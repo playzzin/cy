@@ -6,6 +6,7 @@ import {
     listAllWorkers,
     listAllTeams
 } from '../services/firestoreCrudCompat';
+import { normalizeAdvancePaymentDepositAccount, type AdvancePaymentDepositAccount } from '../types/advancePaymentDepositAccount';
 
 export interface AdvancePayment {
     id?: string;
@@ -37,6 +38,7 @@ export interface AdvancePayment {
     totalDeduction: number;    // 공제 합계 (Calculated)
     assignmentType?: 'corporate' | 'labor'; // 분류: 법인(corporate) / 노무(labor) - Legacy row-level field
     memo?: string;
+    depositAccount?: AdvancePaymentDepositAccount;
     updatedAt?: Date;
 }
 
@@ -351,6 +353,7 @@ const mapAdvancePaymentRow = (row: any): AdvancePayment => {
         itemAssignments: safeJsonParseAssignmentRecord(row?.itemAssignments),
         assignmentType: row?.assignmentType ? (String(row.assignmentType) as 'corporate' | 'labor') : 'labor',
         memo: row?.memo ? String(row.memo) : '',
+        depositAccount: normalizeAdvancePaymentDepositAccount(row?.depositAccount),
         updatedAt: toDate(row?.updatedAt)
     } as AdvancePayment;
 };

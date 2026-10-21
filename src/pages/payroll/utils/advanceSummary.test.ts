@@ -43,6 +43,16 @@ test('동명이인을 합치지 않고 같은 작업자의 다른 팀 내역도 
     expect(result.total).toBe(450000);
 });
 
+test('합산된 급여 구분별 입금계좌와 원본 ID를 필터에서도 보존한다', () => {
+    const result = buildAdvanceSummary([
+        payment({ depositAccount: 'cheongyeon' }),
+        payment({ id: 'monthly', salaryModel: '월급제', depositAccount: 'dawon', items: { laborAdvance1: 20000 } }),
+    ], teams, { ...filters, item: 'corporate' });
+    expect(result.groups[0].rows[0].depositAccountSources).toEqual([
+        { id: 'payment-a', depositAccount: 'cheongyeon' }, { id: 'monthly', depositAccount: 'dawon' },
+    ]);
+});
+
 test('법인·노무·개별 항목과 팀·검색 조건이 소계 및 전체 합계에 동일하게 적용된다', () => {
     const records = [payment({ memo: '검색용 메모' }), payment({ id: 'b', workerId: 'worker-b', teamId: 'team-b' })];
     expect(buildAdvanceSummary(records, teams, { ...filters, item: 'corporate', teamId: 'old-a' }).total).toBe(100000);
@@ -61,4 +71,31 @@ test('음수 조정과 상쇄되는 가불을 보존하며 가불 없는 공제 
     expect(result.total).toBe(0);
     expect(result.corporate).toBe(50000);
     expect(result.labor).toBe(-50000);
+});
+
+test('작업자 ID와 legacy ID로 현재 계좌를 연결하고 동명이인 계좌를 섞지 않는다', () => {
+    const result = buildAdvanceSummary([
+        payment(), payment({ id: 'b', workerId: 'legacy-b' }), payment({ id: 'missing', workerId: 'missing-worker' }),
+    ], teams, filters, [
+        { id: 'worker-a', bankName: '테스트 A은행', accountNumber: ' 000-0000-0000 ', accountHolder: ' 등록 예금주 A ' },
+        { id: 'worker-b', legacyId: 'legacy-b', bankName: '테스트 B은행', accountNumber: '000-1111-0000', accountHolder: '등록 예금주 B' },
+    ]);
+    const rows = new Map(result.groups[0].rows.map(row => [row.workerId, row]));
+    expect(rows.get('worker-a')).toMatchObject({ bankName: '테스트 A은행', accountNumber: '000-0000-0000', accountHolder: '등록 예금주 A' });
+    expect(rows.get('legacy-b')).toMatchObject({ bankName: '테스트 B은행', accountNumber: '000-1111-0000', accountHolder: '등록 예금주 B' });
+    expect(rows.get('missing-worker')).toMatchObject({ bankName: '', accountNumber: '', accountHolder: '' });
+    expect(result.total).toBe(450000);
+});
+
+test('현재 ID를 legacy ID보다 우선하고 중복 legacy ID의 계좌는 표시하지 않는다', () => {
+    const result = buildAdvanceSummary([payment(), payment({ id: 'duplicate', workerId: 'shared-legacy' })], teams, filters, [
+        { id: 'worker-a', accountNumber: '000-0000-0000' },
+        { id: 'worker-b', legacyId: 'worker-a', accountNumber: '000-1111-0000' },
+        { id: 'worker-c', legacyId: 'shared-legacy', accountNumber: '000-2222-0000' },
+        { id: 'worker-d', legacyId: 'shared-legacy', accountNumber: '000-3333-0000' },
+    ]);
+    const rows = new Map(result.groups[0].rows.map(row => [row.workerId, row]));
+    expect(rows.get('worker-a')?.accountNumber).toBe('000-0000-0000');
+    expect(rows.get('worker-a')?.accountHolder).toBe('');
+    expect(rows.get('shared-legacy')?.accountNumber).toBe('');
 });

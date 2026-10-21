@@ -19,6 +19,14 @@ const modifiedAt = new Date('2026-09-30T01:00:00.000Z');
 
 beforeEach(() => jest.clearAllMocks());
 
+it('새로 조회한 입금계좌 선택을 유지하고 기존 미선택 내역도 읽는다', async () => {
+    listAdvances.mockResolvedValue({ data: { advancePayments: ['cheongyeon', 'dawon', 'personal', undefined, 'unknown'].map((depositAccount, index) => ({
+        id: `account-${index}`, workerId, teamId, yearMonth: '2026-10', depositAccount,
+    })) } });
+    const records = await advancePaymentService.getAdvancePaymentsByYearMonth(2026, 10);
+    expect(records.map(record => record.depositAccount)).toEqual(['cheongyeon', 'dawon', 'personal', '', '']);
+});
+
 it.each([
     ['ISO', modifiedAt.toISOString()],
     ['Date', modifiedAt],

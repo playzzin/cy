@@ -1,7 +1,10 @@
 import type { AdvancePayment } from '../../../services/advancePaymentService';
+import type { Worker } from '../../../services/manpowerService';
+import { normalizeAdvancePaymentDepositAccount, type AdvancePaymentDepositAccount } from '../../../types/advancePaymentDepositAccount';
 import { ADVANCE_ITEM_LABEL_KEYS, type AdvanceItemLabelKey } from '../../../services/payrollConfigService';
 
 export type AdvanceSummaryFilter = 'all' | 'corporate' | 'labor' | AdvanceItemLabelKey;
+export type AdvanceSummaryWorker = Pick<Worker, 'id' | 'legacyId' | 'bankName' | 'accountNumber' | 'accountHolder'>;
 export interface AdvanceSummaryTeam {
     id: string;
     legacyId?: string | null;
@@ -12,12 +15,16 @@ export interface AdvanceSummaryRow {
     key: string;
     workerId: string;
     workerName: string;
+    bankName: string;
+    accountNumber: string;
+    accountHolder: string;
     amount: number;
     corporate: number;
     labor: number;
     items: Partial<Record<AdvanceItemLabelKey, number>>;
     memos: string[];
     memoSources: { id: string; memo: string; salaryModel: string }[];
+    depositAccountSources: { id: string; depositAccount: AdvancePaymentDepositAccount }[];
 }
 export interface AdvanceSummaryGroup {
     team: AdvanceSummaryTeam;
@@ -34,7 +41,15 @@ export function buildAdvanceSummary(
     payments: AdvancePayment[],
     teams: AdvanceSummaryTeam[],
     filters: { yearMonth: string; teamId: string; item: AdvanceSummaryFilter; query: string },
+    workers: AdvanceSummaryWorker[] = [],
 ) {
+    const workerById = new Map(workers.filter(worker => worker.id).map(worker => [worker.id!, worker]));
+    const workerByLegacyId = new Map<string, AdvanceSummaryWorker | null>();
+    workers.forEach(worker => {
+        if (!worker.legacyId) return;
+        // Ambiguous legacy IDs must not attach another worker's bank account.
+        workerByLegacyId.set(worker.legacyId, workerByLegacyId.has(worker.legacyId) ? null : worker);
+    });
     const teamById = new Map<string, AdvanceSummaryTeam>();
     teams.forEach(team => {
         teamById.set(team.id, team);
@@ -59,8 +74,11 @@ export function buildAdvanceSummary(
         }
         let row = group.rows.get(workerKey);
         if (!row) {
+            const worker = workerById.get(payment.workerId) || workerByLegacyId.get(payment.workerId);
             row = { key: workerKey, workerId: payment.workerId, workerName: payment.workerName || '이름 미등록',
-                amount: 0, corporate: 0, labor: 0, items: {}, memos: [], memoSources: [] };
+                bankName: worker?.bankName?.trim() || '', accountNumber: worker?.accountNumber?.trim() || '',
+                accountHolder: worker?.accountHolder?.trim() || '',
+                amount: 0, corporate: 0, labor: 0, items: {}, memos: [], memoSources: [], depositAccountSources: [] };
             group.rows.set(workerKey, row);
         }
         keys.forEach(key => {
@@ -74,6 +92,7 @@ export function buildAdvanceSummary(
         const memo = payment.memo?.trim();
         if (memo && !row.memos.includes(memo)) row.memos.push(memo);
         row.memoSources.push({ id: payment.id || '', memo: payment.memo ?? '', salaryModel: payment.salaryModel || '급여 구분 없음' });
+        row.depositAccountSources.push({ id: payment.id || '', depositAccount: normalizeAdvancePaymentDepositAccount(payment.depositAccount) });
     });
 
     const groups: AdvanceSummaryGroup[] = Array.from(grouped.values()).map(({ team, rows }) => {
