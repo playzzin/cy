@@ -1,10 +1,13 @@
-export const canShareImageFile = (file: File): boolean => {
-    try { return !!navigator.share && !!navigator.canShare?.({ files: [file] }); }
+export const canShareImageFiles = (files: File[]): boolean => {
+    try { return files.length > 0 && !!navigator.share && !!navigator.canShare?.({ files }); }
     catch { return false; }
 };
 
+export const canShareImageFile = (file: File): boolean => canShareImageFiles([file]);
+
 // Do not add text or URLs: receiving apps may append them to the photo.
-export const shareImageFile = (file: File): Promise<void> => navigator.share({ files: [file] });
+export const shareImageFiles = (files: File[]): Promise<void> => navigator.share({ files });
+export const shareImageFile = (file: File): Promise<void> => shareImageFiles([file]);
 
 export const imageFileFromUrl = async (url: string, name: string, signal?: AbortSignal): Promise<File> => {
     const response = await fetch(url, { signal });

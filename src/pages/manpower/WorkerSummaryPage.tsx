@@ -14,6 +14,7 @@ import { saveAs } from 'file-saver';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
+import WorkerIdImageShare from './WorkerIdImageShare';
 import './WorkerSummaryPage.css';
 
 
@@ -949,6 +950,7 @@ const WorkerSummaryPage: React.FC = () => {
                                 <FontAwesomeIcon icon={faDownload} />
                                 신분증 ZIP
                             </ActionButton>
+                            <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedWorkers} disabled={isSendingImage} />
                             <ActionButton onClick={handleCopyImage} className="ws-copy" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
                                 <FontAwesomeIcon icon={faCopy} />
                                 이미지 복사

@@ -29,6 +29,7 @@ export const IDENTITY_LOG_ACTIONS = {
   document_removed: '신분증 자료 연결 해제',
   document_analysis: '신분증 AI 인식',
   copy_image: '신분증 이미지 복사',
+  share_image: '신분증 사진 공유 요청',
 } as const;
 
 export const IDENTITY_LOG_SOURCES = {
