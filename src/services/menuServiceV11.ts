@@ -19,6 +19,7 @@ import { mergeMenuConfigChanges } from '../utils/menuConfigChanges';
 import { ensureTeamPersonnelMenu } from '../utils/teamPersonnelMenu';
 import { ensureBankTransferMenu } from '../utils/bankTransferMenu';
 import { ensureCorporateTaxMenu } from '../utils/corporateTaxMenu';
+import { ensureAdvanceSummaryMenu } from '../utils/advanceSummaryMenu';
 
 export type { MenuItem, SiteDataType };
 
@@ -1197,6 +1198,7 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     ensureTeamPersonnelMenu(final);
     ensureBankTransferMenu(final);
     ensureCorporateTaxMenu(final);
+    ensureAdvanceSummaryMenu(final);
 
     return final;
 };

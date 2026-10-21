@@ -1,4 +1,5 @@
 export const MENU_PATHS: { [key: string]: string } = {
+    '팀별 가불내역': '/payroll/advance-summary',
     '국민은행 송금': '/payroll/bank-transfer',
     '위임금 입금 확인': '/payroll/delegated-receipts',
     '도장 이미지 관리': '/settings/stamps',

@@ -83,7 +83,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                     "팀정산 관리",
                     "팀정산 통계",
                     "팀별 연간 통계",
-                    { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }
+                    { text: "가불관리", sub: ["가불신청", "가불등록", "팀별 가불내역", "세금/가불"] }
                 ]
             },
             {
@@ -177,7 +177,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "숙소관리",
                 icon: "fa-home",
-                sub: ["숙소 관리", "가불 및 공제"]
+                sub: ["숙소 관리", "가불 및 공제", "팀별 가불내역"]
             },
             {
                 text: "자재관리",

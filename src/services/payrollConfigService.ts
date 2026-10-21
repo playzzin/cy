@@ -342,6 +342,12 @@ const sanitizeConfig = (raw: unknown): PayrollConfig => {
 };
 
 export const payrollConfigService = {
+    // Reports must not create settings or backfill defaults just by opening the page.
+    getConfigReadOnly: async (): Promise<PayrollConfig> => {
+        const row = await findPayrollSettingRow();
+        return sanitizeConfig(parseSettingData(row?.data) ?? {});
+    },
+
     getConfig: async (): Promise<PayrollConfig> => {
         try {
             const row = await findPayrollSettingRow();

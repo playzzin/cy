@@ -79,6 +79,7 @@ const ProgressClaimsEntry = React.lazy(() => import('./pages/payroll/ProgressCla
 const FieldBuybackWorkbookPage = React.lazy(() => import('./pages/payroll/FieldBuybackWorkbookPage'));
 const PayrollRateManagementPage = React.lazy(() => import('./pages/payroll/PayrollRateManagementPage'));
 const AdvancePaymentPage = React.lazy(() => import('./pages/payroll/AdvancePaymentPage'));
+const AdvanceSummaryPage = React.lazy(() => import('./pages/payroll/AdvanceSummaryPage'));
 const WorkerAdvanceRequestPage = React.lazy(() => import('./pages/payroll/WorkerAdvanceRequestPage'));
 const PayrollStatisticsPage = React.lazy(() => import('./pages/payroll/PayrollStatisticsPage'));
 const WorkerBulkRegistrationPage = React.lazy(() => import('./pages/manpower/WorkerBulkRegistrationPage'));
@@ -439,6 +440,7 @@ const App: React.FC = () => {
               <Route path="buyback-ledger" element={<Navigate to="/payroll/field-buyback" replace />} />
               <Route path="rate-management" element={<PayrollRateManagementPage />} />
               <Route path="advance-payment" element={<AdvancePaymentPage />} />
+              <Route path="advance-summary" element={<AdvanceSummaryPage />} />
               <Route path="advance-request" element={<WorkerAdvanceRequestPage />} />
               <Route path="team-payslip" element={<TaxAdvanceTeamPayslipPage />} />
               <Route path="sign-management" element={<SignManagementPage />} />

@@ -29,7 +29,7 @@ import type { UtilityRecord } from '../../types/accommodation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { shiftYearMonth } from '../../components/common/MonthNavigator';
 import './AdvancePaymentPage.css';
 
@@ -2484,6 +2484,15 @@ const AdvancePaymentPage: React.FC = () => {
                     가불 및 공제 관리
                 </h1>
                 <div className="flex items-center gap-2">
+                    {canUseAdvanceManagement && (
+                        <Link
+                            to={`/payroll/advance-summary?${new URLSearchParams({ yearMonth: selectedMonth,
+                                ...(selectedTeamId && selectedTeamId !== ALL_TEAMS_VALUE ? { teamId: selectedTeamId } : {}) })}`}
+                            className="px-3 py-2 rounded font-bold bg-white text-blue-700 hover:bg-blue-50 border border-blue-200"
+                        >
+                            팀별 가불내역
+                        </Link>
+                    )}
                     {/* Settings Toggle */}
                     {canUseAdvanceManagement && (
                         <button
