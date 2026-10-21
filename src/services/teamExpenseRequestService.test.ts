@@ -28,7 +28,7 @@ test('authenticated list keeps the selected month and billing directory request'
   const invoke = jest.fn().mockResolvedValue({ data: { requests: [] } });
   (httpsCallable as jest.Mock).mockReturnValue(invoke);
   await expect(teamExpenseRequestService.list('2026-09')).resolves.toEqual({ requests: [] });
-  expect(invoke).toHaveBeenCalledWith({ action: 'list', yearMonth: '2026-09', includeBillingTeams: true });
+  expect(invoke).toHaveBeenCalledWith({ action: 'list', yearMonth: '2026-09', includeBillingTeams: true, includePaymentCards: true });
 });
 
 test('같은 세션·월·페이지의 진행 중 조회만 공유하고 완료 결과는 저장하지 않는다', async () => {

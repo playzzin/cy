@@ -25,7 +25,7 @@ const call = async <T>(input: Record<string, unknown>): Promise<T> => {
 };
 
 const list = (yearMonth: string, cursor?: string, options?: { forceReload?: boolean }) => {
-  const input = { action: 'list', yearMonth, includeBillingTeams: true, ...(cursor ? { cursor } : {}) };
+  const input = { action: 'list', yearMonth, includeBillingTeams: true, includePaymentCards: true, ...(cursor ? { cursor } : {}) };
   const account = auth.currentUser;
   if (!account || isDevAdminSessionEnabled()) return call<TeamExpenseRequestData>(input);
   let requests = pendingLists.get(account);

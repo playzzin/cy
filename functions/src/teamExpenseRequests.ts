@@ -7,6 +7,7 @@ import { requireCallableAuth } from './auth';
 import { analyzeExpenseReceipt } from './expenseReceiptAnalysis';
 import { readRequestPage } from './teamRequestPagination';
 import { maintainRequestDrafts } from './teamRequestDrafts';
+import { listExpensePaymentCards, readExpensePaymentCard } from './teamExpensePaymentCards';
 
 const COLLECTION = 'team_expense_requests';
 const RECEIPTS = 'team-expense-receipts';
@@ -96,12 +97,13 @@ export async function readTeamExpenseRequestList(db: FirebaseFirestore.Firestore
     const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth)
         : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
     // These reads only depend on the freshly checked actor, not on each other.
-    const [snapshot, directory, categories] = await Promise.all([
+    const [snapshot, directory, categories, paymentCards] = await Promise.all([
         readRequestPage(scope, input),
         actor.canReview || input.includeBillingTeams === true
             ? db.collection('teams').select('name', 'color', 'icon', 'iconKey').limit(1001).get()
             : Promise.resolve(null),
         categoriesFor(db),
+        input.includePaymentCards === true ? listExpensePaymentCards(db, actor.teams) : Promise.resolve(undefined),
     ]);
     if (directory && directory.size > 1000) fail('resource-exhausted', '팀 목록이 많습니다. 사무실에 문의해 주세요.');
     const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any))
@@ -110,7 +112,7 @@ export async function readTeamExpenseRequestList(db: FirebaseFirestore.Firestore
     // Old pages still use `teams` as the payer selector. The billing directory
     // continues to project only public team fields.
     const teams = directory ? directory.docs.map(teamOption).sort((a, b) => a.name.localeCompare(b.name, 'ko')) : actor.teams;
-    return { canReview: actor.canReview, payerTeams: actor.teams, teams, categories, requests, nextCursor: snapshot.nextCursor };
+    return { canReview: actor.canReview, payerTeams: actor.teams, teams, categories, requests, nextCursor: snapshot.nextCursor, ...(paymentCards ? { paymentCards } : {}) };
 }
 
 export const validateExpenseReceipt = (contentType: string, encoded: string): Buffer => {
@@ -266,22 +268,28 @@ export async function handleTeamExpenseRequest(input: any, context: functions.ht
     if (!category) fail('invalid-argument', '사용 가능한 경비 구분을 선택해 주세요.');
     const receiptIds = Array.isArray(input.receiptIds) ? [...new Set<string>(input.receiptIds.map(safeId))] : [];
     if (receiptIds.length < 1 || receiptIds.length > 5) fail('invalid-argument', '영수증을 1~5개 첨부해 주세요.');
-    const paymentMethod = text(input.paymentMethod);
-    if (!['현찰', '개인카드', '계좌이체'].includes(paymentMethod)) fail('invalid-argument', '결제수단을 확인해 주세요.');
+    const paymentCardId = text(input.paymentCardId) ? safeId(input.paymentCardId) : '';
+    const paymentCard = paymentCardId ? await readExpensePaymentCard(db, team!.id, paymentCardId) : null;
+    const paymentMethod = paymentCard?.label || text(input.paymentMethod);
+    if (!paymentCard && !['현찰', '개인카드', '계좌이체'].includes(paymentMethod)) fail('invalid-argument', '결제수단을 확인해 주세요.');
     // Old clients omitted the billing team and charged their own team.
     const chargeToTeamId = input.chargeToTeamId === undefined ? team!.id : safeId(input.chargeToTeamId);
     const chargeToDoc = await db.collection('teams').doc(chargeToTeamId).get();
     if (!chargeToDoc.exists) fail('invalid-argument', '청구할 팀을 선택해 주세요.');
     const chargeTo = teamOption(chargeToDoc);
     const legacyPayload = { ownerUid: actor.uid, submitterName: actor.name, teamId: team!.id, teamName: team!.name, date, yearMonth: date.slice(0, 7), amount, description, category: category!.id, categoryLabel: category!.label, paymentMethod, memo: text(input.memo).slice(0, 1000), receiptIds };
-    const payload = { ...legacyPayload, teamColor: team!.color, teamIcon: team!.icon, chargeToTeamId: chargeTo.id, chargeToTeamName: chargeTo.name, chargeToTeamColor: chargeTo.color, chargeToTeamIcon: chargeTo.icon };
-    const fingerprint = createHash('sha256').update(JSON.stringify({ teamId: team!.id, chargeToTeamId, date, amount, description, category: category!.id, paymentMethod, memo: payload.memo, receiptIds })).digest('hex');
+    const payload = { ...legacyPayload, teamColor: team!.color, teamIcon: team!.icon, chargeToTeamId: chargeTo.id, chargeToTeamName: chargeTo.name, chargeToTeamColor: chargeTo.color, chargeToTeamIcon: chargeTo.icon, ...(paymentCard ? { paymentCardId } : {}) };
+    const fingerprint = createHash('sha256').update(JSON.stringify({ teamId: team!.id, chargeToTeamId, date, amount, description, category: category!.id, paymentMethod, memo: payload.memo, receiptIds, ...(paymentCard ? { paymentCardId } : {}) })).digest('hex');
     const legacyFingerprint = createHash('sha256').update(JSON.stringify(legacyPayload)).digest('hex');
     return db.runTransaction(async transaction => {
         const row = (await transaction.get(ref)).data();
         const sameRequest = row?.fingerprint === fingerprint || (!row?.chargeToTeamId && chargeToTeamId === team!.id && row?.fingerprint === legacyFingerprint);
         if (sameRequest && row?.status !== 'uploading') return { id: ref.id, status: row!.status };
         if (!row || row.status !== 'uploading' || row.ownerUid !== actor.uid || row.teamId !== team!.id) fail('failed-precondition', '영수증을 올린 후 제출해 주세요. 이미 제출했다면 새로고침해 주세요.');
+        if (paymentCard) {
+            const currentCard = await readExpensePaymentCard(db, team!.id, paymentCardId, transaction);
+            if (currentCard.label !== paymentMethod) fail('failed-precondition', '카드 정보가 변경되었습니다. 새로고침 후 다시 선택해 주세요.');
+        }
         const receipts = await transaction.getAll(...receiptIds.map(receiptId => ref.collection('receipts').doc(receiptId)));
         if (receipts.some(doc => !doc.exists)) fail('failed-precondition', '영수증 업로드가 완료되지 않았습니다. 다시 시도해 주세요.');
         transaction.update(ref, { ...payload, attachments: receipts.map(doc => doc.data()!.attachment), fingerprint, status: 'pending', submittedAt: new Date().toISOString() });

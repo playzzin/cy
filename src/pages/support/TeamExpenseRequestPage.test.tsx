@@ -13,7 +13,7 @@ jest.mock('../../services/teamExpenseRequestService', () => ({
 const service = teamExpenseRequestService as jest.Mocked<typeof teamExpenseRequestService>;
 const payer = { id: 'team-a', name: 'A팀', color: '#ef4444', icon: 'fa-helmet-safety' };
 const billing = { id: 'team-b', name: 'B팀', color: '#2563eb', icon: 'fa-truck-front' };
-const data = { canReview: false, payerTeams: [payer], teams: [payer, billing], categories: [{ id: 'meal', label: '식대' }], requests: [] };
+const data = { canReview: false, payerTeams: [payer], teams: [payer, billing], categories: [{ id: 'meal', label: '식대' }], paymentCards: [{ id: 'card-a', label: '경비카드 1234', teamId: 'team-a' }], requests: [] };
 const request: any = { id: 'request-a', status: 'pending', teamId: 'team-a', teamName: 'A팀', submitterName: '팀장', description: '점심 식대', amount: 25000, date: '2026-09-20', categoryLabel: '식대', paymentMethod: '현찰', attachments: [{ id: 'receipt', url: 'https://example.test/receipt.png' }] };
 beforeEach(() => {
   jest.clearAllMocks();
@@ -29,19 +29,117 @@ beforeEach(() => {
 });
 const fillRequest = async () => {
   await screen.findByLabelText('청구팀');
-  fireEvent.change(screen.getByLabelText('청구팀'), { target: { value: 'team-b' } });
+  fireEvent.change(screen.getByLabelText('청구팀'), { target: { value: 'B팀' } });
+  fireEvent.click(screen.getByRole('option', { name: 'B팀' }));
+  fireEvent.change(screen.getByLabelText('배정된 카드'), { target: { value: 'card:card-a' } });
   fireEvent.change(screen.getByLabelText('금액 (원)'), { target: { value: '25000' } });
   fireEvent.change(screen.getByLabelText('사용 내용'), { target: { value: '점심 식대' } });
   fireEvent.change(screen.getByLabelText('영수증 파일 첨부'), { target: { files: [new File(['receipt'], '영수증.png', { type: 'image/png' })] } });
   await screen.findByDisplayValue('12000');
   fireEvent.click(screen.getByRole('button', { name: '적용하지 않고 닫기' }));
 };
+
+test('청구팀 입력칸에서 검색하고 키보드로 선택하며 미선택 검색어는 저장하지 않는다', async () => {
+  render(<TeamExpenseRequestPage />);
+  const input = await screen.findByRole('combobox', { name: '청구팀' });
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: ' b 팀 ' } });
+  expect(screen.queryByRole('option', { name: 'A팀' })).not.toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'B팀' })).toBeInTheDocument();
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(input).toHaveValue('B팀');
+  expect(input).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: '없는팀' } });
+  expect(screen.getByText('검색 결과가 없습니다.')).toBeInTheDocument();
+  fireEvent.blur(input);
+  expect(input).toHaveValue('B팀');
+});
+
+test('사용팀의 경비카드를 결제수단으로 선택해 카드 ID와 이름을 제출한다', async () => {
+  service.list.mockResolvedValue({ ...data, paymentCards: [
+    { id: 'card-a', label: '현장 경비 · 테스트카드 · •••• 1234', teamId: 'team-a' },
+    { id: 'card-b', label: '다른팀 카드', teamId: 'team-b' },
+  ] });
+  render(<TeamExpenseRequestPage />);
+  await fillRequest();
+  const payment = screen.getByLabelText('배정된 카드');
+  expect(within(payment).queryByRole('option', { name: '다른팀 카드' })).not.toBeInTheDocument();
+  fireEvent.change(payment, { target: { value: 'card:card-a' } });
+  fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
+  expect(screen.getByRole('dialog')).toHaveTextContent('현장 경비 · 테스트카드 · •••• 1234');
+  fireEvent.click(screen.getByRole('button', { name: '확인 후 승인 요청' }));
+  await waitFor(() => expect(service.submit).toHaveBeenCalledWith(expect.objectContaining({ paymentCardId: 'card-a', paymentMethod: '현장 경비 · 테스트카드 · •••• 1234' })));
+});
+
+test('사용팀 변경과 카드 배정 해제 후에는 결제수단을 다시 선택해야 한다', async () => {
+  const withCards = { ...data, payerTeams: [payer, billing], paymentCards: [{ id: 'card-a', label: '경비카드 1234', teamId: 'team-a' }] };
+  service.list.mockResolvedValue(withCards);
+  render(<TeamExpenseRequestPage />);
+  const team = await screen.findByLabelText('사용팀 (현재 소속)');
+  fireEvent.change(team, { target: { value: 'team-a' } });
+  fireEvent.change(screen.getByLabelText('배정된 카드'), { target: { value: 'card:card-a' } });
+  fireEvent.change(team, { target: { value: 'team-b' } });
+  expect(screen.getByLabelText('배정된 카드')).toHaveValue('');
+  expect(screen.queryByRole('option', { name: '경비카드 1234' })).not.toBeInTheDocument();
+  fireEvent.change(team, { target: { value: 'team-a' } });
+  fireEvent.change(screen.getByLabelText('배정된 카드'), { target: { value: 'card:card-a' } });
+  service.list.mockResolvedValue({ ...withCards, paymentCards: [] });
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+  await waitFor(() => expect(screen.getByLabelText('배정된 카드')).toHaveValue(''));
+});
+
+test('배정된 카드만 선택할 수 있고 카드 미선택 상태에서는 제출하지 않는다', async () => {
+  render(<TeamExpenseRequestPage />);
+  await fillRequest();
+  const card = screen.getByLabelText('배정된 카드');
+  expect(within(card).getAllByRole('option').map(option => option.textContent)).toEqual(['배정된 카드 선택', '경비카드 1234']);
+  expect(screen.queryByLabelText('결제수단')).not.toBeInTheDocument();
+  fireEvent.change(card, { target: { value: '' } });
+  fireEvent.submit(screen.getByRole('form', { name: '새 경비 신청' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('사용팀에 배정된 카드를 선택해 주세요.');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(service.submit).not.toHaveBeenCalled();
+});
+
+test('AI 분석의 결제수단과 관계없이 직접 선택한 배정 카드를 유지한다', async () => {
+  service.list.mockResolvedValue({ ...data, paymentCards: [{ id: 'card-a', label: '경비카드 1234', teamId: 'team-a' }] });
+  render(<TeamExpenseRequestPage />);
+  await fillRequest();
+  fireEvent.change(screen.getByLabelText('배정된 카드'), { target: { value: 'card:card-a' } });
+  fireEvent.click(screen.getByRole('button', { name: '영수증.png 분석·미리보기' }));
+  await screen.findByDisplayValue('12000');
+  fireEvent.click(screen.getByRole('button', { name: '확인 후 입력란에 적용' }));
+  expect(screen.getByLabelText('배정된 카드')).toHaveValue('card:card-a');
+  service.analyze.mockResolvedValue({ date: '2026-09-19', amount: 15000, paymentMethod: '현찰', category: 'meal', warnings: [], isReceipt: true });
+  fireEvent.click(screen.getByRole('button', { name: '영수증.png 분석·미리보기' }));
+  await screen.findByDisplayValue('15000');
+  expect(screen.queryByLabelText('분석 결제수단')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '확인 후 입력란에 적용' }));
+  expect(screen.getByLabelText('배정된 카드')).toHaveValue('card:card-a');
+});
+
+test('신청 내역을 사용팀·청구팀 이름으로 검색하고 상태 필터와 함께 적용한다', async () => {
+  service.list.mockResolvedValue({ ...data, requests: [
+    { ...request, chargeToTeamName: 'B팀' },
+    { ...request, id: 'other', teamName: 'C팀', description: '다른 경비', status: 'approved' },
+  ] });
+  render(<TeamExpenseRequestPage />);
+  const search = await screen.findByRole('searchbox', { name: '내역 팀 검색' });
+  fireEvent.change(search, { target: { value: ' b 팀 ' } });
+  expect(screen.getByText('점심 식대')).toBeInTheDocument();
+  expect(screen.queryByText('다른 경비')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('상태'), { target: { value: 'approved' } });
+  expect(screen.queryByText('점심 식대')).not.toBeInTheDocument();
+  fireEvent.change(search, { target: { value: 'c팀' } });
+  expect(screen.getByText('다른 경비')).toBeInTheDocument();
+});
 test('현재 소속팀을 사용팀으로 표시하고 별도 청구팀과 영수증을 제출한다', async () => {
   render(<TeamExpenseRequestPage />);
   await fillRequest();
   expect(screen.getByLabelText('현재 소속팀')).toHaveTextContent('A팀');
   expect(screen.queryByRole('combobox', { name: '사용팀 (현재 소속)' })).not.toBeInTheDocument();
-  expect(screen.getByLabelText('청구팀')).toHaveValue('team-b');
+  expect(screen.getByLabelText('청구팀')).toHaveValue('B팀');
   expect(within(screen.getByLabelText('현재 소속팀')).getByText('A팀')).toHaveStyle({ borderColor: '#ef4444' });
   expect(screen.queryByRole('button', { name: '승인 및 반영' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
@@ -123,7 +221,9 @@ test('분석을 확인해 적용한 항목과 팀 아이콘을 최종 미리보�
   render(<TeamExpenseRequestPage />);
   await screen.findByLabelText('청구팀');
   expect(screen.getByLabelText('A팀 팀 아이콘')).toHaveAttribute('data-icon', 'helmet-safety');
-  fireEvent.change(screen.getByLabelText('청구팀'), { target: { value: 'team-b' } });
+  fireEvent.change(screen.getByLabelText('청구팀'), { target: { value: 'B팀' } });
+  fireEvent.click(screen.getByRole('option', { name: 'B팀' }));
+  fireEvent.change(screen.getByLabelText('배정된 카드'), { target: { value: 'card:card-a' } });
   expect(screen.getByLabelText('B팀 팀 아이콘')).toHaveAttribute('data-icon', 'truck-front');
   fireEvent.change(screen.getByLabelText('사용 내용'), { target: { value: '식대 분석 테스트' } });
   fireEvent.change(screen.getByLabelText('영수증 파일 첨부'), { target: { files: [new File(['receipt'], '분석.png', { type: 'image/png' })] } });
@@ -140,7 +240,7 @@ test('분석을 확인해 적용한 항목과 팀 아이콘을 최종 미리보�
   fireEvent.change(screen.getByLabelText('금액 (원)'), { target: { value: '14000' } });
   fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
   fireEvent.click(screen.getByRole('button', { name: '확인 후 승인 요청' }));
-  await waitFor(() => expect(service.submit).toHaveBeenCalledWith(expect.objectContaining({ amount: 14000, paymentMethod: '개인카드', category: 'meal', date: '2026-09-19' })));
+  await waitFor(() => expect(service.submit).toHaveBeenCalledWith(expect.objectContaining({ amount: 14000, paymentMethod: '경비카드 1234', category: 'meal', date: '2026-09-19' })));
 });
 
 test('추가 조회 실패를 재시도하고 같은 신청을 중복 표시하지 않는다', async () => {

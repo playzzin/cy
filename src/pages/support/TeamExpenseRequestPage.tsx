@@ -10,6 +10,7 @@ import { resolveIcon } from '../../constants/iconMap';
 import { useAuth } from '../../contexts/AuthContext';
 import { teamExpenseRequestService, validateRequestReceiptFiles } from '../../services/teamExpenseRequestService';
 import type { TeamExpenseRequest, TeamExpenseRequestData } from '../../types/teamExpenseRequest';
+import ExpenseTeamSelect from './ExpenseTeamSelect';
 import './TeamExpenseRequestPage.css';
 
 const ExpenseReceiptCamera = lazy(() => import('./ExpenseReceiptCamera'));
@@ -20,7 +21,8 @@ const today = () => new Date().toLocaleDateString('sv-SE');
 const createId = () => typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
 const money = (amount: number) => `${amount.toLocaleString('ko-KR')}원`;
 const labels = { pending: '승인 대기', approved: '승인 · 반영 완료', rejected: '반려' };
-const emptyForm = () => ({ teamId: '', chargeToTeamId: '', date: today(), category: '', description: '', amount: '', paymentMethod: '현찰', memo: '' });
+const emptyForm = () => ({ teamId: '', chargeToTeamId: '', date: today(), category: '', description: '', amount: '', paymentMethod: '', paymentCardId: '', memo: '' });
+const searchKey = (value: string) => value.replace(/\s+/g, '').toLocaleLowerCase('ko-KR');
 
 const TeamTag = ({ name, color, icon }: { name: string; color?: string; icon?: string }) => {
   const safeColor = /^#[\da-f]{6}$/i.test(color || '') ? color! : '#64748b';
@@ -48,6 +50,7 @@ export default function TeamExpenseRequestPage() {
   const [progress, setProgress] = useState('');
   const [filter, setFilter] = useState('all');
   const [teamFilter, setTeamFilter] = useState('all');
+  const [historyTeamSearch, setHistoryTeamSearch] = useState('');
   const [review, setReview] = useState<{ row: TeamExpenseRequest; decision: 'approved' | 'rejected' } | null>(null);
   const [reason, setReason] = useState('');
   const [requestId, setRequestId] = useState(createId);
@@ -69,6 +72,7 @@ export default function TeamExpenseRequestPage() {
   useEffect(() => {
     receiptsRef.current.forEach(receipt => URL.revokeObjectURL(receipt.preview));
     setReceipts([]); setForm(emptyForm()); setData(null); setReview(null); setNotice(''); setRequestId(createId()); setCameraOpen(false); setAnalysisReceipt(null); setConfirmOpen(false);
+    setHistoryTeamSearch(''); setTeamFilter('all');
   }, [currentUser?.uid]);
 
   const load = useCallback(async (forceReload = false) => {
@@ -80,10 +84,15 @@ export default function TeamExpenseRequestPage() {
       if (sequence !== generation.current) return;
       if (!next.canReview) setReview(null);
       setData(next);
-      setForm(previous => ({ ...previous,
-        teamId: next.payerTeams.some(team => team.id === previous.teamId) ? previous.teamId : next.payerTeams.length === 1 ? next.payerTeams[0].id : '',
+      setForm(previous => {
+        const teamId = next.payerTeams.some(team => team.id === previous.teamId) ? previous.teamId : next.payerTeams.length === 1 ? next.payerTeams[0].id : '';
+        const card = next.paymentCards?.find(option => option.id === previous.paymentCardId && option.teamId === teamId);
+        return { ...previous, teamId,
+        paymentCardId: card?.id || '',
+        paymentMethod: card?.label || '',
         chargeToTeamId: next.teams.some(team => team.id === previous.chargeToTeamId) ? previous.chargeToTeamId : next.teams.length === 1 ? next.teams[0].id : '',
-        category: next.categories.some(category => category.id === previous.category) ? previous.category : next.categories[0]?.id || '' }));
+        category: next.categories.some(category => category.id === previous.category) ? previous.category : next.categories[0]?.id || '' };
+      });
     } catch (cause) {
       if (sequence === generation.current) { setData(null); setError(cause instanceof Error ? cause.message : '경비 신청을 불러오지 못했습니다.'); }
     } finally { if (sequence === generation.current) setLoading(false); }
@@ -110,9 +119,14 @@ export default function TeamExpenseRequestPage() {
   }, [receipts.length, form.description, form.amount]);
 
   const change = (field: keyof typeof form, value: string) => {
-    setForm(previous => ({ ...previous, [field]: value }));
+    setForm(previous => ({ ...previous, [field]: value, ...(field === 'teamId' && value !== previous.teamId && previous.paymentCardId ? { paymentCardId: '', paymentMethod: '' } : {}) }));
     setRequestId(createId());
     setNotice('');
+  };
+  const changePayment = (value: string) => {
+    const card = data?.paymentCards?.find(option => `card:${option.id}` === value && option.teamId === form.teamId);
+    setForm(previous => ({ ...previous, paymentMethod: card?.label || '', paymentCardId: card?.id || '' }));
+    setRequestId(createId()); setNotice('');
   };
   const addFiles = (files: File[]) => {
     if (saving || loading || !files.length || !form.teamId) return;
@@ -135,6 +149,7 @@ export default function TeamExpenseRequestPage() {
       validateRequestReceiptFiles(receipts.map(receipt => receipt.file));
       if (!form.teamId || !form.chargeToTeamId || !form.category || !form.description.trim() || !form.date) throw new Error('팀과 경비 항목을 모두 입력해 주세요.');
       if (!Number.isSafeInteger(Number(form.amount)) || Number(form.amount) <= 0 || Number(form.amount) > 1_000_000_000) throw new Error('올바른 금액을 입력해 주세요.');
+      if (!data?.paymentCards?.some(card => card.id === form.paymentCardId && card.teamId === form.teamId)) throw new Error('사용팀에 배정된 카드를 선택해 주세요.');
       setConfirmOpen(true);
     } catch (cause) { setError((cause as Error).message); }
   };
@@ -147,6 +162,7 @@ export default function TeamExpenseRequestPage() {
     try {
       validateRequestReceiptFiles(receipts.map(receipt => receipt.file));
       if (!form.teamId || !form.chargeToTeamId || !form.category) throw new Error('사용팀, 청구팀과 경비 구분을 확인해 주세요.');
+      if (!data?.paymentCards?.some(card => card.id === form.paymentCardId && card.teamId === form.teamId)) throw new Error('사용팀에 배정된 카드를 선택해 주세요.');
       if (!Number.isSafeInteger(Number(form.amount)) || Number(form.amount) <= 0) throw new Error('올바른 금액을 입력해 주세요.');
       setSaving(true);
       for (let index = 0; index < receipts.length; index++) {
@@ -180,7 +196,8 @@ export default function TeamExpenseRequestPage() {
     } catch (cause) { if (activeUid.current === uid) setError(cause instanceof Error ? cause.message : '처리에 실패했습니다.'); }
     finally { saveLock.current = false; setSaving(false); }
   };
-  const rows = useMemo(() => (data?.requests || []).filter(row => (filter === 'all' || row.status === filter) && (teamFilter === 'all' || row.teamId === teamFilter || row.chargeToTeamId === teamFilter)), [data?.requests, filter, teamFilter]);
+  const rows = useMemo(() => (data?.requests || []).filter(row => (filter === 'all' || row.status === filter) && (teamFilter === 'all' || row.teamId === teamFilter || row.chargeToTeamId === teamFilter) && [row.teamName, row.chargeToTeamName || row.teamName].some(name => searchKey(name).includes(searchKey(historyTeamSearch)))), [data?.requests, filter, teamFilter, historyTeamSearch]);
+  const paymentCards = (data?.paymentCards || []).filter(card => card.teamId === form.teamId);
   const summary = useMemo(() => (data?.requests || []).reduce((total, row) => {
     total[row.status]++;
     if (row.status === 'pending') total.pendingAmount += row.amount;
@@ -206,16 +223,19 @@ export default function TeamExpenseRequestPage() {
     {data && <div className={`expense-request-grid ${data.canReview ? 'review-only' : ''}`}>
       {!data.canReview && <section className="expense-request-panel"><h2><Plus size={19} />새 경비 신청</h2><p className="expense-request-note">승인 전에는 경비와 정산 금액에 포함되지 않습니다.</p>
         {!data.payerTeams.length && <p role="alert">연결된 소속팀이 없습니다. 사무실에 작업자·소속 팀 연결을 요청해 주세요.</p>}
-        <form onSubmit={submit}><fieldset disabled={saving || loading || !data.payerTeams.length || Boolean(analysisReceipt) || confirmOpen}>
+        <form aria-label="새 경비 신청" onSubmit={submit}><fieldset disabled={saving || loading || !data.payerTeams.length || Boolean(analysisReceipt) || confirmOpen}>
           <div className="expense-request-team-fields">
             <div className="expense-current-team"><span className="expense-field-label">사용팀 (현재 소속)</span>
               {data.payerTeams.length > 1 ? <select aria-label="사용팀 (현재 소속)" required value={form.teamId} onChange={event => change('teamId', event.target.value)}><option value="">소속팀 선택</option>{data.payerTeams.map(team => <option key={team.id} value={team.id} style={{ color: team.color }}>{team.name}</option>)}</select> : null}
               <div aria-label="현재 소속팀">{payerTeam ? <TeamTag name={payerTeam.name} color={payerTeam.color} icon={payerTeam.icon} /> : '소속팀을 확인해 주세요.'}</div><small>경비를 먼저 낸 팀 · 승인 후 환급</small>
             </div>
-            <div className="expense-billing-team"><label>청구팀<select required value={form.chargeToTeamId} onChange={event => change('chargeToTeamId', event.target.value)}><option value="">경비를 청구할 팀 선택</option>{data.teams.map(team => <option key={team.id} value={team.id} style={{ color: team.color }}>{team.name}</option>)}</select></label>{chargeToTeam && <TeamTag name={chargeToTeam.name} color={chargeToTeam.color} icon={chargeToTeam.icon} />}<small>경비를 부담할 팀 · 승인 후 차감</small></div>
+            <div className="expense-billing-team">
+              <ExpenseTeamSelect teams={data.teams} value={form.chargeToTeamId} onChange={id => change('chargeToTeamId', id)} />
+              {chargeToTeam && <TeamTag name={chargeToTeam.name} color={chargeToTeam.color} icon={chargeToTeam.icon} />}<small>경비를 부담할 팀 · 승인 후 차감</small>
+            </div>
           </div>
           <div className="expense-request-fields"><label>사용일<input type="date" required value={form.date} onChange={event => change('date', event.target.value)} /></label><label>경비 구분<select required value={form.category} onChange={event => change('category', event.target.value)}>{data.categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></label></div>
-          <div className="expense-request-fields"><label>금액 (원)<input type="number" inputMode="numeric" required min="1" max="1000000000" step="1" placeholder="0" value={form.amount} onChange={event => change('amount', event.target.value)} /></label><label>결제수단<select value={form.paymentMethod} onChange={event => change('paymentMethod', event.target.value)}><option>현찰</option><option>개인카드</option><option>계좌이체</option></select></label></div>
+          <div className="expense-request-fields"><label>금액 (원)<input type="number" inputMode="numeric" required min="1" max="1000000000" step="1" placeholder="0" value={form.amount} onChange={event => change('amount', event.target.value)} /></label><div><label>배정된 카드<select aria-label="배정된 카드" required value={form.paymentCardId ? `card:${form.paymentCardId}` : ''} onChange={event => changePayment(event.target.value)} aria-describedby="expense-payment-help"><option value="">배정된 카드 선택</option>{paymentCards.map(card => <option key={card.id} value={`card:${card.id}`}>{card.label}</option>)}</select></label><p id="expense-payment-help" className="expense-request-note">{paymentCards.length ? '사용한 카드를 선택해 주세요.' : '사용팀에 배정된 카드가 없습니다. 사무실에 카드 배정을 요청해 주세요.'}</p></div></div>
           <label>사용 내용<input required maxLength={500} placeholder="예: 현장 작업자 점심 식대" value={form.description} onChange={event => change('description', event.target.value)} /></label>
           <label>메모 <span className="optional">선택</span><textarea maxLength={1000} rows={2} value={form.memo} onChange={event => change('memo', event.target.value)} placeholder="확인이 필요한 내용을 남겨 주세요." /></label>
           <div role="group" aria-label="영수증 등록" aria-disabled={receiptLocked} className={`expense-request-upload ${dragging ? 'dragging' : ''}`}
@@ -235,7 +255,7 @@ export default function TeamExpenseRequestPage() {
       <section id="expense-request-history" className="expense-request-panel expense-request-history" aria-busy={loading}><div className="expense-request-history-title"><h2><FileText size={19} aria-hidden="true" />{data.canReview ? '경비 신청 목록' : '내 신청 내역'}</h2><span>대기 {summary.pending}건 · {money(summary.pendingAmount)}</span></div>
         <p className="expense-request-note">불러온 {data.requests.length}건 기준으로 필터와 대기 합계를 표시합니다.</p>
         {data.nextCursor && <button type="button" disabled={loading || loadingMore || saving} onClick={() => void loadMore()}>{loadingMore ? '추가 조회 중…' : '다음 100건 더 보기'}</button>}
-        <div className="expense-request-filters"><label>조회 월<input type="month" aria-label="조회 월" value={yearMonth} disabled={saving} onChange={event => { if (event.target.value) setYearMonth(event.target.value); }} /></label><label>상태<select value={filter} onChange={event => setFilter(event.target.value)}><option value="all">전체 상태</option><option value="pending">승인 대기</option><option value="approved">승인 완료</option><option value="rejected">반려</option></select></label>{data.canReview && <label>팀 필터<select value={teamFilter} onChange={event => setTeamFilter(event.target.value)}><option value="all">전체 팀</option>{data.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>}</div>
+        <div className="expense-request-filters"><label>조회 월<input type="month" aria-label="조회 월" value={yearMonth} disabled={saving} onChange={event => { if (event.target.value) setYearMonth(event.target.value); }} /></label><label>상태<select value={filter} onChange={event => setFilter(event.target.value)}><option value="all">전체 상태</option><option value="pending">승인 대기</option><option value="approved">승인 완료</option><option value="rejected">반려</option></select></label><label>내역 팀 검색<input type="search" placeholder="사용팀 또는 청구팀 이름" value={historyTeamSearch} onChange={event => setHistoryTeamSearch(event.target.value)} /></label>{data.canReview && <label>팀 필터<select value={teamFilter} onChange={event => setTeamFilter(event.target.value)}><option value="all">전체 팀</option>{data.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>}</div>
         {!rows.length && !loading && <div className="expense-request-empty"><FileText size={30} /><p>해당 조건의 경비 신청이 없습니다.</p></div>}
         {rows.map(row => <article key={row.id} className="expense-request-card"><div className="expense-request-card-top"><span className={`expense-request-badge ${row.status}`}>{labels[row.status]}</span><strong>{money(row.amount)}</strong></div><h3>{row.description}</h3><RequestTeams row={row} teams={data.teams} /><p>{row.date} · {row.categoryLabel} · {row.paymentMethod}</p>{data.canReview && <p>신청자: {row.submitterName}</p>}{row.memo && <p className="expense-request-memo">{row.memo}</p>}<div className="expense-request-attachments">{row.attachments.map((attachment, index) => <SecureExpenseReceipt key={attachment.id} fullPath={attachment.fullPath} name={`영수증 ${index + 1}`} />)}</div>{row.reviewedAt && <p className="expense-request-note">{row.reviewerName} · {new Date(row.reviewedAt).toLocaleString('ko-KR')}{row.reviewReason && <><br />처리 사유: {row.reviewReason}</>}</p>}{data.canReview && row.status === 'pending' && <div className="expense-request-actions"><button type="button" disabled={saving || loading} onClick={() => { setReview({ row, decision: 'rejected' }); setReason(''); }}>반려</button><button type="button" className="primary" disabled={saving || loading} onClick={() => { setReview({ row, decision: 'approved' }); setReason(''); }}>승인 및 반영</button></div>}</article>)}
       </section>
@@ -247,13 +267,13 @@ export default function TeamExpenseRequestPage() {
       <h2 id="expense-confirm-title">등록 전 최종 확인</h2><p>영수증과 입력 항목이 일치하는지 확인한 뒤 승인 요청을 보내세요.</p>
       <div className="expense-preview-grid"><div className="expense-confirm-receipts"><Suspense fallback={<p role="status">영수증 미리보기를 준비하고 있습니다.</p>}>{receipts.map(receipt => <ExpenseReceiptDocument key={receipt.id} receipt={receipt} />)}</Suspense></div><div>
         <div className="expense-team-route"><span>사용팀 {payerTeam && <TeamTag name={payerTeam.name} color={payerTeam.color} icon={payerTeam.icon} />}</span><span>청구팀 {chargeToTeam && <TeamTag name={chargeToTeam.name} color={chargeToTeam.color} icon={chargeToTeam.icon} />}</span></div>
-        <dl className="expense-confirm-fields"><dt>사용일</dt><dd>{form.date}</dd><dt>금액</dt><dd>{money(Number(form.amount))}</dd><dt>결제수단</dt><dd>{form.paymentMethod}</dd><dt>경비 구분</dt><dd>{data?.categories.find(category => category.id === form.category)?.label}</dd><dt>사용 내용</dt><dd>{form.description}</dd>{form.memo && <><dt>메모</dt><dd>{form.memo}</dd></>}</dl>
+        <dl className="expense-confirm-fields"><dt>사용일</dt><dd>{form.date}</dd><dt>금액</dt><dd>{money(Number(form.amount))}</dd><dt>배정된 카드</dt><dd>{form.paymentMethod}</dd><dt>경비 구분</dt><dd>{data?.categories.find(category => category.id === form.category)?.label}</dd><dt>사용 내용</dt><dd>{form.description}</dd>{form.memo && <><dt>메모</dt><dd>{form.memo}</dd></>}</dl>
         <p className="expense-request-note">사무실 승인 후 청구팀의 경비를 차감하고 사용팀에 환급 정산합니다.</p>
         {error && <p role="alert" className="expense-request-error">{error}</p>}
         <div className="expense-request-actions"><button type="button" autoFocus disabled={saving} onClick={() => setConfirmOpen(false)}>돌아가서 수정</button><button type="button" className="primary" disabled={saving} onClick={() => void saveRequest()}>{saving ? progress : '확인 후 승인 요청'}</button></div>
       </div></div>
     </div></div>}
-    {analysisReceipt && data && <Suspense fallback={<ReceiptToolLoading onClose={() => setAnalysisReceipt(null)} />}><ExpenseReceiptAnalysis key={`${analysisReceipt.id}:${form.teamId}`} receipt={analysisReceipt} teamId={form.teamId} categories={data.categories} onClose={() => setAnalysisReceipt(null)} onApply={fields => { setForm(previous => ({ ...previous, ...fields })); setRequestId(createId()); setAnalysisReceipt(null); setNotice('확인한 영수증 항목을 입력란에 적용했습니다. 사용 내용과 청구팀을 확인해 주세요.'); }} /></Suspense>}
+    {analysisReceipt && data && <Suspense fallback={<ReceiptToolLoading onClose={() => setAnalysisReceipt(null)} />}><ExpenseReceiptAnalysis key={`${analysisReceipt.id}:${form.teamId}`} receipt={analysisReceipt} teamId={form.teamId} categories={data.categories} showPaymentMethod={false} onClose={() => setAnalysisReceipt(null)} onApply={fields => { setForm(previous => ({ ...previous, ...fields, paymentCardId: previous.paymentCardId, paymentMethod: previous.paymentMethod })); setRequestId(createId()); setAnalysisReceipt(null); setNotice('확인한 영수증 항목을 입력란에 적용했습니다. 사용 내용과 청구팀을 확인해 주세요.'); }} /></Suspense>}
     {cameraOpen && <Suspense fallback={<ReceiptToolLoading onClose={() => setCameraOpen(false)} />}><ExpenseReceiptCamera onClose={() => setCameraOpen(false)} onDeviceCamera={() => { setCameraOpen(false); deviceCameraInput.current?.click(); }} onCapture={file => { setCameraOpen(false); addFiles([file]); }} /></Suspense>}
     </ExpensePortal>
   </main>;

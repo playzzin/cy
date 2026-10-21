@@ -1,0 +1,7 @@
+.expense-team-select { position: relative; }
+.expense-team-select input { width: 100%; }
+.expense-team-select ul { position: absolute; z-index: 20; top: 100%; left: 0; right: 0; max-height: 240px; overflow-y: auto; margin: 4px 0 0; padding: 4px; list-style: none; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; box-shadow: 0 8px 24px #0f172a20; }
+.expense-team-select li { padding: 10px 12px; border-radius: 6px; overflow-wrap: anywhere; }
+.expense-team-select li[role="option"] { cursor: pointer; }
+.expense-team-select li.active, .expense-team-select li[role="option"]:hover { background: #eff6ff; }
+.expense-team-select li[aria-selected="true"] { color: #1d4ed8; font-weight: 700; }
