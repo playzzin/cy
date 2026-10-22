@@ -22,6 +22,9 @@ export interface Freelancer {
 export interface FreelancerPayment {
     id: string;
     freelancerId: string;
+    /** 신고 당시 귀속 팀. 기존 자료는 월 정산 저장본으로 보완한다. */
+    teamId?: string;
+    teamName?: string;
     year: number;
     month: number;
     dailyRate?: number;
