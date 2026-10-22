@@ -197,7 +197,9 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         setMessage('PC 보조 프로그램에 연결하고 있습니다. 브라우저가 로컬 네트워크 접근을 물으면 허용해 주세요.');
         const selected = prepared.images;
         try {
-            const result = await copyWindowsPhotos(selected.map(image => image.file), controller.signal);
+            const result = await copyWindowsPhotos(selected.map(image => image.file), controller.signal, progress => {
+                if (request === requestRef.current && !controller.signal.aborted) setMessage(`사진 전달 ${progress.completed}/${progress.total}장 · ${Math.floor(progress.sentBytes / progress.totalBytes * 100)}%${progress.retrying ? ' — 끊긴 부분을 다시 전달하고 있습니다.' : ''}`);
+            });
             const log = { source: 'worker_summary' as const, status: 'success' as const,
                 personNames: selected.map(image => image.worker.name), personCount: selected.length, fileCount: result.photoCount };
             if (result.copied) void recordIdentityDocumentLog({ ...log, action: 'copy_image' });
@@ -225,7 +227,11 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         setError('');
         setMessage('Windows 사진창을 준비하고 있습니다. 브라우저가 로컬 네트워크 접근을 물으면 허용해 주세요.');
         try {
-            const result = await openWindowsPhotoWindow(prepared.images.map(image => image.file), controller.signal);
+            const result = await openWindowsPhotoWindow(prepared.images.map(image => image.file), controller.signal, progress => {
+                if (request === requestRef.current && !controller.signal.aborted) setMessage(progress.completed === progress.total
+                    ? `사진 ${progress.total}장 전달 완료. Windows 사진창을 열고 있습니다.`
+                    : `사진 전달 ${progress.completed}/${progress.total}장 · ${Math.floor(progress.sentBytes / progress.totalBytes * 100)}%${progress.retrying ? ' — 끊긴 부분을 다시 전달하고 있습니다.' : ''}`);
+            });
             if (request !== requestRef.current || controller.signal.aborted || prepared.workers !== currentWorkers.current) return;
             // Opening a local window does not prove a clipboard copy or KakaoTalk attachment/share.
             if (!result.opened) throw new WindowsPhotoClipboardError('photo-window', 'open');
@@ -266,7 +272,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
                         <p>버튼을 누르면 사진이 모두 선택된 Windows 사진창이 열립니다. <strong>선택된 사진 하나를 누른 채 카카오톡 대화창으로 끌어놓으세요.</strong> 각각의 원본 사진이 함께 첨부됩니다.</p>
                         <p>저장할 위치를 고를 필요가 없습니다. 카카오톡에서 첨부된 사진과 받을 대화방을 확인한 뒤 전송하세요.</p>
                         <details><summary>처음 사용하시나요? PC 보조 프로그램 설치</summary>
-                            <ol><li><a href="/downloads/CYPhotoClipboardSetup.exe?v=1.3.0" download>Windows 보조 프로그램 1.3 다운로드 (.exe)</a> 후 실행하고 ‘설치하고 실행’을 누르세요. 기존 1.0·1.1·1.2 버전은 업데이트가 필요합니다.</li>
+                            <ol><li><a href="/downloads/CYPhotoClipboardSetup.exe?v=1.4.0" download>Windows 보조 프로그램 1.4 다운로드 (.exe)</a> 후 실행하고 ‘설치하고 실행’을 누르세요. 여러 장 전달 중 끊김을 자동으로 재시도하려면 1.4로 업데이트해 주세요.</li>
                                 <li>이 화면으로 돌아와 위의 끌어놓기 버튼을 누르세요. 로컬 네트워크 접근을 물으면 허용해 주세요.</li></ol>
                             <p>보조 프로그램이 공유용 임시 사진을 관리합니다. 작업을 마치면 Windows 사진창을 닫아 주세요.</p>
                         </details>

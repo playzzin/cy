@@ -17,6 +17,7 @@ namespace CyPhotoClipboard {
         public const string Origin = "https://cyee-9c1e4.web.app";
         const long MaxTotal = 200L * 1024 * 1024;
         const int MaxFile = 20 * 1024 * 1024;
+        const int ChunkSize = 1024 * 1024;
         readonly TcpListener listener;
         readonly string root;
         readonly Action<string[]> clipboard;
@@ -25,6 +26,11 @@ namespace CyPhotoClipboard {
         readonly object sync = new object();
         readonly Dictionary<string, DateTime> sessions = new Dictionary<string, DateTime>();
         readonly Dictionary<string, Batch> batches = new Dictionary<string, Batch>();
+        readonly Dictionary<string, Upload> uploads = new Dictionary<string, Upload>();
+        sealed class Upload {
+            internal Batch batch; internal Photo[] files; internal long[] offsets;
+            internal string manifest; internal DateTime expires;
+        }
         readonly Semaphore slots = new Semaphore(4, 4);
         volatile bool stopped;
         int saving;
@@ -40,6 +46,8 @@ namespace CyPhotoClipboard {
         public sealed class Manifest { public Photo[] files { get; set; } }
         public sealed class Photo { public string name { get; set; } public string type { get; set; } public long size { get; set; } }
         sealed class CopyRequest { public string batchId { get; set; } }
+        sealed class StartRequest { public string batchId { get; set; } public Photo[] files { get; set; } }
+        sealed class ChunkRequest { public string batchId { get; set; } public int index { get; set; } public long offset { get; set; } }
         sealed class BadRequest : Exception { public int Status; public string Code; public BadRequest(int status, string code = "request-failed") { Status = status; Code = code; } }
         sealed class Request {
             public string Method, Path;
@@ -117,7 +125,10 @@ namespace CyPhotoClipboard {
             var header = request.Header("Authorization");
             if (!header.StartsWith("Bearer ", StringComparison.Ordinal)) throw new BadRequest(403);
             var token = header.Substring(7);
-            lock (sync) { DateTime expires; if (!sessions.TryGetValue(token, out expires) || expires < DateTime.UtcNow) throw new BadRequest(403); }
+            lock (sync) {
+                DateTime expires; if (!sessions.TryGetValue(token, out expires) || expires < DateTime.UtcNow) throw new BadRequest(403, "session-expired");
+                sessions[token] = DateTime.UtcNow.AddMinutes(5);
+            }
             return token;
         }
         void Handle(TcpClient client) {
@@ -131,7 +142,7 @@ namespace CyPhotoClipboard {
                         var request = Parse(stream);
                         if (request.Header("Host") != "127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port || request.Header("Origin") != Origin) throw new BadRequest(403);
                         cors = true;
-                        if (request.Path != "/v1/session" && request.Path != "/v1/prepare" && request.Path != "/v1/copy" && request.Path != "/v1/open-photo-window") throw new BadRequest(404);
+                        if (!new[] { "/v1/session", "/v1/prepare", "/v1/copy", "/v1/open-photo-window", "/v1/prepare/start", "/v1/prepare/chunk", "/v1/prepare/finish", "/v1/prepare/cancel" }.Contains(request.Path)) throw new BadRequest(404);
                         if (request.Method == "OPTIONS") {
                             var method = request.Header("Access-Control-Request-Method");
                             if (request.Length != 0 || (method != "GET" && method != "POST")) throw new BadRequest(400);
@@ -141,14 +152,16 @@ namespace CyPhotoClipboard {
                         }
                         if (request.Header("X-CY-Photo-Protocol") != "2" && !(request.Path == "/v1/session" && request.Header("X-CY-Photo-Protocol") == "1")) throw new BadRequest(403, "version");
                         if (request.Method == "GET" && request.Path == "/v1/session" && request.Length == 0) {
-                            Reply(stream, 200, new { app = "cy-photo-clipboard", protocol = 2, version = "1.3.0", clipboardMode = "shell-files-v1", photoWindowMode = "shell-view-v1", token = Session() }, true); return;
+                            Reply(stream, 200, new { app = "cy-photo-clipboard", protocol = 2, version = "1.4.0", clipboardMode = "shell-files-v1", photoWindowMode = "shell-view-v1", transferMode = "chunks-v1", token = Session() }, true); return;
                         }
                         if (request.Method != "POST") throw new BadRequest(405);
                         var token = Authorize(request);
                         if (Interlocked.CompareExchange(ref saving, 1, 0) != 0) { Reply(stream, 409, new { error = "busy" }, true); return; }
                         try {
                             client.ReceiveTimeout = 15000;
-                            if (request.Path == "/v1/prepare" && request.Header("Content-Type") == "application/octet-stream") {
+                            if (request.Path.StartsWith("/v1/prepare/", StringComparison.Ordinal)) {
+                                HandleUpload(request, stream, token);
+                            } else if (request.Path == "/v1/prepare" && request.Header("Content-Type") == "application/octet-stream") {
                                 var batch = Save(stream, request.Length, token);
                                 Reply(stream, 200, new { batch.batchId, photoCount = batch.savedCount }, true);
                             } else if ((request.Path == "/v1/copy" || request.Path == "/v1/open-photo-window") && request.Header("Content-Type") == "application/json" && request.Length > 0 && request.Length <= 256) {
@@ -210,6 +223,98 @@ namespace CyPhotoClipboard {
         bool TryCopy(Batch batch) {
             if (batch.paths.Any(p => !File.Exists(p))) return false;
             try { clipboard(batch.paths); return true; } catch { return false; }
+        }
+        // Each acknowledged chunk is durable and replayable. A lost response must
+        // never append the same bytes twice or expose a partly received batch.
+        void HandleUpload(Request request, Stream stream, string token) {
+            foreach (var old in uploads.Where(p => p.Value.expires < DateTime.UtcNow).Select(p => p.Key).ToArray()) {
+                RemoveUpload(uploads[old]); uploads.Remove(old);
+            }
+            if (request.Path == "/v1/prepare/start") {
+                if (request.Header("Content-Type") != "application/json" || request.Length <= 0 || request.Length > 65536) throw new BadRequest(400, "upload-manifest");
+                var raw = new UTF8Encoding(false, true).GetString(Read(stream, (int)request.Length));
+                StartRequest data;
+                try { data = Json().Deserialize<StartRequest>(raw); } catch { throw new BadRequest(400, "upload-manifest"); }
+                if (data == null || !ValidId(data.batchId)) throw new BadRequest(400, "upload-manifest");
+                ValidatePhotos(data.files);
+                Upload existing;
+                if (uploads.TryGetValue(data.batchId, out existing)) {
+                    if (existing.batch.token != token || existing.manifest != raw) throw new BadRequest(409, "upload-state");
+                    Reply(stream, 200, new { batchId = data.batchId, chunkSize = ChunkSize }, true); return;
+                }
+                if (uploads.Count >= 4 || batches.ContainsKey(data.batchId)) throw new BadRequest(409, "busy");
+                var names = data.files.Select((p, i) => SafeName(p, i)).ToArray();
+                var folderName = "신분증_사진_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                var folder = Path.Combine(root, folderName);
+                if (Directory.Exists(folder)) throw new BadRequest(409, "busy");
+                Directory.CreateDirectory(folder); TemporaryPhotos.Mark(folder);
+                var batch = new Batch { batchId = data.batchId, folderName = folderName, savedCount = data.files.Length, token = token, paths = names.Select(n => Path.Combine(folder, n)).ToArray() };
+                uploads.Add(data.batchId, new Upload { batch = batch, files = data.files, offsets = new long[data.files.Length], manifest = raw, expires = DateTime.UtcNow.AddMinutes(5) });
+                Reply(stream, 200, new { batch.batchId, chunkSize = ChunkSize }, true); return;
+            }
+            if (request.Path == "/v1/prepare/chunk") {
+                if (request.Header("Content-Type") != "application/octet-stream" || request.Length < 5 || request.Length > ChunkSize + 1028) throw new BadRequest(400, "upload-chunk");
+                int headerLength = BitConverter.ToInt32(Read(stream, 4), 0);
+                if (headerLength <= 0 || headerLength > 1024 || request.Length <= headerLength + 4) throw new BadRequest(400, "upload-chunk");
+                ChunkRequest data;
+                try { data = Json().Deserialize<ChunkRequest>(new UTF8Encoding(false, true).GetString(Read(stream, headerLength))); } catch { throw new BadRequest(400, "upload-chunk"); }
+                Upload upload;
+                if (data == null || data.batchId == null || !uploads.TryGetValue(data.batchId, out upload) || upload.batch.token != token) throw new BadRequest(404, "upload-expired");
+                int count = (int)(request.Length - headerLength - 4);
+                if (data.index < 0 || data.index >= upload.files.Length || data.offset < 0 || count > ChunkSize || data.offset > upload.files[data.index].size - count) throw new BadRequest(400, "upload-chunk");
+                // Read the entire bounded chunk before touching the file. Truncated
+                // network requests therefore preserve the last acknowledged offset.
+                byte[] bytes;
+                try { bytes = Read(stream, count); }
+                catch (IOException) { throw new BadRequest(408, "transfer-interrupted"); }
+                if (data.offset == 0 && (count < 12 || !ValidSignature(bytes, upload.files[data.index].type))) throw new BadRequest(400, "image-format");
+                var file = upload.batch.paths[data.index]; var offset = upload.offsets[data.index];
+                if (data.offset < offset && data.offset + count <= offset) {
+                    using (var input = File.OpenRead(file)) { input.Position = data.offset; if (!Read(input, count).SequenceEqual(bytes)) throw new BadRequest(409, "upload-state"); }
+                } else {
+                    if (data.offset != offset) throw new BadRequest(409, "upload-state");
+                    using (var output = new FileStream(file, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None)) {
+                        try { output.SetLength(offset); output.Position = offset; output.Write(bytes, 0, count); output.Flush(true); }
+                        catch { output.SetLength(offset); throw; }
+                    }
+                    upload.offsets[data.index] += count;
+                }
+                upload.expires = DateTime.UtcNow.AddMinutes(5);
+                Reply(stream, 200, new { batchId = data.batchId, index = data.index, nextOffset = data.offset + count }, true); return;
+            }
+            if (request.Header("Content-Type") != "application/json" || request.Length <= 0 || request.Length > 256) throw new BadRequest(400, "upload-state");
+            CopyRequest command;
+            try { command = Json().Deserialize<CopyRequest>(Encoding.UTF8.GetString(Read(stream, (int)request.Length))); } catch { throw new BadRequest(400, "upload-state"); }
+            if (command == null || !ValidId(command.batchId)) throw new BadRequest(400, "upload-state");
+            Upload current;
+            uploads.TryGetValue(command.batchId, out current);
+            if (request.Path == "/v1/prepare/cancel") {
+                if (current != null && current.batch.token == token) { RemoveUpload(current); uploads.Remove(command.batchId); }
+                Reply(stream, 200, new { cancelled = true }, true); return;
+            }
+            Batch complete;
+            if (batches.TryGetValue(command.batchId, out complete) && complete.token == token && complete.expires > DateTime.UtcNow) {
+                Reply(stream, 200, new { complete.batchId, photoCount = complete.savedCount }, true); return;
+            }
+            if (current == null || current.batch.token != token) throw new BadRequest(404, "upload-expired");
+            if (current.files.Where((f, i) => current.offsets[i] != f.size || !File.Exists(current.batch.paths[i]) || new FileInfo(current.batch.paths[i]).Length != f.size).Any()) throw new BadRequest(409, "upload-incomplete");
+            current.batch.expires = DateTime.UtcNow.AddMinutes(5);
+            lock (sync) {
+                foreach (var old in batches.Where(p => p.Value.expires < DateTime.UtcNow).Select(p => p.Key).ToArray()) batches.Remove(old);
+                batches.Add(command.batchId, current.batch); LastBatch = current.batch;
+            }
+            uploads.Remove(command.batchId);
+            Reply(stream, 200, new { current.batch.batchId, photoCount = current.batch.savedCount }, true);
+        }
+        static bool ValidId(string id) { return id != null && id.Length == 32 && id.All(c => "0123456789abcdef".Contains(c)); }
+        static void ValidatePhotos(Photo[] files) {
+            if (files == null || files.Length == 0 || files.Length > 100 || files.Any(f => f == null || f.size < 12 || f.size > MaxFile || string.IsNullOrEmpty(f.name) || f.name.Length > 255) || files.Sum(f => f.size) > MaxTotal) throw new BadRequest(400, "upload-manifest");
+        }
+        static void RemoveUpload(Upload upload) {
+            // Only known files from this unfinished batch; never recursive deletion.
+            foreach (var file in upload.batch.paths) { try { File.Delete(file); } catch { } }
+            var folder = Path.GetDirectoryName(upload.batch.paths[0]);
+            try { File.Delete(Path.Combine(folder, TemporaryPhotos.Marker)); Directory.Delete(folder, false); } catch { }
         }
         Batch Save(Stream input, long length, string token) {
             if (length < 4) throw new BadRequest(400);

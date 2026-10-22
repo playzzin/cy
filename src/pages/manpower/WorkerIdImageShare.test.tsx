@@ -85,6 +85,19 @@ async function prepare() {
     await screen.findByText(/사진 \d+장을 준비했습니다/);
 }
 
+test('여러 장의 전달 진행 상황과 자동 재시도를 표시하고 닫은 뒤 갱신하지 않는다', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    let report: (value: unknown) => void;
+    (openWindowsPhotoWindow as jest.Mock).mockImplementationOnce((_files, _signal, progress) => { report = progress; return new Promise(() => {}); });
+    render(<WorkerIdImageShare workers={workers} />); await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 한 번에 끌어놓기' }));
+    act(() => report({ completed: 1, total: 2, sentBytes: 50, totalBytes: 100, retrying: true }));
+    expect(screen.getByRole('status')).toHaveTextContent('사진 전달 1/2장 · 50% — 끊긴 부분을 다시 전달하고 있습니다.');
+    fireEvent.click(screen.getByRole('button', { name: '신분증 공유 닫기' }));
+    act(() => report({ completed: 2, total: 2, sentBytes: 100, totalBytes: 100, retrying: false }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
 test('선택한 신분증을 준비하고 다음 클릭에서 원본 사진 여러 장만 함께 공유한다', async () => {
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
@@ -325,7 +338,7 @@ test('Windows 사진창에는 선택된 각각의 원본을 전달하고 창 열
     expect(saveAs).not.toHaveBeenCalled();
     expect(share).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('처음 사용하시나요? PC 보조 프로그램 설치'));
-    expect(screen.getByRole('link', { name: 'Windows 보조 프로그램 1.3 다운로드 (.exe)' })).toHaveAttribute('href', '/downloads/CYPhotoClipboardSetup.exe?v=1.3.0');
+    expect(screen.getByRole('link', { name: 'Windows 보조 프로그램 1.4 다운로드 (.exe)' })).toHaveAttribute('href', '/downloads/CYPhotoClipboardSetup.exe?v=1.4.0');
 });
 
 test('사진창을 준비하는 중 중복 클릭은 창을 추가로 열지 않는다', async () => {

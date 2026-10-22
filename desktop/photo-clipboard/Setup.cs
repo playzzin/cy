@@ -18,7 +18,7 @@ namespace CyPhotoClipboard {
             Application.Run(CreateForm());
         }
         internal static Form CreateForm() {
-            var form = new Form { Text = "CY 사진 첨부·복사 설치 · 1.3.0", ClientSize = new Size(540, 300), FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, StartPosition = FormStartPosition.CenterScreen };
+            var form = new Form { Text = "CY 사진 첨부·복사 설치 · 1.4.0", ClientSize = new Size(540, 300), FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, StartPosition = FormStartPosition.CenterScreen };
             form.Controls.Add(new Label { Text = "Windows 사진창에서 여러 원본 사진을 한 번에 끌어놓습니다.\r\n\r\n• 사진창의 선택된 사진 하나를 카카오톡 대화창으로 끌어놓기\r\n• 저장 위치 선택 없이 보조 프로그램이 임시 사진 관리\r\n• 24시간 지난 사진은 사진창·클립보드에서 사용하지 않을 때 정리\r\n• Windows 로그인 시 자동 실행 / 알림 영역에서 종료 가능\r\n• 첨부 미리보기와 전송은 사용자가 카카오톡에서 확인\r\n\r\n설치 후 사이트에서 ‘사진 N장 한 번에 끌어놓기’를 누르세요.\r\n브라우저가 로컬 네트워크 접근을 물으면 허용해 주세요.", Location = new Point(20, 20), Size = new Size(500, 190) });
             var install = new Button { Text = "설치하고 실행", Location = new Point(20, 225), Size = new Size(180, 35) };
             var remove = new Button { Text = "보조 프로그램 제거", Location = new Point(215, 225), Size = new Size(180, 35), Enabled = File.Exists(Exe) };

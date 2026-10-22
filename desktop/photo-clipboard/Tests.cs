@@ -25,7 +25,7 @@ namespace CyPhotoClipboard {
                 using (var stream = client.GetStream()) {
                     var header = method + " " + path + " HTTP/1.1\r\nHost: 127.0.0.1:43128\r\n" + (origin == null ? "" : "Origin: " + origin + "\r\n") +
                         "X-CY-Photo-Protocol: 2\r\n" + (token == null ? "" : "Authorization: Bearer " + token + "\r\n") +
-                        "Content-Type: " + (path == "/v1/copy" || path == "/v1/open-photo-window" ? "application/json" : "application/octet-stream") + "\r\nContent-Length: " + (body == null ? 0 : body.Length) + "\r\n" + extra + "\r\n";
+                        "Content-Type: " + (path == "/v1/copy" || path == "/v1/open-photo-window" || (path.StartsWith("/v1/prepare/") && path != "/v1/prepare/chunk") ? "application/json" : "application/octet-stream") + "\r\nContent-Length: " + (body == null ? 0 : body.Length) + "\r\n" + extra + "\r\n";
                     var bytes = Encoding.ASCII.GetBytes(header); stream.Write(bytes, 0, bytes.Length);
                     if (body != null) stream.Write(body, 0, body.Length);
                     var head = new StringBuilder();
@@ -162,7 +162,7 @@ namespace CyPhotoClipboard {
                 Check(Send("/v1/prepare", pack, null, Bridge.Origin, "", "POST").status == 403, "missing session denied");
                 var session = Call("/v1/session"); var token = (string)session.data["token"];
                 Check(session.status == 200 && token.Length == 64, "ephemeral session");
-                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.3.0" &&
+                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.4.0" && (string)session.data["transferMode"] == "chunks-v1" &&
                     (string)session.data["clipboardMode"] == "shell-files-v1" && (string)session.data["photoWindowMode"] == "shell-view-v1", "advertise compatible copying and native photo window capability");
                 Check(Call("/v1/prepare", pack, "wrong").status == 403, "wrong token denied");
                 Check(Send("/v1/prepare", pack, token, Bridge.Origin, "Transfer-Encoding: chunked\r\n", "POST").status == 400, "ambiguous framing denied");
@@ -219,6 +219,7 @@ namespace CyPhotoClipboard {
                 TemporaryPhotos.Prune(directory, DateTime.UtcNow, candidate => false);
                 Check(File.Exists(Path.Combine(old, "unrelated.txt")), "never delete unrelated files in modified batches");
 
+                TestChunks(bridge, directory, token, otherToken, jpg, png);
                 waitForDisconnect = true;
                 using (var pendingClient = new TcpClient("127.0.0.1", 43128)) {
                     var stream = pendingClient.GetStream();
@@ -239,6 +240,51 @@ namespace CyPhotoClipboard {
             while (!task.IsCompleted && DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(20); }
             if (!task.IsCompleted) throw new InvalidOperationException("UI test timeout");
             return task.Result;
+        }
+        static byte[] Encode(object value) { return Encoding.UTF8.GetBytes(Json.Serialize(value)); }
+        static byte[] Chunk(string id, int index, long offset, byte[] bytes) {
+            var meta = Encode(new { batchId = id, index, offset });
+            return BitConverter.GetBytes(meta.Length).Concat(meta).Concat(bytes).ToArray();
+        }
+        static void TestChunks(Bridge bridge, string directory, string token, string otherToken, byte[] jpg, byte[] png) {
+            var id = Guid.NewGuid().ToString("N");
+            var first = new byte[1024 * 1024 + 19]; Array.Copy(jpg, first, jpg.Length);
+            var start = Encode(new { batchId = id, files = new[] { new { name = "one.jpg", type = "image/jpeg", size = first.Length }, new { name = "two.png", type = "image/png", size = png.Length } } });
+            var command = Encode(new { batchId = id });
+            var before = Directory.GetDirectories(directory).Length;
+            Check(Call("/v1/prepare/start", start, token).status == 200, "chunk transfer starts without copying");
+            Check(Call("/v1/prepare/start", start, token).status == 200 && Directory.GetDirectories(directory).Length == before + 1, "lost start response retry reuses one batch");
+            Check(Call("/v1/prepare/start", start, otherToken).status == 409, "chunk start bound to session");
+            Check(Call("/v1/prepare/finish", command, token).status == 409 && Call("/v1/open-photo-window", command, token).status == 404, "incomplete batch cannot finish or open");
+            var part = Chunk(id, 0, 0, first.Take(1024 * 1024).ToArray());
+            Check(Call("/v1/prepare/chunk", Chunk(id, 0, 0, jpg), otherToken).status == 404, "chunk transfer rejects another session");
+            using (var interrupted = new TcpClient("127.0.0.1", 43128)) {
+                interrupted.ReceiveTimeout = 5000;
+                var stream = interrupted.GetStream();
+                var header = Encoding.ASCII.GetBytes("POST /v1/prepare/chunk HTTP/1.1\r\nHost: 127.0.0.1:43128\r\nOrigin: " + Bridge.Origin + "\r\nX-CY-Photo-Protocol: 2\r\nAuthorization: Bearer " + token + "\r\nContent-Type: application/octet-stream\r\nContent-Length: " + part.Length + "\r\n\r\n");
+                stream.Write(header, 0, header.Length); stream.Write(part, 0, 1024); interrupted.Client.Shutdown(SocketShutdown.Send);
+                var response = new StreamReader(stream).ReadToEnd();
+                Check(response.Contains("408 Response") && response.Contains("transfer-interrupted"), "interrupted body returns a retryable transfer error");
+            }
+            Check(Call("/v1/prepare/chunk", part, token).status == 200, "first bounded chunk received");
+            Check(Call("/v1/prepare/chunk", part, token).status == 200, "lost chunk acknowledgement is safely replayed");
+            var altered = (byte[])part.Clone(); altered[altered.Length - 1] = 7;
+            Check(Call("/v1/prepare/chunk", altered, token).status == 409, "replay cannot silently replace bytes");
+            Check(Call("/v1/prepare/chunk", Chunk(id, 0, 1024 * 1024 + 1, new byte[] { 1 }), token).status == 409, "out of order offset rejected");
+            Check(Call("/v1/prepare/chunk", Chunk(id, 0, 1024 * 1024, first.Skip(1024 * 1024).ToArray()), token).status == 200, "tail chunk appended");
+            Check(Call("/v1/prepare/chunk", Chunk(id, 1, 0, jpg), token).status == 400, "invalid photo signature rejected");
+            Check(Call("/v1/prepare/chunk", Chunk(id, 1, 0, png), token).status == 200, "next original photo received");
+            Check(Call("/v1/prepare/finish", command, token).status == 200 && Call("/v1/prepare/finish", command, token).status == 200, "finish reply loss is idempotent");
+            Check(bridge.LastBatch.paths.Length == 2 && File.ReadAllBytes(bridge.LastBatch.paths[0]).SequenceEqual(first) && File.ReadAllBytes(bridge.LastBatch.paths[1]).SequenceEqual(png), "chunk retries preserve exact original byte arrays and count");
+            Check(Call("/v1/prepare/cancel", command, token).status == 200 && bridge.LastBatch.paths.All(File.Exists), "cancel never removes a completed batch");
+            var cancelId = Guid.NewGuid().ToString("N");
+            var cancelStart = Encode(new { batchId = cancelId, files = new[] { new { name = "cancel.jpg", type = "image/jpeg", size = jpg.Length } } });
+            Check(Call("/v1/prepare/start", cancelStart, token).status == 200 && Call("/v1/prepare/chunk", Chunk(cancelId, 0, 0, jpg), token).status == 200, "cancellable batch prepared");
+            var cancel = Encode(new { batchId = cancelId });
+            Check(Call("/v1/prepare/cancel", cancel, otherToken).status == 200 && Call("/v1/prepare/start", cancelStart, token).status == 200, "another session cannot cancel an upload");
+            Check(Call("/v1/prepare/cancel", cancel, token).status == 200 && Directory.GetDirectories(directory).Length == before + 1, "cancel removes only its unfinished files");
+            var invalid = Encode(new { batchId = "../../outside", files = new[] { new { name = "one.jpg", type = "image/jpeg", size = jpg.Length } } });
+            Check(Call("/v1/prepare/start", invalid, token).status == 400, "start rejects path identifiers");
         }
     }
 }
