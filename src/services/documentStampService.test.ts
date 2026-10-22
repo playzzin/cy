@@ -1,7 +1,8 @@
 import { doc, getDoc, onSnapshot, runTransaction } from 'firebase/firestore';
 import { ref, getDownloadURL, uploadBytes } from 'firebase/storage';
 import { documentStampService, validateStampFile } from './documentStampService';
-import { createDefaultStampSettings } from '../features/document-stamps/model';
+import { applyStampCommand, createDefaultStampSettings } from '../features/document-stamps/model';
+import { LEGACY_ESTIMATE_STAMP_URL } from '../features/document-stamps/legacyStampUrl';
 
 jest.mock('../config/firebase', () => ({ db: {}, storage: {} }));
 jest.mock('../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
@@ -49,4 +50,27 @@ it('잘못된 형식·빈 파일·크기 초과를 업로드 전에 차단한다
     expect(() => validateStampFile(new File([], 'seal.png', { type: 'image/png' }))).toThrow('2MB');
     expect(() => validateStampFile(new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'seal.png', { type: 'image/png' }))).toThrow('2MB');
     expect(uploadBytes).not.toHaveBeenCalled();
+});
+
+it.each(['screen', 'excel'] as const)('거래명세표 %s는 등록된 청연 회사 직인을 사용한다', async output => {
+    (getDoc as jest.Mock).mockResolvedValue({ exists: () => false });
+    (getDownloadURL as jest.Mock).mockResolvedValue('/registered-cheongyeon.jpg');
+    expect(await documentStampService.getUrl('transaction', '청연이엔지', output)).toBe('/registered-cheongyeon.jpg');
+    expect(getDownloadURL).toHaveBeenCalledWith('청연도장.jpg');
+});
+
+it.each(['screen', 'excel'] as const)('거래명세표 %s는 기본 직인의 이미지 수정도 반영한다', async output => {
+    const defaults = createDefaultStampSettings();
+    const settings = applyStampCommand(defaults, {
+        type: 'upsert', editing: true,
+        asset: { ...defaults.assets[0], url: '/updated-company-seal.png' },
+    });
+    expect(await documentStampService.resolveUrl(settings, 'transaction', '청연', output)).toBe('/updated-company-seal.png');
+    expect(getDownloadURL).not.toHaveBeenCalled();
+});
+
+it.each(['screen', 'excel'] as const)('거래명세표 %s는 설정·Storage 조회 실패 시에도 확인된 청연 직인을 사용한다', async output => {
+    (getDoc as jest.Mock).mockRejectedValue(new Error('offline'));
+    (getDownloadURL as jest.Mock).mockRejectedValue(new Error('offline'));
+    expect(await documentStampService.getUrl('transaction', '청연', output)).toBe(LEGACY_ESTIMATE_STAMP_URL);
 });

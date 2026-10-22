@@ -92,7 +92,7 @@ export const documentStampService = {
     },
     async resolveUrl(settings: StampSettings, document: StampDocument, companyName?: string | null, output: 'screen' | 'excel' = 'screen'): Promise<string | null> {
         const asset = resolveStampAsset(settings, document, companyName, output);
-        if (asset?.id === 'legacy-cheongyeon' && asset.builtin && output === 'screen' && (document === 'estimate' || document === 'transaction')) return LEGACY_ESTIMATE_STAMP_URL;
+        if (asset?.id === 'legacy-cheongyeon' && asset.builtin && output === 'screen' && document === 'estimate') return LEGACY_ESTIMATE_STAMP_URL;
         try { return await documentStampService.assetUrl(asset); }
         catch {
             // The receipt already used this local image when the old Storage object was unavailable.

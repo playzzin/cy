@@ -3,16 +3,20 @@ import { applyStampCommand, createDefaultStampSettings, getStampCompanyScope, re
 const custom = { id: 'new', name: '새 도장', url: '/test-stamp.png' };
 const withCustom = () => applyStampCommand(createDefaultStampSettings(), { type: 'upsert', asset: custom, editing: false });
 
-it('변경 전 회사별 증명서와 화면·엑셀 도장 기본값을 그대로 유지한다', () => {
+it('회사별 증명서와 견적서의 기존 도장 기본값을 유지한다', () => {
     const settings = createDefaultStampSettings();
     expect(resolveStampAsset(settings, 'employment', '주식회사 청연이엔지')?.storagePath).toBe('청연도장.jpg');
     expect(resolveStampAsset(settings, 'termination', '다원(주)')?.storagePath).toBe('다원도장.png');
     expect(resolveStampAsset(settings, 'employment', '다른 회사')).toBeNull();
     expect(resolveStampAsset(settings, 'employment', null)).toBeNull();
-    for (const type of ['estimate', 'transaction'] as const) {
-        expect(resolveStampAsset(settings, type, '공급사')?.id).toBe('legacy-cheongyeon');
-        expect(resolveStampAsset(settings, type, '공급사', 'excel')?.id).toBe('legacy-round');
-    }
+    expect(resolveStampAsset(settings, 'estimate', '공급사')?.id).toBe('legacy-cheongyeon');
+    expect(resolveStampAsset(settings, 'estimate', '공급사', 'excel')?.id).toBe('legacy-round');
+});
+
+it.each(['screen', 'excel'] as const)('거래명세표 %s에 공급 회사의 실제 직인을 사용한다', output => {
+    const settings = createDefaultStampSettings();
+    expect(resolveStampAsset(settings, 'transaction', '주식회사 청연이엔지', output)?.storagePath).toBe('청연도장.jpg');
+    expect(resolveStampAsset(settings, 'transaction', '다원(주)', output)?.storagePath).toBe('다원도장.png');
 });
 
 it('회사의 표기 차이를 정규화하고 회사·문서 지정이 공통보다 우선한다', () => {

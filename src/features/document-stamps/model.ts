@@ -56,10 +56,13 @@ export const resolveStampAsset = (
     const explicit = company[document] || company.default || common[document] || common.default;
     if (explicit) return settings.assets.find(asset => asset.id === explicit) || null;
 
-    // Preserve the original document-specific defaults until the user changes them.
+    // Transactions use the supplier's company seal for both screen and Excel.
+    // Keep the separate legacy Excel image only for estimates.
     let legacyId: string | undefined;
-    if (document === 'estimate' || document === 'transaction') {
+    if (document === 'estimate') {
         legacyId = output === 'excel' ? 'legacy-round' : 'legacy-cheongyeon';
+    } else if (document === 'transaction') {
+        legacyId = scope === 'company-dawon' ? 'legacy-dawon' : 'legacy-cheongyeon';
     } else if (scope === 'company-cheongyeon') legacyId = 'legacy-cheongyeon';
     else if (scope === 'company-dawon') legacyId = 'legacy-dawon';
     return settings.assets.find(asset => asset.id === legacyId) || null;
