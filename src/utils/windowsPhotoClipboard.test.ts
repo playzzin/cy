@@ -128,7 +128,7 @@ test.each(['photo-window-busy', 'photo-window'])('사진창 오류 %s는 복사 
         ? { ok: false, json: async () => ({ error: code }) } : photoWindowResponse(url));
     const error = await openWindowsPhotoWindow(files, new AbortController().signal).catch(failure => failure);
     expect(error).toMatchObject({ code, stage: 'open' });
-    expect(windowsPhotoClipboardErrorMessage(error)).toContain(code === 'photo-window-busy' ? '사진창을 닫은 뒤' : '사진창을 열지 못했습니다');
+    expect(windowsPhotoClipboardErrorMessage(error)).toContain(code === 'photo-window-busy' ? '마우스를 놓고 잠시 뒤' : '사진창을 열지 못했습니다');
 });
 
 test('사진 준비 중 취소되면 Windows 사진창을 열지 않는다', async () => {

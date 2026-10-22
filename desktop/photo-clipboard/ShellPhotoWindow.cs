@@ -23,6 +23,7 @@ namespace CyPhotoClipboard {
         readonly Dictionary<string, DateTime> grace = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         readonly bool hidden;
         readonly int timeout;
+        readonly Func<bool> interactionInProgress;
         Request active;
         ShellPhotoWindow window;
         bool stopped;
@@ -32,10 +33,12 @@ namespace CyPhotoClipboard {
             internal readonly TaskCompletionSource<PhotoWindowResult> done = new TaskCompletionSource<PhotoWindowResult>();
         }
         public ShellPhotoWindows(Control uiDispatcher, string cacheRoot) : this(uiDispatcher, cacheRoot, false, 10000) { }
-        internal ShellPhotoWindows(Control uiDispatcher, string cacheRoot, bool hide, int waitMilliseconds) {
+        internal ShellPhotoWindows(Control uiDispatcher, string cacheRoot, bool hide, int waitMilliseconds, Func<bool> interaction = null) {
             dispatcher = uiDispatcher; var handle = dispatcher.Handle;
             root = Path.GetFullPath(cacheRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             hidden = hide; timeout = waitMilliseconds;
+            interactionInProgress = interaction ?? (() => GetCapture() != IntPtr.Zero ||
+                ((GetAsyncKeyState(1) | GetAsyncKeyState(2) | GetAsyncKeyState(4)) & 0x8000) != 0);
         }
         bool Validate(string id, string[] paths) {
             if (string.IsNullOrEmpty(id) || id.Length != 32 || id.Any(c => !"0123456789abcdef".Contains(c)) || paths == null || paths.Length == 0 || paths.Length > 100) return false;
@@ -64,12 +67,18 @@ namespace CyPhotoClipboard {
         void OpenOnUi(Request request) {
             lock (sync) { if (stopped || request.cancelled) { request.done.TrySetResult(PhotoWindowResult.Failed); return; } }
             if (window != null) {
+                // Shell drag uses a nested message loop. Do not dispose its source
+                // view, or change focus, while the user is holding/capturing input.
+                if (interactionInProgress()) { request.done.TrySetResult(PhotoWindowResult.Busy); return; }
                 bool same = active.id == request.id && active.paths.SequenceEqual(request.paths, StringComparer.OrdinalIgnoreCase);
-                if (same && window.Ready) { window.Present(); request.done.TrySetResult(PhotoWindowResult.Opened); }
-                else request.done.TrySetResult(PhotoWindowResult.Busy);
-                return;
+                if (same && window.Ready) { window.Present(); request.done.TrySetResult(PhotoWindowResult.Opened); return; }
+                if (!window.Ready) { window.Present(); request.done.TrySetResult(PhotoWindowResult.Busy); return; }
             }
             try {
+                // Each website click prepares a new batch, even for the same
+                // photos. Replace the idle view instead of blocking on its ID.
+                // FormClosed preserves the previous batch for pending recipients.
+                if (window != null) window.Close();
                 lock (sync) { active = request; }
                 window = new ShellPhotoWindow(request.paths, hidden);
                 var created = window;
@@ -103,6 +112,8 @@ namespace CyPhotoClipboard {
         }
         internal void CloseCurrent() { if (window != null) window.Close(); }
         internal int OpenWindowCount { get { return window == null ? 0 : 1; } }
+        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+        [DllImport("user32.dll")] static extern IntPtr GetCapture();
         public void Dispose() {
             lock (sync) { stopped = true; if (active != null) { active.cancelled = true; active.done.TrySetResult(PhotoWindowResult.Failed); } }
             if (window != null) { var closing = window; closing.Close(); closing.Dispose(); window = null; }

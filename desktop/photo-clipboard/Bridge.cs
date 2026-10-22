@@ -152,7 +152,7 @@ namespace CyPhotoClipboard {
                         }
                         if (request.Header("X-CY-Photo-Protocol") != "2" && !(request.Path == "/v1/session" && request.Header("X-CY-Photo-Protocol") == "1")) throw new BadRequest(403, "version");
                         if (request.Method == "GET" && request.Path == "/v1/session" && request.Length == 0) {
-                            Reply(stream, 200, new { app = "cy-photo-clipboard", protocol = 2, version = "1.4.1", clipboardMode = "shell-files-v1", photoWindowMode = "shell-view-v1", transferMode = "chunks-v1", token = Session() }, true); return;
+                            Reply(stream, 200, new { app = "cy-photo-clipboard", protocol = 2, version = "1.4.2", clipboardMode = "shell-files-v1", photoWindowMode = "shell-view-v1", transferMode = "chunks-v1", token = Session() }, true); return;
                         }
                         if (request.Method != "POST") throw new BadRequest(405);
                         var token = Authorize(request);

@@ -157,12 +157,12 @@ export const windowsPhotoClipboardErrorMessage = (error: unknown): string => {
     if (code === 'busy') return '다른 사진을 처리하고 있습니다. 잠시 뒤 다시 눌러 주세요.';
     if (code === 'version') return '전체 복사 기능을 사용하려면 PC 보조 프로그램 1.2 이상이 필요합니다. 아래 설치 메뉴에서 새 설치 파일을 실행한 뒤 다시 눌러 주세요.';
     if (code === 'photo-window-version') return '사진을 한 번에 끌어놓으려면 PC 보조 프로그램 1.3 이상이 필요합니다. 아래 설치 메뉴에서 새 설치 파일을 실행한 뒤 다시 눌러 주세요.';
-    if (code === 'photo-window-busy') return '이미 열려 있는 Windows 사진창을 닫은 뒤 다시 눌러 주세요. 끌어놓는 중이라면 먼저 작업을 마쳐 주세요.';
+    if (code === 'photo-window-busy') return '사진창이 준비 중이거나 마우스를 사용 중입니다. 마우스를 놓고 잠시 뒤 다시 눌러 주세요. 계속되면 아래 설치 메뉴에서 PC 보조 프로그램을 1.4.2 이상으로 업데이트해 주세요. 기존 사진창은 자동으로 전환됩니다.';
     if (code === 'photo-window') return 'Windows 사진창을 열지 못했습니다. 보조 프로그램의 실행 상태를 확인한 뒤 다시 눌러 주세요.';
     if (code === 'image-format') return '사진 형식을 확인하지 못해 사진 준비를 중단했습니다. 해당 사진을 다시 등록하거나 개별 사진 복사를 이용해 주세요.';
     if (code === 'temporary-files') return '보조 프로그램에서 공유용 임시 사진을 준비하지 못했습니다. PC의 여유 공간을 확인해 주세요.';
     if (error instanceof WindowsPhotoClipboardError && error.stage === 'copy') return '사진 준비는 끝났지만 클립보드 복사 결과를 확인하지 못했습니다. Windows 알림 영역의 CY 사진 전체 복사에서 ‘마지막 사진 전체 다시 복사’를 눌러 주세요.';
-    if (error instanceof WindowsPhotoClipboardError && error.stage === 'open') return '사진 준비는 끝났지만 Windows 사진창이 열렸는지 확인하지 못했습니다. 작업 표시줄에서 사진창을 확인하고, 열려 있다면 닫은 뒤 다시 눌러 주세요.';
+    if (error instanceof WindowsPhotoClipboardError && error.stage === 'open') return '사진 준비는 끝났지만 Windows 사진창이 열렸는지 확인하지 못했습니다. 잠시 뒤 ‘한 번에 끌어놓기’를 다시 눌러 주세요. PC 보조 프로그램 1.4.2 이상에서는 기존 사진창을 자동으로 전환합니다.';
     if (error instanceof WindowsPhotoClipboardError && error.stage === 'prepare') return `사진 전달을 완료하지 못했습니다. 잠시 뒤 다시 눌러 주세요. PC 보조 프로그램이 1.4 이전이면 업데이트해 주세요. 1.4부터는 끊긴 부분을 자동 재시도합니다. 오류: ${code}`;
     return 'PC 보조 프로그램에 연결하지 못했습니다. 시작 메뉴에서 ‘CY 사진 전체 복사’를 실행하고 브라우저의 로컬 네트워크 접근을 허용한 뒤 다시 눌러 주세요.';
 };

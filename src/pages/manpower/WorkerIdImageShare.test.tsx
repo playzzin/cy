@@ -374,7 +374,7 @@ test.each(['close', 'selection'])('사진창 준비 중 %s 시 취소하고 이�
 
 test.each([
     ['photo-window-version', '1.3 이상이 필요합니다'],
-    ['photo-window-busy', '이미 열려 있는 Windows 사진창을 닫은 뒤'],
+    ['photo-window-busy', '마우스를 놓고 잠시 뒤 다시 눌러 주세요'],
     ['photo-window', 'Windows 사진창을 열지 못했습니다'],
 ])('사진창 오류 %s를 안내하고 자동 복사나 공유로 대체하지 않는다', async (code, message) => {
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });

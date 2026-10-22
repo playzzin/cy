@@ -70,13 +70,26 @@ namespace CyPhotoClipboard {
                 var paths = new[] { Path.Combine(folder, "001_test.jpg"), Path.Combine(folder, "002_test.jpg") };
                 File.Copy(Path.Combine(args[2], "test-1.jpg"), paths[0]); File.Copy(Path.Combine(args[2], "test-2.jpg"), paths[1]);
                 var id = new string('a', 32);
+                var nextFolder = Path.Combine(root, "synthetic-next-batch"); Directory.CreateDirectory(nextFolder); TemporaryPhotos.Mark(nextFolder);
+                var nextPaths = new[] { Path.Combine(nextFolder, "new-selection.jpg") };
+                File.Copy(Path.Combine(args[2], "test-2.jpg"), nextPaths[0]);
+                var nextId = new string('b', 32); bool interacting = false;
                 using (var dispatcher = new Control()) {
-                    using (var windows = new ShellPhotoWindows(dispatcher, root, true, 10000)) {
+                    using (var windows = new ShellPhotoWindows(dispatcher, root, true, 10000, () => interacting)) {
                         Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "native Shell view has exact selected file-drop batch");
                         Check(!Application.OpenForms.OfType<ShellPhotoWindow>().Single().TopMost, "hidden diagnostics do not create a topmost window");
                         Check(windows.OpenWindowCount == 1 && windows.UsesFolder(folder), "one native window holds its cache batch");
                         Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened && windows.OpenWindowCount == 1, "same batch reuses existing native window");
-                        Check(Pump(Task.Run(() => windows.Open(new string('b', 32), paths, CancellationToken.None))) == PhotoWindowResult.Busy && windows.OpenWindowCount == 1, "different batch cannot replace an open window");
+                        var previous = Application.OpenForms.OfType<ShellPhotoWindow>().Single();
+                        interacting = true;
+                        Check(Pump(Task.Run(() => windows.Open(nextId, nextPaths, CancellationToken.None))) == PhotoWindowResult.Busy && !previous.IsDisposed, "active drag or held input preserves its source window");
+                        interacting = false;
+                        using (var cancel = new CancellationTokenSource()) { cancel.Cancel(); Check(windows.Open(nextId, nextPaths, cancel.Token) == PhotoWindowResult.Failed && !previous.IsDisposed, "cancelled replacement leaves the existing view intact"); }
+                        Check(Pump(Task.Run(() => windows.Open(nextId, nextPaths, CancellationToken.None))) == PhotoWindowResult.Opened && windows.OpenWindowCount == 1 && previous.IsDisposed, "new batch replaces the idle window without manual closing");
+                        var replacement = Application.OpenForms.OfType<ShellPhotoWindow>().Single();
+                        Check(replacement.Ready && replacement.Text.Contains("1장"), "replacement selects only the newly requested photo files");
+                        Check(windows.UsesFolder(folder) && windows.UsesFolder(nextFolder) && paths.Concat(nextPaths).All(File.Exists), "replacement preserves old and new files for pending recipients");
+                        Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened && replacement.IsDisposed, "repeated website requests continue to replace one window");
                         Check(Pump(Task.Run(() => windows.Open(id, new[] { Path.Combine(root, "unapproved.jpg") }, CancellationToken.None))) == PhotoWindowResult.Failed, "invalid path rejected before creating a window");
                         using (var cancel = new CancellationTokenSource()) { cancel.Cancel(); Check(windows.Open(id, paths, cancel.Token) == PhotoWindowResult.Failed, "cancelled request cannot open or reactivate a window"); }
                         Directory.SetLastWriteTimeUtc(folder, DateTime.UtcNow.AddHours(-25));
@@ -95,7 +108,7 @@ namespace CyPhotoClipboard {
                         Application.DoEvents();
                         Check(shortWait.OpenWindowCount == 0, "timed-out queued request never opens a stale window");
                     }
-                    using (var windows = new ShellPhotoWindows(dispatcher, root))
+                    using (var windows = new ShellPhotoWindows(dispatcher, root, false, 10000, () => false))
                     using (var covering = new Form { Text = "SYNTHETIC NORMAL WINDOW", WindowState = FormWindowState.Maximized }) {
                         covering.Show();
                         Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "visible photo window prepares the original selection");
@@ -110,6 +123,10 @@ namespace CyPhotoClipboard {
                         Check(photo.WindowState == FormWindowState.Normal && pin.Checked && (GetWindowLong(photo.Handle, -20) & 8) != 0, "reopen restores and pins the existing window");
                         covering.Activate(); Application.DoEvents();
                         Check(windows.OpenWindowCount == 1 && Above(photo.Handle, covering.Handle), "reopened photo window stays above the normal window without duplicates");
+                        photo.WindowState = FormWindowState.Minimized; Application.DoEvents();
+                        Check(Pump(Task.Run(() => windows.Open(nextId, nextPaths, CancellationToken.None))) == PhotoWindowResult.Opened && photo.IsDisposed, "new selection replaces even a minimized previous window");
+                        var fresh = Application.OpenForms.OfType<ShellPhotoWindow>().Single();
+                        Check(fresh.Ready && fresh.WindowState == FormWindowState.Normal && fresh.Text.Contains("1장") && Above(fresh.Handle, covering.Handle), "newly selected photos are visible above the normal window");
                         covering.Close();
                     }
                 }
@@ -182,7 +199,7 @@ namespace CyPhotoClipboard {
                 Check(Send("/v1/prepare", pack, null, Bridge.Origin, "", "POST").status == 403, "missing session denied");
                 var session = Call("/v1/session"); var token = (string)session.data["token"];
                 Check(session.status == 200 && token.Length == 64, "ephemeral session");
-                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.4.1" && (string)session.data["transferMode"] == "chunks-v1" &&
+                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.4.2" && (string)session.data["transferMode"] == "chunks-v1" &&
                     (string)session.data["clipboardMode"] == "shell-files-v1" && (string)session.data["photoWindowMode"] == "shell-view-v1", "advertise compatible copying and native photo window capability");
                 Check(Call("/v1/prepare", pack, "wrong").status == 403, "wrong token denied");
                 Check(Send("/v1/prepare", pack, token, Bridge.Origin, "Transfer-Encoding: chunked\r\n", "POST").status == 400, "ambiguous framing denied");
