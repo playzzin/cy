@@ -6,6 +6,7 @@ import WorkerIdImageShare from './WorkerIdImageShare';
 import { copyImageFile, imageFileFromUrl } from '../../utils/imageFileDelivery';
 import { canSaveImageFolder, saveImageFolder, zipImageFiles } from '../../utils/imageBatchDownload';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
+import { saveAndCopyWindowsPhotos, WindowsPhotoClipboardError } from '../../utils/windowsPhotoClipboard';
 
 jest.mock('../../config/firebase', () => ({ storage: {} }));
 jest.mock('firebase/storage', () => ({ ref: (_storage: unknown, path: string) => path, getDownloadURL: async (path: string) => path }));
@@ -13,6 +14,7 @@ jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 jest.mock('../../services/identityDocumentLogService', () => ({ recordIdentityDocumentLog: jest.fn() }));
 jest.mock('../../utils/imageFileDelivery', () => ({ ...jest.requireActual('../../utils/imageFileDelivery'), imageFileFromUrl: jest.fn(), copyImageFile: jest.fn() }));
 jest.mock('../../utils/imageBatchDownload', () => ({ canSaveImageFolder: jest.fn(), saveImageFolder: jest.fn(), zipImageFiles: jest.fn() }));
+jest.mock('../../utils/windowsPhotoClipboard', () => ({ ...jest.requireActual('../../utils/windowsPhotoClipboard'), saveAndCopyWindowsPhotos: jest.fn() }));
 
 const workers = [
     { id: 'one', name: '테스트 가', fileNameSaved: 'one.jpg' },
@@ -37,6 +39,40 @@ beforeEach(() => {
     HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
     (imageFileFromUrl as jest.Mock).mockImplementation(async (url: string, name: string) =>
         new File([url], `${name}.${url.endsWith('.jpg') ? 'jpg' : 'png'}`, { type: url.endsWith('.jpg') ? 'image/jpeg' : 'image/png' }));
+});
+
+test('Windows 전체 복사는 선택한 개별 원본 파일만 전달하고 확인된 저장·복사를 기록한다', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    (saveAndCopyWindowsPhotos as jest.Mock).mockResolvedValue({ copied: true, savedCount: 2, folderName: '테스트 폴더' });
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 저장하고 전체 복사' }));
+    await screen.findByText(/사진 2장을 각각 저장하고 전체 복사했습니다/);
+    expect((saveAndCopyWindowsPhotos as jest.Mock).mock.calls[0][0].map((file: File) => file.type)).toEqual(['image/jpeg', 'image/png']);
+    expect(recordIdentityDocumentLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'copy_image', fileCount: 2 }));
+    expect(share).not.toHaveBeenCalled();
+});
+
+test('보조 프로그램이 복사 실패를 반환하면 저장만 기록하고 재복사를 안내한다', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    (saveAndCopyWindowsPhotos as jest.Mock).mockResolvedValue({ copied: false, savedCount: 2, folderName: '테스트 폴더' });
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 저장하고 전체 복사' }));
+    await screen.findByText(/저장했지만 클립보드에 복사하지 못했습니다/);
+    expect(recordIdentityDocumentLog).toHaveBeenCalledTimes(1);
+    expect(recordIdentityDocumentLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'download_image' }));
+});
+
+test('연결 실패는 성공으로 표시하거나 자동 공유하지 않는다', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    (saveAndCopyWindowsPhotos as jest.Mock).mockRejectedValue(new WindowsPhotoClipboardError('connection'));
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 저장하고 전체 복사' }));
+    await screen.findByText(/PC 보조 프로그램과 연결하지 못했거나/);
+    expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
+    expect(share).not.toHaveBeenCalled();
 });
 
 async function prepare() {
@@ -65,6 +101,7 @@ test('여러 장 공유가 지원되지 않으면 PC 묶음 저장과 개별 사
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
     expect(screen.queryByRole('button', { name: '사진 2장 함께 공유' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '사진 2장 저장하고 전체 복사' })).not.toBeInTheDocument();
     expect(screen.getByText(/함께 공유할 수 없습니다/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '사진 2장 ZIP 저장' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '사진 2장 폴더에 저장' })).not.toBeInTheDocument();
@@ -229,6 +266,8 @@ test('Windows에서는 실제 지원 여부와 무관하게 PC 저장 안내를 
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
     expect(screen.queryByRole('button', { name: '사진 2장 함께 공유' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '사진 2장 저장하고 전체 복사' })).toBeVisible();
+    fireEvent.click(screen.getByText('폴더·ZIP으로 저장해서 보내기'));
     expect(screen.getByRole('button', { name: '사진 2장 폴더에 저장' })).toBeVisible();
     expect(screen.getByText(/Windows 공유창의 카카오톡·복사 항목/)).toBeVisible();
     expect(screen.queryByRole('button', { name: '테스트 가 사진 공유' })).not.toBeInTheDocument();
