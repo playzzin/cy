@@ -22,6 +22,8 @@ export const FreelancerSchema = z.object({
 export const FreelancerPaymentSchema = z.object({
     id: z.string().optional(),
     freelancerId: z.string().min(1, '프리랜서 ID는 필수입니다.'),
+    teamId: z.string().optional(),
+    teamName: z.string().optional(),
     year: z.number().int().min(2000),
     month: z.number().int().min(1).max(12),
     dailyRate: z.number().optional().nullable(),

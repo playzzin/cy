@@ -6,6 +6,7 @@ import 'handsontable/dist/handsontable.full.min.css';
 import Handsontable from 'handsontable';
 import { freelancerService } from '../../services/freelancerService';
 import { buildFreelancerTaxExcelRows } from '../../utils/freelancerTaxExcel';
+import { freelancerReportRowKey } from '../../utils/freelancerYearlyData';
 
 import { addYears, subYears } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -30,6 +31,7 @@ const FreelancerPage: React.FC = () => {
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [reportTeams, setReportTeams] = useState<Array<{ id: string; name: string }>>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [downloadingExcel, setDownloadingExcel] = useState(false);
     const [downloadingTaxExcel, setDownloadingTaxExcel] = useState(false);
     const [taxExcelMonth, setTaxExcelMonth] = useState(new Date().getMonth() + 1);
@@ -214,9 +216,10 @@ const FreelancerPage: React.FC = () => {
         if (masterLoading) return;
         setLoading(true);
         setAllFreelancers([]);
+        setLoadError('');
 
         try {
-            // 서비스에서 모든 소스(FreelancerPayment + 일보)를 병합한 결과를 가져옴
+            // 월 정산 당시의 작업자·팀별 신고 금액과 수기 입력을 병합한다.
             const freelancerResult = await freelancerService.getFreelancerYearlyData(year);
 
             const cheongyeonTeamIds = cheongyeonTeams
@@ -249,7 +252,7 @@ const FreelancerPage: React.FC = () => {
             setAllFreelancers(normalized);
             allFreelancersRef.current = normalized;
         } catch (error) {
-            console.error('Failed to fetch yearly data (suppressed alert):', error);
+            setLoadError(error instanceof Error ? error.message : '신고 자료를 불러오지 못했습니다. 다시 시도해 주세요.');
         } finally {
             setLoading(false);
         }
@@ -312,8 +315,8 @@ const FreelancerPage: React.FC = () => {
 
         // gridNo가 없는 데이터는 남은 빈 자리에 순차 배치한다.
         const standard = filtered.filter(f => !(Number(f?.gridNo) || 0));
-        const anchoredIds = new Set(anchored.map(a => a.id));
-        const standardToPlace = standard.filter(f => !anchoredIds.has(f.id));
+        const anchoredIds = new Set(anchored.map(freelancerReportRowKey));
+        const standardToPlace = standard.filter(f => !anchoredIds.has(freelancerReportRowKey(f)));
 
         let standardIdx = 0;
         for (let i = 0; i < totalSlots; i++) {
@@ -466,7 +469,7 @@ const FreelancerPage: React.FC = () => {
         setAllFreelancers(prev => {
             const next = [...prev];
             modifiedInGrid.forEach((item: any) => {
-                const idx = next.findIndex(f => f.id === item.id);
+                const idx = next.findIndex(f => freelancerReportRowKey(f) === freelancerReportRowKey(item));
                 if (idx !== -1) {
                     next[idx] = { ...item };
                 } else {
@@ -525,6 +528,8 @@ const FreelancerPage: React.FC = () => {
                 requestAnimationFrame(() => {
                     hotInstance.setDataAtRowProp([
                         [row, 'id', tempId, 'internal'],
+                        [row, 'teamId', newRecord.teamId, 'internal'],
+                        [row, 'teamName', newRecord.teamName, 'internal'],
                         [row, 'isEmpty', false, 'internal'],
                         [row, 'gridNo', rowData.no, 'internal'],
                         [row, prop, processedValue, 'internal']
@@ -985,6 +990,10 @@ const FreelancerPage: React.FC = () => {
 
     return (
         <div className="freelancer-page-container">
+            {loadError && <div role="alert" className="p-3 text-red-700 bg-red-50">
+                신고 자료를 표시할 수 없습니다. {loadError}
+                <button type="button" onClick={fetchData} className="ml-3 underline">다시 불러오기</button>
+            </div>}
             {/* 상단 팀 내비게이션 */}
             <div className="team-tab-navigation">
                 {/* 년도 조절기 (전체보기 버튼 대신 위치) */}
@@ -1029,7 +1038,7 @@ const FreelancerPage: React.FC = () => {
                 <span className="freelancer-salary-legend-chip is-monthly">월급제</span>
                 <span className="freelancer-salary-legend-chip is-agency">용역팀</span>
                 <span className="ml-3 text-xs font-semibold text-slate-600">
-                    월별 금액은 통합급여관리에서 전체법인으로 정산 저장한 세전 금액이며 직접 수정할 수 있습니다.
+                    월별 금액은 전체법인 정산에 저장된 세전 금액입니다. 팀을 이동해도 이전 신고액은 당시 팀에서 조회하며, 수정값은 선택한 팀에만 반영됩니다.
                 </span>
             </div>
 
@@ -1043,6 +1052,7 @@ const FreelancerPage: React.FC = () => {
                     <HotTable
                         ref={hotRef}
                         data={displayData}
+                        readOnly={!!loadError}
                         columns={columns}
                         rowHeaders={false}
                         nestedHeaders={nestedHeaders}
@@ -1119,7 +1129,7 @@ const FreelancerPage: React.FC = () => {
                     <select
                         value={taxExcelMonth}
                         onChange={(event) => setTaxExcelMonth(Number(event.target.value))}
-                        disabled={loading || downloadingTaxExcel}
+                        disabled={loading || !!loadError || downloadingTaxExcel}
                         aria-label="세무용 엑셀 월 선택"
                         className="rounded border border-emerald-300 bg-white px-3 py-3 font-bold text-emerald-800 shadow-sm disabled:opacity-60"
                     >
@@ -1129,7 +1139,7 @@ const FreelancerPage: React.FC = () => {
                     </select>
                     <button
                         onClick={handleDownloadTaxExcel}
-                        disabled={loading || downloadingTaxExcel}
+                        disabled={loading || !!loadError || downloadingTaxExcel}
                         className="flex items-center gap-2 px-6 py-3 bg-teal-700 text-white rounded font-black shadow-lg hover:bg-teal-800 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                         <FontAwesomeIcon icon={downloadingTaxExcel ? faSpinner : faFileExcel} spin={downloadingTaxExcel} />
@@ -1137,7 +1147,7 @@ const FreelancerPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleDownloadExcel}
-                        disabled={loading || downloadingExcel}
+                        disabled={loading || !!loadError || downloadingExcel}
                         className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded font-black shadow-lg hover:bg-emerald-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                         <FontAwesomeIcon icon={downloadingExcel ? faSpinner : faFileExcel} spin={downloadingExcel} />
@@ -1145,7 +1155,7 @@ const FreelancerPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={loading}
+                        disabled={loading || !!loadError}
                         className="flex items-center gap-2 px-8 py-3 bg-[#1e40af] text-white rounded font-black shadow-lg hover:bg-[#1e3a8a] transition-all"
                     >
                         <FontAwesomeIcon icon={faSave} />
