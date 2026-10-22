@@ -33,7 +33,7 @@ test('팀장 이름 기반의 단일 인원관리 링크와 문자열 하위 메
     ] } };
     ensureTeamPersonnelMenu(config);
     expect(config.pos_custom.menu[0].path).toBeUndefined();
-    expect(config.pos_custom.menu[0].sub).toHaveLength(4);
+    expect(config.pos_custom.menu[0].sub).toHaveLength(5);
 });
 
 test('숨김 설정과 관련 없는 사용자 지정 메뉴를 보존한다', () => {
@@ -42,5 +42,5 @@ test('숨김 설정과 관련 없는 사용자 지정 메뉴를 보존한다', (
     (config.pos_dynamic.menu[0].sub![0] as { hide?: boolean }).hide = true;
     ensureTeamPersonnelMenu(config);
     expect(config.pos_dynamic.menu[0].sub?.[1]).toMatchObject({ hide: true });
-    expect(config.pos_dynamic.menu[0].sub?.[4]).toEqual({ text: '별도 업무', path: '/custom' });
+    expect(config.pos_dynamic.menu[0].sub?.[5]).toEqual({ text: '별도 업무', path: '/custom' });
 });

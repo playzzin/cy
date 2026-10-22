@@ -7,6 +7,7 @@ export const TEAM_PERSONNEL_MENU_ITEMS: MenuItem[] = [
     { text: '급여명세서', path: '/manpower/team-worker-payslip', icon: 'fa-file-invoice-dollar' },
     { text: '신규작업자등록', path: '/manpower/team-worker-requests', icon: 'fa-user-plus' },
     { text: '작업자 요약', path: '/manpower/summary', icon: 'fa-users' },
+    { text: '일정확정보드', path: '/assignment/schedule-confirmation', icon: 'fa-calendar-check' },
 ];
 
 export const TEAM_SITE_MENU_ITEMS: MenuItem[] = [

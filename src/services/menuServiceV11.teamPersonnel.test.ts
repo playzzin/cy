@@ -10,7 +10,7 @@ jest.mock('firebase/firestore', () => ({
     doc: jest.fn(), getDoc: jest.fn(), setDoc: jest.fn(), updateDoc: jest.fn(), onSnapshot: jest.fn(), runTransaction: jest.fn(),
 }));
 
-test('저장된 메뉴를 조회할 때 허용된 세 메뉴로 표시하며 서버 설정은 쓰지 않는다', async () => {
+test('저장된 팀장 메뉴에 일정확정보드를 포함하며 서버 설정은 쓰지 않는다', async () => {
     menuServiceV11.clearCache();
     jest.clearAllMocks();
     const stored: SiteDataType = { pos_leader: { name: '팀장', icon: '', menu: [{ text: '인원관리', sub: [
@@ -24,6 +24,7 @@ test('저장된 메뉴를 조회할 때 허용된 세 메뉴로 표시하며 서
         expect.objectContaining({ text: '급여명세서', path: '/manpower/team-worker-payslip' }),
         expect.objectContaining({ text: '신규작업자등록', path: '/manpower/team-worker-requests' }),
         expect.objectContaining({ text: '작업자 요약', path: '/manpower/summary' }),
+        expect.objectContaining({ text: '일정확정보드', path: '/assignment/schedule-confirmation' }),
     ]);
     expect(config?.pos_leader.menu).toContainEqual(expect.objectContaining({ path: '/support/vehicles/oil-cycle' }));
     expect(stored.pos_leader.menu[0].sub).toHaveLength(2);
