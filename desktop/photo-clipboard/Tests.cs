@@ -15,6 +15,8 @@ namespace CyPhotoClipboard {
     public static class Tests {
         [DllImport("user32.dll")] static extern IntPtr GetClipboardOwner();
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] static extern int GetWindowLong(IntPtr window, int index);
+        [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
         static int passed;
         static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
         sealed class Response { public int status; public string raw; public Dictionary<string, object> data; }
@@ -71,6 +73,7 @@ namespace CyPhotoClipboard {
                 using (var dispatcher = new Control()) {
                     using (var windows = new ShellPhotoWindows(dispatcher, root, true, 10000)) {
                         Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "native Shell view has exact selected file-drop batch");
+                        Check(!Application.OpenForms.OfType<ShellPhotoWindow>().Single().TopMost, "hidden diagnostics do not create a topmost window");
                         Check(windows.OpenWindowCount == 1 && windows.UsesFolder(folder), "one native window holds its cache batch");
                         Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened && windows.OpenWindowCount == 1, "same batch reuses existing native window");
                         Check(Pump(Task.Run(() => windows.Open(new string('b', 32), paths, CancellationToken.None))) == PhotoWindowResult.Busy && windows.OpenWindowCount == 1, "different batch cannot replace an open window");
@@ -91,6 +94,23 @@ namespace CyPhotoClipboard {
                         Check(timeout.Wait(2000) && timeout.Result == PhotoWindowResult.Failed, "unresponsive UI dispatch has a bounded timeout");
                         Application.DoEvents();
                         Check(shortWait.OpenWindowCount == 0, "timed-out queued request never opens a stale window");
+                    }
+                    using (var windows = new ShellPhotoWindows(dispatcher, root))
+                    using (var covering = new Form { Text = "SYNTHETIC NORMAL WINDOW", WindowState = FormWindowState.Maximized }) {
+                        covering.Show();
+                        Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "visible photo window prepares the original selection");
+                        var photo = Application.OpenForms.OfType<ShellPhotoWindow>().Single();
+                        Check((GetWindowLong(photo.Handle, -20) & 8) != 0, "native WS_EX_TOPMOST is set on initial open");
+                        covering.Activate(); Application.DoEvents();
+                        Check(Above(photo.Handle, covering.Handle), "photo window stays above an activated normal window");
+                        var pin = photo.Controls.OfType<CheckBox>().Single(); pin.Checked = false; Application.DoEvents();
+                        Check((GetWindowLong(photo.Handle, -20) & 8) == 0, "user can turn off always-on-top");
+                        photo.WindowState = FormWindowState.Minimized; Application.DoEvents();
+                        Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "same batch reopens a minimized window");
+                        Check(photo.WindowState == FormWindowState.Normal && pin.Checked && (GetWindowLong(photo.Handle, -20) & 8) != 0, "reopen restores and pins the existing window");
+                        covering.Activate(); Application.DoEvents();
+                        Check(windows.OpenWindowCount == 1 && Above(photo.Handle, covering.Handle), "reopened photo window stays above the normal window without duplicates");
+                        covering.Close();
                     }
                 }
                 Console.WriteLine("Passed " + passed + " native photo window checks."); return;
@@ -162,7 +182,7 @@ namespace CyPhotoClipboard {
                 Check(Send("/v1/prepare", pack, null, Bridge.Origin, "", "POST").status == 403, "missing session denied");
                 var session = Call("/v1/session"); var token = (string)session.data["token"];
                 Check(session.status == 200 && token.Length == 64, "ephemeral session");
-                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.4.0" && (string)session.data["transferMode"] == "chunks-v1" &&
+                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.4.1" && (string)session.data["transferMode"] == "chunks-v1" &&
                     (string)session.data["clipboardMode"] == "shell-files-v1" && (string)session.data["photoWindowMode"] == "shell-view-v1", "advertise compatible copying and native photo window capability");
                 Check(Call("/v1/prepare", pack, "wrong").status == 403, "wrong token denied");
                 Check(Send("/v1/prepare", pack, token, Bridge.Origin, "Transfer-Encoding: chunked\r\n", "POST").status == 400, "ambiguous framing denied");
@@ -240,6 +260,12 @@ namespace CyPhotoClipboard {
             while (!task.IsCompleted && DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(20); }
             if (!task.IsCompleted) throw new InvalidOperationException("UI test timeout");
             return task.Result;
+        }
+        static bool Above(IntPtr upper, IntPtr lower) {
+            var seen = new HashSet<IntPtr>();
+            for (var next = GetWindow(lower, 3); next != IntPtr.Zero && seen.Add(next); next = GetWindow(next, 3))
+                if (next == upper) return true;
+            return false;
         }
         static byte[] Encode(object value) { return Encoding.UTF8.GetBytes(Json.Serialize(value)); }
         static byte[] Chunk(string id, int index, long offset, byte[] bytes) {

@@ -65,7 +65,7 @@ namespace CyPhotoClipboard {
             lock (sync) { if (stopped || request.cancelled) { request.done.TrySetResult(PhotoWindowResult.Failed); return; } }
             if (window != null) {
                 bool same = active.id == request.id && active.paths.SequenceEqual(request.paths, StringComparer.OrdinalIgnoreCase);
-                if (same && window.Ready) { if (!hidden) { window.Show(); window.Activate(); } request.done.TrySetResult(PhotoWindowResult.Opened); }
+                if (same && window.Ready) { window.Present(); request.done.TrySetResult(PhotoWindowResult.Opened); }
                 else request.done.TrySetResult(PhotoWindowResult.Busy);
                 return;
             }
@@ -87,7 +87,7 @@ namespace CyPhotoClipboard {
                     if (!ready || request.cancelled) { created.Close(); request.done.TrySetResult(PhotoWindowResult.Failed); }
                     else request.done.TrySetResult(PhotoWindowResult.Opened);
                 };
-                created.Show();
+                created.Present();
             } catch {
                 if (window != null) { window.Dispose(); window = null; }
                 lock (sync) { active = null; }
@@ -114,6 +114,7 @@ namespace CyPhotoClipboard {
         readonly bool hidden;
         readonly Panel host = new Panel { Dock = DockStyle.Fill };
         readonly Label status = new Label { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(14) };
+        readonly CheckBox keepAbove = new CheckBox { Text = "맨 위에 표시", Dock = DockStyle.Top, Height = 32, Padding = new Padding(14, 0, 0, 0), Checked = true };
         readonly System.Windows.Forms.Timer poll = new System.Windows.Forms.Timer { Interval = 100 };
         readonly DateTime deadline = DateTime.UtcNow.AddSeconds(8);
         IExplorerBrowser browser;
@@ -130,10 +131,22 @@ namespace CyPhotoClipboard {
             var instructions = new Label { Dock = DockStyle.Top, Height = 78, Padding = new Padding(14),
                 Text = "선택된 사진 하나를 카카오톡 대화창으로 끌어놓으세요. 사진 " + files.Length + "장이 함께 첨부됩니다.\n사진과 받을 대화방을 확인한 뒤 카카오톡에서 전송하세요." };
             status.Text = "사진 목록을 준비하고 있습니다.";
-            Controls.Add(host); Controls.Add(status); Controls.Add(instructions);
+            Controls.Add(host); Controls.Add(status); Controls.Add(keepAbove); Controls.Add(instructions);
+            keepAbove.CheckedChanged += delegate { TopMost = !hidden && keepAbove.Checked; };
             host.Resize += delegate { if (browser != null) { var rect = Rect(); browser.SetRect(IntPtr.Zero, ref rect); } };
             Shown += delegate { try { InitializeView(); poll.Start(); } catch { Finish(false); } };
             poll.Tick += delegate { Poll(); };
+        }
+        // Browser HTTP requests do not grant foreground activation permission.
+        // A topmost tool window stays visible without synthetic input or focus loops.
+        internal void Present() {
+            if (!hidden) {
+                keepAbove.Checked = true;
+                TopMost = true;
+                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            }
+            Show();
+            if (!hidden) { BringToFront(); Activate(); }
         }
         void Finish(bool ready) {
             if (completed) return; completed = true; Ready = ready; poll.Stop();
