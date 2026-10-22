@@ -38,7 +38,7 @@ namespace CyPhotoClipboard {
         public sealed class Manifest { public Photo[] files { get; set; } }
         public sealed class Photo { public string name { get; set; } public string type { get; set; } public long size { get; set; } }
         sealed class CopyRequest { public string batchId { get; set; } }
-        sealed class BadRequest : Exception { public int Status; public BadRequest(int status) { Status = status; } }
+        sealed class BadRequest : Exception { public int Status; public string Code; public BadRequest(int status, string code = "request-failed") { Status = status; Code = code; } }
         sealed class Request {
             public string Method, Path;
             public long Length;
@@ -126,7 +126,7 @@ namespace CyPhotoClipboard {
                         var request = Parse(stream);
                         if (request.Header("Host") != "127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port || request.Header("Origin") != Origin) throw new BadRequest(403);
                         cors = true;
-                        if (request.Path != "/v1/session" && request.Path != "/v1/save" && request.Path != "/v1/copy") throw new BadRequest(404);
+                        if (request.Path != "/v1/session" && request.Path != "/v1/prepare" && request.Path != "/v1/copy") throw new BadRequest(404);
                         if (request.Method == "OPTIONS") {
                             var method = request.Header("Access-Control-Request-Method");
                             if (request.Length != 0 || (method != "GET" && method != "POST")) throw new BadRequest(400);
@@ -134,18 +134,18 @@ namespace CyPhotoClipboard {
                             if (request.Header("Access-Control-Request-Headers").Split(',').Any(h => !allowed.Contains(h.Trim().ToLowerInvariant()))) throw new BadRequest(403);
                             Reply(stream, 204, null, true); return;
                         }
-                        if (request.Header("X-CY-Photo-Protocol") != "1") throw new BadRequest(403);
+                        if (request.Header("X-CY-Photo-Protocol") != "2" && !(request.Path == "/v1/session" && request.Header("X-CY-Photo-Protocol") == "1")) throw new BadRequest(403, "version");
                         if (request.Method == "GET" && request.Path == "/v1/session" && request.Length == 0) {
-                            Reply(stream, 200, new { app = "cy-photo-clipboard", protocol = 1, token = Session() }, true); return;
+                            Reply(stream, 200, new { app = "cy-photo-clipboard", protocol = 2, version = "1.1.0", token = Session() }, true); return;
                         }
                         if (request.Method != "POST") throw new BadRequest(405);
                         var token = Authorize(request);
                         if (Interlocked.CompareExchange(ref saving, 1, 0) != 0) { Reply(stream, 409, new { error = "busy" }, true); return; }
                         try {
                             client.ReceiveTimeout = 15000;
-                            if (request.Path == "/v1/save" && request.Header("Content-Type") == "application/octet-stream") {
+                            if (request.Path == "/v1/prepare" && request.Header("Content-Type") == "application/octet-stream") {
                                 var batch = Save(stream, request.Length, token);
-                                Reply(stream, 200, new { batch.batchId, batch.folderName, batch.savedCount }, true);
+                                Reply(stream, 200, new { batch.batchId, photoCount = batch.savedCount }, true);
                             } else if (request.Path == "/v1/copy" && request.Header("Content-Type") == "application/json" && request.Length > 0 && request.Length <= 256) {
                                 var data = Json().Deserialize<CopyRequest>(Encoding.UTF8.GetString(Read(stream, (int)request.Length)));
                                 Batch batch;
@@ -153,10 +153,12 @@ namespace CyPhotoClipboard {
                                     if (data == null || data.batchId == null || !batches.TryGetValue(data.batchId, out batch) || batch.token != token || batch.expires < DateTime.UtcNow) throw new BadRequest(404);
                                 }
                                 bool copied = TryCopy(batch);
-                                Reply(stream, 200, new { batch.batchId, batch.folderName, batch.savedCount, copied }, true);
+                                Reply(stream, 200, new { batch.batchId, photoCount = batch.savedCount, copied }, true);
                             } else throw new BadRequest(400);
                         } finally { Interlocked.Exchange(ref saving, 0); }
-                    } catch (BadRequest error) { SafeError(stream, error.Status, cors); }
+                    } catch (BadRequest error) { SafeError(stream, error.Status, cors, error.Code); }
+                      catch (UnauthorizedAccessException) { SafeError(stream, 500, cors, "temporary-files"); }
+                      catch (IOException) { SafeError(stream, 500, cors, "temporary-files"); }
                       catch { SafeError(stream, 500, cors); }
                     finally {
                         // Half-close before discarding a rejected body. An immediate close with unread
@@ -194,10 +196,11 @@ namespace CyPhotoClipboard {
             Directory.CreateDirectory(folder);
             var paths = new List<string>();
             try {
+                TemporaryPhotos.Mark(folder);
                 for (int index = 0; index < manifest.files.Length; index++) {
                     var photo = manifest.files[index];
                     var prefix = Read(input, 12);
-                    if (!ValidSignature(prefix, photo.type)) throw new BadRequest(400);
+                    if (!ValidSignature(prefix, photo.type)) throw new BadRequest(400, "image-format");
                     var path = Path.Combine(folder, names[index]);
                     using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
                         paths.Add(path); output.Write(prefix, 0, prefix.Length);
@@ -219,6 +222,7 @@ namespace CyPhotoClipboard {
             } catch {
                 // Only files created in this new batch are eligible for rollback, never recursive deletion.
                 foreach (var path in paths) { try { File.Delete(path); } catch { } }
+                try { File.Delete(Path.Combine(folder, TemporaryPhotos.Marker)); } catch { }
                 try { Directory.Delete(folder, false); } catch { }
                 throw;
             }
@@ -249,7 +253,7 @@ namespace CyPhotoClipboard {
                 default: return false;
             }
         }
-        static void SafeError(Stream stream, int status, bool cors) { try { Reply(stream, status, new { error = "request-failed" }, cors); } catch { } }
+        static void SafeError(Stream stream, int status, bool cors, string code = "request-failed") { try { Reply(stream, status, new { error = code }, cors); } catch { } }
         static void Reply(Stream stream, int status, object result, bool cors) {
             var bytes = result == null ? new byte[0] : Encoding.UTF8.GetBytes(Json().Serialize(result));
             var headers = "HTTP/1.1 " + status + " Response\r\nConnection: close\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: " + bytes.Length + "\r\n";

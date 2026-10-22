@@ -5,9 +5,9 @@ fs.mkdirSync(bin, { recursive: true });
 const csc = path.join(process.env.WINDIR || 'C:\\Windows', 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe');
 const common = ['/nologo', '/optimize+', '/codepage:65001', '/platform:anycpu', '/r:System.Windows.Forms.dll', '/r:System.Drawing.dll', '/r:System.Web.Extensions.dll'];
 function compile(args) { const result = cp.spawnSync(csc, [...common, ...args], { cwd: dir, encoding: 'utf8' }); if (result.status !== 0) throw new Error(result.stdout + result.stderr); }
-compile(['/target:winexe', '/out:bin/CYPhotoClipboard.exe', 'Bridge.cs', 'NativeClipboard.cs', 'Program.cs']);
+compile(['/target:winexe', '/out:bin/CYPhotoClipboard.exe', 'Bridge.cs', 'NativeClipboard.cs', 'TemporaryPhotos.cs', 'Program.cs']);
 compile(['/target:winexe', '/out:bin/CYPhotoClipboardSetup.exe', '/r:Microsoft.CSharp.dll', '/resource:bin/CYPhotoClipboard.exe,Helper', 'Setup.cs']);
-compile(['/target:exe', '/out:bin/HelperTests.exe', '/main:CyPhotoClipboard.Tests', 'Bridge.cs', 'NativeClipboard.cs', 'Tests.cs']);
+compile(['/target:exe', '/out:bin/HelperTests.exe', '/main:CyPhotoClipboard.Tests', 'Bridge.cs', 'NativeClipboard.cs', 'TemporaryPhotos.cs', 'Tests.cs']);
 compile(['/target:exe', '/out:bin/SetupPreview.exe', '/main:CyPhotoClipboard.SetupPreview', '/r:Microsoft.CSharp.dll', 'Setup.cs', 'SetupPreview.cs']);
 if (process.argv.includes('--package')) {
     const destination = path.resolve(dir, '../../public/downloads');

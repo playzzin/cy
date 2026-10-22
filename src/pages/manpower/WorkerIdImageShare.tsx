@@ -7,7 +7,7 @@ import type { Worker } from '../../services/manpowerService';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import { canShareImageFiles, copyImageFile, imageFileFromUrl, shareImageFiles } from '../../utils/imageFileDelivery';
 import { canSaveImageFolder, saveImageFolder, zipImageFiles } from '../../utils/imageBatchDownload';
-import { saveAndCopyWindowsPhotos, windowsPhotoClipboardErrorMessage } from '../../utils/windowsPhotoClipboard';
+import { copyWindowsPhotos, windowsPhotoClipboardErrorMessage } from '../../utils/windowsPhotoClipboard';
 import './WorkerIdImageShare.css';
 
 type IdWorker = Pick<Worker, 'id' | 'name' | 'fileNameSaved'>;
@@ -186,7 +186,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         }
     };
 
-    const saveAndCopyBatch = async () => {
+    const copyBatch = async () => {
         if (!prepared || prepared.workers !== currentWorkers.current || busyRef.current || !prepared.images.length) return;
         const request = requestRef.current;
         const controller = new AbortController();
@@ -197,15 +197,14 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         setMessage('PC 보조 프로그램에 연결하고 있습니다. 브라우저가 로컬 네트워크 접근을 물으면 허용해 주세요.');
         const selected = prepared.images;
         try {
-            const result = await saveAndCopyWindowsPhotos(selected.map(image => image.file), controller.signal);
+            const result = await copyWindowsPhotos(selected.map(image => image.file), controller.signal);
             const log = { source: 'worker_summary' as const, status: 'success' as const,
-                personNames: selected.map(image => image.worker.name), personCount: selected.length, fileCount: result.savedCount };
-            void recordIdentityDocumentLog({ ...log, action: 'download_image' });
+                personNames: selected.map(image => image.worker.name), personCount: selected.length, fileCount: result.photoCount };
             if (result.copied) void recordIdentityDocumentLog({ ...log, action: 'copy_image' });
             if (request !== requestRef.current) return;
             setMessage(result.copied
-                ? `사진 ${result.savedCount}장을 각각 저장하고 전체 복사했습니다. 카카오톡 대화 입력칸에서 Ctrl+V를 눌러 첨부하세요. 저장 위치: 다운로드 > CY_신분증_사진 > ${result.folderName}`
-                : `사진 ${result.savedCount}장을 저장했지만 클립보드에 복사하지 못했습니다. Windows 알림 영역의 CY 사진 전체 복사에서 ‘마지막 사진 전체 다시 복사’를 누르세요. 저장 폴더: ${result.folderName}`);
+                ? `사진 ${result.photoCount}장을 Windows 클립보드에 모두 복사했습니다. 카카오톡 대화 입력칸에서 Ctrl+V를 눌러 첨부하세요.`
+                : '사진은 준비됐지만 클립보드에 복사하지 못했습니다. Windows 알림 영역의 CY 사진 전체 복사에서 ‘마지막 사진 전체 다시 복사’를 누르세요.');
         } catch (failure) {
             if (request === requestRef.current) {
                 setMessage('');
@@ -238,12 +237,12 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
                 <details className="worker-id-share__desktop" open={isWindows || !canShareAll}>
                     <summary>PC 카카오톡으로 보내기</summary>
                     {isWindows && <div className="worker-id-share__helper">
-                        <button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void saveAndCopyBatch()}>사진 {images.length}장 저장하고 전체 복사</button>
-                        <p>사진을 각각 저장하고 한꺼번에 복사합니다. 완료되면 카카오톡 대화 입력칸에서 <strong>Ctrl+V</strong>를 누르세요.</p>
+                        <button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void copyBatch()}>사진 {images.length}장 전체 복사</button>
+                        <p>별도 저장 없이 각각의 사진을 한꺼번에 복사합니다. 완료되면 카카오톡 대화 입력칸에서 <strong>Ctrl+V</strong>를 누르세요.</p>
                         <details><summary>처음 사용하시나요? PC 보조 프로그램 설치</summary>
-                            <ol><li><a href="/downloads/CYPhotoClipboardSetup.exe" download>Windows 보조 프로그램 다운로드 (.exe)</a> 후 실행하고 ‘설치하고 실행’을 누르세요.</li>
-                                <li>이 화면으로 돌아와 위의 저장·전체 복사 버튼을 누르세요. 로컬 네트워크 접근을 물으면 허용해 주세요.</li></ol>
-                            <p>설치 후 Windows 로그인 시 자동 실행됩니다. 사진은 다운로드 폴더 안 CY_신분증_사진에 남으며, 다음 복사 작업은 기존 클립보드 내용을 바꿉니다. 종료·저장 폴더 열기는 Windows 알림 영역에서, 제거는 설치 프로그램에서 할 수 있습니다.</p>
+                            <ol><li><a href="/downloads/CYPhotoClipboardSetup.exe?v=1.1.0" download>Windows 보조 프로그램 1.1 다운로드 (.exe)</a> 후 실행하고 ‘설치하고 실행’을 누르세요. 기존 1.0 버전은 업데이트가 필요합니다.</li>
+                                <li>이 화면으로 돌아와 위의 전체 복사 버튼을 누르세요. 로컬 네트워크 접근을 물으면 허용해 주세요.</li></ol>
+                            <p>다운로드 폴더에는 저장하지 않습니다. 보조 프로그램이 복사용 임시 사진을 관리하며, 24시간이 지난 사진은 클립보드에서 사용하지 않을 때 정리합니다. 다음 복사 작업은 기존 클립보드 내용을 바꿉니다.</p>
                         </details>
                     </div>}
                     <details open={!isWindows}>
