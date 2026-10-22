@@ -1,12 +1,12 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { saveAs } from 'file-saver';
 import WorkerIdImageShare from './WorkerIdImageShare';
 import { copyImageFile, imageFileFromUrl } from '../../utils/imageFileDelivery';
 import { canSaveImageFolder, saveImageFolder, zipImageFiles } from '../../utils/imageBatchDownload';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
-import { copyWindowsPhotos, WindowsPhotoClipboardError } from '../../utils/windowsPhotoClipboard';
+import { copyWindowsPhotos, openWindowsPhotoWindow, WindowsPhotoClipboardError } from '../../utils/windowsPhotoClipboard';
 
 jest.mock('../../config/firebase', () => ({ storage: {} }));
 jest.mock('firebase/storage', () => ({ ref: (_storage: unknown, path: string) => path, getDownloadURL: async (path: string) => path }));
@@ -14,7 +14,7 @@ jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 jest.mock('../../services/identityDocumentLogService', () => ({ recordIdentityDocumentLog: jest.fn() }));
 jest.mock('../../utils/imageFileDelivery', () => ({ ...jest.requireActual('../../utils/imageFileDelivery'), imageFileFromUrl: jest.fn(), copyImageFile: jest.fn() }));
 jest.mock('../../utils/imageBatchDownload', () => ({ canSaveImageFolder: jest.fn(), saveImageFolder: jest.fn(), zipImageFiles: jest.fn() }));
-jest.mock('../../utils/windowsPhotoClipboard', () => ({ ...jest.requireActual('../../utils/windowsPhotoClipboard'), copyWindowsPhotos: jest.fn() }));
+jest.mock('../../utils/windowsPhotoClipboard', () => ({ ...jest.requireActual('../../utils/windowsPhotoClipboard'), copyWindowsPhotos: jest.fn(), openWindowsPhotoWindow: jest.fn() }));
 
 const workers = [
     { id: 'one', name: '테스트 가', fileNameSaved: 'one.jpg' },
@@ -26,6 +26,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux' });
     (copyImageFile as jest.Mock).mockResolvedValue(undefined);
+    (openWindowsPhotoWindow as jest.Mock).mockResolvedValue({ batchId: 'b'.repeat(32), photoCount: 2, opened: true });
     share.mockResolvedValue(undefined);
     canShare.mockReturnValue(true);
     (canSaveImageFolder as jest.Mock).mockReturnValue(false);
@@ -46,6 +47,7 @@ test('Windows 전체 복사는 선택한 개별 원본 파일만 전달하고 �
     (copyWindowsPhotos as jest.Mock).mockResolvedValue({ copied: true, photoCount: 2, folderName: '테스트 폴더' });
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
+    fireEvent.click(screen.getByText('전체 복사로 붙여넣기 (보조 기능)'));
     fireEvent.click(screen.getByRole('button', { name: '사진 2장 전체 복사' }));
     await screen.findByText(/사진 2장을 Windows 클립보드에 모두 복사했습니다/);
     expect((copyWindowsPhotos as jest.Mock).mock.calls[0][0].map((file: File) => file.type)).toEqual(['image/jpeg', 'image/png']);
@@ -60,6 +62,7 @@ test('보조 프로그램이 복사 실패를 반환하면 성공 기록 없이 
     (copyWindowsPhotos as jest.Mock).mockResolvedValue({ copied: false, photoCount: 2, folderName: '테스트 폴더' });
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
+    fireEvent.click(screen.getByText('전체 복사로 붙여넣기 (보조 기능)'));
     fireEvent.click(screen.getByRole('button', { name: '사진 2장 전체 복사' }));
     await screen.findByText(/사진은 준비됐지만 클립보드에 복사하지 못했습니다/);
     expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
@@ -70,6 +73,7 @@ test('연결 실패는 성공으로 표시하거나 자동 공유하지 않는�
     (copyWindowsPhotos as jest.Mock).mockRejectedValue(new WindowsPhotoClipboardError('connection'));
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
+    fireEvent.click(screen.getByText('전체 복사로 붙여넣기 (보조 기능)'));
     fireEvent.click(screen.getByRole('button', { name: '사진 2장 전체 복사' }));
     await screen.findByText(/PC 보조 프로그램에 연결하지 못했습니다/);
     expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
@@ -261,13 +265,14 @@ test('선택이 없거나 사진이 없는 경우 공유를 실행하지 않는�
     expect(share).not.toHaveBeenCalled();
 });
 
-test('Windows에서는 실제 지원 여부와 무관하게 PC 저장 안내를 먼저 펼치고 시스템 공유를 구분한다', async () => {
+test('Windows에서는 끌어놓기를 먼저 안내하고 복사·저장·시스템 공유를 구분한다', async () => {
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
     (canSaveImageFolder as jest.Mock).mockReturnValue(true);
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
     expect(screen.queryByRole('button', { name: '사진 2장 함께 공유' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '사진 2장 전체 복사' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '사진 2장 한 번에 끌어놓기' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '사진 2장 전체 복사', hidden: true })).not.toBeVisible();
     fireEvent.click(screen.getByText('폴더·ZIP으로 저장해서 보내기'));
     expect(screen.getByRole('button', { name: '사진 2장 폴더에 저장' })).toBeVisible();
     expect(screen.getByText(/Windows 공유창의 카카오톡·복사 항목/)).toBeVisible();
@@ -303,4 +308,81 @@ test('사진 복사 실패 시 이전 성공 문구를 지우고 저장 대안�
     expect(screen.getByRole('status')).not.toHaveTextContent('복사했습니다');
     expect(recordIdentityDocumentLog).toHaveBeenCalledTimes(1);
     expect(saveAs).not.toHaveBeenCalled();
+});
+
+test('Windows 사진창에는 선택된 각각의 원본을 전달하고 창 열기를 전송·복사 성공으로 기록하지 않는다', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 한 번에 끌어놓기' }));
+    await screen.findByText(/사진 2장이 모두 선택된 Windows 사진창을 열었습니다/);
+    expect((openWindowsPhotoWindow as jest.Mock).mock.calls[0][0].map((file: File) => [file.name, file.type])).toEqual([
+        ['01_테스트 가_신분증.jpg', 'image/jpeg'], ['02_테스트 나_신분증.png', 'image/png'],
+    ]);
+    expect(screen.getByRole('status')).toHaveTextContent('선택된 사진 하나를 누른 채');
+    expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
+    expect(copyWindowsPhotos).not.toHaveBeenCalled();
+    expect(saveAs).not.toHaveBeenCalled();
+    expect(share).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('처음 사용하시나요? PC 보조 프로그램 설치'));
+    expect(screen.getByRole('link', { name: 'Windows 보조 프로그램 1.3 다운로드 (.exe)' })).toHaveAttribute('href', '/downloads/CYPhotoClipboardSetup.exe?v=1.3.0');
+});
+
+test('사진창을 준비하는 중 중복 클릭은 창을 추가로 열지 않는다', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    let resolveWindow!: (value: unknown) => void;
+    (openWindowsPhotoWindow as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { resolveWindow = resolve; }));
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    const button = screen.getByRole('button', { name: '사진 2장 한 번에 끌어놓기' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(openWindowsPhotoWindow).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+    await act(async () => resolveWindow({ photoCount: 2, opened: true }));
+    expect(button).toBeEnabled();
+});
+
+test.each(['close', 'selection'])('사진창 준비 중 %s 시 취소하고 이전 선택의 늦은 응답을 표시하지 않는다', async action => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    let resolveWindow!: (value: unknown) => void;
+    (openWindowsPhotoWindow as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { resolveWindow = resolve; }));
+    const { rerender } = render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 한 번에 끌어놓기' }));
+    const signal = (openWindowsPhotoWindow as jest.Mock).mock.calls[0][1] as AbortSignal;
+    if (action === 'close') fireEvent.click(screen.getByRole('button', { name: '신분증 공유 닫기' }));
+    else rerender(<WorkerIdImageShare workers={[workers[1]]} />);
+    expect(signal.aborted).toBe(true);
+    await act(async () => resolveWindow({ photoCount: 2, opened: true }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
+});
+
+test.each([
+    ['photo-window-version', '1.3 이상이 필요합니다'],
+    ['photo-window-busy', '이미 열려 있는 Windows 사진창을 닫은 뒤'],
+    ['photo-window', 'Windows 사진창을 열지 못했습니다'],
+])('사진창 오류 %s를 안내하고 자동 복사나 공유로 대체하지 않는다', async (code, message) => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    (openWindowsPhotoWindow as jest.Mock).mockRejectedValueOnce(new WindowsPhotoClipboardError(code, 'open'));
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 한 번에 끌어놓기' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(message));
+    expect(screen.getByRole('button', { name: '사진 2장 한 번에 끌어놓기' })).toBeEnabled();
+    expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
+    expect(copyWindowsPhotos).not.toHaveBeenCalled();
+    expect(share).not.toHaveBeenCalled();
+});
+
+test('사진창 opened=false는 창을 열었다고 표시하지 않는다', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    (openWindowsPhotoWindow as jest.Mock).mockResolvedValueOnce({ photoCount: 2, opened: false });
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 한 번에 끌어놓기' }));
+    await screen.findByText(/Windows 사진창을 열지 못했습니다/);
+    expect(screen.getByRole('status')).not.toHaveTextContent('열었습니다');
+    expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
 });

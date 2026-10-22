@@ -8,6 +8,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CyPhotoClipboard {
     public static class Tests {
@@ -23,7 +25,7 @@ namespace CyPhotoClipboard {
                 using (var stream = client.GetStream()) {
                     var header = method + " " + path + " HTTP/1.1\r\nHost: 127.0.0.1:43128\r\n" + (origin == null ? "" : "Origin: " + origin + "\r\n") +
                         "X-CY-Photo-Protocol: 2\r\n" + (token == null ? "" : "Authorization: Bearer " + token + "\r\n") +
-                        "Content-Type: " + (path == "/v1/copy" ? "application/json" : "application/octet-stream") + "\r\nContent-Length: " + (body == null ? 0 : body.Length) + "\r\n" + extra + "\r\n";
+                        "Content-Type: " + (path == "/v1/copy" || path == "/v1/open-photo-window" ? "application/json" : "application/octet-stream") + "\r\nContent-Length: " + (body == null ? 0 : body.Length) + "\r\n" + extra + "\r\n";
                     var bytes = Encoding.ASCII.GetBytes(header); stream.Write(bytes, 0, bytes.Length);
                     if (body != null) stream.Write(body, 0, body.Length);
                     var head = new StringBuilder();
@@ -49,6 +51,50 @@ namespace CyPhotoClipboard {
             finally { NativeClipboard.Shutdown(); }
         }
         static void Run(string[] args) {
+            if (args.Length == 3 && args[0] == "--serve-photo-window") {
+                var root = Path.GetFullPath(args[1]); Directory.CreateDirectory(root);
+                using (var dispatcher = new Control())
+                using (var windows = new ShellPhotoWindows(dispatcher, root))
+                using (var server = new Bridge(root, delegate { throw new InvalidOperationException("copy-disabled-in-window-fixture"); }, int.Parse(args[2]), windows.Open))
+                using (var stop = new System.Windows.Forms.Timer { Interval = 500 }) {
+                    stop.Tick += delegate { if (File.Exists(Path.Combine(root, "stop-photo-window-server"))) Application.ExitThread(); };
+                    server.Start(); stop.Start(); Console.WriteLine("photo-window server ready"); Application.Run();
+                }
+                return;
+            }
+            if (args.Length == 3 && args[0] == "--test-photo-window") {
+                var root = Path.Combine(Path.GetFullPath(args[1]), Guid.NewGuid().ToString("N"));
+                var folder = Path.Combine(root, "신분증_사진_20260101_000000_1234abcd"); Directory.CreateDirectory(folder); TemporaryPhotos.Mark(folder);
+                var paths = new[] { Path.Combine(folder, "001_test.jpg"), Path.Combine(folder, "002_test.jpg") };
+                File.Copy(Path.Combine(args[2], "test-1.jpg"), paths[0]); File.Copy(Path.Combine(args[2], "test-2.jpg"), paths[1]);
+                var id = new string('a', 32);
+                using (var dispatcher = new Control()) {
+                    using (var windows = new ShellPhotoWindows(dispatcher, root, true, 10000)) {
+                        Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "native Shell view has exact selected file-drop batch");
+                        Check(windows.OpenWindowCount == 1 && windows.UsesFolder(folder), "one native window holds its cache batch");
+                        Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened && windows.OpenWindowCount == 1, "same batch reuses existing native window");
+                        Check(Pump(Task.Run(() => windows.Open(new string('b', 32), paths, CancellationToken.None))) == PhotoWindowResult.Busy && windows.OpenWindowCount == 1, "different batch cannot replace an open window");
+                        Check(Pump(Task.Run(() => windows.Open(id, new[] { Path.Combine(root, "unapproved.jpg") }, CancellationToken.None))) == PhotoWindowResult.Failed, "invalid path rejected before creating a window");
+                        using (var cancel = new CancellationTokenSource()) { cancel.Cancel(); Check(windows.Open(id, paths, cancel.Token) == PhotoWindowResult.Failed, "cancelled request cannot open or reactivate a window"); }
+                        Directory.SetLastWriteTimeUtc(folder, DateTime.UtcNow.AddHours(-25));
+                        TemporaryPhotos.Prune(root, DateTime.UtcNow, windows.UsesFolder);
+                        Check(paths.All(File.Exists), "cleanup preserves photos referenced by open Shell window");
+                        windows.CloseCurrent();
+                        Check(windows.OpenWindowCount == 0 && windows.UsesFolder(folder), "closed window releases view and retains cache grace");
+                        Check(Directory.GetLastWriteTimeUtc(folder) > DateTime.UtcNow.AddMinutes(-1), "close refreshes owned batch retention across restart");
+                        Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "closed batch can be opened again");
+                        windows.Dispose();
+                        Check(windows.OpenWindowCount == 0 && windows.Open(id, paths, CancellationToken.None) == PhotoWindowResult.Failed, "shutdown closes native window and rejects new opens");
+                    }
+                    using (var shortWait = new ShellPhotoWindows(dispatcher, root, true, 50)) {
+                        var timeout = Task.Run(() => shortWait.Open(id, paths, CancellationToken.None));
+                        Check(timeout.Wait(2000) && timeout.Result == PhotoWindowResult.Failed, "unresponsive UI dispatch has a bounded timeout");
+                        Application.DoEvents();
+                        Check(shortWait.OpenWindowCount == 0, "timed-out queued request never opens a stale window");
+                    }
+                }
+                Console.WriteLine("Passed " + passed + " native photo window checks."); return;
+            }
             if (args.Length == 3 && args[0] == "--test-native-clipboard") {
                 var files = Directory.GetFiles(args[1]).Where(file => file.EndsWith(".jpg") || file.EndsWith(".png")).OrderBy(file => file).ToArray();
                 Check(files.Length == 2, "two synthetic fixture photos");
@@ -90,7 +136,22 @@ namespace CyPhotoClipboard {
             var pack = Pack(new[] { "테스트.jpg", "../../CON:evil.exe.png" }, new[] { jpg, png }, new[] { "image/jpeg", "image/png" });
             string[] copied = null;
             bool failCopy = false;
-            using (var bridge = new Bridge(directory, paths => { if (failCopy) throw new Exception(); copied = paths; }, 43128)) {
+            string[] windowPaths = null;
+            PhotoWindowResult windowResult = PhotoWindowResult.Opened;
+            bool waitForDisconnect = false;
+            int lateOpenCommits = 0;
+            using (var windowStarted = new ManualResetEventSlim())
+            using (var windowCancelled = new ManualResetEventSlim())
+            using (var bridge = new Bridge(directory, paths => { if (failCopy) throw new Exception(); copied = paths; }, 43128,
+                (id, paths, cancellation) => {
+                    windowPaths = paths;
+                    if (waitForDisconnect) {
+                        windowStarted.Set();
+                        if (cancellation.WaitHandle.WaitOne(5000)) { windowCancelled.Set(); return PhotoWindowResult.Failed; }
+                        Interlocked.Increment(ref lateOpenCommits);
+                    }
+                    return windowResult;
+                })) {
                 bridge.Start();
                 var denied = Send("/v1/session", null, null, "https://untrusted.example", "", "GET");
                 Check(denied.status == 403 && !denied.raw.Contains("Access-Control-Allow-Origin"), "untrusted origin denied");
@@ -101,8 +162,8 @@ namespace CyPhotoClipboard {
                 Check(Send("/v1/prepare", pack, null, Bridge.Origin, "", "POST").status == 403, "missing session denied");
                 var session = Call("/v1/session"); var token = (string)session.data["token"];
                 Check(session.status == 200 && token.Length == 64, "ephemeral session");
-                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.2.0" &&
-                    (string)session.data["clipboardMode"] == "shell-files-v1", "advertise Shell copying for upgrade checks");
+                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.3.0" &&
+                    (string)session.data["clipboardMode"] == "shell-files-v1" && (string)session.data["photoWindowMode"] == "shell-view-v1", "advertise compatible copying and native photo window capability");
                 Check(Call("/v1/prepare", pack, "wrong").status == 403, "wrong token denied");
                 Check(Send("/v1/prepare", pack, token, Bridge.Origin, "Transfer-Encoding: chunked\r\n", "POST").status == 400, "ambiguous framing denied");
                 var saved = Call("/v1/prepare", pack, token);
@@ -114,6 +175,21 @@ namespace CyPhotoClipboard {
                 Check(File.ReadAllBytes(paths[0]).SequenceEqual(jpg) && File.ReadAllBytes(paths[1]).SequenceEqual(png), "original bytes preserved");
                 var copyBody = Encoding.UTF8.GetBytes(Json.Serialize(new { batchId = batch }));
                 var otherToken = (string)Call("/v1/session").data["token"];
+                Check(Call("/v1/open-photo-window", copyBody).status == 403 && windowPaths == null, "photo window requires a session");
+                Check(Call("/v1/open-photo-window", copyBody, otherToken).status == 404 && windowPaths == null, "photo window rejects another session batch");
+                Check(Call("/v1/open-photo-window", Encoding.UTF8.GetBytes("{\"batchId\":\"C:\\\\secret\"}"), token).status == 404 && windowPaths == null, "photo window does not accept arbitrary paths");
+                var opened = Call("/v1/open-photo-window", copyBody, token);
+                Check(opened.status == 200 && (bool)opened.data["opened"] && (int)opened.data["photoCount"] == 2 && windowPaths.SequenceEqual(paths) && copied == null, "opening exact prepared batch never copies clipboard");
+                windowResult = PhotoWindowResult.Busy;
+                var busyWindow = Call("/v1/open-photo-window", copyBody, token);
+                Check(busyWindow.status == 409 && (string)busyWindow.data["error"] == "photo-window-busy", "existing photo window busy is explicit");
+                windowResult = PhotoWindowResult.Failed;
+                var failedWindow = Call("/v1/open-photo-window", copyBody, token);
+                Check(failedWindow.status == 500 && (string)failedWindow.data["error"] == "photo-window" && paths.All(File.Exists), "window failure preserves prepared files");
+                windowResult = PhotoWindowResult.Opened;
+                bridge.LastBatch.expires = DateTime.UtcNow.AddSeconds(-1);
+                Check(Call("/v1/open-photo-window", copyBody, token).status == 404, "photo window rejects expired batch");
+                bridge.LastBatch.expires = DateTime.UtcNow.AddMinutes(5);
                 Check(Call("/v1/copy", copyBody, otherToken).status == 404 && copied == null, "batch bound to session");
                 Check((bool)Call("/v1/copy", copyBody, token).data["copied"] && copied.SequenceEqual(paths), "whole file list copied");
                 failCopy = true;
@@ -142,8 +218,27 @@ namespace CyPhotoClipboard {
                 Directory.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddHours(-25));
                 TemporaryPhotos.Prune(directory, DateTime.UtcNow, candidate => false);
                 Check(File.Exists(Path.Combine(old, "unrelated.txt")), "never delete unrelated files in modified batches");
+
+                waitForDisconnect = true;
+                using (var pendingClient = new TcpClient("127.0.0.1", 43128)) {
+                    var stream = pendingClient.GetStream();
+                    var header = Encoding.ASCII.GetBytes("POST /v1/open-photo-window HTTP/1.1\r\nHost: 127.0.0.1:43128\r\nOrigin: " + Bridge.Origin +
+                        "\r\nX-CY-Photo-Protocol: 2\r\nAuthorization: Bearer " + token + "\r\nContent-Type: application/json\r\nContent-Length: " + copyBody.Length + "\r\n\r\n");
+                    stream.Write(header, 0, header.Length); stream.Write(copyBody, 0, copyBody.Length);
+                    Check(windowStarted.Wait(2000), "photo window request reaches pending preparation");
+                    pendingClient.Client.Shutdown(SocketShutdown.Both);
+                    pendingClient.Close();
+                    Check(windowCancelled.Wait(2000), "browser disconnect cancels pending native preparation");
+                    Check(Interlocked.CompareExchange(ref lateOpenCommits, 0, 0) == 0, "disconnected pending request cannot commit a late photo window");
+                }
             }
             Console.WriteLine("PASS: " + passed + " native helper checks");
+        }
+        static T Pump<T>(Task<T> task) {
+            var until = DateTime.UtcNow.AddSeconds(15);
+            while (!task.IsCompleted && DateTime.UtcNow < until) { Application.DoEvents(); Thread.Sleep(20); }
+            if (!task.IsCompleted) throw new InvalidOperationException("UI test timeout");
+            return task.Result;
         }
     }
 }

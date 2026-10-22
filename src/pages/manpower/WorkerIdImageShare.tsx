@@ -7,7 +7,7 @@ import type { Worker } from '../../services/manpowerService';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import { canShareImageFiles, copyImageFile, imageFileFromUrl, shareImageFiles } from '../../utils/imageFileDelivery';
 import { canSaveImageFolder, saveImageFolder, zipImageFiles } from '../../utils/imageBatchDownload';
-import { copyWindowsPhotos, windowsPhotoClipboardErrorMessage } from '../../utils/windowsPhotoClipboard';
+import { copyWindowsPhotos, openWindowsPhotoWindow, WindowsPhotoClipboardError, windowsPhotoClipboardErrorMessage } from '../../utils/windowsPhotoClipboard';
 import './WorkerIdImageShare.css';
 
 type IdWorker = Pick<Worker, 'id' | 'name' | 'fileNameSaved'>;
@@ -203,8 +203,33 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
             if (result.copied) void recordIdentityDocumentLog({ ...log, action: 'copy_image' });
             if (request !== requestRef.current) return;
             setMessage(result.copied
-                ? `사진 ${result.photoCount}장을 Windows 클립보드에 모두 복사했습니다. 카카오톡 대화 입력칸에서 Ctrl+V를 눌러 첨부하세요.`
+                ? `사진 ${result.photoCount}장을 Windows 클립보드에 모두 복사했습니다. 카카오톡에서 붙여넣기가 안 되면 위의 한 번에 끌어놓기를 이용하세요.`
                 : '사진은 준비됐지만 클립보드에 복사하지 못했습니다. Windows 알림 영역의 CY 사진 전체 복사에서 ‘마지막 사진 전체 다시 복사’를 누르세요.');
+        } catch (failure) {
+            if (request === requestRef.current) {
+                setMessage('');
+                if ((failure as DOMException)?.name !== 'AbortError') setError(windowsPhotoClipboardErrorMessage(failure));
+            }
+        } finally {
+            if (request === requestRef.current) { busyRef.current = false; setBusy(false); }
+        }
+    };
+
+    const openPhotoWindow = async () => {
+        if (!prepared || prepared.workers !== currentWorkers.current || busyRef.current || !prepared.images.length) return;
+        const request = requestRef.current;
+        const controller = new AbortController();
+        controllerRef.current = controller;
+        busyRef.current = true;
+        setBusy(true);
+        setError('');
+        setMessage('Windows 사진창을 준비하고 있습니다. 브라우저가 로컬 네트워크 접근을 물으면 허용해 주세요.');
+        try {
+            const result = await openWindowsPhotoWindow(prepared.images.map(image => image.file), controller.signal);
+            if (request !== requestRef.current || controller.signal.aborted || prepared.workers !== currentWorkers.current) return;
+            // Opening a local window does not prove a clipboard copy or KakaoTalk attachment/share.
+            if (!result.opened) throw new WindowsPhotoClipboardError('photo-window', 'open');
+            setMessage(`사진 ${result.photoCount}장이 모두 선택된 Windows 사진창을 열었습니다. 선택된 사진 하나를 누른 채 카카오톡 대화창으로 끌어놓으세요. 첨부된 사진과 받을 대화방을 확인한 뒤 카카오톡에서 전송하세요.`);
         } catch (failure) {
             if (request === requestRef.current) {
                 setMessage('');
@@ -233,16 +258,21 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
             {!!images.length && <div className="worker-id-share__send">
                 {canShareAll && !isWindows ? <><button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void share(images)}>사진 {images.length}장 함께 공유</button>
                     <p>공유창에서 카카오톡과 받을 대화방을 선택하세요. 카카오톡이 보이지 않으면 아래 PC 저장 메뉴를 이용하세요.</p></>
-                    : !canShareAll && <p>이 브라우저에서는 사진 {images.length}장을 바로 함께 공유할 수 없습니다. 아래에서 사진을 한꺼번에 저장해 카카오톡에 첨부하세요.</p>}
+                    : !canShareAll && !isWindows && <p>이 브라우저에서는 사진 {images.length}장을 바로 함께 공유할 수 없습니다. 아래에서 사진을 한꺼번에 저장해 카카오톡에 첨부하세요.</p>}
                 <details className="worker-id-share__desktop" open={isWindows || !canShareAll}>
                     <summary>PC 카카오톡으로 보내기</summary>
                     {isWindows && <div className="worker-id-share__helper">
-                        <button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void copyBatch()}>사진 {images.length}장 전체 복사</button>
-                        <p>별도 저장 없이 각각의 사진을 한꺼번에 복사합니다. 완료되면 카카오톡 대화 입력칸에서 <strong>Ctrl+V</strong>를 누르세요.</p>
+                        <button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void openPhotoWindow()}>사진 {images.length}장 한 번에 끌어놓기</button>
+                        <p>버튼을 누르면 사진이 모두 선택된 Windows 사진창이 열립니다. <strong>선택된 사진 하나를 누른 채 카카오톡 대화창으로 끌어놓으세요.</strong> 각각의 원본 사진이 함께 첨부됩니다.</p>
+                        <p>저장할 위치를 고를 필요가 없습니다. 카카오톡에서 첨부된 사진과 받을 대화방을 확인한 뒤 전송하세요.</p>
                         <details><summary>처음 사용하시나요? PC 보조 프로그램 설치</summary>
-                            <ol><li><a href="/downloads/CYPhotoClipboardSetup.exe?v=1.2.0" download>Windows 보조 프로그램 1.2 다운로드 (.exe)</a> 후 실행하고 ‘설치하고 실행’을 누르세요. 기존 1.0·1.1 버전은 업데이트가 필요합니다.</li>
-                                <li>이 화면으로 돌아와 위의 전체 복사 버튼을 누르세요. 로컬 네트워크 접근을 물으면 허용해 주세요.</li></ol>
-                            <p>다운로드 폴더에는 저장하지 않습니다. 보조 프로그램이 복사용 임시 사진을 관리하며, 24시간이 지난 사진은 클립보드에서 사용하지 않을 때 정리합니다. 다음 복사 작업은 기존 클립보드 내용을 바꿉니다.</p>
+                            <ol><li><a href="/downloads/CYPhotoClipboardSetup.exe?v=1.3.0" download>Windows 보조 프로그램 1.3 다운로드 (.exe)</a> 후 실행하고 ‘설치하고 실행’을 누르세요. 기존 1.0·1.1·1.2 버전은 업데이트가 필요합니다.</li>
+                                <li>이 화면으로 돌아와 위의 끌어놓기 버튼을 누르세요. 로컬 네트워크 접근을 물으면 허용해 주세요.</li></ol>
+                            <p>보조 프로그램이 공유용 임시 사진을 관리합니다. 작업을 마치면 Windows 사진창을 닫아 주세요.</p>
+                        </details>
+                        <details><summary>전체 복사로 붙여넣기 (보조 기능)</summary>
+                            <button type="button" disabled={busy} onClick={() => void copyBatch()}>사진 {images.length}장 전체 복사</button>
+                            <p>Windows 클립보드에 파일을 복사합니다. 카카오톡에서 붙여넣기가 안 되면 위의 끌어놓기 기능을 이용하세요. 다음 복사 작업은 기존 클립보드 내용을 바꿉니다.</p>
                         </details>
                     </div>}
                     <details open={!isWindows}>

@@ -20,6 +20,8 @@ namespace CyPhotoClipboard {
         readonly TcpListener listener;
         readonly string root;
         readonly Action<string[]> clipboard;
+        readonly Func<string, string[], CancellationToken, PhotoWindowResult> photoWindow;
+        readonly CancellationTokenSource shutdown = new CancellationTokenSource();
         readonly object sync = new object();
         readonly Dictionary<string, DateTime> sessions = new Dictionary<string, DateTime>();
         readonly Dictionary<string, Batch> batches = new Dictionary<string, Batch>();
@@ -46,8 +48,10 @@ namespace CyPhotoClipboard {
             public string Header(string key) { string value; return Headers.TryGetValue(key, out value) ? value : ""; }
         }
         static JavaScriptSerializer Json() { return new JavaScriptSerializer { MaxJsonLength = 65536, RecursionLimit = 8 }; }
-        public Bridge(string saveRoot, Action<string[]> copy, int port) {
+        public Bridge(string saveRoot, Action<string[]> copy, int port) : this(saveRoot, copy, port, null) { }
+        public Bridge(string saveRoot, Action<string[]> copy, int port, Func<string, string[], CancellationToken, PhotoWindowResult> openPhotoWindow) {
             root = Path.GetFullPath(saveRoot); clipboard = copy;
+            photoWindow = openPhotoWindow;
             listener = new TcpListener(IPAddress.Loopback, port);
             listener.Server.ExclusiveAddressUse = true;
         }
@@ -65,7 +69,7 @@ namespace CyPhotoClipboard {
                   catch (ObjectDisposedException) { return; }
             }
         }
-        public void Dispose() { stopped = true; listener.Stop(); }
+        public void Dispose() { stopped = true; shutdown.Cancel(); listener.Stop(); }
         static byte[] Read(Stream input, int count) {
             var bytes = new byte[count]; int offset = 0;
             while (offset < count) { int n = input.Read(bytes, offset, count - offset); if (n == 0) throw new EndOfStreamException(); offset += n; }
@@ -121,12 +125,13 @@ namespace CyPhotoClipboard {
             using (var stream = client.GetStream()) {
                 client.ReceiveTimeout = 5000; client.SendTimeout = 5000;
                 // A peer cannot keep a slot forever by trickling header/body bytes.
-                using (var deadline = new Timer(delegate { client.Close(); }, null, 130000, Timeout.Infinite)) {
+                using (var cancellation = CancellationTokenSource.CreateLinkedTokenSource(shutdown.Token))
+                using (var deadline = new Timer(delegate { try { cancellation.Cancel(); client.Close(); } catch (ObjectDisposedException) { } }, null, 130000, Timeout.Infinite)) {
                     try {
                         var request = Parse(stream);
                         if (request.Header("Host") != "127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port || request.Header("Origin") != Origin) throw new BadRequest(403);
                         cors = true;
-                        if (request.Path != "/v1/session" && request.Path != "/v1/prepare" && request.Path != "/v1/copy") throw new BadRequest(404);
+                        if (request.Path != "/v1/session" && request.Path != "/v1/prepare" && request.Path != "/v1/copy" && request.Path != "/v1/open-photo-window") throw new BadRequest(404);
                         if (request.Method == "OPTIONS") {
                             var method = request.Header("Access-Control-Request-Method");
                             if (request.Length != 0 || (method != "GET" && method != "POST")) throw new BadRequest(400);
@@ -136,7 +141,7 @@ namespace CyPhotoClipboard {
                         }
                         if (request.Header("X-CY-Photo-Protocol") != "2" && !(request.Path == "/v1/session" && request.Header("X-CY-Photo-Protocol") == "1")) throw new BadRequest(403, "version");
                         if (request.Method == "GET" && request.Path == "/v1/session" && request.Length == 0) {
-                            Reply(stream, 200, new { app = "cy-photo-clipboard", protocol = 2, version = "1.2.0", clipboardMode = "shell-files-v1", token = Session() }, true); return;
+                            Reply(stream, 200, new { app = "cy-photo-clipboard", protocol = 2, version = "1.3.0", clipboardMode = "shell-files-v1", photoWindowMode = "shell-view-v1", token = Session() }, true); return;
                         }
                         if (request.Method != "POST") throw new BadRequest(405);
                         var token = Authorize(request);
@@ -146,14 +151,36 @@ namespace CyPhotoClipboard {
                             if (request.Path == "/v1/prepare" && request.Header("Content-Type") == "application/octet-stream") {
                                 var batch = Save(stream, request.Length, token);
                                 Reply(stream, 200, new { batch.batchId, photoCount = batch.savedCount }, true);
-                            } else if (request.Path == "/v1/copy" && request.Header("Content-Type") == "application/json" && request.Length > 0 && request.Length <= 256) {
+                            } else if ((request.Path == "/v1/copy" || request.Path == "/v1/open-photo-window") && request.Header("Content-Type") == "application/json" && request.Length > 0 && request.Length <= 256) {
                                 var data = Json().Deserialize<CopyRequest>(Encoding.UTF8.GetString(Read(stream, (int)request.Length)));
                                 Batch batch;
                                 lock (sync) {
                                     if (data == null || data.batchId == null || !batches.TryGetValue(data.batchId, out batch) || batch.token != token || batch.expires < DateTime.UtcNow) throw new BadRequest(404);
                                 }
-                                bool copied = TryCopy(batch);
-                                Reply(stream, 200, new { batch.batchId, photoCount = batch.savedCount, copied }, true);
+                                if (request.Path == "/v1/copy") {
+                                    bool copied = TryCopy(batch);
+                                    Reply(stream, 200, new { batch.batchId, photoCount = batch.savedCount, copied }, true);
+                                } else {
+                                    PhotoWindowResult opened;
+                                    // The complete request body has been consumed. A readable
+                                    // socket with no buffered bytes now means the browser ended
+                                    // this request while the native view was still preparing.
+                                    // Stop watching as soon as the callback completes: an already
+                                    // opened photo window has its own user-controlled lifetime.
+                                    var pendingSync = new object();
+                                    bool pending = true;
+                                    CancelDisconnectedRequest(client, cancellation);
+                                    using (var disconnected = new Timer(delegate {
+                                        lock (pendingSync) { if (pending) CancelDisconnectedRequest(client, cancellation); }
+                                    }, null, 100, 100)) {
+                                        try { opened = photoWindow == null ? PhotoWindowResult.Failed : photoWindow(batch.batchId, (string[])batch.paths.Clone(), cancellation.Token); }
+                                        catch { opened = PhotoWindowResult.Failed; }
+                                        finally { lock (pendingSync) { pending = false; } }
+                                    }
+                                    if (opened == PhotoWindowResult.Busy) throw new BadRequest(409, "photo-window-busy");
+                                    if (opened != PhotoWindowResult.Opened) throw new BadRequest(500, "photo-window");
+                                    Reply(stream, 200, new { batch.batchId, photoCount = batch.savedCount, opened = true }, true);
+                                }
                             } else throw new BadRequest(400);
                         } finally { Interlocked.Exchange(ref saving, 0); }
                     } catch (BadRequest error) { SafeError(stream, error.Status, cors, error.Code); }
@@ -171,6 +198,13 @@ namespace CyPhotoClipboard {
                     }
                 }
             }
+        }
+        static void CancelDisconnectedRequest(TcpClient client, CancellationTokenSource cancellation) {
+            bool disconnected;
+            try { var socket = client.Client; disconnected = socket == null || (socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0); }
+            catch (SocketException) { disconnected = true; }
+            catch (ObjectDisposedException) { disconnected = true; }
+            if (disconnected) { try { cancellation.Cancel(); } catch (ObjectDisposedException) { } }
         }
         public bool CopyLast() { return LastBatch != null && TryCopy(LastBatch); }
         bool TryCopy(Batch batch) {
