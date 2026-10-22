@@ -3,12 +3,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 namespace CyPhotoClipboard {
     public static class Tests {
+        [DllImport("user32.dll")] static extern IntPtr GetClipboardOwner();
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
         static int passed;
         static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
         sealed class Response { public int status; public string raw; public Dictionary<string, object> data; }
@@ -42,8 +46,33 @@ namespace CyPhotoClipboard {
         [STAThread] public static int Main(string[] args) {
             try { Run(args); return 0; }
             catch (Exception error) { Console.Error.WriteLine(error.GetType().FullName + ": " + error.Message); return 1; }
+            finally { NativeClipboard.Shutdown(); }
         }
         static void Run(string[] args) {
+            if (args.Length == 3 && args[0] == "--test-native-clipboard") {
+                var files = Directory.GetFiles(args[1]).Where(file => file.EndsWith(".jpg") || file.EndsWith(".png")).OrderBy(file => file).ToArray();
+                Check(files.Length == 2, "two synthetic fixture photos");
+                NativeClipboard.Copy(files);
+                Check(NativeClipboard.Matches(files), "native file list remains available after Copy returns");
+                Check(Clipboard.ContainsData("Shell IDList Array"), "Explorer Shell item format is available");
+                uint ownerProcess; GetWindowThreadProcessId(GetClipboardOwner(), out ownerProcess);
+                Check(ownerProcess == (uint)Process.GetCurrentProcess().Id, "live clipboard owner remains in this process");
+                Check(NativeClipboard.UsesFolder(args[1]), "temporary photos remain protected while copied");
+                NativeClipboard.Copy(files.Reverse().ToArray());
+                Check(NativeClipboard.Matches(files.Reverse().ToArray()), "subsequent copy preserves the exact file set despite Shell ordering");
+                bool missingRejected = false;
+                try { NativeClipboard.Copy(new[] { Path.Combine(args[1], "missing-synthetic-photo.png") }); } catch (ArgumentException) { missingRejected = true; }
+                Check(missingRejected && NativeClipboard.Matches(files.Reverse().ToArray()), "invalid batch does not replace clipboard");
+                if (args[2] == "replacement") {
+                    Clipboard.SetText("SYNTHETIC CLIPBOARD REPLACEMENT");
+                    NativeClipboard.Shutdown();
+                    Check(Clipboard.GetText() == "SYNTHETIC CLIPBOARD REPLACEMENT", "shutdown preserves another clipboard owner");
+                } else {
+                    NativeClipboard.Shutdown();
+                    Check(NativeClipboard.Matches(files.Reverse().ToArray()), "shutdown persists copied photos");
+                }
+                Console.WriteLine("Passed " + passed + " native clipboard checks."); return;
+            }
             if ((args.Length == 2 || args.Length == 3) && args[0] == "--serve") {
                 using (var server = new Bridge(args[1], NativeClipboard.Copy, args.Length == 3 ? int.Parse(args[2]) : Bridge.Port)) { server.Start(); Console.WriteLine("ready"); Console.ReadLine(); }
                 return;
@@ -72,6 +101,8 @@ namespace CyPhotoClipboard {
                 Check(Send("/v1/prepare", pack, null, Bridge.Origin, "", "POST").status == 403, "missing session denied");
                 var session = Call("/v1/session"); var token = (string)session.data["token"];
                 Check(session.status == 200 && token.Length == 64, "ephemeral session");
+                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.2.0" &&
+                    (string)session.data["clipboardMode"] == "shell-files-v1", "advertise Shell copying for upgrade checks");
                 Check(Call("/v1/prepare", pack, "wrong").status == 403, "wrong token denied");
                 Check(Send("/v1/prepare", pack, token, Bridge.Origin, "Transfer-Encoding: chunked\r\n", "POST").status == 400, "ambiguous framing denied");
                 var saved = Call("/v1/prepare", pack, token);

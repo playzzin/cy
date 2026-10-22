@@ -240,7 +240,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
                         <button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void copyBatch()}>사진 {images.length}장 전체 복사</button>
                         <p>별도 저장 없이 각각의 사진을 한꺼번에 복사합니다. 완료되면 카카오톡 대화 입력칸에서 <strong>Ctrl+V</strong>를 누르세요.</p>
                         <details><summary>처음 사용하시나요? PC 보조 프로그램 설치</summary>
-                            <ol><li><a href="/downloads/CYPhotoClipboardSetup.exe?v=1.1.0" download>Windows 보조 프로그램 1.1 다운로드 (.exe)</a> 후 실행하고 ‘설치하고 실행’을 누르세요. 기존 1.0 버전은 업데이트가 필요합니다.</li>
+                            <ol><li><a href="/downloads/CYPhotoClipboardSetup.exe?v=1.2.0" download>Windows 보조 프로그램 1.2 다운로드 (.exe)</a> 후 실행하고 ‘설치하고 실행’을 누르세요. 기존 1.0·1.1 버전은 업데이트가 필요합니다.</li>
                                 <li>이 화면으로 돌아와 위의 전체 복사 버튼을 누르세요. 로컬 네트워크 접근을 물으면 허용해 주세요.</li></ol>
                             <p>다운로드 폴더에는 저장하지 않습니다. 보조 프로그램이 복사용 임시 사진을 관리하며, 24시간이 지난 사진은 클립보드에서 사용하지 않을 때 정리합니다. 다음 복사 작업은 기존 클립보드 내용을 바꿉니다.</p>
                         </details>

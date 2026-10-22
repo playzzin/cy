@@ -4,7 +4,7 @@ const MAX_FILE = 20 * 1024 * 1024;
 const MAX_TOTAL = 200 * 1024 * 1024;
 const TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp']);
 
-type Session = { app: string; protocol: number; token: string };
+type Session = { app: string; protocol: number; clipboardMode: string; token: string };
 export type WindowsPhotoBatch = { batchId: string; photoCount: number };
 export type WindowsPhotoCopyResult = WindowsPhotoBatch & { copied: boolean };
 
@@ -46,7 +46,7 @@ const request = async (path: string, signal: AbortSignal, body?: Blob | string, 
 
 const connect = async (signal: AbortSignal): Promise<Session> => {
     const result = await request('/session', signal) as Session;
-    if (result?.app !== APP || result.protocol !== 2 || !/^[a-f0-9]{64}$/.test(result.token)) {
+    if (result?.app !== APP || result.protocol !== 2 || result.clipboardMode !== 'shell-files-v1' || !/^[a-f0-9]{64}$/.test(result.token)) {
         throw new WindowsPhotoClipboardError('version');
     }
     return result;
@@ -78,7 +78,7 @@ export const windowsPhotoClipboardErrorMessage = (error: unknown): string => {
     const code = error instanceof WindowsPhotoClipboardError ? error.code : '';
     if (code === 'size') return '한 번에 사진 100장, 한 장당 20MB, 전체 200MB까지 복사할 수 있습니다. 선택한 사진 수를 줄여 주세요.';
     if (code === 'busy') return '다른 사진을 복사하고 있습니다. 잠시 뒤 다시 눌러 주세요.';
-    if (code === 'version') return '전체 복사에는 PC 보조 프로그램 1.1 이상이 필요합니다. 아래 설치 메뉴에서 새 설치 파일을 실행한 뒤 다시 눌러 주세요.';
+    if (code === 'version') return '카카오톡 전체 붙여넣기를 위해 PC 보조 프로그램 1.2 이상으로 업데이트해 주세요. 아래 설치 메뉴에서 새 설치 파일을 실행한 뒤 다시 눌러 주세요.';
     if (code === 'image-format') return '사진 형식을 확인하지 못해 전체 복사를 중단했습니다. 해당 사진을 다시 등록하거나 개별 사진 복사를 이용해 주세요.';
     if (code === 'temporary-files') return '보조 프로그램에서 복사용 임시 사진을 준비하지 못했습니다. PC의 여유 공간을 확인해 주세요.';
     if (error instanceof WindowsPhotoClipboardError && error.stage === 'copy') return '사진 준비는 끝났지만 클립보드 복사 결과를 확인하지 못했습니다. Windows 알림 영역의 CY 사진 전체 복사에서 ‘마지막 사진 전체 다시 복사’를 눌러 주세요.';

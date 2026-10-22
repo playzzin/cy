@@ -18,7 +18,7 @@ namespace CyPhotoClipboard {
             Application.Run(CreateForm());
         }
         internal static Form CreateForm() {
-            var form = new Form { Text = "CY 사진 전체 복사 설치 · 1.1.0", ClientSize = new Size(540, 300), FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, StartPosition = FormStartPosition.CenterScreen };
+            var form = new Form { Text = "CY 사진 전체 복사 설치 · 1.2.0", ClientSize = new Size(540, 300), FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, StartPosition = FormStartPosition.CenterScreen };
             form.Controls.Add(new Label { Text = "사이트 버튼 한 번으로 여러 사진을 각각 클립보드에 복사합니다.\r\n\r\n• 다운로드 폴더에 따로 저장하지 않습니다.\r\n• 내부 임시 사진은 24시간 후, 클립보드에서 사용하지 않을 때 정리\r\n• Windows 로그인 시 자동 실행 / 알림 영역에서 종료 가능\r\n• 사진을 서버로 보내거나 카카오톡에 자동 전송하지 않습니다.\r\n\r\n설치 후 사이트를 새로고침하고 ‘사진 전체 복사’를 누르세요.\r\n브라우저가 로컬 네트워크 접근을 물으면 허용해 주세요.", Location = new Point(20, 20), Size = new Size(500, 190) });
             var install = new Button { Text = "설치하고 실행", Location = new Point(20, 225), Size = new Size(180, 35) };
             var remove = new Button { Text = "보조 프로그램 제거", Location = new Point(215, 225), Size = new Size(180, 35), Enabled = File.Exists(Exe) };

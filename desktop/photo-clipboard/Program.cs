@@ -50,7 +50,7 @@ namespace CyPhotoClipboard {
                 stopWait = ThreadPool.RegisterWaitForSingleObject(stop, delegate { dispatcher.BeginInvoke((Action)ExitThread); }, null, Timeout.Infinite, true);
             }
             protected override void Dispose(bool disposing) {
-                if (disposing) { cleanup.Dispose(); bridge.Dispose(); stopWait.Unregister(null); stop.Dispose(); icon.Visible = false; icon.Dispose(); dispatcher.Dispose(); }
+                if (disposing) { cleanup.Dispose(); bridge.Dispose(); stopWait.Unregister(null); stop.Dispose(); NativeClipboard.Shutdown(); icon.Visible = false; icon.Dispose(); dispatcher.Dispose(); }
                 base.Dispose(disposing);
             }
         }
