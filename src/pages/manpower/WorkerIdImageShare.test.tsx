@@ -3,7 +3,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { saveAs } from 'file-saver';
 import WorkerIdImageShare from './WorkerIdImageShare';
-import { imageFileFromUrl } from '../../utils/imageFileDelivery';
+import { copyImageFile, imageFileFromUrl } from '../../utils/imageFileDelivery';
 import { canSaveImageFolder, saveImageFolder, zipImageFiles } from '../../utils/imageBatchDownload';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 
@@ -11,7 +11,7 @@ jest.mock('../../config/firebase', () => ({ storage: {} }));
 jest.mock('firebase/storage', () => ({ ref: (_storage: unknown, path: string) => path, getDownloadURL: async (path: string) => path }));
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 jest.mock('../../services/identityDocumentLogService', () => ({ recordIdentityDocumentLog: jest.fn() }));
-jest.mock('../../utils/imageFileDelivery', () => ({ ...jest.requireActual('../../utils/imageFileDelivery'), imageFileFromUrl: jest.fn() }));
+jest.mock('../../utils/imageFileDelivery', () => ({ ...jest.requireActual('../../utils/imageFileDelivery'), imageFileFromUrl: jest.fn(), copyImageFile: jest.fn() }));
 jest.mock('../../utils/imageBatchDownload', () => ({ canSaveImageFolder: jest.fn(), saveImageFolder: jest.fn(), zipImageFiles: jest.fn() }));
 
 const workers = [
@@ -22,6 +22,8 @@ const share = jest.fn();
 const canShare = jest.fn();
 beforeEach(() => {
     jest.clearAllMocks();
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux' });
+    (copyImageFile as jest.Mock).mockResolvedValue(undefined);
     share.mockResolvedValue(undefined);
     canShare.mockReturnValue(true);
     (canSaveImageFolder as jest.Mock).mockReturnValue(false);
@@ -70,7 +72,7 @@ test('여러 장 공유가 지원되지 않으면 PC 묶음 저장과 개별 사
     expect(saveAs).toHaveBeenCalledWith(expect.any(File), '01_테스트 가_신분증.jpg');
     fireEvent.click(screen.getByRole('button', { name: '테스트 나 사진 공유' }));
     expect(share.mock.calls[0][0].files).toHaveLength(1);
-    await screen.findByText(/공유창 처리를 마쳤습니다/);
+    await screen.findByText(/공유창을 열었습니다/);
 });
 
 test('파일 공유를 지원해도 PC 카카오톡 대체 메뉴에서 원본 사진을 폴더에 저장할 수 있다', async () => {
@@ -182,7 +184,7 @@ test('미등록과 불러오기 실패를 표시하고 준비된 사진 수만 �
     expect(screen.getByRole('alert')).toHaveTextContent('불러오기 실패 1명: 테스트 나');
     fireEvent.click(screen.getByRole('button', { name: '사진 1장 함께 공유' }));
     expect(share.mock.calls[0][0].files).toHaveLength(1);
-    await screen.findByText(/공유창 처리를 마쳤습니다/);
+    await screen.findByText(/공유창을 열었습니다/);
 });
 
 test('선택이 바뀌면 준비된 사진을 폐기하고 이전 선택을 공유하지 않는다', async () => {
@@ -194,7 +196,7 @@ test('선택이 바뀌면 준비된 사진을 폐기하고 이전 선택을 공�
     await prepare();
     fireEvent.click(screen.getByRole('button', { name: '사진 1장 함께 공유' }));
     expect(share.mock.calls[0][0].files[0].name).toBe('01_테스트 나_신분증.png');
-    await screen.findByText(/공유창 처리를 마쳤습니다/);
+    await screen.findByText(/공유창을 열었습니다/);
 });
 
 test('준비 도중 닫으면 요청을 취소하고 뒤늦은 사진을 노출하지 않는다', async () => {
@@ -219,4 +221,46 @@ test('선택이 없거나 사진이 없는 경우 공유를 실행하지 않는�
     fireEvent.click(screen.getByRole('button', { name: '신분증 사진 공유' }));
     await screen.findByText('공유할 신분증 사진이 없습니다.');
     expect(share).not.toHaveBeenCalled();
+});
+
+test('Windows에서는 실제 지원 여부와 무관하게 PC 저장 안내를 먼저 펼치고 시스템 공유를 구분한다', async () => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+    (canSaveImageFolder as jest.Mock).mockReturnValue(true);
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    expect(screen.queryByRole('button', { name: '사진 2장 함께 공유' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '사진 2장 폴더에 저장' })).toBeVisible();
+    expect(screen.getByText(/Windows 공유창의 카카오톡·복사 항목/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: '테스트 가 사진 공유' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Windows 공유창 열기 (2장)' }));
+    expect(share.mock.calls[0][0].files).toHaveLength(2);
+    await screen.findByText(/Windows 공유창을 열었습니다/);
+    expect(copyImageFile).not.toHaveBeenCalled();
+});
+
+test('사진 복사는 선택한 한 장을 직접 클립보드로 전달하고 다음 사진으로 교체됨을 안내한다', async () => {
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '테스트 가 사진 복사' }));
+    await screen.findByText(/테스트 가 사진 1장을 복사했습니다/);
+    expect(copyImageFile).toHaveBeenLastCalledWith(expect.objectContaining({ name: '01_테스트 가_신분증.jpg', type: 'image/jpeg' }));
+    expect(screen.getByRole('status')).toHaveTextContent('다른 사진을 복사하면 이전 사진은 교체됩니다.');
+    fireEvent.click(screen.getByRole('button', { name: '테스트 나 사진 복사' }));
+    await screen.findByText(/테스트 나 사진 1장을 복사했습니다/);
+    expect(copyImageFile).toHaveBeenLastCalledWith(expect.objectContaining({ name: '02_테스트 나_신분증.png', type: 'image/png' }));
+    expect(recordIdentityDocumentLog).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'copy_image', fileCount: 1, personNames: ['테스트 나'] }));
+    expect(share).not.toHaveBeenCalled();
+});
+
+test('사진 복사 실패 시 이전 성공 문구를 지우고 저장 대안을 안내한다', async () => {
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '테스트 가 사진 복사' }));
+    await screen.findByText(/테스트 가 사진 1장을 복사했습니다/);
+    (copyImageFile as jest.Mock).mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
+    fireEvent.click(screen.getByRole('button', { name: '테스트 나 사진 복사' }));
+    await screen.findByText(/사진을 복사하지 못했습니다/);
+    expect(screen.getByRole('status')).not.toHaveTextContent('복사했습니다');
+    expect(recordIdentityDocumentLog).toHaveBeenCalledTimes(1);
+    expect(saveAs).not.toHaveBeenCalled();
 });

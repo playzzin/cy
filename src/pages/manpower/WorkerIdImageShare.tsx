@@ -14,6 +14,7 @@ type PreparedImage = { worker: IdWorker; file: File; url: string };
 type Prepared = { workers: IdWorker[]; images: PreparedImage[]; failed: string[]; missing: string[] };
 
 const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> = ({ workers, disabled }) => {
+    const isWindows = /Windows/i.test(navigator.userAgent) || /^Win/i.test(navigator.platform);
     const [open, setOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [prepared, setPrepared] = useState<Prepared | null>(null);
@@ -107,7 +108,9 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
             await shareImageFiles(images.map(image => image.file));
             void recordIdentityDocumentLog({ action: 'share_image', source: 'worker_summary', status: 'success',
                 personNames: images.map(image => image.worker.name), personCount: images.length, fileCount: images.length });
-            if (request === requestRef.current) setMessage('공유창 처리를 마쳤습니다. 전송 여부는 카카오톡에서 확인해 주세요.');
+            if (request === requestRef.current) setMessage(isWindows
+                ? 'Windows 공유창을 열었습니다. 붙여넣기가 안 되면 Windows 공유창을 닫고 사진 아래의 사진 복사 또는 폴더 저장을 이용하세요.'
+                : '공유창을 열었습니다. 사진 전송 완료 여부는 받을 앱에서 확인해 주세요.');
         } catch (failure) {
             if (request === requestRef.current) {
                 if ((failure as DOMException)?.name === 'AbortError') setMessage('공유를 취소했습니다. 사진은 다시 공유할 수 있습니다.');
@@ -124,10 +127,11 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         busyRef.current = true;
         setBusy(true);
         setError('');
+        setMessage('');
         try {
             await copyImageFile(image.file);
             void recordIdentityDocumentLog({ action: 'copy_image', source: 'worker_summary', status: 'success', personNames: [image.worker.name], fileCount: 1 });
-            if (request === requestRef.current) setMessage('사진을 복사했습니다. 카카오톡 채팅방에 붙여넣어 보내세요.');
+            if (request === requestRef.current) setMessage(`${image.worker.name} 사진 1장을 복사했습니다. 카카오톡 대화 입력칸에서 Ctrl+V(모바일은 붙여넣기)로 첨부하세요. 다른 사진을 복사하면 이전 사진은 교체됩니다.`);
         } catch {
             if (request === requestRef.current) setError('사진을 복사하지 못했습니다. 사진 저장 후 카카오톡에 첨부해 주세요.');
         } finally {
@@ -197,15 +201,15 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
                 <p>불러오기 실패 {prepared.failed.length}명: {prepared.failed.join(', ')}. 이 사진은 공유에 포함되지 않습니다.</p>
                 <button type="button" disabled={busy} onClick={() => void prepare()}>사진 다시 준비</button></div>}
             {!!images.length && <div className="worker-id-share__send">
-                {canShareAll ? <><button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void share(images)}>사진 {images.length}장 함께 공유</button>
+                {canShareAll && !isWindows ? <><button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void share(images)}>사진 {images.length}장 함께 공유</button>
                     <p>공유창에서 카카오톡과 받을 대화방을 선택하세요. 카카오톡이 보이지 않으면 아래 PC 저장 메뉴를 이용하세요.</p></>
-                    : <p>이 브라우저에서는 사진 {images.length}장을 바로 함께 공유할 수 없습니다. 아래에서 사진을 한꺼번에 저장해 카카오톡에 첨부하세요.</p>}
-                <details className="worker-id-share__desktop" open={!canShareAll}>
+                    : !canShareAll && <p>이 브라우저에서는 사진 {images.length}장을 바로 함께 공유할 수 없습니다. 아래에서 사진을 한꺼번에 저장해 카카오톡에 첨부하세요.</p>}
+                <details className="worker-id-share__desktop" open={isWindows || !canShareAll}>
                     <summary>PC 카카오톡으로 보내기</summary>
-                    <p>PC에서는 카카오톡이 공유창에 나타나지 않을 수 있습니다. 사진을 각각의 원본 파일로 저장한 뒤 한꺼번에 첨부할 수 있습니다.</p>
+                    <p>여러 장을 각각의 사진으로 보내려면 원본 파일을 저장한 뒤 카카오톡에 한꺼번에 첨부하세요.</p>
                     <div className="worker-id-share__batch-actions">
-                        {canSaveImageFolder() && <button type="button" disabled={busy} onClick={() => void saveBatch('folder')}>사진 {images.length}장 폴더에 저장</button>}
-                        <button type="button" disabled={busy} onClick={() => void saveBatch('zip')}>사진 {images.length}장 ZIP 저장</button>
+                        {canSaveImageFolder() && <button type="button" className={isWindows ? 'worker-id-share__primary' : undefined} disabled={busy} onClick={() => void saveBatch('folder')}>사진 {images.length}장 폴더에 저장</button>}
+                        <button type="button" className={isWindows && !canSaveImageFolder() ? 'worker-id-share__primary' : undefined} disabled={busy} onClick={() => void saveBatch('zip')}>사진 {images.length}장 ZIP 저장</button>
                     </div>
                     <ol>
                         <li>{canSaveImageFolder() ? '저장할 위치를 선택하면 사진 전용 폴더가 만들어집니다. ZIP으로 저장했다면 먼저 압축을 풀어 주세요.' : 'ZIP을 다운로드한 뒤 압축을 풀어 주세요.'}</li>
@@ -213,13 +217,18 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
                         <li>카카오톡 대화방으로 끌어 놓거나 파일 첨부에서 선택해 보내세요.</li>
                     </ol>
                     <p>ZIP 파일 자체를 보내면 사진 대신 압축파일로 전달됩니다.</p>
+                    <p><strong>한 장씩 붙여넣기:</strong> 아래 사진의 <strong>사진 복사</strong>를 누른 뒤 카카오톡 대화 입력칸에서 Ctrl+V를 누르세요. 여러 장을 연속으로 복사하면 마지막 사진만 남습니다.</p>
+                    {isWindows && canShareAll && <div className="worker-id-share__system">
+                        <p>Windows 공유창의 카카오톡·복사 항목으로는 사진 붙여넣기가 안 될 수 있습니다. 아래 사진 복사나 폴더 저장을 이용해 주세요.</p>
+                        <button type="button" disabled={busy} onClick={() => void share(images)}>Windows 공유창 열기 ({images.length}장)</button>
+                    </div>}
                 </details>
             </div>}
             <div className="worker-id-share__images">{images.map(image => <article key={image.worker.id}>
                 <img src={image.url} alt={`${image.worker.name} 신분증 공유 미리보기`} />
                 <strong>{image.worker.name}</strong>
-                <div>{canShareImageFiles([image.file]) && <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 공유`} onClick={() => void share([image])}>개별 공유</button>}
-                    <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 복사`} onClick={() => void copy(image)}>복사</button>
+                <div>{!isWindows && canShareImageFiles([image.file]) && <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 공유`} onClick={() => void share([image])}>개별 공유</button>}
+                    <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 복사`} onClick={() => void copy(image)}>사진 복사</button>
                     <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 저장`} onClick={() => save(image)}>사진 저장</button></div>
             </article>)}</div>
         </dialog>, document.body)}
