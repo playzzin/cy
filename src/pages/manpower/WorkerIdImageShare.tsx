@@ -6,6 +6,7 @@ import { storage } from '../../config/firebase';
 import type { Worker } from '../../services/manpowerService';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import { canShareImageFiles, copyImageFile, imageFileFromUrl, shareImageFiles } from '../../utils/imageFileDelivery';
+import { canSaveImageFolder, saveImageFolder, zipImageFiles } from '../../utils/imageBatchDownload';
 import './WorkerIdImageShare.css';
 
 type IdWorker = Pick<Worker, 'id' | 'name' | 'fileNameSaved'>;
@@ -110,7 +111,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         } catch (failure) {
             if (request === requestRef.current) {
                 if ((failure as DOMException)?.name === 'AbortError') setMessage('공유를 취소했습니다. 사진은 다시 공유할 수 있습니다.');
-                else setError('공유창을 열지 못했습니다. 다시 시도하거나 각 사진을 저장해 카카오톡에 첨부해 주세요.');
+                else setError('공유창을 열지 못했습니다. 아래 PC 저장 메뉴에서 사진을 한꺼번에 저장해 카카오톡에 첨부해 주세요.');
             }
         } finally {
             if (request === requestRef.current) { busyRef.current = false; setBusy(false); }
@@ -141,6 +142,45 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         setMessage('사진 저장을 요청했습니다. 카카오톡에서 저장한 사진을 첨부해 주세요.');
     };
 
+    const saveBatch = async (format: 'folder' | 'zip') => {
+        if (!prepared || prepared.workers !== currentWorkers.current || busyRef.current || !prepared.images.length) return;
+        const request = requestRef.current;
+        const controller = new AbortController();
+        controllerRef.current = controller;
+        busyRef.current = true;
+        setBusy(true);
+        setError('');
+        setMessage(format === 'folder' ? '사진을 저장할 위치를 선택해 주세요.' : '사진을 ZIP 파일로 준비하고 있습니다.');
+        const selected = prepared.images;
+        try {
+            if (format === 'folder') {
+                const result = await saveImageFolder(selected.map(image => image.file), controller.signal);
+                const savedImages = selected.filter(image => result.saved.includes(image.file));
+                if (savedImages.length) void recordIdentityDocumentLog({ action: 'download_image', source: 'worker_summary',
+                    status: result.saved.length === selected.length ? 'success' : 'partial',
+                    personNames: savedImages.map(image => image.worker.name), personCount: savedImages.length, fileCount: savedImages.length });
+                if (request !== requestRef.current) return;
+                setMessage(result.saved.length ? `사진 ${result.saved.length}장을 선택한 위치의 “${result.folderName}” 폴더에 저장했습니다. 폴더 안의 사진을 모두 선택해 카카오톡 대화방에 첨부하세요.` : '저장된 사진이 없습니다. ZIP 저장을 이용해 주세요.');
+                if (result.failed.length) setError(`사진 ${result.failed.length}장 저장 실패: ${selected.filter(image => result.failed.includes(image.file)).map(image => image.worker.name).join(', ')}. 해당 사진을 개별 저장하거나 ZIP 저장을 이용해 주세요.`);
+            } else {
+                const zip = await zipImageFiles(selected.map(image => image.file));
+                if (request !== requestRef.current || controller.signal.aborted || prepared.workers !== currentWorkers.current) return;
+                saveAs(zip, zip.name);
+                void recordIdentityDocumentLog({ action: 'download_zip', source: 'worker_summary', status: 'success',
+                    personNames: selected.map(image => image.worker.name), personCount: selected.length, fileCount: selected.length });
+                setMessage(`사진 ${selected.length}장이 들어 있는 ZIP 다운로드를 요청했습니다. 압축을 풀고 사진 파일을 모두 선택해 카카오톡 대화방에 첨부하세요.`);
+            }
+        } catch (failure) {
+            if (request === requestRef.current) {
+                setMessage('');
+                if ((failure as DOMException)?.name === 'AbortError') setMessage('저장을 취소했습니다. 사진은 다시 저장할 수 있습니다.');
+                else setError(format === 'folder' ? '폴더에 저장하지 못했습니다. ZIP 저장을 이용하거나 저장 권한을 확인해 주세요.' : 'ZIP 파일을 만들지 못했습니다. 다시 시도하거나 개별 사진을 저장해 주세요.');
+            }
+        } finally {
+            if (request === requestRef.current) { busyRef.current = false; setBusy(false); }
+        }
+    };
+
     const images = prepared?.images ?? [];
     const canShareAll = canShareImageFiles(images.map(image => image.file));
     return <>
@@ -158,8 +198,22 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
                 <button type="button" disabled={busy} onClick={() => void prepare()}>사진 다시 준비</button></div>}
             {!!images.length && <div className="worker-id-share__send">
                 {canShareAll ? <><button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void share(images)}>사진 {images.length}장 함께 공유</button>
-                    <p>공유창에서 카카오톡과 받을 대화방을 선택하세요.</p></>
-                    : <p>이 브라우저에서는 사진 {images.length}장을 함께 공유할 수 없습니다. 아래 사진을 개별 공유·복사하거나 저장해 카카오톡에 첨부하세요.</p>}
+                    <p>공유창에서 카카오톡과 받을 대화방을 선택하세요. 카카오톡이 보이지 않으면 아래 PC 저장 메뉴를 이용하세요.</p></>
+                    : <p>이 브라우저에서는 사진 {images.length}장을 바로 함께 공유할 수 없습니다. 아래에서 사진을 한꺼번에 저장해 카카오톡에 첨부하세요.</p>}
+                <details className="worker-id-share__desktop" open={!canShareAll}>
+                    <summary>PC 카카오톡으로 보내기</summary>
+                    <p>PC에서는 카카오톡이 공유창에 나타나지 않을 수 있습니다. 사진을 각각의 원본 파일로 저장한 뒤 한꺼번에 첨부할 수 있습니다.</p>
+                    <div className="worker-id-share__batch-actions">
+                        {canSaveImageFolder() && <button type="button" disabled={busy} onClick={() => void saveBatch('folder')}>사진 {images.length}장 폴더에 저장</button>}
+                        <button type="button" disabled={busy} onClick={() => void saveBatch('zip')}>사진 {images.length}장 ZIP 저장</button>
+                    </div>
+                    <ol>
+                        <li>{canSaveImageFolder() ? '저장할 위치를 선택하면 사진 전용 폴더가 만들어집니다. ZIP으로 저장했다면 먼저 압축을 풀어 주세요.' : 'ZIP을 다운로드한 뒤 압축을 풀어 주세요.'}</li>
+                        <li>저장된 폴더를 열고 사진 파일을 모두 선택하세요.</li>
+                        <li>카카오톡 대화방으로 끌어 놓거나 파일 첨부에서 선택해 보내세요.</li>
+                    </ol>
+                    <p>ZIP 파일 자체를 보내면 사진 대신 압축파일로 전달됩니다.</p>
+                </details>
             </div>}
             <div className="worker-id-share__images">{images.map(image => <article key={image.worker.id}>
                 <img src={image.url} alt={`${image.worker.name} 신분증 공유 미리보기`} />

@@ -11,6 +11,12 @@
 .worker-id-share__notice { padding: 10px 12px; border-radius: 8px; background: #f1f5f9; }
 .worker-id-share__error { padding: 10px 12px; border-radius: 8px; color: #991b1b; background: #fef2f2; }
 .worker-id-share__send { margin: 16px 0; }
+.worker-id-share__desktop { margin-top: 12px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; }
+.worker-id-share__desktop summary { padding: 8px 0; cursor: pointer; font-weight: 600; }
+.worker-id-share__desktop summary:focus-visible { outline: 3px solid #228be6; outline-offset: 2px; }
+.worker-id-share__desktop ol { list-style: decimal; padding-left: 22px; font-size: 14px; line-height: 1.7; }
+.worker-id-share__batch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.worker-id-share__batch-actions button { flex: 1 1 180px; border-color: #94a3b8; font-weight: 600; }
 .worker-id-share .worker-id-share__primary { width: 100%; background: #fee500; border-color: #ead400; color: #342b00; font-weight: 700; }
 .worker-id-share__images { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .worker-id-share__images article { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 12px; min-width: 0; }
