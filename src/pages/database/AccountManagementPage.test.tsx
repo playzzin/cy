@@ -175,7 +175,7 @@ it.each(['worker', 'team', 'company', 'custom'] as const)('registers a photo to 
     const id = { worker: 'recipient', team: 'team', company: 'company', custom: 'custom-id' }[kind];
     const writers = { worker: manpowerService.updateWorker, team: teamService.updateTeam, company: companyService.updateCompany, custom: accountDirectoryService.updateEntry };
     await openPage();
-    fireEvent.click(screen.getByRole('button', { name: '계좌 사진 등록' }));
+    fireEvent.click(screen.getByRole('button', { name: '계좌번호 등록 (사진 분석)' }));
     fireEvent.change(screen.getByLabelText('계좌 사진 선택'), { target: { files: [new File(['synthetic'], 'bank.png', { type: 'image/png' })] } });
     fireEvent.click(screen.getByRole('button', { name: 'Gemini로 계좌 읽기' }));
     await waitFor(() => expect(screen.getByLabelText('1번 계좌번호')).toHaveValue(fields.accountNumber));

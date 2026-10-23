@@ -30,7 +30,7 @@ let workers: Worker[];
 
 beforeEach(() => {
     jest.clearAllMocks();
-    workers = [{ id: 'worker-a', name: '검증작업자', status: 'active', idNumber: 'synthetic-id', accountNumber: '009876543210' },
+    workers = [{ id: 'worker-a', name: '검증작업자', status: 'active', idNumber: 'synthetic-id', accountNumber: '009876543210', bankPhotoId: 'a'.repeat(32) },
         { id: 'worker-b', name: '다른작업자', status: 'active' }];
     (manpowerService.getWorkers as jest.Mock).mockImplementation(async () => workers.map(worker => ({ ...worker })));
     (manpowerService.updateWorker as jest.Mock).mockImplementation(async (id: string, patch: Partial<Worker>) => {
@@ -42,7 +42,7 @@ beforeEach(() => {
 });
 
 const openRowPhoto = async () => {
-    fireEvent.click(await screen.findByRole('button', { name: '검증작업자 계좌 사진 등록' }));
+    fireEvent.click(await screen.findByRole('button', { name: '검증작업자 계좌번호 등록 (사진 분석)' }));
     fireEvent.change(screen.getByLabelText('계좌 사진 선택'), {
         target: { files: [new File(['synthetic'], 'account.png', { type: 'image/png' })] },
     });
@@ -57,7 +57,7 @@ const savePhoto = async () => {
 
 it('shows an account-only list with full numbers and restores the other columns when toggled off', async () => {
     render(<WorkerDatabase hideHeader />);
-    await screen.findByRole('button', { name: '검증작업자 계좌 사진 등록' });
+    await screen.findByRole('button', { name: '검증작업자 계좌번호 등록 (사진 분석)' });
     const toggle = screen.getByRole('button', { name: '계좌만 보기' });
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
@@ -84,6 +84,7 @@ it('registers only account fields for the clicked person without requiring an ID
     expect(within(row).getByText(fields.accountNumber)).toBeInTheDocument();
     expect(workers[0].name).toBe('검증작업자');
     expect(workers[0].idNumber).toBe('synthetic-id');
+    expect(workers[0].bankPhotoId).toBe('a'.repeat(32));
 });
 
 it('supports changing the recipient and clears the list selection when reopening from the toolbar', async () => {
@@ -93,7 +94,7 @@ it('supports changing the recipient and clears the list selection when reopening
     await savePhoto();
     expect(manpowerService.updateWorker).toHaveBeenCalledWith('worker-b', fields);
     expect(workers[0].accountNumber).toBe('009876543210');
-    fireEvent.click(screen.getByRole('button', { name: '계좌 사진 등록' }));
+    fireEvent.click(screen.getByRole('button', { name: '계좌번호 등록 (사진 분석)' }));
     fireEvent.change(screen.getByLabelText('계좌 사진 선택'), {
         target: { files: [new File(['synthetic'], 'next.png', { type: 'image/png' })] },
     });

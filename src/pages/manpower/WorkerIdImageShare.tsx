@@ -8,13 +8,18 @@ import { recordIdentityDocumentLog } from '../../services/identityDocumentLogSer
 import { canShareImageFiles, copyImageFile, imageFileFromUrl, shareImageFiles } from '../../utils/imageFileDelivery';
 import { canSaveImageFolder, saveImageFolder, zipImageFiles } from '../../utils/imageBatchDownload';
 import { copyWindowsPhotos, openWindowsPhotoWindow, WindowsPhotoClipboardError, windowsPhotoClipboardErrorMessage } from '../../utils/windowsPhotoClipboard';
+import { readWorkerBankPhoto } from '../../services/workerBankPhotoService';
 import './WorkerIdImageShare.css';
 
-type IdWorker = Pick<Worker, 'id' | 'name' | 'fileNameSaved'>;
+type IdWorker = Pick<Worker, 'id' | 'name' | 'fileNameSaved' | 'bankPhotoId'>;
 type PreparedImage = { worker: IdWorker; file: File; url: string };
 type Prepared = { workers: IdWorker[]; images: PreparedImage[]; failed: string[]; missing: string[] };
 
-const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> = ({ workers, disabled }) => {
+const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean; kind?: 'identity' | 'bank' }> = ({ workers, disabled, kind = 'identity' }) => {
+    const documentLabel = kind === 'bank' ? '통장사본' : '신분증';
+    const shareTitle = kind === 'bank' ? '통장사본 공유' : '신분증 공유';
+    // Keep the existing identity audit accurate; bank registrations are audited by the server.
+    const recordPhotoLog: typeof recordIdentityDocumentLog = input => kind === 'identity' ? recordIdentityDocumentLog(input) : Promise.resolve();
     const isWindows = /Windows/i.test(navigator.userAgent) || /^Win/i.test(navigator.platform);
     const [open, setOpen] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -36,7 +41,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         setBusy(false);
         busyRef.current = false;
         return () => { requestRef.current += 1; controllerRef.current?.abort(); };
-    }, [workers]);
+    }, [workers, kind]);
 
     useEffect(() => () => {
         prepared?.images.forEach(image => URL.revokeObjectURL(image.url));
@@ -67,18 +72,20 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         setOpen(true);
         setPrepared(null);
         setError('');
-        setMessage('선택한 작업자의 신분증 사진을 준비하고 있습니다.');
+        setMessage(`선택한 작업자의 ${documentLabel}을 준비하고 있습니다.`);
         const images: PreparedImage[] = [];
         const failed: string[] = [];
-        const missing = workers.filter(worker => !worker.fileNameSaved).map(worker => worker.name);
+        const missing = kind === 'identity' ? workers.filter(worker => !worker.fileNameSaved).map(worker => worker.name) : [];
         try {
             // Read only the already-authorized selection. Keep original image bytes and format.
             for (const [index, worker] of workers.entries()) {
-                if (!worker.fileNameSaved) continue;
+                if (kind === 'identity' && !worker.fileNameSaved) continue;
                 try {
-                    const url = await getDownloadURL(ref(storage, worker.fileNameSaved));
-                    if (controller.signal.aborted) break;
-                    const file = await imageFileFromUrl(url, `${String(index + 1).padStart(2, '0')}_${worker.name}_신분증`, controller.signal);
+                    const name = `${String(index + 1).padStart(2, '0')}_${worker.name}_${documentLabel}`;
+                    const file = kind === 'bank'
+                        ? await readWorkerBankPhoto(worker.id!, name, controller.signal)
+                        : await imageFileFromUrl(await getDownloadURL(ref(storage, worker.fileNameSaved)), name, controller.signal);
+                    if (!file) { missing.push(worker.name); continue; }
                     if (controller.signal.aborted) break;
                     images.push({ worker, file, url: URL.createObjectURL(file) });
                 } catch {
@@ -91,7 +98,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
                 return;
             }
             setPrepared({ workers, images, failed, missing });
-            setMessage(images.length ? `사진 ${images.length}장을 준비했습니다. 아래 사진을 확인한 뒤 공유하세요.` : '공유할 신분증 사진이 없습니다.');
+            setMessage(images.length ? `사진 ${images.length}장을 준비했습니다. 아래 사진을 확인한 뒤 공유하세요.` : kind === 'bank' ? '공유할 통장사본이 없습니다. 통장사본 등록에서 원본을 등록해 주세요.' : '공유할 신분증 사진이 없습니다.');
         } finally {
             if (request === requestRef.current) { busyRef.current = false; setBusy(false); }
         }
@@ -107,7 +114,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         try {
             // No network or image processing before share: preserve this button click's activation.
             await shareImageFiles(images.map(image => image.file));
-            void recordIdentityDocumentLog({ action: 'share_image', source: 'worker_summary', status: 'success',
+            void recordPhotoLog({ action: 'share_image', source: 'worker_summary', status: 'success',
                 personNames: images.map(image => image.worker.name), personCount: images.length, fileCount: images.length });
             if (request === requestRef.current) setMessage(isWindows
                 ? 'Windows 공유창을 열었습니다. 붙여넣기가 안 되면 Windows 공유창을 닫고 사진 아래의 사진 복사 또는 폴더 저장을 이용하세요.'
@@ -131,7 +138,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         setMessage('');
         try {
             await copyImageFile(image.file);
-            void recordIdentityDocumentLog({ action: 'copy_image', source: 'worker_summary', status: 'success', personNames: [image.worker.name], fileCount: 1 });
+            void recordPhotoLog({ action: 'copy_image', source: 'worker_summary', status: 'success', personNames: [image.worker.name], fileCount: 1 });
             if (request === requestRef.current) setMessage(`${image.worker.name} 사진 1장을 복사했습니다. 카카오톡 대화 입력칸에서 Ctrl+V(모바일은 붙여넣기)로 첨부하세요. 다른 사진을 복사하면 이전 사진은 교체됩니다.`);
         } catch {
             if (request === requestRef.current) setError('사진을 복사하지 못했습니다. 사진 저장 후 카카오톡에 첨부해 주세요.');
@@ -143,7 +150,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
     const save = (image: PreparedImage) => {
         if (!prepared || prepared.workers !== currentWorkers.current || busyRef.current) return;
         saveAs(image.file, image.file.name);
-        void recordIdentityDocumentLog({ action: 'download_image', source: 'worker_summary', status: 'success', personNames: [image.worker.name], fileCount: 1 });
+        void recordPhotoLog({ action: 'download_image', source: 'worker_summary', status: 'success', personNames: [image.worker.name], fileCount: 1 });
         setMessage('사진 저장을 요청했습니다. 카카오톡에서 저장한 사진을 첨부해 주세요.');
     };
 
@@ -159,19 +166,19 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
         const selected = prepared.images;
         try {
             if (format === 'folder') {
-                const result = await saveImageFolder(selected.map(image => image.file), controller.signal);
+                const result = await saveImageFolder(selected.map(image => image.file), controller.signal, kind === 'bank' ? '통장사본' : '신분증');
                 const savedImages = selected.filter(image => result.saved.includes(image.file));
-                if (savedImages.length) void recordIdentityDocumentLog({ action: 'download_image', source: 'worker_summary',
+                if (savedImages.length) void recordPhotoLog({ action: 'download_image', source: 'worker_summary',
                     status: result.saved.length === selected.length ? 'success' : 'partial',
                     personNames: savedImages.map(image => image.worker.name), personCount: savedImages.length, fileCount: savedImages.length });
                 if (request !== requestRef.current) return;
                 setMessage(result.saved.length ? `사진 ${result.saved.length}장을 선택한 위치의 “${result.folderName}” 폴더에 저장했습니다. 폴더 안의 사진을 모두 선택해 카카오톡 대화방에 첨부하세요.` : '저장된 사진이 없습니다. ZIP 저장을 이용해 주세요.');
                 if (result.failed.length) setError(`사진 ${result.failed.length}장 저장 실패: ${selected.filter(image => result.failed.includes(image.file)).map(image => image.worker.name).join(', ')}. 해당 사진을 개별 저장하거나 ZIP 저장을 이용해 주세요.`);
             } else {
-                const zip = await zipImageFiles(selected.map(image => image.file));
+                const zip = await zipImageFiles(selected.map(image => image.file), kind === 'bank' ? '통장사본' : '신분증');
                 if (request !== requestRef.current || controller.signal.aborted || prepared.workers !== currentWorkers.current) return;
                 saveAs(zip, zip.name);
-                void recordIdentityDocumentLog({ action: 'download_zip', source: 'worker_summary', status: 'success',
+                void recordPhotoLog({ action: 'download_zip', source: 'worker_summary', status: 'success',
                     personNames: selected.map(image => image.worker.name), personCount: selected.length, fileCount: selected.length });
                 setMessage(`사진 ${selected.length}장이 들어 있는 ZIP 다운로드를 요청했습니다. 압축을 풀고 사진 파일을 모두 선택해 카카오톡 대화방에 첨부하세요.`);
             }
@@ -202,7 +209,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
             });
             const log = { source: 'worker_summary' as const, status: 'success' as const,
                 personNames: selected.map(image => image.worker.name), personCount: selected.length, fileCount: result.photoCount };
-            if (result.copied) void recordIdentityDocumentLog({ ...log, action: 'copy_image' });
+            if (result.copied) void recordPhotoLog({ ...log, action: 'copy_image' });
             if (request !== requestRef.current) return;
             setMessage(result.copied
                 ? `사진 ${result.photoCount}장을 Windows 클립보드에 모두 복사했습니다. 카카오톡에서 붙여넣기가 안 되면 위의 한 번에 끌어놓기를 이용하세요.`
@@ -250,14 +257,14 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
     const canShareAll = canShareImageFiles(images.map(image => image.file));
     return <>
         <button ref={triggerRef} type="button" className="ws-id-share-trigger" disabled={disabled || !workers.length || busy}
-            onClick={() => void prepare()}>신분증 사진 공유</button>
+            onClick={() => void prepare()}>{shareTitle}</button>
         {open && createPortal(<dialog ref={dialogRef} className="worker-id-share" aria-labelledby={titleId}
             onCancel={event => { event.preventDefault(); close(); }}>
-            <header><div><h2 id={titleId}>신분증 사진 공유</h2><p>선택한 {workers.length}명의 신분증을 각각의 사진으로 보냅니다.</p></div>
-                <button type="button" aria-label="신분증 공유 닫기" onClick={close}>닫기</button></header>
+            <header><div><h2 id={titleId}>{shareTitle}</h2><p>선택한 {workers.length}명의 {documentLabel}을 각각의 사진으로 보냅니다.</p></div>
+                <button type="button" aria-label={`${documentLabel} 공유 닫기`} onClick={close}>닫기</button></header>
             <p role="status" aria-live="polite">{message}</p>
             {error && <p role="alert" className="worker-id-share__error">{error}</p>}
-            {!!prepared?.missing.length && <p className="worker-id-share__notice">신분증 미등록 {prepared.missing.length}명: {prepared.missing.join(', ')}</p>}
+            {!!prepared?.missing.length && <p className="worker-id-share__notice">{documentLabel} 미등록 {prepared.missing.length}명: {prepared.missing.join(', ')}</p>}
             {!!prepared?.failed.length && <div role="alert" className="worker-id-share__error">
                 <p>불러오기 실패 {prepared.failed.length}명: {prepared.failed.join(', ')}. 이 사진은 공유에 포함되지 않습니다.</p>
                 <button type="button" disabled={busy} onClick={() => void prepare()}>사진 다시 준비</button></div>}
@@ -303,7 +310,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean }> 
                 </details>
             </div>}
             <div className="worker-id-share__images">{images.map(image => <article key={image.worker.id}>
-                <img src={image.url} alt={`${image.worker.name} 신분증 공유 미리보기`} />
+                <img src={image.url} alt={`${image.worker.name} ${documentLabel} 공유 미리보기`} />
                 <strong>{image.worker.name}</strong>
                 <div>{!isWindows && canShareImageFiles([image.file]) && <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 공유`} onClick={() => void share([image])}>개별 공유</button>}
                     <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 복사`} onClick={() => void copy(image)}>사진 복사</button>

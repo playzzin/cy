@@ -648,15 +648,15 @@ const WorkerManagement: React.FC = () => {
                         <span className="hidden sm:inline">계정 연결</span>
                     </button>
 
-                    {/* 신분증 등록 */}
+                    {/* 사진 분석으로 계좌정보 등록 */}
                     <button
                         type="button"
                         onClick={() => setIsBankBookModalOpen(true)}
-                        title="Gemini로 계좌 사진 등록"
+                        title="사진에서 은행·계좌번호·예금주를 읽어 계좌정보 등록"
                         className="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors shadow-sm whitespace-nowrap"
                     >
                         <FontAwesomeIcon icon={faMoneyCheck} />
-                        <span>계좌 사진 등록</span>
+                        <span>계좌번호 등록 (사진 분석)</span>
                     </button>
 
                     <button

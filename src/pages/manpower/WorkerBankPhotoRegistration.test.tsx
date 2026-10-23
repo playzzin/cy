@@ -1,0 +1,58 @@
+import React from 'react';
+import '@testing-library/jest-dom';
+import { fireEvent, render, screen } from '@testing-library/react';
+import WorkerBankPhotoRegistration from './WorkerBankPhotoRegistration';
+import { saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
+jest.mock('../../services/workerBankPhotoService', () => ({ ...jest.requireActual('../../services/workerBankPhotoService'), saveWorkerBankPhoto: jest.fn() }));
+jest.mock('../../config/firebase', () => ({ auth: {}, functions: {} }));
+jest.mock('../../services/teamScopedReadService', () => ({ invalidateTeamScopedCache: jest.fn() }));
+const workers = [{ id: 'one', name: '가상 가', bankPhotoId: 'a'.repeat(32) }, { id: 'two', name: '가상 나' }];
+const file = new File(['original'], 'original.jpg', { type: 'image/jpeg' });
+beforeEach(() => {
+    jest.clearAllMocks();
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:synthetic') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
+    Object.defineProperty(window, 'crypto', { configurable: true, value: jest.requireActual('crypto').webcrypto });
+    (saveWorkerBankPhoto as jest.Mock).mockImplementation(async (_id, _file, photoId) => photoId);
+});
+test('각 작업자와 원본을 명시적으로 연결하고 저장 요청 전에는 업로드하지 않는다', async () => {
+    const onSaved = jest.fn(); render(<WorkerBankPhotoRegistration workers={workers} onSaved={onSaved} />);
+    fireEvent.click(screen.getByRole('button', { name: '통장사본 등록' }));
+    fireEvent.change(screen.getByLabelText('가상 가 통장사본 선택'), { target: { files: [file] } });
+    expect(saveWorkerBankPhoto).not.toHaveBeenCalled();
+    expect(screen.getByAltText('가상 가 등록할 통장사본')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '사진 1장 원본 등록' }));
+    await screen.findByText(/1장 등록 완료/);
+    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', file, expect.stringMatching(/^[a-f0-9]{32}$/), workers[0].bankPhotoId);
+    expect(onSaved).toHaveBeenCalledWith([{ workerId: 'one', bankPhotoId: expect.any(String) }]);
+});
+test('일부 실패는 성공한 사진을 재등록하지 않고 같은 요청 ID로 다시 시도한다', async () => {
+    const onSaved = jest.fn();
+    (saveWorkerBankPhoto as jest.Mock).mockRejectedValueOnce(new Error('가상 연결 실패'));
+    render(<WorkerBankPhotoRegistration workers={workers} onSaved={onSaved} />);
+    fireEvent.click(screen.getByRole('button', { name: '통장사본 등록' }));
+    for (const name of ['가상 가', '가상 나']) fireEvent.change(screen.getByLabelText(`${name} 통장사본 선택`), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 원본 등록' }));
+    await screen.findByText(/1장 등록 완료/);
+    expect(screen.getByRole('alert')).toHaveTextContent('가상 연결 실패');
+    const first = (saveWorkerBankPhoto as jest.Mock).mock.calls[0];
+    fireEvent.click(screen.getByRole('button', { name: '사진 1장 원본 등록' }));
+    await screen.findByText(/닫은 뒤 통장사본 공유/);
+    expect((saveWorkerBankPhoto as jest.Mock).mock.calls[2]).toEqual(first);
+    expect(saveWorkerBankPhoto).toHaveBeenCalledTimes(3);
+});
+test('지원하지 않는 파일은 원본 등록을 차단하고 닫으면 미리보기 URL을 해제한다', () => {
+    render(<WorkerBankPhotoRegistration workers={workers} onSaved={jest.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '통장사본 등록' }));
+    fireEvent.change(screen.getByLabelText('가상 가 통장사본 선택'), { target: { files: [new File(['svg'], 'x.svg', { type: 'image/svg+xml' })] } });
+    expect(screen.getByRole('alert')).toHaveTextContent('5MB 이하');
+    expect(screen.getByRole('button', { name: '사진 0장 원본 등록' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('가상 가 통장사본 선택'), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText('가상 가 통장사본 선택'), { target: { files: [new File(['pdf'], 'wrong.pdf', { type: 'application/pdf' })] } });
+    expect(screen.getByRole('button', { name: '사진 0장 원본 등록' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '통장사본 등록 닫기' }));
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:synthetic');
+    expect(saveWorkerBankPhoto).not.toHaveBeenCalled();
+});

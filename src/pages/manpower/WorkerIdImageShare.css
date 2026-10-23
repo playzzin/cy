@@ -30,3 +30,7 @@
     .worker-id-share { padding: 16px; }
     .worker-id-share__images { grid-template-columns: 1fr; }
 }
+
+.ws-bank-register { background: white; color: #334155; border-color: #cbd5e1; }
+.worker-bank-photo-input { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.worker-bank-photo-input input { width: 100%; min-width: 0; }

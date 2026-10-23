@@ -160,6 +160,7 @@ export { teamAccountApprovals } from './teamAccountApprovals';
 export { teamOffDutyRequests } from './teamOffDutyRequests';
 
 export { workerSignatures } from './workerSignatures';
+export { workerBankPhotos } from './workerBankPhotos';
 
 export { aiWorkspace } from './aiWorkspace';
 export { dailyReportAnalyticsAi } from './dailyReportAnalyticsAi';

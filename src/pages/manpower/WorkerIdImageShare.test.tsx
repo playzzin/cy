@@ -81,7 +81,7 @@ test('연결 실패는 성공으로 표시하거나 자동 공유하지 않는�
 });
 
 async function prepare() {
-    fireEvent.click(screen.getByRole('button', { name: '신분증 사진 공유' }));
+    fireEvent.click(screen.getByRole('button', { name: '신분증 공유' }));
     await screen.findByText(/사진 \d+장을 준비했습니다/);
 }
 
@@ -258,7 +258,7 @@ test('준비 도중 닫으면 요청을 취소하고 뒤늦은 사진을 노출�
     let resolveFile!: (file: File) => void;
     (imageFileFromUrl as jest.Mock).mockImplementationOnce(() => new Promise<File>(resolve => { resolveFile = resolve; }));
     render(<WorkerIdImageShare workers={workers} />);
-    fireEvent.click(screen.getByRole('button', { name: '신분증 사진 공유' }));
+    fireEvent.click(screen.getByRole('button', { name: '신분증 공유' }));
     await waitFor(() => expect(imageFileFromUrl).toHaveBeenCalledTimes(1));
     const signal = (imageFileFromUrl as jest.Mock).mock.calls[0][2];
     fireEvent.click(screen.getByRole('button', { name: '신분증 공유 닫기' }));
@@ -271,9 +271,9 @@ test('준비 도중 닫으면 요청을 취소하고 뒤늦은 사진을 노출�
 
 test('선택이 없거나 사진이 없는 경우 공유를 실행하지 않는다', async () => {
     const { rerender } = render(<WorkerIdImageShare workers={[]} />);
-    expect(screen.getByRole('button', { name: '신분증 사진 공유' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '신분증 공유' })).toBeDisabled();
     rerender(<WorkerIdImageShare workers={[{ id: 'none', name: '테스트 없음' }]} />);
-    fireEvent.click(screen.getByRole('button', { name: '신분증 사진 공유' }));
+    fireEvent.click(screen.getByRole('button', { name: '신분증 공유' }));
     await screen.findByText('공유할 신분증 사진이 없습니다.');
     expect(share).not.toHaveBeenCalled();
 });

@@ -1885,7 +1885,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
                         <button type="button" onClick={() => setPhotoRegistrationOpen(true)} disabled={loading || !!loadError || applyingUpload || Object.values(savingKeys).some(Boolean)}
                             className="inline-flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-50">
-                            <FontAwesomeIcon icon={faUpload} />계좌 사진 등록
+                            <FontAwesomeIcon icon={faUpload} />계좌번호 등록 (사진 분석)
                         </button>
                         <button
                             type="button"

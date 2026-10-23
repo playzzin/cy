@@ -6,11 +6,15 @@ import { manpowerService } from '../../services/manpowerService';
 import html2canvas from 'html2canvas';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
+import { readWorkerBankPhoto, saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
 
 jest.mock('../../routes/TeamWorkflowGate', () => ({ useRestrictedTeamWorkflow: jest.fn() }));
 jest.mock('../../services/teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
 
-jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn() } }));
+jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn(), updateWorker: jest.fn() } }));
+jest.mock('../../services/workerBankPhotoService', () => ({
+    ...jest.requireActual('../../services/workerBankPhotoService'), readWorkerBankPhoto: jest.fn(), saveWorkerBankPhoto: jest.fn(),
+}));
 jest.mock('../../services/teamService', () => ({
     teamService: { getTeams: async () => [
         { id: 'a', name: '가상 A팀', companyName: '청연', color: '#228be6' },
@@ -109,8 +113,8 @@ test('화면 전환 후 요약에 초점을 옮기고 카드에서 선택을 해
     expect(screen.getByRole('button', { name: '요약 확인 1' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: '가상가 선택 해제' }));
     expect(screen.getByRole('status')).toHaveTextContent('0명 선택');
-    expect(screen.getByRole('button', { name: '이미지 복사' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '공유하기' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'PC 공유' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '모바일 공유' })).toBeDisabled();
 });
 
 test('검색 결과가 없어도 선택은 보존되며 검색어만 지울 수 있다', async () => {
@@ -140,6 +144,35 @@ test('모바일 카드와 분리된 표 형식으로 이미지를 만들고 신�
     await openPage();
     fireEvent.click(screen.getByRole('checkbox', { name: '가상가 선택' }));
     fireEvent.click(screen.getByRole('checkbox', { name: '신분증 보기' }));
-    fireEvent.click(screen.getByRole('button', { name: '이미지 복사' }));
+    fireEvent.click(screen.getByRole('button', { name: 'PC 공유' }));
     await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+});
+
+test('작업자 요약에서 통장사본을 별도로 등록한 뒤 계좌정보 수정 없이 공유할 수 있다', async () => {
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:bank-copy') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
+    Object.defineProperty(window, 'crypto', { configurable: true, value: jest.requireActual('crypto').webcrypto });
+    const file = new File(['synthetic-original'], 'bank.png', { type: 'image/png' });
+    (saveWorkerBankPhoto as jest.Mock).mockImplementation(async (_id, _file, photoId) => photoId);
+    (readWorkerBankPhoto as jest.Mock).mockResolvedValue(file);
+    await openPage();
+    for (const label of ['PC 공유', '모바일 공유', '신분증 공유', '통장사본 공유', '통장사본 등록']) {
+        expect(screen.getByRole('button', { name: label })).toBeDisabled();
+    }
+    fireEvent.click(screen.getByRole('checkbox', { name: '가상가 선택' }));
+    fireEvent.click(screen.getByRole('button', { name: '통장사본 등록' }));
+    expect(screen.getByText(/은행명·계좌번호·예금주는 변경되지 않습니다/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('가상가 통장사본 선택'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: '사진 1장 원본 등록' }));
+    await screen.findByText(/1장 등록 완료/);
+    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', file, expect.any(String), '');
+    expect(manpowerService.updateWorker).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '통장사본 등록 닫기' }));
+    fireEvent.click(screen.getByRole('button', { name: '통장사본 공유' }));
+    await screen.findByAltText('가상가 통장사본 공유 미리보기');
+    expect(readWorkerBankPhoto).toHaveBeenCalledWith('one', '01_가상가_통장사본', expect.any(AbortSignal));
+    expect(screen.getAllByRole('img')).toHaveLength(1);
+    expect(manpowerService.updateWorker).not.toHaveBeenCalled();
 });

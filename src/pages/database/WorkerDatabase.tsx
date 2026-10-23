@@ -1142,11 +1142,11 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     <button
                         type="button"
                         onClick={() => openBankBookModal()}
-                        title="Gemini로 계좌 사진 등록"
+                        title="사진에서 은행·계좌번호·예금주를 읽어 계좌정보 등록"
                         className="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors shadow-sm whitespace-nowrap"
                     >
                         <FontAwesomeIcon icon={faMoneyCheck} />
-                        <span>계좌 사진 등록</span>
+                        <span>계좌번호 등록 (사진 분석)</span>
                     </button>
 
                     <button
@@ -1799,13 +1799,13 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                         />
                                                                         <button
                                                                             type="button"
-                                                                            aria-label={`${worker.name} 계좌 사진 등록`}
+                                                                            aria-label={`${worker.name} 계좌번호 등록 (사진 분석)`}
                                                                             onClick={() => openBankBookModal(worker.id)}
                                                                             disabled={!worker.id || loading}
                                                                             className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 whitespace-nowrap"
                                                                         >
                                                                             <FontAwesomeIcon icon={faImages} />
-                                                                            계좌 사진 등록
+                                                                            계좌번호 등록 (사진 분석)
                                                                         </button>
                                                                     </div>
                                                                 </td>

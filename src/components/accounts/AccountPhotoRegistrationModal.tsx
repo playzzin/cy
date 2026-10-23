@@ -135,10 +135,10 @@ export default function AccountPhotoRegistrationModal({ targets, initialTargetId
                 onPointerDownOutside={event => event.preventDefault()} onEscapeKeyDown={event => { if (running.current) event.preventDefault(); }}>
                 <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4 sm:p-5">
                     <div>
-                        <Dialog.Title className="flex items-center gap-2 text-lg font-bold text-slate-900"><Camera size={20} className="text-orange-600" />계좌 사진 등록</Dialog.Title>
-                        <Dialog.Description className="mt-1 text-sm text-slate-600">Gemini가 통장사본·은행 앱 사진에서 은행, 계좌번호, 예금주를 읽습니다.</Dialog.Description>
+                        <Dialog.Title className="flex items-center gap-2 text-lg font-bold text-slate-900"><Camera size={20} className="text-orange-600" />계좌번호 등록 (사진 분석)</Dialog.Title>
+                        <Dialog.Description className="mt-1 text-sm text-slate-600">사진에서 은행·계좌번호·예금주를 읽어 계좌정보를 등록합니다. 공유용 통장사본 사진은 저장하거나 교체하지 않습니다.</Dialog.Description>
                     </div>
-                    <button type="button" aria-label="계좌 사진 등록 닫기" disabled={!!busy} onClick={close} className="rounded-lg p-2 text-slate-600 disabled:opacity-40"><X size={20} /></button>
+                    <button type="button" aria-label="계좌번호 등록 (사진 분석) 닫기" disabled={!!busy} onClick={close} className="rounded-lg p-2 text-slate-600 disabled:opacity-40"><X size={20} /></button>
                 </div>
                 <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4 sm:p-5">
                     <p className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">등록할 사람·대상을 직접 선택하세요. 다른 사람 명의의 계좌도 등록할 수 있습니다. 계좌번호는 전체 표시되며, 저장하면 선택한 대상의 기존 계좌정보가 변경됩니다.</p>

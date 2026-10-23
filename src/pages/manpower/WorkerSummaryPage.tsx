@@ -15,6 +15,7 @@ import { recordIdentityDocumentLog } from '../../services/identityDocumentLogSer
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
 import WorkerIdImageShare from './WorkerIdImageShare';
+import WorkerBankPhotoRegistration from './WorkerBankPhotoRegistration';
 import './WorkerSummaryPage.css';
 
 
@@ -951,18 +952,24 @@ const WorkerSummaryPage: React.FC = () => {
                                 신분증 ZIP
                             </ActionButton>
                             <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedWorkers} disabled={isSendingImage} />
-                            <ActionButton onClick={handleCopyImage} className="ws-copy" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
+                            <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedWorkers} disabled={isSendingImage}
+                                onSaved={updates => setWorkers(previous => previous.map(worker => {
+                                    const update = updates.find(item => item.workerId === worker.id);
+                                    return update ? { ...worker, bankPhotoId: update.bankPhotoId } : worker;
+                                }))} />
+                            <WorkerIdImageShare key={restricted ? 'team-bank' : 'office-bank'} workers={selectedWorkers} disabled={isSendingImage} kind="bank" />
+                            <ActionButton onClick={handleCopyImage} title="작업자 요약 이미지를 복사한 뒤 PC 카카오톡에 붙여넣기" className="ws-copy" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
                                 <FontAwesomeIcon icon={faCopy} />
-                                이미지 복사
+                                PC 공유
                             </ActionButton>
                             <ActionButton
                                 onClick={handleSendKakao}
                                 className="kakao"
                                 disabled={selectedWorkerIds.size === 0 || isSendingImage}
-                                title="공유창에서 카카오톡 등을 선택해 보내기"
+                                title="모바일 공유창에서 카카오톡 등을 선택해 작업자 요약 보내기"
                             >
                                 <FontAwesomeIcon icon={faPaperPlane} />
-                                {isSendingImage ? '준비 중' : '공유하기'}
+                                {isSendingImage ? '준비 중' : '모바일 공유'}
                             </ActionButton>
                         </ActionButtons>
                     </CardHeader>

@@ -6,13 +6,15 @@ type DirectoryPickerWindow = Window & {
 
 export const canSaveImageFolder = (): boolean => typeof (window as DirectoryPickerWindow).showDirectoryPicker === 'function';
 
-const batchName = (): string => {
+type ImageBatchLabel = '신분증' | '계좌' | '통장사본';
+
+const batchName = (label: ImageBatchLabel): string => {
     const timestamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
     const suffix = Array.from(crypto.getRandomValues(new Uint32Array(2)), value => value.toString(16).padStart(8, '0')).join('');
-    return `신분증_사진_${timestamp}_${suffix}`;
+    return `${label}_사진_${timestamp}_${suffix}`;
 };
 
-export const saveImageFolder = async (files: File[], signal: AbortSignal): Promise<{
+export const saveImageFolder = async (files: File[], signal: AbortSignal, label: ImageBatchLabel = '신분증'): Promise<{
     folderName: string; saved: File[]; failed: File[];
 }> => {
     const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
@@ -20,7 +22,7 @@ export const saveImageFolder = async (files: File[], signal: AbortSignal): Promi
     // Invoke the picker before the first await to preserve the button's user activation.
     const parent = await picker.call(window, { mode: 'readwrite', startIn: 'downloads' });
     if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
-    let folderName = batchName();
+    let folderName = batchName(label);
     // Never reuse an existing folder or overwrite the user's files.
     for (let suffix = 1; ; suffix += 1) {
         try { await parent.getDirectoryHandle(folderName); }
@@ -28,7 +30,7 @@ export const saveImageFolder = async (files: File[], signal: AbortSignal): Promi
             if ((error as DOMException).name === 'NotFoundError') break;
             throw error;
         }
-        folderName = `${batchName()}_${suffix}`;
+        folderName = `${batchName(label)}_${suffix}`;
     }
     if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
     const folder = await parent.getDirectoryHandle(folderName, { create: true });
@@ -54,10 +56,10 @@ export const saveImageFolder = async (files: File[], signal: AbortSignal): Promi
     return { folderName, saved, failed };
 };
 
-export const zipImageFiles = async (files: File[]): Promise<File> => {
+export const zipImageFiles = async (files: File[], label: ImageBatchLabel = '신분증'): Promise<File> => {
     if (!files.length) throw new Error('no-images');
     const zip = new JSZip();
     files.forEach(file => zip.file(file.name, file));
     const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
-    return new File([blob], `${batchName()}.zip`, { type: 'application/zip' });
+    return new File([blob], `${batchName(label)}.zip`, { type: 'application/zip' });
 };
