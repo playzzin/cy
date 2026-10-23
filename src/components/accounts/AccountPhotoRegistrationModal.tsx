@@ -11,6 +11,7 @@ import {
 export interface AccountPhotoTarget { id: string; label: string }
 interface Props {
     targets: AccountPhotoTarget[];
+    initialTargetId?: string;
     onSave: (targetId: string, fields: BankAccountFields) => Promise<void>;
     onClose: () => void;
 }
@@ -26,7 +27,7 @@ interface PhotoRow {
 const labels: Record<keyof BankAccountFields, string> = { bankName: '은행명', accountNumber: '계좌번호', accountHolder: '예금주' };
 const inputClass = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100';
 
-export default function AccountPhotoRegistrationModal({ targets, onSave, onClose }: Props) {
+export default function AccountPhotoRegistrationModal({ targets, initialTargetId, onSave, onClose }: Props) {
     const [rows, setRows] = useState<PhotoRow[]>([]);
     const [busy, setBusy] = useState<'analysis' | 'save' | null>(null);
     const [error, setError] = useState('');
@@ -60,7 +61,8 @@ export default function AccountPhotoRegistrationModal({ targets, onSave, onClose
                 if (rows.length + added.length >= 20) throw new Error('한 번에 사진 20장까지 등록할 수 있습니다.');
                 const preview = URL.createObjectURL(file);
                 urls.current.add(preview);
-                added.push({ id: ++nextId.current, file, preview, status: 'idle', targetId: '',
+                added.push({ id: ++nextId.current, file, preview, status: 'idle',
+                    targetId: initialTargetId && targets.some(target => target.id === initialTargetId) ? initialTargetId : '',
                     fields: { bankName: '', accountNumber: '', accountHolder: '' } });
             } catch (failure) {
                 errors.push(failure instanceof Error ? failure.message : '사진을 추가하지 못했습니다.');

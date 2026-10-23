@@ -52,6 +52,24 @@ it('requires confirmation again after correcting OCR, and never saves before the
     await waitFor(() => expect(onSave).toHaveBeenCalledWith('worker-a', { ...fields, accountNumber: '009876543210' }));
 });
 
+it('keeps the explicitly chosen list recipient through analysis and allows changing it', async () => {
+    const onUpdateWorkers = jest.fn().mockResolvedValue(undefined);
+    render(<BankBookAnalysisModal isOpen initialWorkerId="worker-a" onClose={jest.fn()}
+        workers={[{ id: 'worker-a', name: '검증작업자' }, { id: 'worker-b', name: '다른작업자' }]}
+        onUpdateWorkers={onUpdateWorkers} />);
+    upload(); await analyze();
+    expect(screen.getByLabelText('1번 등록할 사람·대상')).toHaveValue('worker-a');
+    expect(onUpdateWorkers).not.toHaveBeenCalled();
+    select(1, 'worker-b'); review(); save();
+    await waitFor(() => expect(onUpdateWorkers).toHaveBeenCalledWith([{ workerId: 'worker-b', ...fields }]));
+});
+
+it('does not preselect a recipient that is no longer available', () => {
+    render(<AccountPhotoRegistrationModal targets={targets} initialTargetId="missing" onSave={jest.fn()} onClose={jest.fn()} />);
+    upload();
+    expect(screen.getByLabelText('1번 등록할 사람·대상')).toHaveValue('');
+});
+
 it('blocks missing account data and duplicate recipients but allows the same account for different recipients', async () => {
     const onSave = jest.fn().mockResolvedValue(undefined);
     render(<AccountPhotoRegistrationModal targets={targets} onSave={onSave} onClose={jest.fn()} />);

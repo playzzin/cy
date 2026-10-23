@@ -6,12 +6,14 @@ interface BankBookAnalysisModalProps {
     isOpen: boolean;
     onClose: () => void;
     workers: Worker[];
+    initialWorkerId?: string;
     onUpdateWorkers: (updates: { workerId: string; bankName: string; accountNumber: string; accountHolder: string }[]) => Promise<void>;
 }
 
-const BankBookAnalysisModal: React.FC<BankBookAnalysisModalProps> = ({ isOpen, onClose, workers, onUpdateWorkers }) => {
+const BankBookAnalysisModal: React.FC<BankBookAnalysisModalProps> = ({ isOpen, onClose, workers, initialWorkerId, onUpdateWorkers }) => {
     if (!isOpen) return null;
     return <AccountPhotoRegistrationModal
+        initialTargetId={initialWorkerId}
         targets={workers.filter(worker => worker.id).map(worker => ({
             id: worker.id!, label: `${worker.name} · ${worker.teamName || '미배정'}${worker.companyName ? ` · ${worker.companyName}` : ''}`,
         }))}

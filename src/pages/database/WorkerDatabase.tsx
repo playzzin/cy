@@ -69,6 +69,7 @@ const WORKER_COLUMNS = [
 
 const QUICK_VIEW_PERSONAL_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'idNumber', 'contact', 'address', 'unitPrice', 'bankName', 'accountNumber', 'accountHolder'];
 const QUICK_VIEW_WORK_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'role', 'salaryModel', 'teamName', 'companyName', 'status', 'totalManDay'];
+const QUICK_VIEW_ACCOUNT_COLUMNS = ['name', 'teamName', 'bankName', 'accountNumber', 'accountHolder'];
 const UNASSIGNED_TEAM_FILTER_ID = '__unassigned_team__';
 const UNASSIGNED_COMPANY_FILTER_ID = '__unassigned_company__';
 const COMPANY_NAME_FILTER_PREFIX = '__company_name__:';
@@ -142,17 +143,17 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         { key: 'totalManDay', label: '누적공수' },
     ]);
 
-    const [quickColumnView, setQuickColumnView] = useState<'personal' | 'work' | ''>('');
+    const [quickColumnView, setQuickColumnView] = useState<'personal' | 'work' | 'accounts' | ''>('');
 
     const orderedVisibleColumnKeys = moveFixedWorkerColumns(columnOrder.filter((key) => visibleColumns.includes(key)));
     const effectiveVisibleColumnKeys = quickColumnView === 'personal'
         ? moveFixedWorkerColumns(columnOrder.filter((key) => QUICK_VIEW_PERSONAL_COLUMNS.includes(key)))
         : (quickColumnView === 'work'
             ? moveFixedWorkerColumns(columnOrder.filter((key) => QUICK_VIEW_WORK_COLUMNS.includes(key)))
-            : orderedVisibleColumnKeys);
+            : (quickColumnView === 'accounts' ? QUICK_VIEW_ACCOUNT_COLUMNS : orderedVisibleColumnKeys));
     const tableColSpan = effectiveVisibleColumnKeys.length + 2;
 
-    const applyQuickView = (next: 'personal' | 'work') => {
+    const applyQuickView = (next: 'personal' | 'work' | 'accounts') => {
         setShowColumnSettings(false);
         setQuickColumnView((prev) => (prev === next ? '' : next));
     };
@@ -165,6 +166,11 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, success: 0, fail: 0 });
     const [bulkLogs, setBulkLogs] = useState<string[]>([]);
     const [isBankBookModalOpen, setIsBankBookModalOpen] = useState(false);
+    const [bankBookWorkerId, setBankBookWorkerId] = useState<string | undefined>();
+    const openBankBookModal = (workerId?: string) => {
+        setBankBookWorkerId(workerId);
+        setIsBankBookModalOpen(true);
+    };
     const [isIdCardAnalysisModalOpen, setIsIdCardAnalysisModalOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentWorker, setCurrentWorker] = useState<Worker | null>(null);
@@ -1098,6 +1104,19 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                         <span className="hidden sm:inline">소속/상태</span>
                     </button>
 
+                    <button
+                        type="button"
+                        aria-pressed={quickColumnView === 'accounts'}
+                        onClick={() => applyQuickView('accounts')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all shadow-sm whitespace-nowrap ${quickColumnView === 'accounts'
+                            ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                    >
+                        <FontAwesomeIcon icon={faMoneyCheck} />
+                        <span>계좌만 보기</span>
+                    </button>
+
                     {/* 계정 연결 */}
                     <button
                         onClick={() => setShowLinkingModal(true)}
@@ -1122,7 +1141,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     {/* 수정모드 */}
                     <button
                         type="button"
-                        onClick={() => setIsBankBookModalOpen(true)}
+                        onClick={() => openBankBookModal()}
                         title="Gemini로 계좌 사진 등록"
                         className="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors shadow-sm whitespace-nowrap"
                     >
@@ -1767,16 +1786,28 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                         case 'accountNumber':
                                                             return (
                                                                 <td key={key} className="px-4 py-3 text-gray-600 border border-slate-200">
-                                                                    <InputPopover
-                                                                        value={worker.accountNumber || ''}
-                                                                        placeholder="계좌번호"
-                                                                        onChange={(val) => {
-                                                                            handleWorkerChange(worker.id!, 'accountNumber', String(val));
-                                                                            handleWorkerBlur(worker.id!, 'accountNumber', String(val));
-                                                                        }}
-                                                                        minimal={!isEditMode}
-                                                                        formatDisplay={(val) => <span className="text-xs">{val || '-'}</span>}
-                                                                    />
+                                                                    <div className="flex flex-col items-start gap-1.5">
+                                                                        <InputPopover
+                                                                            value={worker.accountNumber || ''}
+                                                                            placeholder="계좌번호"
+                                                                            onChange={(val) => {
+                                                                                handleWorkerChange(worker.id!, 'accountNumber', String(val));
+                                                                                handleWorkerBlur(worker.id!, 'accountNumber', String(val));
+                                                                            }}
+                                                                            minimal={!isEditMode}
+                                                                            formatDisplay={(val) => <span className="text-xs">{val || '-'}</span>}
+                                                                        />
+                                                                        <button
+                                                                            type="button"
+                                                                            aria-label={`${worker.name} 계좌 사진 등록`}
+                                                                            onClick={() => openBankBookModal(worker.id)}
+                                                                            disabled={!worker.id || loading}
+                                                                            className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 whitespace-nowrap"
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faImages} />
+                                                                            계좌 사진 등록
+                                                                        </button>
+                                                                    </div>
                                                                 </td>
                                                             );
                                                         case 'accountHolder':
@@ -1919,6 +1950,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     isOpen={isBankBookModalOpen}
                     onClose={() => setIsBankBookModalOpen(false)}
                     workers={filteredWorkers}
+                    initialWorkerId={bankBookWorkerId}
                     onUpdateWorkers={handleBankBookUpdate}
                 />
             )}
