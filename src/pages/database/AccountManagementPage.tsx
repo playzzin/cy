@@ -1,3 +1,5 @@
+import AccountPhotoRegistrationModal from '../../components/accounts/AccountPhotoRegistrationModal';
+import { BankAccountFields } from '../../services/bankAccountPhotoService';
 import PagePrimaryAccountManager from '../../components/accounts/PagePrimaryAccountManager';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -437,6 +439,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [uploadPreviewFileName, setUploadPreviewFileName] = useState('');
     const [uploadPreviewSections, setUploadPreviewSections] = useState<UploadPreviewSection[]>([]);
     const [applyingUpload, setApplyingUpload] = useState(false);
+    const [photoRegistrationOpen, setPhotoRegistrationOpen] = useState(false);
 
     useEffect(() => {
         writeHiddenAccountKeys(hiddenAccountKeys);
@@ -963,6 +966,36 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         setWorkers((prev) => prev.map((worker) => (worker.id === workerId ? { ...worker, [field]: value } : worker)));
     };
 
+
+    const photoTargets = [
+        ...visibleCheongyeonWorkersForStats.filter(item => item.id).map(item => ({
+            id: `worker:${item.id}`, label: `작업자 · ${item.name} · ${item.teamName || '미배정'}${item.companyName ? ` · ${item.companyName}` : ''}`,
+        })),
+        ...visibleTeamsForStats.filter(item => item.id).map(item => ({ id: `team:${item.id}`, label: `팀 · ${item.name}` })),
+        ...visibleCompaniesForStats.filter(item => item.id).map(item => ({ id: `company:${item.id}`, label: `회사 · ${item.name}` })),
+        ...visibleCustomAccountsForStats.filter(item => item.id).map(item => ({ id: `custom:${item.id}`, label: `매입/기타 · ${item.name}` })),
+    ];
+
+    const savePhotoAccount = async (targetId: string, fields: BankAccountFields) => {
+        if (!photoTargets.some(target => target.id === targetId)) throw new Error('등록할 대상을 다시 선택해 주세요.');
+        const separator = targetId.indexOf(':');
+        const kind = targetId.slice(0, separator);
+        const id = targetId.slice(separator + 1);
+        if (kind === 'worker') {
+            await manpowerService.updateWorker(id, fields);
+            setWorkers(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        } else if (kind === 'team') {
+            await teamService.updateTeam(id, fields);
+            setTeams(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        } else if (kind === 'company') {
+            await companyService.updateCompany(id, fields);
+            setCompanies(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        } else if (kind === 'custom') {
+            await accountDirectoryService.updateEntry(id, fields);
+            setCustomAccounts(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        }
+        clearRowControl(targetId);
+    };
 
     const saveWorkerAccount = async (workerId: string) => {
         const target = workers.find((worker) => worker.id === workerId);
@@ -1850,6 +1883,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                             </label>
                         )}
 
+                        <button type="button" onClick={() => setPhotoRegistrationOpen(true)} disabled={loading || !!loadError || applyingUpload || Object.values(savingKeys).some(Boolean)}
+                            className="inline-flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-50">
+                            <FontAwesomeIcon icon={faUpload} />계좌 사진 등록
+                        </button>
                         <button
                             type="button"
                             onClick={loadData}
@@ -3052,6 +3089,11 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                     )}
                 </>
             )}
+            {photoRegistrationOpen && <AccountPhotoRegistrationModal
+                targets={photoTargets}
+                onSave={savePhotoAccount}
+                onClose={() => setPhotoRegistrationOpen(false)}
+            />}
         </div>
     );
 };

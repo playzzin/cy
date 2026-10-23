@@ -1,3 +1,4 @@
+import { analyzeBankAccountPhoto } from './bankAccountPhotoService';
 import { trackedGeminiFetch } from './geminiUsageFetch';
 import { DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_LITE_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
@@ -760,44 +761,7 @@ Return empty strings for fields that are not visible.`;
         );
     },
 
-    analyzeBankBook: async (file: File): Promise<AnalyzedBankBook> => {
-        const apiKey = getApiKeyOrThrow();
-
-        const base64Data = await geminiService.fileToBase64(file);
-        const base64Content = base64Data.split(',')[1];
-
-        const prompt = `
-            Analyze this image of a bank book (통장사본) or digital bank account details.
-            
-            Extract:
-            1. Bank Name (은행명)
-            2. Account Number (계좌번호) - Extract digits and hyphens.
-            3. Account Holder (예금주) - Name of the account owner.
-
-            Return ONLY a valid JSON object with keys: "bankName", "accountNumber", "accountHolder".
-            Do not include markdown or explanations.
-        `;
-
-        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(apiKey), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{
-                    role: "user",
-                    parts: [
-                        { text: prompt },
-                        { inlineData: { mimeType: file.type, data: base64Content } }
-                    ]
-                }]
-            })
-        });
-
-        const data = await response.json();
-        if (data.error) throw new Error(data.error.message);
-
-        const textResult = data.candidates[0].content.parts[0].text;
-        return geminiService.parseJSON(textResult);
-    },
+    analyzeBankBook: analyzeBankAccountPhoto,
 
     analyzeWorkerRegistrationText: async (text: string): Promise<AnalyzedWorkerRegistration[]> => {
         const apiKey = getApiKeyOrThrow();

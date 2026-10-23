@@ -883,11 +883,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     accountHolder: update.accountHolder
                 })
             ));
-            alert(`${updates.length}명의 계좌정보가 업데이트되었습니다.`);
             await fetchData(); // 데이터 새로고침
-        } catch (error) {
-            console.error("Batch update failed", error);
-            alert("일부 업데이트에 실패했습니다.");
         } finally {
             setLoading(false);
         }
@@ -1124,6 +1120,16 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     </button>
 
                     {/* 수정모드 */}
+                    <button
+                        type="button"
+                        onClick={() => setIsBankBookModalOpen(true)}
+                        title="Gemini로 계좌 사진 등록"
+                        className="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors shadow-sm whitespace-nowrap"
+                    >
+                        <FontAwesomeIcon icon={faMoneyCheck} />
+                        <span>계좌 사진 등록</span>
+                    </button>
+
                     <button
                         onClick={() => setIsEditMode(!isEditMode)}
                         className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all shadow-sm whitespace-nowrap ${isEditMode

@@ -1,6 +1,7 @@
+import { geminiService } from '../../services/geminiService';
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AccountManagementPage from './AccountManagementPage';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -10,10 +11,10 @@ import { accountDirectoryService } from '../../services/accountDirectoryService'
 import { primaryAccountService } from '../../services/primaryAccountService';
 
 jest.mock('../../components/accounts/PagePrimaryAccountManager', () => () => null);
-jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn() } }));
-jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.fn() } }));
-jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: jest.fn() } }));
-jest.mock('../../services/accountDirectoryService', () => ({ accountDirectoryService: { getEntries: jest.fn().mockResolvedValue([]) } }));
+jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn(), updateWorker: jest.fn() } }));
+jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.fn(), updateTeam: jest.fn() } }));
+jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: jest.fn(), updateCompany: jest.fn() } }));
+jest.mock('../../services/accountDirectoryService', () => ({ accountDirectoryService: { getEntries: jest.fn().mockResolvedValue([]), updateEntry: jest.fn() } }));
 jest.mock('../../services/primaryAccountService', () => ({
     primaryAccountService: {
         subscribe: jest.fn(() => () => undefined),
@@ -159,4 +160,31 @@ it('distinguishes a load failure from an empty list and allows retry', async () 
     } finally {
         consoleError.mockRestore();
     }
+});
+
+jest.mock('../../services/geminiService', () => ({ geminiService: { analyzeBankBook: jest.fn() } }));
+jest.mock('../../services/aiSettingsService', () => ({ aiSettingsService: {} }));
+
+it.each(['worker', 'team', 'company', 'custom'] as const)('registers a photo to the selected %s without requiring the recipient name to equal the account holder', async kind => {
+    URL.createObjectURL = jest.fn(() => 'blob:synthetic-bank');
+    URL.revokeObjectURL = jest.fn();
+    const fields = { bankName: '검증은행', accountNumber: '001234567890', accountHolder: '타인명의검증' };
+    (geminiService.analyzeBankBook as jest.Mock).mockResolvedValue(fields);
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([worker('recipient')]);
+    (accountDirectoryService.getEntries as jest.Mock).mockResolvedValue([{ id: 'custom-id', name: '검증 매입', category: 'purchase', status: 'active' }]);
+    const id = { worker: 'recipient', team: 'team', company: 'company', custom: 'custom-id' }[kind];
+    const writers = { worker: manpowerService.updateWorker, team: teamService.updateTeam, company: companyService.updateCompany, custom: accountDirectoryService.updateEntry };
+    await openPage();
+    fireEvent.click(screen.getByRole('button', { name: '계좌 사진 등록' }));
+    fireEvent.change(screen.getByLabelText('계좌 사진 선택'), { target: { files: [new File(['synthetic'], 'bank.png', { type: 'image/png' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini로 계좌 읽기' }));
+    await waitFor(() => expect(screen.getByLabelText('1번 계좌번호')).toHaveValue(fields.accountNumber));
+    expect(screen.getByLabelText('1번 등록할 사람·대상')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('1번 등록할 사람·대상'), { target: { value: `${kind}:${id}` } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '등록할 대상과 은행·전체 계좌번호·예금주를 확인했습니다.' }));
+    fireEvent.click(screen.getByRole('button', { name: '확인한 계좌 1건 저장' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(writers[kind]).toHaveBeenCalledWith(id, fields);
+    Object.entries(writers).filter(([key]) => key !== kind).forEach(([, writer]) => expect(writer).not.toHaveBeenCalled());
+    expect(screen.getByText('검증-recipient')).toBeVisible();
 });
