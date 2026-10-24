@@ -492,6 +492,8 @@ export const buildWorkbookReceivableRows = (
     });
 
     adjustmentInvoiceEntries.forEach((adjustmentEntry) => {
+        const adjustmentDate = normalizeDate(adjustmentEntry.date);
+        if (!adjustmentDate || adjustmentDate > paymentCutoffDate) return;
         const adjustmentAmount = Math.abs(adjustmentEntry.totalAmount ?? 0);
         if (adjustmentAmount <= 0) return;
 

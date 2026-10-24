@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faBoxArchive, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory, faSearch, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faFileInvoiceDollar, faFileExcel, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faBoxArchive, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory, faSearch, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { iconMap } from '../../constants/iconMap';
 import { accommodationService } from '../../services/accommodationService';
@@ -23,7 +23,8 @@ import { accommodationBillingTargetService } from '../../services/accommodationB
 import { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
 import {
     isCurrentAccommodationAssignment,
-    matchesCurrentAccommodationTeamScope
+    isAccommodationAssignmentInMonth,
+    matchesAccommodationTeamScopeForMonth
 } from '../../utils/accommodationStatusScope';
 import { menuServiceV11 } from '../../services/menuServiceV11';
 import { userMenuPositionService } from '../../services/userMenuPositionService';
@@ -40,7 +41,7 @@ import { SupportCancellationModal, type SupportCancellationFormValue } from '../
 import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { getContrastingTextColor } from '../../utils/color';
 import { getSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
-import { getAccommodationContractAmounts, getAccommodationMonthSummary, getAccommodationMonthSummaryByOwnership, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
+import { getAccommodationContractAmounts, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
 import type { SiteDataType } from '../../types/menu';
 
 interface AccommodationManagerProps {
@@ -124,6 +125,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     const [currentMonthLedgerRecords, setCurrentMonthLedgerRecords] = useState<UtilityRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [summaryMonth, setSummaryMonth] = useState(getSupportManagementYearMonth);
+    const [exportReadyMonth, setExportReadyMonth] = useState<string | null>(null);
+    const [exporting, setExporting] = useState(false);
     const loadSequence = useRef(0);
     useEffect(() => subscribeSupportManagementYearMonth(setSummaryMonth), []);
 
@@ -274,6 +277,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
     const loadData = async () => {
         const sequence = ++loadSequence.current;
+        setExportReadyMonth(null);
+        let exportDataComplete = true;
         try {
             setLoading(true);
             const targetYearMonth = summaryMonth;
@@ -283,10 +288,12 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 companyService.getCompanies(),
                 accommodationService.getAssignments(),
                 accommodationService.getMonthlyLedger(targetYearMonth).catch((error) => {
+                    exportDataComplete = false;
                     console.error('Failed to load accommodation monthly ledger', error);
                     return [] as UtilityRecord[];
                 }),
                 accommodationBillingTargetService.listTargets().catch((error) => {
+                    exportDataComplete = false;
                     console.error('Failed to load accommodation billing targets', error);
                     return [] as AccommodationBillingTarget[];
                 })
@@ -304,6 +311,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
             setCurrentMonthLedgerRecords(ledgerList);
             setTeams(appendOfficeAssignmentTeam(sortedTeams, sortedTeams)); // Full list for state
             setSelectableTeams(appendOfficeAssignmentTeam(allowedTeams, sortedTeams)); // Filtered list for assignment
+            if (exportDataComplete) setExportReadyMonth(targetYearMonth);
         } catch (error) {
             console.error("Failed to load accommodations", error);
         } finally {
@@ -409,6 +417,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         const map = new Map<string, UtilityRecord>();
 
         currentMonthLedgerRecords.forEach((record) => {
+            if (record.yearMonth !== summaryMonth) return;
             const rawAccommodationId = normalizeKey(record.accommodationId);
             const matchedById = rawAccommodationId ? accommodationByAnyId.get(rawAccommodationId) : undefined;
             const canonicalIdFromId = normalizeKey(matchedById?.id ?? rawAccommodationId);
@@ -426,7 +435,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         });
 
         return map;
-    }, [currentMonthLedgerRecords, accommodationByAnyId, accommodationByName]);
+    }, [currentMonthLedgerRecords, accommodationByAnyId, accommodationByName, summaryMonth]);
 
     const selectedTeamRawId = normalizeKey(selectedTeamId);
     const selectedTeam = selectedTeamRawId ? teamByAnyId.get(selectedTeamRawId) : undefined;
@@ -523,6 +532,18 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     const getAssignmentsForAccommodation = (accommodation: Accommodation): AccommodationAssignment[] => {
         return assignmentsByAccommodationId.get(normalizeKey(accommodation.id)) ?? [];
     };
+
+    // Historical display must not change the current assignments used by edits
+    // and cancellation actions.
+    const monthAssignmentsByAccommodationId = useMemo(() => new Map(
+        Array.from(assignmentsByAccommodationId, ([id, rows]) => [
+            id, rows.filter(assignment => isAccommodationAssignmentInMonth(assignment, summaryMonth)),
+        ])
+    ), [assignmentsByAccommodationId, summaryMonth]);
+
+    const getMonthAssignmentsForAccommodation = (accommodation: Accommodation): AccommodationAssignment[] => (
+        monthAssignmentsByAccommodationId.get(normalizeKey(accommodation.id)) ?? []
+    );
 
     const confirmedExpirationAlertKeySet = useMemo(
         () => new Set(confirmedExpirationAlertKeys),
@@ -642,24 +663,29 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         return matchesSelectedTeam(target.teamId, target.teamName);
     };
 
-    const selectedTeamScopedAccommodations = useMemo(() => {
-        if (!selectedTeamId) return accommodations;
+    const contractMonthAccommodations = useMemo(() => accommodations.filter(accommodation => (
+        overlapsAccommodationMonth(accommodation.contract || {}, summaryMonth)
+    )), [accommodations, summaryMonth]);
 
-        return accommodations.filter((accommodation) => {
-            const activeAssignments = getActiveAssignmentsForAccommodation(accommodation);
-            return matchesCurrentAccommodationTeamScope(
-                activeAssignments,
+    const selectedTeamScopedAccommodations = useMemo(() => {
+        if (!selectedTeamId) return contractMonthAccommodations;
+
+        return contractMonthAccommodations.filter((accommodation) => {
+            return matchesAccommodationTeamScopeForMonth(
+                getAssignmentsForAccommodation(accommodation),
                 getBillingTargetsForAccommodation(accommodation),
                 assignmentMatchesSelectedTeam,
-                billingTargetMatchesSelectedTeam
+                billingTargetMatchesSelectedTeam,
+                summaryMonth
             );
         });
     }, [
-        accommodations,
+        contractMonthAccommodations,
+        summaryMonth,
         selectedTeamId,
         selectedTeamCanonicalId,
         selectedTeamCanonicalName,
-        activeAssignmentsByAccommodationId,
+        assignmentsByAccommodationId,
         billingTargets,
         accommodationByAnyId,
         teamByAnyId,
@@ -671,7 +697,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         const query = searchTerm.trim().toLowerCase();
 
         return selectedTeamScopedAccommodations.filter(acc => {
-            const activeList = getActiveAssignmentsForAccommodation(acc);
+            const activeList = getMonthAssignmentsForAccommodation(acc);
 
             if (filterStatus === 'todo') {
                 if (acc.status !== 'active') return false;
@@ -682,7 +708,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
             if (!query) return true;
 
-            const matchedBillingTargets = getBillingTargetsForAccommodation(acc);
+            const matchedBillingTargets = getBillingTargetsForAccommodation(acc)
+                .filter(target => overlapsAccommodationMonth(target, summaryMonth));
 
             const assignmentSearchValues = activeList.flatMap((assignment) => {
                 const resolvedTeam = resolveCanonicalTeam(assignment);
@@ -726,7 +753,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 ...billingTargetSearchValues
             ].some(value => String(value ?? '').toLowerCase().includes(query));
         });
-    }, [selectedTeamScopedAccommodations, filterStatus, activeAssignmentsByAccommodationId, searchTerm, billingTargets, accommodationByAnyId]);
+    }, [selectedTeamScopedAccommodations, filterStatus, monthAssignmentsByAccommodationId, searchTerm, billingTargets, accommodationByAnyId, summaryMonth]);
 
     const ownershipSummary = useMemo(() => {
         const summary: Record<string, { count: number; rent: number; deposit: number; occupants: number }> = {
@@ -741,24 +768,24 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 summary[key].count++;
                 summary[key].rent += getAccommodationRent(acc);
                 summary[key].deposit += getAccommodationDeposit(acc);
-                const assignments = getActiveAssignmentsForAccommodation(acc);
+                const assignments = getMonthAssignmentsForAccommodation(acc);
                 summary[key].occupants += assignments.length;
             }
         });
 
         return summary;
-    }, [filteredAccommodations, activeAssignmentsByAccommodationId, currentMonthLedgerByAccommodationId]);
+    }, [filteredAccommodations, monthAssignmentsByAccommodationId, currentMonthLedgerByAccommodationId]);
 
     const filteredTotals = useMemo(() => {
         return filteredAccommodations.reduce((acc, curr) => {
             acc.count++;
             acc.rent += getAccommodationRent(curr);
             acc.deposit += getAccommodationDeposit(curr);
-            const assignments = getActiveAssignmentsForAccommodation(curr);
+            const assignments = getMonthAssignmentsForAccommodation(curr);
             acc.occupants += assignments.length;
             return acc;
         }, { count: 0, rent: 0, deposit: 0, occupants: 0 });
-    }, [filteredAccommodations, activeAssignmentsByAccommodationId, currentMonthLedgerByAccommodationId]);
+    }, [filteredAccommodations, monthAssignmentsByAccommodationId, currentMonthLedgerByAccommodationId]);
 
     const ownershipsConfig: { key: Accommodation['ownership']; label: string; bg: string; text: string; border: string; accent: string }[] = [
         { key: 'Cheongyeon', label: '청연', bg: 'bg-indigo-50', text: 'text-indigo-700', border: 'border-indigo-100', accent: 'bg-indigo-600' },
@@ -817,8 +844,9 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         return workerTargets[0].name;
     };
 
-    const getBillingTargetForAccommodation = (accommodation: Accommodation): AccommodationBillingTarget | undefined => {
-        return getBillingTargetsForAccommodation(accommodation).at(-1);
+    const getBillingTargetForAccommodation = (accommodation: Accommodation, yearMonth = summaryMonth): AccommodationBillingTarget | undefined => {
+        return getBillingTargetsForAccommodation(accommodation)
+            .filter(target => overlapsAccommodationMonth(target, yearMonth)).at(-1);
     };
 
     const getBillingModeBadge = (
@@ -826,7 +854,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         separatedTarget: AccommodationBillingTarget | undefined,
         hasAssignment: boolean
     ) => {
-        const targetRows = getBillingTargetsForAccommodation(accommodation);
+        const targetRows = getBillingTargetsForAccommodation(accommodation)
+            .filter(target => overlapsAccommodationMonth(target, summaryMonth));
         const isSplit = targetRows.length > 1 || targetRows.some((target) => Boolean(normalizeKey(target.endDate)));
         if (isSplit) {
             return { label: '분할', className: 'bg-amber-50 text-amber-700 border-amber-100' };
@@ -843,8 +872,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         return { label: '미지정', className: 'bg-slate-50 text-slate-400 border-slate-100' };
     };
 
-    const buildBillingTargetLabel = (accommodation: Accommodation, items: AccommodationAssignment[]): string => {
-        const separatedTarget = getBillingTargetForAccommodation(accommodation);
+    const buildBillingTargetLabel = (accommodation: Accommodation, items: AccommodationAssignment[], yearMonth = summaryMonth): string => {
+        const separatedTarget = getBillingTargetForAccommodation(accommodation, yearMonth);
         if (separatedTarget) {
             if (separatedTarget.targetType === 'worker') return '개인';
             if (separatedTarget.targetType === 'office') return '사무실';
@@ -944,7 +973,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     }
 
     const getAssignedTeamNameForAccommodation = (accommodation: Accommodation): string => {
-        const activeList = getActiveAssignmentsForAccommodation(accommodation);
+        const activeList = getMonthAssignmentsForAccommodation(accommodation);
         const primaryTeamAssign = activeList.find((assignment) => (
             Boolean(normalizeKey(assignment.teamId)) || Boolean(normalizeKey(assignment.teamName))
         ));
@@ -970,7 +999,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
         const targetWorkerId = normalizeKey(separatedTarget.workerId);
         const targetWorkerName = normalizeKey(separatedTarget.workerName);
-        const activeList = getActiveAssignmentsForAccommodation(accommodation);
+        const activeList = getMonthAssignmentsForAccommodation(accommodation);
         const matchedAssignment = activeList.find((assignment) => (
             Boolean(targetWorkerId && normalizeKey(assignment.workerId) === targetWorkerId) ||
             Boolean(targetWorkerName && normalizeKey(assignment.workerName) === targetWorkerName)
@@ -994,7 +1023,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         })
     ), [
         filteredAccommodations,
-        activeAssignmentsByAccommodationId,
+        monthAssignmentsByAccommodationId,
+        summaryMonth,
         billingTargetByAccommodationId,
         billingTargetByAccommodationName,
         teamByAnyId,
@@ -1169,7 +1199,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 statusAfter: 'inactive',
                 assigneeName: activeList.map((assignment) => normalizeKey(assignment.workerName)).filter(Boolean).join(', ') || accommodation.currentOccupantName,
                 teamName: activeList.map((assignment) => normalizeKey(assignment.teamName)).filter(Boolean).join(', '),
-                billingTargetName: buildBillingTargetLabel(accommodation, activeList),
+                billingTargetName: buildBillingTargetLabel(accommodation, activeList, getCurrentYearMonth()),
                 settlementAmount: form.settlementAmount,
                 note: form.note,
                 snapshot: {
@@ -1183,7 +1213,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                     deposit: getAccommodationDeposit(accommodation),
                     monthlyRent: getAccommodationRent(accommodation),
                     currentOccupantName: accommodation.currentOccupantName,
-                    billingTarget: buildBillingTargetLabel(accommodation, activeList)
+                    billingTarget: buildBillingTargetLabel(accommodation, activeList, getCurrentYearMonth())
                 }
             });
 
@@ -1275,34 +1305,60 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     // Stats Logic
     const totalCount = selectedTeamScopedAccommodations.length;
     const currentWorkCount = selectedTeamScopedAccommodations.filter((accommodation) => (
-        accommodation.status === 'active' && getActiveAssignmentsForAccommodation(accommodation).length === 0
+        accommodation.status === 'active' && getMonthAssignmentsForAccommodation(accommodation).length === 0
     )).length;
     const occupiedCount = selectedTeamScopedAccommodations.filter(a => a.status === 'active').reduce((acc, _) => acc + 1, 0); // safe count
     const vacantCount = selectedTeamScopedAccommodations.filter(a => a.status === 'inactive').reduce((acc, _) => acc + 1, 0);
-    const monthScopedAccommodations = accommodations.filter(accommodation => {
-        if (!selectedTeamId) return true;
-        const monthAssignments = getAssignmentsForAccommodation(accommodation)
-            .filter(assignment => overlapsAccommodationMonth(assignment, summaryMonth));
-        if (monthAssignments.length) return monthAssignments.some(assignmentMatchesSelectedTeam);
-        return getBillingTargetsForAccommodation(accommodation)
-            .filter(target => overlapsAccommodationMonth(target, summaryMonth))
-            .some(billingTargetMatchesSelectedTeam);
-    });
-    const normalizedMonthLedgerRecords = Array.from(currentMonthLedgerByAccommodationId, ([accommodationId, record]) => ({
-        ...record, accommodationId,
-    }));
-    const { rent: totalRent, deposit: totalDeposit } = getAccommodationMonthSummary(
-        monthScopedAccommodations, summaryMonth, normalizedMonthLedgerRecords,
-    );
-    const ownershipMonthSummary = getAccommodationMonthSummaryByOwnership(
-        monthScopedAccommodations, summaryMonth, normalizedMonthLedgerRecords,
-    );
+    // The list and both summaries share the selected contract month and filters.
+    const { rent: totalRent, deposit: totalDeposit } = filteredTotals;
+    const missingContractStartCount = filteredAccommodations.filter(room => !room.contract?.startDate?.trim()).length;
     const ownershipSummaryRows = [
-        { label: '청연', ...ownershipMonthSummary.Cheongyeon },
-        { label: '개인(사모님)', ...ownershipMonthSummary.Individual },
-        ...(ownershipMonthSummary.Dawon.rent || ownershipMonthSummary.Dawon.deposit
-            ? [{ label: '다원', ...ownershipMonthSummary.Dawon }] : []),
+        { label: '청연', ...ownershipSummary.Cheongyeon },
+        { label: '개인(사모님)', ...ownershipSummary.Individual },
+        ...(ownershipSummary.Dawon.rent || ownershipSummary.Dawon.deposit
+            ? [{ label: '다원', ...ownershipSummary.Dawon }] : []),
     ];
+
+    const canExportStatus = !loading && !exporting && exportReadyMonth === summaryMonth
+        && sortedFilteredAccommodations.length > 0;
+    const handleExcelDownload = async () => {
+        if (!canExportStatus) return;
+        const options = {
+            yearMonth: summaryMonth,
+            teamName: selectedTeamId ? selectedTeamCanonicalName || selectedTeamId : '전체',
+            searchText: searchTerm,
+            statusLabel: { all: '전체', active: '운영 중', inactive: '보관/종료', todo: '확인 필요' }[filterStatus],
+            rows: sortedFilteredAccommodations.map(accommodation => {
+                const activeList = getMonthAssignmentsForAccommodation(accommodation);
+                const target = getBillingTargetForAccommodation(accommodation);
+                const targetLabel = buildBillingTargetLabel(accommodation, activeList);
+                const targetName = buildBillingTargetWorkerList(accommodation, activeList)
+                    || getBillingTeamNameForAccommodation(accommodation);
+                return {
+                    accommodation,
+                    rent: getAccommodationRent(accommodation),
+                    deposit: getAccommodationDeposit(accommodation),
+                    assignedTeam: getAssignedTeamNameForAccommodation(accommodation),
+                    assignedWorkers: Array.from(new Set(activeList.map(assignment => (
+                        assignment.workerName || assignment.teamName || assignment.workerId
+                    )).filter(Boolean))),
+                    occupantCount: activeList.length,
+                    billingTarget: [targetLabel, targetName].filter(Boolean).join(' · '),
+                    billingMode: getBillingModeBadge(accommodation, target, activeList.length > 0).label,
+                };
+            }),
+        };
+        setExporting(true);
+        try {
+            const { buildAccommodationStatusWorkbook, downloadAccommodationWorkbook } = await import('../../utils/accommodationExcelExport');
+            await downloadAccommodationWorkbook(buildAccommodationStatusWorkbook(options), `숙소_배정경비현황_${summaryMonth}.xlsx`);
+        } catch (error) {
+            console.error('Failed to export accommodation status', error);
+            void Swal.fire('다운로드 실패', '엑셀 다운로드에 실패했습니다. 다시 시도해 주세요.', 'error');
+        } finally {
+            setExporting(false);
+        }
+    };
 
     // Calculate Alerts (Rent Due Soon)
     const today = new Date();
@@ -1440,6 +1496,18 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                     </div>
 
                     <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
+                        {activeTab === 'status' && (
+                            <button
+                                type="button"
+                                onClick={handleExcelDownload}
+                                disabled={!canExportStatus}
+                                title="현재 조회 목록을 두 시트에 동일하게 적용하여 다운로드합니다."
+                                className="flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-bold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <FontAwesomeIcon icon={faFileExcel} />
+                                {exporting ? '엑셀 생성 중...' : '엑셀 다운로드'}
+                            </button>
+                        )}
                         {activeTab === 'status' && (
                             <span className="whitespace-nowrap px-1 text-xs font-bold text-slate-400">
                                 조회 {filteredAccommodations.length} / {selectedTeamScopedAccommodations.length}
@@ -1649,6 +1717,14 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                             </div>
 
                             {/* Summary Stats Cards */}
+                            <p className="text-xs text-slate-500">
+                                {summaryMonth} 계약기간 기준 · 상태 필터는 현재 등록 상태 기준입니다.
+                            </p>
+                            {missingContractStartCount > 0 && (
+                                <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                    계약 시작일 미입력 {missingContractStartCount}곳: 시작일이 없어 이전 월에도 포함됩니다. 정확한 월별 집계를 위해 계약 시작일을 확인해 주세요.
+                                </div>
+                            )}
                             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
                                 {currentWorkCount > 0 && (
                                 <button
@@ -1690,7 +1766,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                     </div>
                                 </button>
 
-                                <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-[0_4px_20px_-4px_rgba(99,102,241,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                                <div role="region" aria-label="월세 요약" className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-[0_4px_20px_-4px_rgba(99,102,241,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
                                     <div className="absolute right-0 top-0 w-32 h-32 bg-indigo-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
                                     <div className="relative z-10">
                                         <p className="text-xs font-bold text-indigo-600/70 uppercase tracking-wider mb-2">총 월세 지출액</p>
@@ -1699,7 +1775,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                             <span className="text-sm font-bold text-slate-400">원</span>
                                         </div>
                                         <div className="mt-4 flex items-center gap-2 text-xs font-medium text-indigo-700 bg-indigo-50 w-fit px-2 py-1 rounded-lg">
-                                            <FontAwesomeIcon icon={faWonSign} /> {summaryMonth} 계약 월세 기준
+                                            <FontAwesomeIcon icon={faWonSign} /> {summaryMonth} 조회 숙소의 계약 월세 기준
                                         </div>
                                         <dl className="mt-3 space-y-2 border-t border-indigo-100 pt-3 text-sm" aria-label="명의별 월세 지출액">
                                             {ownershipSummaryRows.map(row => (
@@ -1712,7 +1788,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                     </div>
                                 </div>
 
-                                <div className="bg-white p-6 rounded-2xl border border-blue-100 shadow-[0_4px_20px_-4px_rgba(59,130,246,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                                <div role="region" aria-label="보증금 요약" className="bg-white p-6 rounded-2xl border border-blue-100 shadow-[0_4px_20px_-4px_rgba(59,130,246,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
                                     <div className="absolute right-0 top-0 w-32 h-32 bg-blue-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
                                     <div className="relative z-10">
                                         <p className="text-xs font-bold text-blue-600/70 uppercase tracking-wider mb-2">총 예치 보증금</p>
@@ -1721,7 +1797,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                             <span className="text-sm font-bold text-slate-400">원</span>
                                         </div>
                                         <div className="mt-4 flex items-center gap-2 text-xs font-medium text-blue-700 bg-blue-50 w-fit px-2 py-1 rounded-lg">
-                                            <FontAwesomeIcon icon={faWonSign} /> {summaryMonth} 기준 · 반환 예정
+                                            <FontAwesomeIcon icon={faWonSign} /> {summaryMonth} 조회 숙소 기준 · 반환 예정
                                         </div>
                                         <dl className="mt-3 space-y-2 border-t border-blue-100 pt-3 text-sm" aria-label="명의별 예치 보증금">
                                             {ownershipSummaryRows.map(row => (
@@ -1836,7 +1912,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                             <tbody className="divide-y divide-slate-100">
                                                 {sortedFilteredAccommodations
                                                     .map((acc, rowIdx) => {
-                                                        const activeList = getActiveAssignmentsForAccommodation(acc);
+                                                        const activeList = getMonthAssignmentsForAccommodation(acc);
                                                         const assignedWorkerNames = Array.from(
                                                             new Set(
                                                                 activeList
@@ -2165,7 +2241,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                                     {sortedFilteredAccommodations.map(acc => (
                                         (() => {
-                                            const activeList = getActiveAssignmentsForAccommodation(acc);
+                                            const activeList = getMonthAssignmentsForAccommodation(acc);
                                             const checkedInCount = activeList.length;
                                             const separatedBillingTarget = getBillingTargetForAccommodation(acc);
                                             const billingTargetLabel = buildBillingTargetLabel(acc, activeList);
@@ -2406,11 +2482,11 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                             )}
 
                             {/* Ownership Summary Breakdown */}
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in-up">
+                            <div role="region" aria-label="명의별 현황 요약" className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in-up">
                                 <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex justify-between items-center">
                                     <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
                                         <FontAwesomeIcon icon={faChartPie} className="text-indigo-500" />
-                                        명의별 현황 요약 ({
+                                        명의별 현황 요약 ({summaryMonth} · {
                                             filterStatus === 'all' ? '전체' :
                                             filterStatus === 'active' ? '운영 중' :
                                             filterStatus === 'todo' ? '확인 필요' :
@@ -2426,7 +2502,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                         {ownershipsConfig.map(({ key, label, bg, text, border, accent }) => {
                                             const s = ownershipSummary[key || 'Cheongyeon'];
                                             return (
-                                                <div key={key} className="p-6 hover:bg-slate-50/50 transition-colors">
+                                                <div key={key} role="group" aria-label={label} className="p-6 hover:bg-slate-50/50 transition-colors">
                                                     <div className="flex items-center gap-2 mb-5">
                                                         <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${bg} ${text} border ${border} shadow-sm`}>
                                                             {label}
@@ -2460,7 +2536,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                             );
                                         })}
                                         {/* Grand Total Column */}
-                                        <div className="p-6 bg-indigo-50/20 relative overflow-hidden">
+                                        <div role="group" aria-label="전체 합계" className="p-6 bg-indigo-50/20 relative overflow-hidden">
                                             <div className="absolute top-0 right-0 p-2 opacity-5">
                                                 <FontAwesomeIcon icon={faBuilding} size="4x" className="text-indigo-600" />
                                             </div>

@@ -604,9 +604,9 @@ const buildTeamSettlementBody = (event: SystemMessageEvent, doc: TeamSettlementD
 let recipientDataCache: { data: MessageRecipientData; timestamp: number } | null = null;
 const RECIPIENT_DATA_TTL = 1000 * 60 * 3;
 
-const getRecipientData = async (): Promise<MessageRecipientData> => {
+const getRecipientData = async (fresh = false): Promise<MessageRecipientData> => {
   const now = Date.now();
-  if (recipientDataCache && now - recipientDataCache.timestamp < RECIPIENT_DATA_TTL) {
+  if (!fresh && recipientDataCache && now - recipientDataCache.timestamp < RECIPIENT_DATA_TTL) {
     return recipientDataCache.data;
   }
 
@@ -924,20 +924,42 @@ export const systemMessageService = {
     }
   },
 
-  notifyNoticeCreatedEvent: async (notice: NoticeMessagePayload, actor: NoticeAuthor): Promise<void> => {
+  notifyNoticeCreatedEvent: async (notice: NoticeMessagePayload, actor: NoticeAuthor): Promise<'sent' | 'disabled' | 'no-recipients' | 'failed'> => {
     try {
       const event: SystemMessageEvent = 'notice.created';
-      await notifyConfiguredEvent(event, {
+      const settings = await getSettings();
+      if (!settings.enabled || !settings.events[event]?.enabled) return 'disabled';
+      const data = await getRecipientData(true);
+      // Notification audiences must never exceed the notice's own target positions.
+      const target = resolveMessageRecipients(createDefaultRecipientRule('noticeTargetPositions'), data, { targetPositions: notice.targetPositions });
+      const rule = normalizeRecipientRule(settings.events[event]?.recipientRule || createDefaultRecipientRule('noticeTargetPositions'));
+      const configured = rule.mode === 'global' ? settings : resolveMessageRecipients(rule, data, { targetPositions: notice.targetPositions });
+      const recipients = data.users.filter(user => (!user.status || user.status === 'active')
+        && (target.recipientScope === 'all' || target.recipientIds.includes(user.uid))
+        && (configured.recipientScope === 'all' || configured.recipientIds.includes(user.uid)));
+      if (!recipients.length) return 'no-recipients';
+      const payload = {
         title: `[공지사항] ${notice.title}`,
         body: buildNoticeCreatedBody(notice),
         priority: noticeToMessagePriority(notice.priority),
         actionLabel: '공지사항 바로가기',
         actionUrl: `/notices?noticeId=${encodeURIComponent(notice.id)}`,
-      }, {
-        targetPositions: notice.targetPositions || [],
+      };
+      const messageId = await messageService.createMessage({
+        ...payload,
+        type: 'direct', category: '공지', senderId: actor.uid, senderName: actor.name,
+        recipientScope: 'users', recipientIds: recipients.map(user => user.uid),
+        recipientNames: recipients.map(user => user.displayName || '사용자'),
+        expiresAt: notice.expiresAt || null,
       });
+      // Logging failure must not report an already-delivered notice as unsent.
+      await writeAutomationMessageLog({ result: 'sent', event, payload, messageId, recipientScope: 'users',
+        recipientIds: recipients.map(user => user.uid), recipientNames: recipients.map(user => user.displayName || '사용자'),
+        context: { targetPositions: notice.targetPositions } }).catch(() => undefined);
+      return 'sent';
     } catch (error) {
       console.warn('[systemMessageService] notice notification failed:', error);
+      return 'failed';
     }
   },
 

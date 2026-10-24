@@ -1,7 +1,11 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import { createHash } from 'crypto';
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { getServerGeminiSettings } from './serverAiSettings';
+import { requireCallableAuth } from './auth';
 
 export type CardExpenseAuditSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type CardExpenseAuditReviewStatus = 'OPEN' | 'NORMAL' | 'NEEDS_EVIDENCE' | 'EXCEPTION' | 'ACKNOWLEDGED';
@@ -186,20 +190,17 @@ export const hasStrictCardExpenseAuditAccess = (source: Record<string, unknown>)
 const requireCardExpenseAuditAccess = async (
     context: functions.https.CallableContext,
 ): Promise<{ uid: string; name: string; email: string | null }> => {
-    if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', '로그인이 필요합니다.');
-    }
-
-    const token = (context.auth.token || {}) as Record<string, unknown>;
-    const userSnap = await admin.firestore().collection('users').doc(context.auth.uid).get();
+    const auth = requireCallableAuth(context);
+    const token = (auth.token || {}) as Record<string, unknown>;
+    const userSnap = await admin.firestore().collection('users').doc(auth.uid).get();
     const user = userSnap.data() || {};
     if (!hasStrictCardExpenseAuditAccess(token) && !hasStrictCardExpenseAuditAccess(user)) {
         throw new functions.https.HttpsError('permission-denied', '카드 AI 감사는 CEO와 DEV 직책만 이용할 수 있습니다.');
     }
 
     return {
-        uid: context.auth.uid,
-        name: asString(user.displayName || token.name || token.email || context.auth.uid),
+        uid: auth.uid,
+        name: asString(user.displayName || token.name || token.email || auth.uid),
         email: asString(user.email || token.email) || null,
     };
 };
@@ -482,7 +483,7 @@ const callGeminiExpenseAudit = async (
 ): Promise<{ model: string; executiveSummary: string; priorityActions: string[]; reviews: GeminiAuditReview[] }> => {
     const settings = await getServerGeminiSettings();
     const apiKey = asString(settings.apiKey);
-    const model = asString(settings.batchModel || settings.model) || 'gemini-2.5-flash';
+    const model = asString(settings.batchModel || settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
     if (!apiKey) throw new Error('서버용 Gemini API Key가 설정되지 않았습니다.');
 
     const candidates = findings.map((finding) => ({
@@ -513,13 +514,13 @@ const callGeminiExpenseAudit = async (
 거래 JSON:
 ${JSON.stringify(candidates)}`;
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    const response = await fetch(endpoint, {
+    const response = await trackedGeminiFetch('card-audit')(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: {
-                temperature: 0.05,
+                ...geminiTextGenerationOptions(model, 0.05),
                 responseMimeType: 'application/json',
                 responseJsonSchema: GEMINI_RESPONSE_SCHEMA,
             },
@@ -605,7 +606,7 @@ const writeInChunks = async (
 export const runCardExpenseAudit = functions
     .runWith({ timeoutSeconds: 540, memory: '1GB', maxInstances: 2 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const actor = await requireCardExpenseAuditAccess(context);
         const yearMonth = parseYearMonth(data?.yearMonth);
         const db = admin.firestore();
@@ -764,12 +765,12 @@ export const runCardExpenseAudit = functions
             if (error instanceof functions.https.HttpsError) throw error;
             throw new functions.https.HttpsError('internal', message || '카드감사 실행에 실패했습니다.');
         }
-    });
+    }));
 
 export const getCardExpenseAuditDashboard = functions
     .runWith({ timeoutSeconds: 60, memory: '512MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         await requireCardExpenseAuditAccess(context);
         const yearMonth = parseYearMonth(data?.yearMonth);
         const db = admin.firestore();
@@ -791,12 +792,12 @@ export const getCardExpenseAuditDashboard = functions
             latestRun: runs[0] || null,
             findings,
         };
-    });
+    }));
 
 export const reviewCardExpenseAuditFinding = functions
     .runWith({ timeoutSeconds: 30, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const actor = await requireCardExpenseAuditAccess(context);
         const findingId = asString(data?.findingId);
         const reviewStatus = asString(data?.reviewStatus) as CardExpenseAuditReviewStatus;
@@ -836,12 +837,12 @@ export const reviewCardExpenseAuditFinding = functions
             });
         });
         return { ok: true, findingId, reviewStatus };
-    });
+    }));
 
 export const saveCardExpenseAuditPolicy = functions
     .runWith({ timeoutSeconds: 30, memory: '256MB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const actor = await requireCardExpenseAuditAccess(context);
         const policy = normalizeCardExpenseAuditPolicy(data?.policy);
         const now = admin.firestore.Timestamp.now();
@@ -851,4 +852,4 @@ export const saveCardExpenseAuditPolicy = functions
             updatedBy: actor,
         }, { merge: true });
         return { ok: true, policy };
-    });
+    }));

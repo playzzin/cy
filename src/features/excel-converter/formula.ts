@@ -46,7 +46,7 @@ export interface FormulaContext {
         remaining: number;
     };
 }
-const functions = new Set('SUM PRODUCT MIN MAX ROUND ROUNDDOWN ROUNDUP TRUNC INT ABS MOD IF IFERROR AND OR NOT TRUE FALSE ISNUMBER LEN VALUE LEFT RIGHT MID SUBSTITUTE SEARCH FIND COUNT COUNTA COUNTIF SUMPRODUCT ROW COLUMNS DATE DAY MONTH YEAR TODAY DATEDIF'.split(' '));
+const functions = new Set('SUM AVERAGE SUMIF SUMIFS COUNTIFS PRODUCT MIN MAX ROUND ROUNDDOWN ROUNDUP TRUNC INT ABS MOD IF IFERROR AND OR NOT TRUE FALSE ISNUMBER LEN VALUE LEFT RIGHT MID SUBSTITUTE SEARCH FIND COUNT COUNTA COUNTIF SUMPRODUCT ROW COLUMNS DATE DAY MONTH YEAR TODAY DATEDIF'.split(' '));
 const matrix = (v: Value): v is Matrix => typeof v === 'object' && v !== null;
 const scalar = (v: Value): Scalar => { if (matrix(v))
     throw new UnsupportedFormula('array-result'); return v; };
@@ -345,7 +345,7 @@ export function evaluateCellFormula(formula: string, context: FormulaContext): S
                 return fail();
             return name === 'AND' ? booleans.every(Boolean) : booleans.some(Boolean);
         }
-        if (['SUM', 'PRODUCT', 'MIN', 'MAX', 'COUNT', 'COUNTA'].includes(name)) {
+        if (['SUM', 'AVERAGE', 'PRODUCT', 'MIN', 'MAX', 'COUNT', 'COUNTA'].includes(name)) {
             arity(1, 255);
             const items = args.flatMap(a => { const result = evaluate(a); return flat(result).map(v => ({ v, reference: a.type === 'ref' || a.type === 'range' || matrix(result) })); });
             if (name === 'COUNTA')
@@ -354,7 +354,8 @@ export function evaluateCellFormula(formula: string, context: FormulaContext): S
                 return items.filter(({ v, reference }) => typeof v === 'number' || (!reference && v !== null && v !== '' && (typeof v === 'boolean' || (typeof v === 'string' && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(v.trim()))))).length;
             const numbers = items.filter(({ v, reference }) => !reference || typeof v === 'number').map(({ v }) => numeric(v));
             if (!numbers.length)
-                return 0;
+                return name === 'AVERAGE' ? fail('#DIV/0!') : 0;
+            if (name === 'AVERAGE') return finite(numbers.reduce((a,b)=>a+b,0)/numbers.length);
             return finite(name === 'SUM' ? numbers.reduce((a, b) => a + b, 0) : name === 'PRODUCT' ? numbers.reduce((a, b) => a * b, 1) : name === 'MIN' ? Math.min(...numbers) : Math.max(...numbers));
         }
         if (['ROUND', 'ROUNDDOWN', 'ROUNDUP', 'TRUNC'].includes(name)) {
@@ -437,15 +438,11 @@ export function evaluateCellFormula(formula: string, context: FormulaContext): S
                 return fail();
             return finite(flat(first).reduce<number>((total, _, i) => total + values.reduce<number>((p, v) => p * (typeof flat(v)[i] === 'number' ? flat(v)[i] as number : 0), 1), 0));
         }
-        if (name === 'COUNTIF') {
-            arity(2);
-            if (args[0].type !== 'range' && args[0].type !== 'ref')
-                return fail();
-            const criteria = value(1);
+        if (['COUNTIF','SUMIF','SUMIFS','COUNTIFS'].includes(name)) {
+            const matches=(v:Scalar,criteria:Scalar):boolean=>{
             const match = typeof criteria === 'string' ? /^(<=|>=|<>|=|<|>)?(.*)$/.exec(criteria)! : null;
             const op = match?.[1] || '=', pattern = match?.[2];
             const isNumber = pattern !== undefined && /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(pattern);
-            return flat(evaluate(args[0])).filter(v => {
                 if (isNumber) {
                     if (v === null || v === '' || typeof v === 'boolean')
                         return false;
@@ -461,7 +458,21 @@ export function evaluateCellFormula(formula: string, context: FormulaContext): S
                     return op === '=' ? matches : op === '<>' ? !matches : binary(op, v, pattern) === true;
                 }
                 return binary(op, v, criteria === null ? 0 : criteria) === true;
-            }).length;
+            };
+            const range=(i:number)=>{if(!args[i]||!['ref','range'].includes(args[i].type))return fail();return evaluate(args[i]);};
+            if(name==='COUNTIF'||name==='SUMIF'){
+                arity(2,name==='SUMIF'?3:2);const criteria=value(1),r=range(0),list=flat(r);
+                if(name==='COUNTIF')return list.filter(v=>matches(v,criteria)).length;
+                const summed=args[2]?range(2):r;
+                // Excel extends a smaller sum_range; leave that form to Excel rather than guess.
+                if(flat(summed).length!==list.length||(matrix(r)&&matrix(summed)&&(r.rows!==summed.rows||r.columns!==summed.columns)))throw new UnsupportedFormula('sumif-range-size');
+                return finite(list.reduce<number>((total,v,i)=>total+(matches(v,criteria)&&typeof flat(summed)[i]==='number'?flat(summed)[i] as number:0),0));
+            }
+            const start=name==='SUMIFS'?1:0;arity(start+2,255);if((args.length-start)%2)return fail();
+            const pairs:{range:Value;criterion:Scalar}[]=[];for(let i=start;i<args.length;i+=2)pairs.push({range:range(i),criterion:value(i+1)});
+            const summed=name==='SUMIFS'?range(0):pairs[0].range,shape=(v:Value)=>matrix(v)?`${v.rows}:${v.columns}`:'1:1';
+            if(pairs.some(p=>shape(p.range)!==shape(summed)))return fail();
+            return finite(flat(summed).reduce<number>((total,v,i)=>total+(pairs.every(p=>matches(flat(p.range)[i],p.criterion))?(name==='COUNTIFS'?1:typeof v==='number'?v:0):0),0));
         }
         const date1904 = !!context.date1904;
         if (name === 'DATE') {

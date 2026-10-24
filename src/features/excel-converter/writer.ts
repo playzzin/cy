@@ -5,7 +5,28 @@ import { buildTraces, numberValue, runRules } from './transform';
 import { columnName, columnNumber, elements, normalizeZipPath, readWorkbook, serializeXml, xml } from './workbook';
 import { validatePlanReferences } from './planning';
 import { inputRecordRows } from './mergedLayout';
+import { evaluateCellFormula } from './formula';
+import { SheetInfo } from './types';
+import { applySheetEdits } from './sheetEditing';
+import { applyFormulaEdits } from './formulaEditing';
 export { evaluateFormula } from './formula';
+function dependsOnManualValue(sheet: SheetInfo | undefined, address: string, traces: CellTrace[]): boolean {
+    if (!sheet) return false;
+    const edited = new Set(traces.filter(t => t.sheet === sheet.name && ['사용자 직접 수정','수식 수정'].includes(t.rule)).map(t => t.address));
+    if (!edited.size) return false;
+    const cells = new Map(sheet.cells.map(c => [c.address,c]));
+    const visiting = new Set<string>(); const budget = {remaining:100000}; let found = false;
+    const lookup = (ref: string): import('./types').Scalar => {
+        if (edited.has(ref)) found = true;
+        const cell = cells.get(ref);
+        if (!cell?.formula) return cell?.value ?? null;
+        if (visiting.has(ref) || visiting.size > 100) throw new Error('수식 참조를 확인하지 못했습니다.');
+        visiting.add(ref);
+        const value = evaluateCellFormula(cell.formula, {lookup,address:ref,budget});
+        visiting.delete(ref); return value;
+    };
+    try { lookup(address); return found; } catch { return found; }
+}
 const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const REL = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const DOCREL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -175,6 +196,8 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
     if (!sourceSheet)
         throw new Error('대상 시트를 찾을 수 없습니다.');
     const templateZip = await JSZip.loadAsync(new Uint8Array(target.bytes));
+    if (Object.keys(templateZip.files).some(p => /externalLinks\/externalLink/i.test(p)))
+        throw new Error('외부 연결이 있는 파일은 데이터 원본으로만 사용할 수 있습니다. 완성할 양식은 Excel에서 외부 연결을 제거한 사본을 선택해 주세요.');
     const templateDoc = xml(await templateZip.file(sourceSheet.path)!.async('string'));
     if (elements(templateDoc, 'sheetProtection').length)
         throw new Error('보호된 시트는 변경할 수 없습니다. Excel에서 보호를 해제한 양식을 선택해 주세요.');
@@ -195,9 +218,12 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
     const result: ConversionResult = { outputs: [], issues: [...processed.issues], excluded: processed.excluded, inputCount: table.rows.length, outputCount: processed.rows.length, elapsedMs: 0 };
     if (!processed.rows.length)
         result.issues.push({ level: 'error', code: 'no-rows', message: '조건에 맞는 데이터가 없습니다. 제외 조건을 확인해 주세요.' });
-    for (const override of plan.overrides || [])
-        if (!processed.rows.some(r => r.origins.join('\n') === override.originsKey) || !plan.mappings.some(m => m.targetColumn === override.targetColumn && (m.rowOffset || 0) === (override.rowOffset || 0)))
+    for (const override of plan.overrides || []) {
+        const active = processed.rows.some(r => r.origins.join('\n') === override.originsKey);
+        const filtered = !active && table.rows.some(r => r.origins.join('\n') === override.originsKey) && !processed.rows.some(r => r.origins.some(origin => override.originsKey.split('\n').includes(origin)));
+        if ((!active && !filtered) || !(override.fixedAddress ? plan.fixedCells.some(f => f.address === override.fixedAddress) : plan.mappings.some(m => m.targetColumn === override.targetColumn && (m.rowOffset || 0) === (override.rowOffset || 0))))
             result.issues.push({ level: 'error', code: 'stale-override', message: '직접 수정한 행의 원본 구성이나 대상 열이 바뀌었습니다. 직접 수정 내역을 해제하고 다시 확인해 주세요.' });
+    }
     if (result.issues.some(i => i.level === 'error'))
         return result;
     const groups = new Map<string, typeof processed.rows>();
@@ -237,6 +263,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
             onProgress?.(`${result.outputs.length + 1}번째 파일 작성·검증 중`);
             await new Promise(resolve => setTimeout(resolve, 0));
             const zip = await JSZip.loadAsync(new Uint8Array(target.bytes));
+            if(plan.macroEdits.length)await (await import('./vbaEditing')).applyMacroEdits(zip,plan.macroEdits);
             const workbook = xml(await zip.file('xl/workbook.xml')!.async('string'));
             const rels = xml(await zip.file('xl/_rels/workbook.xml.rels')!.async('string'));
             const contentTypes = xml(await zip.file('[Content_Types].xml')!.async('string'));
@@ -246,6 +273,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
             const sheetsNode = elements(workbook, 'sheets')[0];
             const allTraces: CellTrace[] = [];
             const outputIssues: Issue[] = [];
+            if(plan.macroEdits.length)outputIssues.push({level:'warning',code:'macro-edited',message:`VBA ${plan.macroEdits.map(m=>m.module).join(', ')} 모듈을 수정해 저장했습니다. 코드 재읽기는 확인했으며 매크로 실행은 Excel에서 확인해야 합니다.`});
             const bundle = bundles[bundleIndex];
             const modifiedPaths: string[] = [];
             for (let page = 0; page < bundle.length; page++) {
@@ -298,12 +326,14 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                             assignValue(doc, cell, { value: null, kind: 'blank' }, date1904);
                     }
                 const prepared = buildTraces(plan, bundle[page], sheetName, inputRows);
-                outputIssues.push(...prepared.issues, ...validateInputRestrictions(doc, prepared.traces, target));
+                const formulaChanges=applyFormulaEdits(doc,plan.formulaEdits,prepared.traces);
+                outputIssues.push(...prepared.issues, ...validateInputRestrictions(doc, prepared.traces.filter(t=>!formulaChanges.has(t.address)), target));
                 for (const trace of prepared.traces) {
                     const cell = getCell(doc, trace.address);
                     if (elements(cell, 'f').length) {
-                        if (trace.value !== null)
+                        if (trace.value !== null && !formulaChanges.has(trace.address))
                             outputIssues.push({ level: 'error', code: 'formula-overwrite', message: `${trace.label}: 기존 수식 칸은 덮어쓸 수 없습니다. 이 열을 빈칸·수식 유지로 설정해 주세요.`, location: `${sheetName}!${trace.address}` });
+                        allTraces.push({...trace,rule:formulaChanges.has(trace.address)?'수식 수정':'formula'});
                         continue;
                     }
                     assignValue(doc, cell, trace, date1904);
@@ -311,11 +341,13 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                     applyFormat(styles, cell, mapping, styleCache);
                     allTraces.push(trace);
                 }
-                const maxRow = Math.max(sourceSheet.rowCount, plan.endRow, ...plan.fixedCells.map(f => Number(f.address.match(/\d+$/)![0])));
-                const maxCol = Math.max(sourceSheet.columnCount, ...plan.mappings.map(m => m.targetColumn), ...plan.fixedCells.map(f => columnNumber(f.address.replace(/\d/g, ''))));
+                for(const address of formulaChanges.keys())if(!allTraces.some(t=>t.sheet===sheetName&&t.address===address))allTraces.push({sheet:sheetName,address,label:'계산식',value:null,kind:'number',origins:[],rule:'수식 수정'});
+                const maxRow = Math.max(sourceSheet.rowCount, plan.endRow, ...plan.fixedCells.map(f => Number(f.address.match(/\d+$/)![0])),...Array.from(formulaChanges.keys()).map(a=>Number(a.match(/\d+/)![0])));
+                const maxCol = Math.max(sourceSheet.columnCount, ...plan.mappings.map(m => m.targetColumn), ...plan.fixedCells.map(f => columnNumber(f.address.replace(/\d/g, ''))),...Array.from(formulaChanges.keys()).map(a=>columnNumber(a.replace(/\d/g,''))));
                 const dim = elements(doc, 'dimension')[0];
                 if (dim)
                     dim.setAttribute('ref', `A1:${columnName(maxCol)}${maxRow}`);
+                applySheetEdits(doc, styles, plan.edits, prepared.traces);
                 zip.file(path, serializeXml(doc));
                 modifiedPaths.push(path);
             }
@@ -366,6 +398,7 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
             const rereadValues = new Map(reread.sheets.map(s => [s.name, new Map(s.cells.map(c => [c.address, c.value]))]));
             for (const trace of allTraces) {
                 const actual = rereadValues.get(trace.sheet)?.get(trace.address) ?? null;
+                if(['formula','수식 수정'].includes(trace.rule)){trace.value=actual;continue;}
                 if ((actual ?? '') !== (trace.value ?? ''))
                     outputIssues.push({ level: 'error', code: 'roundtrip', message: '저장 후 다시 읽은 값이 계획과 다릅니다.', location: `${trace.sheet}!${trace.address}` });
             }
@@ -376,13 +409,15 @@ export async function convertWorkbook(target: WorkbookFile, rawPlan: ConversionP
                     const address = `${columnName(mapping.targetColumn)}${inputRows[i] + (mapping.rowOffset || 0)}`;
                     const expected = numberValue(row.values[mapping.verifyKey]);
                     const actual = numberValue(sheet?.cells.find(c => c.address === address)?.value ?? null);
-                    if (expected === null || actual === null || Math.abs(expected - actual) > 0.0000001)
-                        outputIssues.push({ level: 'error', code: 'reconciliation', message: `${mapping.label}: 양식 계산 결과와 원본의 대응 값이 일치하지 않습니다. 계산식·합산·단가를 확인해 주세요.`, location: `${sheetName}!${address}` });
+                    if (expected === null || actual === null || Math.abs(expected - actual) > 0.0000001) {
+                        const manual = dependsOnManualValue(sheet, address, allTraces);
+                        outputIssues.push({ level: manual ? 'warning' : 'error', code: manual ? 'manual-recalculation' : 'reconciliation', message: manual ? `${mapping.label}: 직접 수정한 입력값에 따라 다시 계산되어 원본 금액과 달라졌습니다. 변경 내용을 확인해 주세요.` : `${mapping.label}: 양식 계산 결과와 원본의 대응 값이 일치하지 않습니다. 계산식·합산·단가를 확인해 주세요.`, location: `${sheetName}!${address}` });
+                    }
                 }));
                 plan.fixedCells.filter(f => f.mapping.verifyKey).forEach(({ address, mapping }) => {
                     const expected = numberValue(pageRows[0]?.values[mapping.verifyKey] ?? null);
                     const actual = numberValue(sheet?.cells.find(c => c.address === address)?.value ?? null);
-                    if (expected === null || actual === null || Math.abs(expected - actual) > 0.0000001) outputIssues.push({ level: 'error', code: 'reconciliation', message: `${mapping.label}: 원본 금액과 양식 계산 결과가 다릅니다.`, location: `${sheetName}!${address}` });
+                    if (expected === null || actual === null || Math.abs(expected - actual) > 0.0000001) {const manual=dependsOnManualValue(sheet,address,allTraces);outputIssues.push({ level: manual?'warning':'error', code: manual?'manual-recalculation':'reconciliation', message: `${mapping.label}: ${manual?'요청한 수식·입력 변경으로 ':''}원본 금액과 양식 계산 결과가 다릅니다.`, location: `${sheetName}!${address}` });}
                 });
             });
             result.outputs.push({ name, bytes, sheets: reread.sheets, traces: allTraces, issues: outputIssues, inputCount: table.rows.length, excludedCount: processed.excluded.length, outputCount: bundle.flat().length, group, formulaCalculation });

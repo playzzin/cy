@@ -946,13 +946,19 @@ export const submitAccountLinkRequest = protectedRegion.https.onCall(async (data
     return { linkId, status: 'pending', entityId, entityName, accountType };
 });
 
-export const getMyAccountLinkStatus = protectedRegion.https.onCall(async (_data, context) => {
+export const getMyAccountLinkStatus = protectedRegion.https.onCall(async (data, context) => {
     const auth = requireCallableAuth(context);
     const [userSnapshot, linksSnapshot] = await Promise.all([
         db.collection('users').doc(auth!.uid).get(),
         db.collection('account_links').where('uid', '==', auth!.uid).get(),
     ]);
     const user = userSnapshot.data() || {};
+    // Self-only recovery closes the gap between the approval transaction and Auth claims.
+    // The role is built from current server records, never from caller-supplied role/uid.
+    // Read-only DEV previews must never refresh the target user's Auth record.
+    if (data?.refreshAccessClaims === true && auth!.token.devPreview !== true && user.status === 'active' && user.accountType === 'worker') {
+        await refreshAccessClaimsForUid(auth!.uid);
+    }
     const links = linksSnapshot.docs
         .sort((a, b) => Number(b.data().requestedAt?.toMillis?.() || 0) - Number(a.data().requestedAt?.toMillis?.() || 0))
         .map(statusPayload);

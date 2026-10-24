@@ -2,11 +2,30 @@ import {
   isCurrentAccommodationAssignment,
   isCurrentAccommodationBillingTarget,
   matchesCurrentAccommodationTeamScope,
+  isAccommodationAssignmentInMonth,
+  matchesAccommodationTeamScopeForMonth,
 } from './accommodationStatusScope';
 
 const TODAY = new Date(2026, 7, 27, 12, 0, 0);
 
 describe('accommodationStatusScope', () => {
+  test('월별 배정은 당시의 종료된 이력을 포함하고 아직 시작하지 않은 배정은 제외한다', () => {
+    const assignment = { status: 'ended' as const, startDate: '2026-07-12', endDate: '2026-09-12' };
+    expect(isAccommodationAssignmentInMonth(assignment, '2026-06')).toBe(false);
+    expect(isAccommodationAssignmentInMonth(assignment, '2026-07')).toBe(true);
+    expect(isAccommodationAssignmentInMonth(assignment, '2026-09')).toBe(true);
+    expect(isAccommodationAssignmentInMonth(assignment, '2026-10')).toBe(false);
+    expect(isAccommodationAssignmentInMonth({ ...assignment, endDate: '' }, '2026-07')).toBe(false);
+  });
+
+  test('팀별 월 조회에서 배정 이력이 없을 때만 해당 월의 청구대상을 적용한다', () => {
+    const assignment = { status: 'ended' as const, startDate: '2026-07-12', endDate: '2026-08-31', teamId: 'old' };
+    const target = { startDate: '2026-09-12', teamId: 'new' };
+    const matches = (value: { teamId: string }) => value.teamId === 'new';
+    expect(matchesAccommodationTeamScopeForMonth([assignment], [target], matches, matches, '2026-08')).toBe(false);
+    expect(matchesAccommodationTeamScopeForMonth([assignment], [target], matches, matches, '2026-09')).toBe(true);
+    expect(matchesAccommodationTeamScopeForMonth([], [target], matches, matches, '2026-08')).toBe(false);
+  });
   test('현재 진행 중인 배정만 숙소현황 팀 필터에 포함한다', () => {
     expect(isCurrentAccommodationAssignment({
       status: 'active',

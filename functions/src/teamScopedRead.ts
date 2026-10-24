@@ -1,4 +1,6 @@
+import { messageRecipientDirectoryRow } from './messageRecipientDirectory';
 import { resolvedRoleNames } from './teamExpenseRequests';
+import { readWorkerScopedData } from './workerScopedRead';
 import * as admin from 'firebase-admin';
 import { FieldPath, Timestamp } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
@@ -6,15 +8,26 @@ import { protectedRegion, requireCallableAuth } from './auth';
 import { belongsToTeam, filterTeamRows, isTeamLeader, list, TeamReadScope, TeamRow, text } from './teamReadPolicy';
 import { mergeTeamQueryRows, queryByIds, queryRows, queryTeamCandidates } from './teamScopedQuery';
 import { readTeamCatalog } from './teamCatalogCache';
+import { readTeamSettlementSupportDetails } from './teamSettlementSupportRead';
+import { readTeamSettlementIncoming } from './teamSettlementRead';
+import { projectSiteWorkReports, responsibleSites, validateSiteWorkRange } from './siteWorkReports';
+import { readWhiteboardParticipation, readWhiteboardSource } from './whiteboardParticipation';
+import { readWorkerSummaryDirectory } from './workerSummaryDirectory';
+import { projectTeamVehicleOil } from './teamVehicleOilSummary';
 
 const COLLECTIONS = new Set([
-    'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches',
+    'worker_summary_directory',
+    'vehicle_oil_summary',
+    'site_work_reports',
+    'message_recipients',
+    'whiteboard_participation', 'whiteboard_source_report',
+    'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming', 'team_settlement_support_details',
     'schedule_confirmation_boards', 'field_schedule_requests',
     'accommodations', 'accommodationAssignments', 'accommodationUtilityRecords', 'accommodation_billing_documents', 'accommodation_billing_line_items', 'accommodation_billing_targets',
     'vehicles', 'vehicleAssignments', 'vehicleBillingTargets', 'vehicle_billing_documents', 'vehicleExpenses',
     'cards', 'cardAssignments', 'cardBillingTargets', 'cardBillings', 'cardTransactions',
     'team_expense_claims', 'system_configs', 'office_transactions',
-    'materials', 'materialInbounds', 'materialOutbounds',
+    'materials', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches',
     'advance_payments', 'advance_requests',
 ]);
 
@@ -29,7 +42,7 @@ const serialize = (value: any): any => {
 // This endpoint decodes and filters several collections per call. In gen 1,
 // memory also controls CPU; the shared 256MB budget throttled these batches.
 // Keep scale-to-zero and the existing instance cap; change only this endpoint.
-export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).https.onCall(async (input, context) => {
+export const readTeamScopedData = async (input: any, context: functions.https.CallableContext) => {
     const startedAt = Date.now();
     const auth = requireCallableAuth(context);
     const batch = Array.isArray(input?.requests);
@@ -46,7 +59,11 @@ export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).http
     const linked = linkedIds.length ? await db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : [];
     const anchors = linked.filter(doc => doc.exists && doc.data()?.isActive !== false && !['퇴사', 'inactive', 'retired', 'archived'].includes(text(doc.data()?.status))).map(doc => ({ ...doc.data(), id: doc.id } as TeamRow));
     const menu = (await db.doc('settings/menus_v12').get()).data();
-    if (!anchors.length || !([...resolvedRoleNames(user, menu), ...anchors.map(row => row.role)].some(isTeamLeader))) {
+    const roles = resolvedRoleNames(user, menu);
+    if (!roles.some(isTeamLeader) && (user.accountType === 'worker' || roles.some(role => ['worker', '작업자', '일반'].includes(text(role).toLowerCase())))) {
+        return serialize(await readWorkerScopedData(db, auth.uid, user, anchors, requests, batch));
+    }
+    if (!anchors.length || !roles.some(isTeamLeader)) {
         throw new functions.https.HttpsError('permission-denied', '팀장 계정의 작업자 연결을 확인해 주세요.');
     }
     const anchorTeamIds: string[] = Array.from(new Set(anchors.map(row => text(row.teamId)).filter(Boolean)));
@@ -82,7 +99,7 @@ export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).http
                         isCatalogDefault: row.isCatalogDefault, hiddenCatalogDefault: row.hiddenCatalogDefault,
                     })));
             }
-            if (name === 'materialInbounds' || name === 'materialOutbounds') return byIds(name, ['siteId'], scope.siteIds);
+            if (['materialInbounds', 'materialOutbounds', 'materialPhotoBatches'].includes(name)) return byIds(name, ['siteId'], scope.siteIds);
             if (name === 'advance_payments' || name === 'advance_requests') {
                 // Payroll authorization is worker-only, so team/asset candidate
                 // queries cannot contribute any permitted rows.
@@ -137,8 +154,8 @@ export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).http
     if (teamIds.length > 30) throw new functions.https.HttpsError('failed-precondition', '팀 연결 수를 확인해 주세요.');
     resolvedTeamIds = teamIds;
     scope.teamIds = teamIds;
-    const needsWorkers = requests.some(request => !['teams', 'materials'].includes(text(request.collection)));
-    const requiresSites = (request: any) => ['sites', 'companies', 'materialInbounds', 'materialOutbounds'].includes(text(request.collection))
+    const needsWorkers = requests.some(request => !['teams', 'materials', 'whiteboard_participation', 'whiteboard_source_report', 'worker_summary_directory'].includes(text(request.collection)));
+    const requiresSites = (request: any) => ['site_work_reports', 'sites', 'companies', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches'].includes(text(request.collection))
         || (request.collection === 'system_configs' && (!text(request.filters?.configId) || request.filters.configId === 'support_site_rates'));
     const needsSites = requests.some(requiresSites);
     const workers = needsWorkers ? (await read('workers')).filter(row => teamIds.includes(text(row.teamId))) : [];
@@ -153,6 +170,44 @@ export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).http
     const resolveRows = async (request: any) => {
         const collection = text(request.collection);
         const filters = request.filters || {};
+        if (collection === 'worker_summary_directory') {
+            return { rows: serialize([await readWorkerSummaryDirectory(db, teams, metrics)]) };
+        }
+        if (collection === 'vehicle_oil_summary') {
+            // Ignore client-supplied team/vehicle IDs and never return the shared map.
+            const vehicles = await byIds('vehicles', ['currentAssigneeId', 'billingTargetId'], [...scope.teamIds, ...scope.workerIds]);
+            const shared = (await db.doc('support_shared_data/engine_oil_cycle').get()).data();
+            return { rows: projectTeamVehicleOil(vehicles, workers, teams, shared?.data) };
+        }
+        if (collection === 'site_work_reports') {
+            validateSiteWorkRange(filters);
+            await sitesReady;
+            const reports = await read('daily_reports', { startDate: filters.startDate, endDate: filters.endDate });
+            const siteIds = new Set(responsibleSites(sites, scope).flatMap(row => [row.id, text(row.legacyId)]).filter(Boolean));
+            const attendees = reports.filter(row => siteIds.has(text(row.siteId))).flatMap(row => list(row.workers));
+            const missingTeams = attendees.filter(row => !text(row.teamId) && !scope.workerIds.includes(text(row.workerId || row.id)));
+            const supportWorkers = await byIds('workers', [FieldPath.documentId(), 'legacyId'], missingTeams.map(row => text(row.workerId || row.id)).filter(Boolean));
+            const attendanceTeams = await byIds('teams', [FieldPath.documentId(), 'legacyId'],
+                [...attendees, ...supportWorkers, ...workers].map(row => text(row.teamId)).filter(Boolean));
+            return { rows: serialize(projectSiteWorkReports(reports, sites, scope, [...workers, ...supportWorkers], attendanceTeams)) };
+        }
+        if (collection === 'message_recipients') {
+            const recipients = await queryRows(db.collection('users').where('status', '==', 'active')
+                .select('displayName', 'name', 'role', 'position', 'department', 'status', 'isActive', 'linkedWorkerIds'), metrics);
+            return { rows: recipients.map(row => messageRecipientDirectoryRow(row, scope.workerIds)).filter(Boolean) };
+        }
+        if (collection === 'whiteboard_source_report') {
+            return { rows: serialize([await readWhiteboardSource(db, filters, { teams })]) };
+        }
+        if (collection === 'whiteboard_participation') {
+            return { rows: serialize([await readWhiteboardParticipation(db, teams, filters, metrics)]) };
+        }
+        if (collection === 'team_settlement_support_details') {
+            return { rows: serialize(await readTeamSettlementSupportDetails(db, teams, filters, metrics)) };
+        }
+        if (collection === 'team_settlement_incoming') {
+            return { rows: serialize(await readTeamSettlementIncoming(db, teams, workers, filters, metrics)) };
+        }
         if (requiresSites(request)) await sitesReady;
         let rows = await read(collection, filters);
         if (collection === 'companies') {
@@ -220,8 +275,17 @@ export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).http
         collectionDocuments: metrics.documents,
         durationMs: Date.now() - startedAt,
     });
+    const confirmScopeUnchanged = async () => {
+        const current = (await db.doc(`users/${auth.uid}`).get()).data();
+        const currentAnchors = linkedIds.length ? await db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : [];
+        const signature = (row: any) => JSON.stringify([row?.status, row?.isActive, row?.teamId, row?.role, row?.uid]);
+        if (JSON.stringify(current) !== JSON.stringify(user) || currentAnchors.some((doc, index) => signature(doc.data()) !== signature(linked[index].data()))) {
+            throw new functions.https.HttpsError('permission-denied', '조회 중 권한 또는 소속이 변경되었습니다. 다시 조회해 주세요.');
+        }
+    };
     if (!batch) {
         const result = await resolveRows(requests[0]);
+        await confirmScopeUnchanged();
         logPerformance();
         return result;
     }
@@ -234,6 +298,9 @@ export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).http
                 : { code: 'internal', message: '팀 데이터를 불러오지 못했습니다.' } };
         }
     }));
+    await confirmScopeUnchanged();
     logPerformance();
     return { results };
-});
+};
+
+export const getTeamScopedData = protectedRegion.runWith({ memory: '1GB' }).https.onCall(readTeamScopedData);

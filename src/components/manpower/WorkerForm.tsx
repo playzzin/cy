@@ -5,6 +5,7 @@ import { Team } from '../../services/teamService';
 import { Company } from '../../services/companyService';
 import { Position } from '../../services/positionService';
 import { geminiService } from '../../services/geminiService';
+import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUserTag, faCamera, faCheck, faTimes } from '@fortawesome/free-solid-svg-icons';
 import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
@@ -267,6 +268,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
+            void recordIdentityDocumentLog({ action: 'files_added', status: 'success', fileNames: [file.name], fileCount: 1, workerId: initialData?.id });
             setSelectedFile(file);
             setFormData(prev => ({
                 ...prev,
@@ -285,6 +287,8 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
 
         try {
             const result = await geminiService.analyzeImage(file);
+            void recordIdentityDocumentLog({ action: 'document_analysis', status: 'success', fileNames: [file.name], fileCount: 1,
+                personNames: [result.name || ''], workerId: initialData?.id });
             setFormData(prev => ({
                 ...prev,
                 name: result.name || prev.name,
@@ -294,6 +298,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
             await showSuccessAlert('인식 성공', '신분증 정보가 인식되었습니다.');
         } catch (error: any) {
             console.error(error);
+            void recordIdentityDocumentLog({ action: 'document_analysis', status: 'failure', fileNames: [file.name], fileCount: 1, reason: 'processing_failed', workerId: initialData?.id });
             await showErrorAlert('인식 실패', error.message);
         } finally {
             e.target.value = '';

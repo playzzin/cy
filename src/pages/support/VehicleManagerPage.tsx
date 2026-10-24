@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Vehicle, VehicleFineChargeTarget } from '../../types/vehicle';
 import { vehicleService } from '../../services/vehicleService';
 import { teamService, Team } from '../../services/teamService';
@@ -24,10 +24,13 @@ import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 import { appendOfficeAssignmentTeam, isOfficeAssignmentReference, isOfficeAssignmentTeam, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 import './VehicleManagerPage.css';
 
+const VehicleRepairLedger = React.lazy(() => import('../../features/vehicle-repairs/VehicleRepairLedger'));
+
 interface VehicleManagerPageProps {
     embedded?: boolean;
     initialTab?: VehicleTabId;
     onTabChange?: (tab: VehicleTabId) => void;
+    onBeforeRepairLeaveChange?: (guard: (() => boolean) | null) => void;
 }
 
 type VehicleTabId = 'status' | 'ledger' | 'history';
@@ -39,13 +42,28 @@ const vehicleTabs: SupportSegmentedTabOption<VehicleTabId>[] = [
 ];
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+const activeRepairView = (search: string) => new URLSearchParams(search).get('ledger') === 'repairs';
 
 export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     embedded = false,
     initialTab = 'status',
     onTabChange,
+    onBeforeRepairLeaveChange,
 }) => {
     const navigate = useNavigate();
+    const location = useLocation();
+    const repairView = activeRepairView(location.search);
+    const repairLeaveGuard = React.useRef<(() => boolean) | null>(null);
+    const registerRepairLeaveGuard = React.useCallback((guard: (() => boolean) | null) => { repairLeaveGuard.current = guard; onBeforeRepairLeaveChange?.(guard); }, [onBeforeRepairLeaveChange]);
+    const changeLedgerView = (repair: boolean) => {
+        if (repairView !== repair && repairLeaveGuard.current && !repairLeaveGuard.current()) return;
+        const params = new URLSearchParams(location.search);
+        params.set('view', 'ledger');
+        if (repair) params.set('ledger', 'repairs');
+        else params.delete('ledger');
+        setActiveTab('ledger');
+        navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+    };
     // Data State
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [loading, setLoading] = useState(true);
@@ -61,6 +79,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [exportButtonContainer, setExportButtonContainer] = useState<HTMLDivElement | null>(null);
 
     // Tab State
     const [activeTab, setActiveTab] = useState<VehicleTabId>(initialTab);
@@ -70,6 +89,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     }, [initialTab]);
 
     const handleTabChange = (tab: VehicleTabId) => {
+        if (tab !== activeTab && repairLeaveGuard.current && !repairLeaveGuard.current()) return;
         setActiveTab(tab);
         onTabChange?.(tab);
     };
@@ -267,6 +287,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
 
     // 핸들러 함수들
     const handleRefresh = () => {
+        if (repairLeaveGuard.current && !repairLeaveGuard.current()) return;
         setRefreshKey(prev => prev + 1);
     };
     const handleEdit = (vehicle: Vehicle) => {
@@ -452,6 +473,9 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                 compact={embedded}
                 actions={(
                     <>
+                    <button type="button" onClick={() => changeLedgerView(true)} className="flex items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 font-bold text-blue-700 hover:bg-blue-100">
+                        <FontAwesomeIcon icon={faScrewdriverWrench} /><span>정비내역</span>
+                    </button>
                     <button
                         type="button"
                         onClick={() => navigate('/support/vehicles/oil-cycle')}
@@ -510,15 +534,16 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                         ariaLabel="차량 관리 보기"
                     />
 
-                    <SupportTeamFilterTabs
+                    {!(activeTab === 'ledger' && repairView) && <SupportTeamFilterTabs
                         teams={assignableTeams}
                         selectedTeamId={selectedTeamId}
                         onChange={setSelectedTeamId}
                         className="flex-1"
-                    />
+                    />}
                 </div>
 
-                <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
+                {!(activeTab === 'ledger' && repairView) && <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
+                    {activeTab === 'status' && <div ref={setExportButtonContainer} className="contents" />}
                     <span className="whitespace-nowrap px-1 text-xs font-bold text-slate-400">
                         조회 {filteredVehicles.length} / {vehicles.length}
                     </span>
@@ -533,7 +558,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                             className="block w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-indigo-500"
                         />
                     </label>
-                </div>
+                </div>}
             </div>
 
             {/* 메인 콘텐츠 영역 */}
@@ -548,6 +573,8 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                 ) : activeTab === 'status' ? (
                     <VehicleStatusBoard
                         vehicles={filteredVehicles}
+                        exportButtonContainer={exportButtonContainer}
+                        exportContext={{ teamName: selectedTeamIdentity.team?.name || '전체', searchText: searchTerm }}
                         teams={assignableTeams}
                         workers={workers}
                         loading={loading}
@@ -559,7 +586,12 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                         onRestoreUse={handleRestoreUse}
                     />
                 ) : activeTab === 'ledger' ? (
-                    <VehicleMonthlyLedger
+                    <>
+                    <div role="group" aria-label="차량 대장 종류" className="mb-3 flex gap-2">
+                        <button type="button" aria-pressed={!repairView} onClick={() => changeLedgerView(false)} className={`rounded-lg border px-4 py-2 text-sm font-bold ${!repairView ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>월별 경비대장</button>
+                        <button type="button" aria-pressed={repairView} onClick={() => changeLedgerView(true)} className={`rounded-lg border px-4 py-2 text-sm font-bold ${repairView ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>정비내역 관리</button>
+                    </div>
+                    {repairView ? <React.Suspense fallback={<p className="p-8 text-center text-slate-500">정비내역 화면을 여는 중입니다.</p>}><VehicleRepairLedger vehicles={vehicles} onBeforeLeaveChange={registerRepairLeaveGuard} /></React.Suspense> : <VehicleMonthlyLedger
                         key={refreshKey}
                         vehicles={vehicles}
                         fineImportVehicles={vehicles}
@@ -568,7 +600,8 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                         searchText={searchTerm}
                         loadingVehicles={loading}
                         onOpenSetup={openAssignmentVehicle}
-                    />
+                    />}
+                    </>
                 ) : (
                     <SupportCancellationHistory
                         resourceType="vehicle"

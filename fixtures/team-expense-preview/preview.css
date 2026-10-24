@@ -1,0 +1,7 @@
+html { background: #f8fafc; }
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+button, input, select, textarea { font: inherit; }
+.fixture-banner { background: #fef3c7; color: #92400e; padding: 6px 12px; font-size: 11px; text-align: center; }
+.animate-spin { animation: fixture-spin 1s linear infinite; }
+@keyframes fixture-spin { to { transform: rotate(360deg); } }

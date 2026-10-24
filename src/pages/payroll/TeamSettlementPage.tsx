@@ -1,48 +1,27 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  type DragEndEvent,
-  useSensor,
-  useSensors
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  horizontalListSortingStrategy,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable
-} from '@dnd-kit/sortable';
-import { CSS as DndCss } from '@dnd-kit/utilities';
+import './TeamSettlementPage.css';
+import CompanyTeamSelector, { readCompanyTeamOrder } from '../../components/common/CompanyTeamSelector';
+import { applySupportTeamOrder } from '../../utils/supportTeamOrder';
+import { calculateTeamSettlementOfficeExpense, LEGACY_TEAM_SETTLEMENT_OFFICE_RATES } from '../../utils/teamSettlementOfficeExpense';
+import { TeamSettlementOfficeExpenseDetail } from '../../components/payroll/TeamSettlementOfficeExpenseDetail';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import {
   TeamSettlementWorkspaceHeader,
   type TeamSettlementSaveState
 } from '../../components/payroll/TeamSettlementWorkspaceHeader';
-import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
 import { accommodationBillingService } from '../../services/accommodationBillingService';
-import { accommodationService } from '../../services/accommodationService';
 import { cardBillingService } from '../../services/cardBillingService';
-import { cardService } from '../../services/cardService';
 import { companyService } from '../../services/companyService';
 import { dailyReportService, type DailyReportWorkerRow } from '../../services/dailyReportService';
 import { laborExchangeService, type LaborExchangeItem, type TeamExchangeSummary } from '../../services/laborExchangeService';
-import { manpowerService, type Worker as ManpowerWorker } from '../../services/manpowerService';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { teamService, type Team } from '../../services/teamService';
 import { teamSettlementService, type TeamSettlementSupportDetailRow } from '../../services/teamSettlementService';
 import { vehicleBillingService } from '../../services/vehicleBillingService';
-import { vehicleService } from '../../services/vehicleService';
 import { officeService } from '../../services/officeService';
 import { supportRateService, type SupportRate } from '../../services/supportRateService';
 import { toast } from '../../utils/swal';
-import {
-  getSettlementBillingRowScopeKey,
-  selectPreferredSettlementBillings
-} from '../../utils/supportSettlementBilling';
 import {
   createTeamSettlementDraftFingerprint,
   getTeamSettlementConfirmationIssues
@@ -56,10 +35,9 @@ import {
   formatTeamSettlementSummaryManDay
 } from '../../utils/teamSettlementTransactionSummary';
 import { DEFAULT_SUPPORT_UNIT_PRICE } from '../../utils/teamSettlementSupportRateOverrides';
-import type { UtilityRecord } from '../../types/accommodation';
-import type { AccommodationAssignment } from '../../types/accommodationAssignment';
+import { formatTeamSettlementMemo } from '../../utils/teamSettlementMemo';
+import { buildTeamSettlementExpenseEntries, compareTeamSettlementExpenses, getTeamSettlementExpenseDetail } from '../../utils/teamSettlementExpenses';
 import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
-import type { Card, CardTransaction } from '../../types/card';
 import type { CardBillingDocument } from '../../types/cardBilling';
 import type {
   TeamSettlementAdditionItem,
@@ -69,9 +47,8 @@ import type {
   TeamSettlementSalesItem,
   TeamSettlementWorkKind
 } from '../../types/teamSettlement';
-import type { Vehicle, VehicleExpenseRecord } from '../../types/vehicle';
 import type { VehicleBillingDocument } from '../../types/vehicleBilling';
-import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../../types/teamExpenseLedger';
+import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
 
 type LoadState =
   | { status: 'idle' }
@@ -86,7 +63,6 @@ const buildDefaultYearMonth = (): string => {
 };
 
 const MONTH_BUTTON_OPTIONS = Array.from({ length: 12 }, (_, index) => index + 1);
-const TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY = 'team-settlement:team-order:v1';
 
 const parseYearMonthValue = (value: string): { year: number; month: number } => {
   const now = new Date();
@@ -144,116 +120,6 @@ const getReadableTextColor = (hex: string): string => {
   if (!rgb) return '#ffffff';
   const luminance = (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) / 255;
   return luminance > 0.55 ? '#0f172a' : '#ffffff';
-};
-
-const getTeamButtonStyle = (color: string | null | undefined, selected: boolean): React.CSSProperties => {
-  const normalized = normalizeHexColor(color) ?? DEFAULT_TEAM_BUTTON_COLOR;
-  const rgb = hexToRgb(normalized);
-  if (!rgb) return {};
-
-  if (selected) {
-    return {
-      backgroundColor: normalized,
-      borderColor: normalized,
-      color: getReadableTextColor(normalized)
-    };
-  }
-
-  return {
-    backgroundColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`,
-    borderColor: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.45)`,
-    color: 'var(--team-settlement-team-chip-text, #1f2937)'
-  };
-};
-
-const getTeamOrderId = (team: Team): string => String(team.id ?? team.legacyId ?? team.name).trim();
-
-const readTeamOrderPreference = (): string[] => {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY) ?? '[]');
-    if (!Array.isArray(parsed)) return [];
-    return Array.from(new Set(parsed.map((value) => String(value).trim()).filter(Boolean)));
-  } catch {
-    return [];
-  }
-};
-
-const applyTeamOrderPreference = (rows: Team[], preferredOrder: string[] = readTeamOrderPreference()): Team[] => {
-  const order = preferredOrder;
-  if (order.length === 0) return rows;
-
-  const rankById = new Map(order.map((id, index) => [id, index]));
-  return rows
-    .map((team, sourceIndex) => ({ team, sourceIndex, rank: rankById.get(getTeamOrderId(team)) }))
-    .sort((a, b) => {
-      const aRank = a.rank ?? Number.MAX_SAFE_INTEGER;
-      const bRank = b.rank ?? Number.MAX_SAFE_INTEGER;
-      return aRank - bRank || a.sourceIndex - b.sourceIndex;
-    })
-    .map(({ team }) => team);
-};
-
-const saveTeamOrderPreference = (rows: Team[]): void => {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(
-      TEAM_SETTLEMENT_TEAM_ORDER_STORAGE_KEY,
-      JSON.stringify(rows.map(getTeamOrderId).filter(Boolean))
-    );
-  } catch {
-    // localStorage가 차단된 환경에서는 현재 세션의 순서만 유지한다.
-  }
-};
-
-interface SortableTeamButtonProps {
-  team: Team;
-  isSelected: boolean;
-  isOrderEditing: boolean;
-  onSelect: (teamId: string) => void;
-}
-
-const SortableTeamButton: React.FC<SortableTeamButtonProps> = ({
-  team,
-  isSelected,
-  isOrderEditing,
-  onSelect
-}) => {
-  const teamId = String(team.id ?? '');
-  const sortableId = getTeamOrderId(team);
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: sortableId,
-    disabled: !isOrderEditing
-  });
-
-  return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      className={`relative inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-4 text-sm font-black tracking-tight transition hover:brightness-95 ${isSelected
-        ? 'shadow-md ring-2 ring-slate-900/20 ring-offset-1'
-        : 'shadow-sm'
-        } ${isOrderEditing ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${isDragging ? 'z-30 opacity-70 shadow-xl' : ''}`}
-      style={{
-        ...getTeamButtonStyle(team.color, isSelected),
-        transform: DndCss.Transform.toString(transform),
-        transition
-      }}
-      {...(isOrderEditing ? attributes : {})}
-      {...(isOrderEditing ? listeners : {})}
-      aria-pressed={!isOrderEditing ? isSelected : undefined}
-      aria-label={isOrderEditing ? `${team.name} 순서 변경` : `${team.name} 선택`}
-      title={isOrderEditing ? '드래그해서 순서를 변경하세요' : `${team.name} 정산 보기`}
-      onClick={() => {
-        if (!isOrderEditing) onSelect(teamId);
-      }}
-    >
-      {isOrderEditing && <span className="text-base leading-none opacity-70" aria-hidden="true">⠿</span>}
-      <span className="whitespace-nowrap">{team.name}</span>
-    </button>
-  );
 };
 
 type TeamSettlementAccentStyle = React.CSSProperties & {
@@ -320,176 +186,6 @@ const normalizeRateLookupKey = (value: unknown): string =>
     .trim()
     .replace(/\s+/g, '')
     .toLowerCase();
-
-const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
-  meal: '식대',
-  parking: '주차',
-  fuel: '유류',
-  toll: '통행료',
-  material: '자재',
-  tool: '공구',
-  deposit: '보증금',
-  marking: '마킹',
-  fieldGoods: '현장물품',
-  equipment: '장비비',
-  etc: '기타'
-};
-
-const getTeamExpenseCategoryLabel = (category: TeamExpenseClaimCategory): string => {
-  return teamExpenseCategoryLabels[category] ?? String(category || '기타');
-};
-
-const parseYmdDate = (value: string): Date | null => {
-  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
-  if (!matched) return null;
-
-  const year = Number(matched[1]);
-  const month = Number(matched[2]);
-  const day = Number(matched[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
-  return date;
-};
-
-const calculateOverlapDays = (params: {
-  monthStart: Date;
-  monthEnd: Date;
-  startDate: Date;
-  endDate?: Date | null;
-}): number => {
-  const actualStart = params.startDate.getTime() > params.monthStart.getTime() ? params.startDate : params.monthStart;
-  const rawEnd = params.endDate && Number.isFinite(params.endDate.getTime()) ? params.endDate : params.monthEnd;
-  const actualEnd = rawEnd.getTime() < params.monthEnd.getTime() ? rawEnd : params.monthEnd;
-  if (actualEnd.getTime() < actualStart.getTime()) return 0;
-
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  return Math.floor((actualEnd.getTime() - actualStart.getTime()) / oneDayMs) + 1;
-};
-
-const selectPreferredTeamBillings = <T extends { status?: unknown }>(
-  docs: T[],
-  additionalPosted?: (doc: T) => boolean,
-  getGroupKey?: (doc: T) => unknown,
-  getScopeKey?: (doc: T) => unknown
-): T[] => selectPreferredSettlementBillings(docs, additionalPosted, getGroupKey, getScopeKey);
-
-const normalizeBillingIdentityPart = (value: unknown): string => (
-  String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
-);
-
-const firstBillingIdentityPart = (...values: unknown[]): string => {
-  for (const value of values) {
-    const normalized = normalizeBillingIdentityPart(value);
-    if (normalized) return normalized;
-  }
-  return '';
-};
-
-const getBillingRecipientIdentity = (doc: {
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  firstBillingIdentityPart(doc.teamName, doc.assignedTeamName, doc.teamId, doc.assignedTeamId),
-  normalizeBillingIdentityPart(doc.issuedToType),
-  firstBillingIdentityPart(doc.issuedToWorkerName, doc.issuedToWorkerId)
-].join('|');
-
-const getAccommodationSettlementBillingGroupKey = (doc: {
-  teamId?: unknown;
-  teamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => `accommodation|${getBillingRecipientIdentity(doc)}`;
-
-const getVehicleSettlementBillingGroupKey = (doc: {
-  vehicleId?: unknown;
-  vehiclePlate?: unknown;
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  'vehicle',
-  firstBillingIdentityPart(doc.vehiclePlate, doc.vehicleId),
-  getBillingRecipientIdentity(doc)
-].join('|');
-
-const getCardSettlementBillingGroupKey = (doc: {
-  cardId?: unknown;
-  cardLabel?: unknown;
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  'card',
-  firstBillingIdentityPart(doc.cardLabel, doc.cardId),
-  getBillingRecipientIdentity(doc)
-].join('|');
-
-const hasBillingLineSource = (
-  doc: { lineItems?: Array<{ sourceType?: unknown }> },
-  sourceType: string
-): boolean => (
-  (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === sourceType)
-);
-
-const isTeamIssuedTo = (value: unknown): boolean => {
-  const raw = String(value ?? '').trim().toLowerCase();
-  return raw === 'team' || raw === 'team_leader';
-};
-
-const isTeamBillingTarget = (params: {
-  issuedToType?: unknown;
-  teamId?: unknown;
-  teamName?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): boolean => {
-  if (isTeamIssuedTo(params.issuedToType)) return true;
-
-  const issuedType = String(params.issuedToType ?? '').trim().toLowerCase();
-  if (issuedType === 'worker') return false;
-
-  const workerId = String(params.issuedToWorkerId ?? '').trim();
-  if (workerId) return false;
-
-  const workerName = String(params.issuedToWorkerName ?? '').trim();
-  const teamName = String(params.teamName ?? '').trim();
-  if (workerName && teamName && workerName !== teamName) return false;
-
-  return (
-    String(params.teamId ?? '').trim().length > 0 ||
-    String(params.teamName ?? '').trim().length > 0
-  );
-};
-
-const mapAccommodationTargetFieldLabel = (field: string): string => {
-  if (field === 'accommodation') return '숙소비';
-  if (field === 'privateRoom') return '개인실';
-  if (field === 'electricity') return '전기';
-  if (field === 'gas') return '가스';
-  if (field === 'internet') return '인터넷';
-  if (field === 'water') return '수도';
-  if (field === 'fines') return '공과금';
-  if (field === 'deposit') return '보증금';
-  if (field === 'gloves') return '장갑비';
-  return field;
-};
 
 const stripSupportOriginalLines = (doc: TeamSettlementDocument): TeamSettlementDocument => {
   return {
@@ -685,20 +381,14 @@ type DeductionGroupDefinition = {
 type DeductionGroup = DeductionGroupDefinition & {
   items: TeamSettlementDeductionItem[];
   displayItems: DeductionDisplayItem[];
-  sourceSummaries: DeductionSourceSummary[];
   totalAmount: number;
 };
 
 type DeductionDisplayItem = TeamSettlementDeductionItem & {
   isAggregate?: boolean;
   itemCount?: number;
-};
-
-type DeductionSourceSummary = {
-  origin: TeamSettlementDeductionItem['origin'];
-  label: string;
-  amount: number;
-  count: number;
+  officeExpenseKind?: '직영' | '도급';
+  isOfficeExpenseAdjustment?: boolean;
 };
 
 const PAYROLL_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
@@ -706,6 +396,10 @@ const PAYROLL_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem
   daily_wage_payroll: 2,
   service_team_payroll: 3
 };
+
+const isPayrollItem = (item: TeamSettlementDeductionItem): boolean => (
+  PAYROLL_DEDUCTION_ORIGIN_ORDER[item.origin] !== undefined
+);
 
 const EXPENSE_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
   accommodation_billing: 1,
@@ -735,38 +429,42 @@ const getDeductionSourceSummaryLabel = (origin: TeamSettlementDeductionItem['ori
   return formatDeductionOrigin(origin);
 };
 
-const buildDeductionSourceSummaries = (items: TeamSettlementDeductionItem[]): DeductionSourceSummary[] => {
-  const byOrigin = new Map<TeamSettlementDeductionItem['origin'], DeductionSourceSummary>();
-
-  items.forEach((item) => {
-    const prev = byOrigin.get(item.origin) ?? {
-      origin: item.origin,
-      label: getDeductionSourceSummaryLabel(item.origin),
-      amount: 0,
-      count: 0
-    };
-    byOrigin.set(item.origin, {
-      ...prev,
-      amount: prev.amount + safeNumber(item.amount),
-      count: prev.count + 1
-    });
-  });
-
-  return Array.from(byOrigin.values())
-    .filter((summary) => summary.amount > 0 || summary.count > 0)
-    .sort((a, b) => {
-      const expenseOrder = (EXPENSE_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (EXPENSE_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
-      if (expenseOrder !== 0) return expenseOrder;
-      const payrollOrder = (PAYROLL_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (PAYROLL_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
-      if (payrollOrder !== 0) return payrollOrder;
-      return a.label.localeCompare(b.label, 'ko');
-    });
-};
-
 const buildDeductionDisplayItems = (
   groupKey: string,
-  items: TeamSettlementDeductionItem[]
+  items: TeamSettlementDeductionItem[],
+  sales: TeamSettlementSalesItem[] = []
 ): DeductionDisplayItem[] => {
+  if (groupKey === 'office_expense') {
+    return items.flatMap((item): DeductionDisplayItem[] => {
+      if (item.source !== 'auto') return [item];
+      const rates = item.officeExpenseRates ?? LEGACY_TEAM_SETTLEMENT_OFFICE_RATES;
+      const rows: DeductionDisplayItem[] = (['직영', '도급'] as const).map((kind) => {
+        const detail = calculateTeamSettlementOfficeExpense(sales.filter(sale => sale.kind === kind), rates);
+        const rate = kind === '직영' ? rates.direct : rates.contract;
+        return {
+          ...item,
+          id: `${item.id}:${kind}`,
+          category: `${kind} 사무실비`,
+          amount: detail.totalAmount,
+          memo: `${detail.totalManDay}공수 × ${formatCurrency(rate)}원`,
+          officeExpenseKind: kind
+        };
+      });
+      // Display-only rows must reconcile to the saved deduction without changing it.
+      const difference = safeNumber(item.amount) - rows.reduce((sum, row) => sum + row.amount, 0);
+      if (difference !== 0) {
+        rows.push({
+          ...item,
+          id: `${item.id}:saved-difference`,
+          category: '저장 금액 차이',
+          amount: difference,
+          memo: '저장된 사무실비와 공수별 계산 합계의 차액',
+          isOfficeExpenseAdjustment: true
+        });
+      }
+      return rows;
+    });
+  }
   if (groupKey !== 'expense') return items;
   if (items.length === 0) return [];
 
@@ -783,7 +481,7 @@ const buildDeductionDisplayItems = (
       origin,
       category: `${originLabel} 전체`,
       amount,
-      memo: `${originLabel} ${originItems.length}건 합계`,
+      memo: `${originItems.length}건`,
       isAggregate: true,
       itemCount: originItems.length
     }];
@@ -791,6 +489,8 @@ const buildDeductionDisplayItems = (
 };
 
 const getDeductionDisplayOriginLabel = (item: DeductionDisplayItem): string => {
+  if (item.officeExpenseKind) return item.officeExpenseKind;
+  if (item.isOfficeExpenseAdjustment) return '차액';
   if (item.id.startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX)) return formatDeductionOrigin(item.origin);
   return item.isAggregate ? getDeductionSourceSummaryLabel(item.origin) : formatDeductionOrigin(item.origin);
 };
@@ -806,7 +506,7 @@ const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
   {
     key: 'payroll',
     title: '급여',
-    description: '월급제·일급제·용역팀 급여 공제',
+    description: '월급제·일급제·용역팀 급여 매입',
     origins: ['monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll'],
     showWhenEmpty: true
   },
@@ -920,30 +620,12 @@ type SourceDataValidationIssue = {
 
 type DeductionSourceData = {
   accommodationDocs: AccommodationBillingDocument[];
-  accommodationAssignments: AccommodationAssignment[];
-  utilityRecords: UtilityRecord[];
   vehicleDocs: VehicleBillingDocument[];
-  vehicles: Vehicle[];
-  vehicleExpenses: VehicleExpenseRecord[];
   cardDocs: CardBillingDocument[];
-  cards: Card[];
-  cardTransactions: CardTransaction[];
   teamExpenseClaims: TeamExpenseClaim[];
-  workers: ManpowerWorker[];
 };
-
 const createEmptyDeductionSourceData = (): DeductionSourceData => ({
-  accommodationDocs: [],
-  accommodationAssignments: [],
-  utilityRecords: [],
-  vehicleDocs: [],
-  vehicles: [],
-  vehicleExpenses: [],
-  cardDocs: [],
-  cards: [],
-  cardTransactions: [],
-  teamExpenseClaims: [],
-  workers: []
+  accommodationDocs: [], vehicleDocs: [], cardDocs: [], teamExpenseClaims: []
 });
 
 const buildMonthRange = (yearMonth: string): { startDate: string; endDate: string } => {
@@ -969,10 +651,6 @@ const buildMonthRange = (yearMonth: string): { startDate: string; endDate: strin
 export const TeamSettlementPage: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-  const [isTeamOrderEditing, setIsTeamOrderEditing] = useState<boolean>(false);
-  const [isTeamOrderSaving, setIsTeamOrderSaving] = useState<boolean>(false);
-  const [isTeamOrderDirty, setIsTeamOrderDirty] = useState<boolean>(false);
-  const [defaultTeamOrderIds, setDefaultTeamOrderIds] = useState<string[]>([]);
   const [yearMonth, setYearMonth] = useState<string>(buildDefaultYearMonth());
   const [doc, setDoc] = useState<TeamSettlementDocument | null>(null);
   const transactionMemoRef = useRef<HTMLTextAreaElement>(null);
@@ -985,19 +663,28 @@ export const TeamSettlementPage: React.FC = () => {
     };
     resize();
     let previousWidth = textarea.clientWidth;
+    let resizeFrame = 0;
     const observer = new ResizeObserver(() => {
       if (textarea.clientWidth === previousWidth) return;
       previousWidth = textarea.clientWidth;
-      resize();
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(resize);
     });
     observer.observe(textarea);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(resizeFrame);
+    };
   }, [doc?.transactionMemo, doc?.teamId, doc?.yearMonth]);
   const [savedDocumentFingerprint, setSavedDocumentFingerprint] = useState<string>('');
   const [saveState, setSaveState] = useState<TeamSettlementSaveState>('idle');
+  const saveStateRef = useRef<TeamSettlementSaveState>(saveState);
+  saveStateRef.current = saveState;
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
   const [detailRows, setDetailRows] = useState<DailyReportWorkerRow[]>([]);
   const [supportDetailRows, setSupportDetailRows] = useState<TeamSettlementSupportDetailRow[]>([]);
+  const [supportDetailError, setSupportDetailError] = useState(false);
+  const [supportDetailRetry, setSupportDetailRetry] = useState(0);
   const supportDetailData = useMemo(
     () => resolveTeamSettlementSupportDetails(doc?.sourceSnapshot, supportDetailRows),
     [doc?.sourceSnapshot, supportDetailRows]
@@ -1008,14 +695,11 @@ export const TeamSettlementPage: React.FC = () => {
   const [expandedDeductionIds, setExpandedDeductionIds] = useState<Set<string>>(() => new Set());
   const [expandedExpenseDetailKeys, setExpandedExpenseDetailKeys] = useState<Set<string>>(() => new Set());
   const [deductionSourceData, setDeductionSourceData] = useState<DeductionSourceData>(() => createEmptyDeductionSourceData());
+  const [expenseSourceLoad, setExpenseSourceLoad] = useState<{ scope: string; status: 'loading' | 'ready' | 'error' }>({ scope: '', status: 'loading' });
+  const [expenseSourceRevision, setExpenseSourceRevision] = useState(0);
   const [supportRates, setSupportRates] = useState<SupportRate[]>([]);
   const [supportRatesLoaded, setSupportRatesLoaded] = useState<boolean>(false);
   const [bulkSupportRateInput, setBulkSupportRateInput] = useState<string>(() => formatCurrency(DEFAULT_SUPPORT_UNIT_PRICE));
-  const teamOrderSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
   const currentDocumentFingerprint = useMemo(
     () => createTeamSettlementDraftFingerprint(doc),
     [doc]
@@ -1073,10 +757,8 @@ export const TeamSettlementPage: React.FC = () => {
         });
 
         const rows = siteConstructionTeams.length > 0 ? siteConstructionTeams : constructionCompanyTeams;
-        const baseOrderIds = rows.map(getTeamOrderId).filter(Boolean);
-        const preferredOrder = serverTeamOrder.length > 0 ? serverTeamOrder : readTeamOrderPreference();
-        setDefaultTeamOrderIds(baseOrderIds);
-        setTeams(applyTeamOrderPreference(rows, preferredOrder));
+        const preferredOrder = serverTeamOrder.length > 0 ? serverTeamOrder : readCompanyTeamOrder();
+        setTeams(applySupportTeamOrder(rows, preferredOrder));
       } catch (error) {
         console.error(error);
         toast.error('팀 목록 로드 실패');
@@ -1152,20 +834,24 @@ export const TeamSettlementPage: React.FC = () => {
       try {
         const range = buildMonthRange(yearMonth);
         const snapshotSupportRows = doc.sourceSnapshot?.supportDetails;
-        const [rows, supportRows] = await Promise.all([
+        setDetailRows([]);
+        setSupportDetailRows([]);
+        setSupportDetailError(false);
+        const [rows, supportRows] = await Promise.allSettled([
           dailyReportService.getReportWorkerRowsByRange({
             startDate: range.startDate,
             endDate: range.endDate
           }),
-          snapshotSupportRows
+          snapshotSupportRows?.length
             ? Promise.resolve(snapshotSupportRows)
             : selectedTeamId
             ? teamSettlementService.getSupportSettlementDetailRows({ yearMonth, teamId: selectedTeamId })
             : Promise.resolve([] as TeamSettlementSupportDetailRow[])
         ]);
         if (cancelled) return;
-        setDetailRows(rows);
-        setSupportDetailRows(supportRows);
+        setDetailRows(rows.status === 'fulfilled' ? rows.value : []);
+        setSupportDetailRows(supportRows.status === 'fulfilled' ? supportRows.value : []);
+        setSupportDetailError(supportRows.status === 'rejected');
       } catch (error) {
         console.error(error);
         if (cancelled) return;
@@ -1178,7 +864,7 @@ export const TeamSettlementPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [doc, selectedTeamId, yearMonth]);
+  }, [doc, selectedTeamId, yearMonth, supportDetailRetry]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1223,65 +909,29 @@ export const TeamSettlementPage: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
 
+    const scope = selectedTeamId + ':' + yearMonth;
     const loadDeductionSources = async () => {
-      if (!selectedTeamId || !yearMonth) {
-        setDeductionSourceData(createEmptyDeductionSourceData());
-        return;
-      }
-
+      setExpenseSourceLoad({ scope, status: 'loading' });
+      if (!selectedTeamId || !yearMonth) return;
       try {
-        const [
-          accommodationDocs,
-          accommodationAssignments,
-          utilityRecords,
-          vehicleDocs,
-          vehicles,
-          vehicleExpenses,
-          cardDocs,
-          cards,
-          cardTransactions,
-          teamExpenseClaims,
-          workers
-        ] = await Promise.all([
-          accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth }),
-          accommodationAssignmentService.getAllAssignments(),
-          accommodationService.getMonthlyLedger(yearMonth),
-          vehicleBillingService.getBillingsByMonth(yearMonth),
-          vehicleService.getVehicles(),
-          vehicleService.getExpensesByMonth(yearMonth),
+        const [accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims] = await Promise.all([
+          accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, strict: true }),
+          vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true }),
           cardBillingService.getBillingsByMonth(yearMonth),
-          cardService.getCards(),
-          cardService.getTransactionsByMonth(yearMonth),
-          teamExpenseLedgerService.getClaimsByMonth(yearMonth),
-          manpowerService.getWorkers()
+          teamExpenseLedgerService.getClaimsByMonth(yearMonth)
         ]);
-
         if (cancelled) return;
-        setDeductionSourceData({
-          accommodationDocs,
-          accommodationAssignments,
-          utilityRecords,
-          vehicleDocs,
-          vehicles,
-          vehicleExpenses,
-          cardDocs,
-          cards,
-          cardTransactions,
-          teamExpenseClaims,
-          workers
-        });
-      } catch (error) {
-        console.error(error);
+        setDeductionSourceData({ accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims });
+        setExpenseSourceLoad({ scope, status: 'ready' });
+      } catch {
         if (cancelled) return;
         setDeductionSourceData(createEmptyDeductionSourceData());
+        setExpenseSourceLoad({ scope, status: 'error' });
       }
     };
-
     void loadDeductionSources();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedTeamId, yearMonth]);
+    return () => { cancelled = true; };
+  }, [selectedTeamId, yearMonth, doc?.updatedAt, expenseSourceRevision]);
 
   const settlementLoadGeneration = useRef(0);
   const settlementScope = useRef('');
@@ -1351,15 +1001,46 @@ export const TeamSettlementPage: React.FC = () => {
   const matchesTeamByIdOrName = useCallback(
     (id: unknown, name: unknown): boolean => {
       const idText = typeof id === 'string' ? id.trim() : '';
-      if (idText && matchesTeam(idText)) return true;
+      const normalize = (value: string) => value.replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
+      // An explicit ID takes precedence over a stale or duplicate display name.
+      if (idText) return [...teamIdVariants, ...teamNameVariants].some(value => normalize(value) === normalize(idText));
 
       const nameText = typeof name === 'string' ? name.trim() : '';
-      if (nameText && teamNameVariants.has(nameText)) return true;
+      if (nameText && [...teamNameVariants].some(value => normalize(value) === normalize(nameText))) return true;
 
       return false;
     },
-    [matchesTeam, teamNameVariants]
+    [teamIdVariants, teamNameVariants]
   );
+
+  const expenseSourceResult = useMemo(() => {
+    if (expenseSourceLoad.scope !== selectedTeamId + ':' + yearMonth || expenseSourceLoad.status !== 'ready') {
+      return { entries: [], status: expenseSourceLoad.scope === selectedTeamId + ':' + yearMonth ? expenseSourceLoad.status : 'loading' };
+    }
+    try {
+      return { entries: buildTeamSettlementExpenseEntries({ yearMonth, matchesTeam: matchesTeamByIdOrName, ...deductionSourceData }), status: 'ready' };
+    } catch {
+      return { entries: [], status: 'error' };
+    }
+  }, [deductionSourceData, expenseSourceLoad, matchesTeamByIdOrName, selectedTeamId, yearMonth]);
+  const expenseValidationMessages = useMemo(() => {
+    if (expenseSourceResult.status === 'loading') return ['경비 원본을 확인하고 있습니다.'];
+    if (expenseSourceResult.status === 'error') return ['경비 원본 조회 또는 금액 검증에 실패했습니다. 다시 조회해 주세요.'];
+    if (!doc) return [];
+    const result = compareTeamSettlementExpenses(doc, expenseSourceResult.entries);
+    const messages: string[] = [];
+    const labels = { accommodation_billing: '숙소비', vehicle_billing: '차량비', card_billing: '카드비', team_expense_claim: '경비' };
+    for (const direction of ['deduction', 'addition'] as const) {
+      for (const [origin, label] of Object.entries(labels)) {
+        const count = result.missing.filter(entry => entry.direction === direction && entry.item.origin === origin).length;
+        if (count) messages.push(label + ' ' + (direction === 'deduction' ? '낼 금액' : '받을 금액') + ' ' + count + '건이 저장 정산에 없습니다.');
+      }
+    }
+    if (result.changed.length) messages.push('원본과 금액이 다른 경비 ' + result.changed.length + '건');
+    if (result.unexpected.length) messages.push('현재 유효한 원본을 찾을 수 없는 경비 ' + result.unexpected.length + '건');
+    if (result.duplicate.length) messages.push('중복 반영된 경비 ' + result.duplicate.length + '건');
+    return messages;
+  }, [doc, expenseSourceResult]);
 
   const transactionSectionTotals = useMemo(() => {
     const summarize = (lines: Array<{ amount: number; manDay: number }>) => lines.reduce(
@@ -1377,6 +1058,10 @@ export const TeamSettlementPage: React.FC = () => {
     const salesContract = summarize(sales.filter((line) => line.kind === '도급'));
     const salesDirect = summarize(sales.filter((line) => line.kind === '직영'));
     const purchaseSupport = summarize(purchases.filter((line) => line.kind === '지원'));
+    // Stored payroll rows remain compatible with existing settlement documents.
+    const payrollAmount = (doc?.deductions ?? []).filter(isPayrollItem)
+      .reduce((sum, item) => sum + safeNumber(item.amount), 0);
+    const purchasesTotal = summarize(purchases);
 
     return {
       salesSupport,
@@ -1384,14 +1069,15 @@ export const TeamSettlementPage: React.FC = () => {
       salesDirect,
       purchaseSupport,
       salesTotal: summarize(sales),
-      purchasesTotal: summarize(purchases)
+      purchasesTotal: { ...purchasesTotal, amount: purchasesTotal.amount + payrollAmount }
     };
   }, [doc]);
 
   const totals = useMemo(() => {
     const salesTotal = transactionSectionTotals.salesTotal.amount;
     const purchasesTotal = transactionSectionTotals.purchasesTotal.amount;
-    const deductionsTotal = (doc?.deductions ?? []).reduce((sum, x) => sum + safeNumber(x.amount), 0);
+    const deductionsTotal = (doc?.deductions ?? []).filter(item => !isPayrollItem(item))
+      .reduce((sum, x) => sum + safeNumber(x.amount), 0);
     const additionsTotal = (doc?.additions ?? []).reduce((sum, x) => sum + safeNumber(x.amount), 0);
     const prevCarryover = safeNumber(doc?.summary?.prevCarryover ?? 0);
     const deposit = safeNumber(doc?.summary?.deposit ?? 0);
@@ -1683,7 +1369,7 @@ export const TeamSettlementPage: React.FC = () => {
       targetId: 'settlement-rate-validation'
     }));
     const byCode = new Map<string, SourceDataValidationIssue>();
-    [...documentConfirmationIssues, ...sourceDataValidationIssues, ...supportIssues].forEach((issue) => {
+    [...documentConfirmationIssues, ...sourceDataValidationIssues, ...supportIssues, ...expenseValidationMessages.map((message, index) => ({ code: 'expense-source:' + index, message, severity: 'error' as const, targetId: 'settlement-deductions' }))].forEach((issue) => {
       byCode.set(issue.code, {
         ...issue,
         severity: issue.severity ?? 'error',
@@ -1691,7 +1377,7 @@ export const TeamSettlementPage: React.FC = () => {
       });
     });
     return Array.from(byCode.values());
-  }, [documentConfirmationIssues, sourceDataValidationIssues, supportRateMissingRows]);
+  }, [documentConfirmationIssues, sourceDataValidationIssues, supportRateMissingRows, expenseValidationMessages]);
 
   const handleValidationIssueClick = useCallback((targetId?: string) => {
     if (!targetId) return;
@@ -1723,8 +1409,7 @@ export const TeamSettlementPage: React.FC = () => {
       return {
         ...definition,
         items,
-        displayItems: buildDeductionDisplayItems(definition.key, items),
-        sourceSummaries: buildDeductionSourceSummaries(items),
+        displayItems: buildDeductionDisplayItems(definition.key, items, doc?.sales),
         totalAmount: items.reduce((sum, item) => sum + safeNumber(item.amount), 0)
       };
     });
@@ -1738,7 +1423,6 @@ export const TeamSettlementPage: React.FC = () => {
         origins: [],
         items: otherItems,
         displayItems: buildDeductionDisplayItems('other', otherItems),
-        sourceSummaries: buildDeductionSourceSummaries(otherItems),
         totalAmount: otherItems.reduce((sum, item) => sum + safeNumber(item.amount), 0)
       });
     }
@@ -1811,7 +1495,7 @@ export const TeamSettlementPage: React.FC = () => {
   }, [updateDoc]);
 
   const persistCurrentDocument = useCallback(async (showSuccessToast = true): Promise<TeamSettlementDocument | null> => {
-    if (!doc) return null;
+    if (!doc || saveStateRef.current === 'saving') return null;
 
     const scopeAtSave = settlementScope.current;
     const nextDoc: TeamSettlementDocument = {
@@ -1820,17 +1504,20 @@ export const TeamSettlementPage: React.FC = () => {
       updatedAt: new Date().toISOString()
     };
 
+    saveStateRef.current = 'saving';
     setSaveState('saving');
     try {
       await teamSettlementService.saveTeamSettlement(nextDoc);
       if (settlementScope.current !== scopeAtSave) return nextDoc;
       setDoc(current => current === doc ? nextDoc : current);
       setSavedDocumentFingerprint(createTeamSettlementDraftFingerprint(nextDoc));
+      saveStateRef.current = 'idle';
       setSaveState('idle');
       if (showSuccessToast) toast.success('변경사항을 저장했습니다.');
       return nextDoc;
     } catch (error) {
       console.error(error);
+      saveStateRef.current = 'error';
       setSaveState('error');
       toast.error('저장하지 못했습니다. 네트워크 상태를 확인해 주세요.');
       return null;
@@ -1863,6 +1550,7 @@ export const TeamSettlementPage: React.FC = () => {
 
   const handleRefresh = useCallback(async () => {
     if (!(await confirmBeforeDiscard('새로고침'))) return;
+    setExpenseSourceRevision(value => value + 1);
     await loadSettlement();
   }, [confirmBeforeDiscard, loadSettlement]);
 
@@ -1970,34 +1658,51 @@ export const TeamSettlementPage: React.FC = () => {
   }, [confirmationIssues, doc, handleValidationIssueClick, isDirty, loadSettlement, selectedTeamName]);
 
   const handleUnconfirm = useCallback(async () => {
-    if (!doc) return;
+    const isSaving = () => saveStateRef.current === 'saving';
+    if (!doc?.confirmedAt || isSaving()) return;
+    const scope = settlementScope.current;
 
     const result = await Swal.fire({
       title: '확정 취소',
-      text: '확정된 팀정산을 취소하시겠습니까? 취소 후에는 다시 편집할 수 있습니다.',
+      text: '확정된 팀정산을 취소하시겠습니까? 취소 후에는 다시 편집하거나 재집계할 수 있습니다.',
       icon: 'warning',
       showCancelButton: true,
       confirmButtonText: '확정 취소',
       cancelButtonText: '닫기'
     });
 
-    if (!result.isConfirmed) return;
+    if (!result.isConfirmed || scope !== settlementScope.current || isSaving()) return;
 
+    saveStateRef.current = 'saving';
+    setSaveState('saving');
     try {
-      await teamSettlementService.unconfirmTeamSettlement({ yearMonth: doc.yearMonth, teamId: doc.teamId });
+      const unconfirmedDoc = await teamSettlementService.unconfirmTeamSettlement({ yearMonth: doc.yearMonth, teamId: doc.teamId });
+      if (scope === settlementScope.current) {
+        setDoc(unconfirmedDoc);
+        setSavedDocumentFingerprint(createTeamSettlementDraftFingerprint(unconfirmedDoc));
+      }
 
-      // Remove Office Fee from Office Management
-      await officeService.deleteTeamFeeTransaction(doc.teamId, doc.yearMonth);
+      try {
+        await officeService.deleteTeamFeeTransaction(doc.teamId, doc.yearMonth);
+      } catch (syncError) {
+        console.error(syncError);
+        toast.error('확정은 취소됐지만 사무실비 연결 내역 정리에 실패했습니다. 사무실 관리에서 확인해 주세요.');
+        return;
+      }
 
       toast.success('확정 취소 완료');
-      await loadSettlement();
     } catch (error) {
       console.error(error);
       toast.error('확정 취소 실패');
+    } finally {
+      if (scope === settlementScope.current) {
+        saveStateRef.current = 'idle';
+        setSaveState('idle');
+      }
     }
-  }, [doc, loadSettlement]);
+  }, [doc]);
 
-  const canEdit = isEditable(doc);
+  const canEdit = isEditable(doc) && saveState !== 'saving';
 
   const primaryButtonClassName =
     'inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed';
@@ -2035,75 +1740,6 @@ export const TeamSettlementPage: React.FC = () => {
       setSelectedTeamId(teamId);
     })();
   }, [confirmBeforeDiscard, selectedTeamId]);
-
-  const handleTeamOrderDragEnd = useCallback(({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return;
-
-    setTeams((currentTeams) => {
-      const oldIndex = currentTeams.findIndex((team) => getTeamOrderId(team) === String(active.id));
-      const newIndex = currentTeams.findIndex((team) => getTeamOrderId(team) === String(over.id));
-      if (oldIndex < 0 || newIndex < 0) return currentTeams;
-
-      const reorderedTeams = arrayMove(currentTeams, oldIndex, newIndex);
-      saveTeamOrderPreference(reorderedTeams);
-      setIsTeamOrderDirty(true);
-      return reorderedTeams;
-    });
-  }, []);
-
-  const handleTeamOrderEditingToggle = useCallback(() => {
-    if (isTeamOrderSaving) return;
-
-    if (!isTeamOrderEditing) {
-      setIsTeamOrderEditing(true);
-      setIsTeamOrderDirty(false);
-      return;
-    }
-
-    if (!isTeamOrderDirty) {
-      setIsTeamOrderEditing(false);
-      return;
-    }
-
-    void (async () => {
-      setIsTeamOrderSaving(true);
-      try {
-        const orderedTeamIds = teams.map(getTeamOrderId).filter(Boolean);
-        await teamSettlementService.saveTeamDisplayOrder(orderedTeamIds);
-        saveTeamOrderPreference(teams);
-        setIsTeamOrderDirty(false);
-        setIsTeamOrderEditing(false);
-        toast.success('회사 공통 팀 순서를 저장했습니다.');
-      } catch (error) {
-        console.error(error);
-        toast.error('팀 순서를 서버에 저장하지 못했습니다.');
-      } finally {
-        setIsTeamOrderSaving(false);
-      }
-    })();
-  }, [isTeamOrderDirty, isTeamOrderEditing, isTeamOrderSaving, teams]);
-
-  const handleResetTeamOrder = useCallback(() => {
-    if (isTeamOrderSaving || defaultTeamOrderIds.length === 0) return;
-
-    void (async () => {
-      setIsTeamOrderSaving(true);
-      try {
-        const resetTeams = applyTeamOrderPreference(teams, defaultTeamOrderIds);
-        await teamSettlementService.resetTeamDisplayOrder();
-        saveTeamOrderPreference(resetTeams);
-        setTeams(resetTeams);
-        setIsTeamOrderDirty(false);
-        setIsTeamOrderEditing(false);
-        toast.success('회사 공통 팀 순서를 기본값으로 초기화했습니다.');
-      } catch (error) {
-        console.error(error);
-        toast.error('팀 순서를 초기화하지 못했습니다.');
-      } finally {
-        setIsTeamOrderSaving(false);
-      }
-    })();
-  }, [defaultTeamOrderIds, isTeamOrderSaving, teams]);
 
   const toggleLineExpanded = useCallback((id: string) => {
     setExpandedLineIds((prev) => {
@@ -2204,7 +1840,7 @@ export const TeamSettlementPage: React.FC = () => {
         manDay: safeNumber(s.manDay),
         quantity: typeof s.quantity === 'number' ? s.quantity : undefined,
         amount: safeNumber(s.amount),
-        memo: s.memo
+        memo: formatTeamSettlementMemo(s)
       }));
 
     const purchases: SettlementUnifiedLine[] = doc.purchases
@@ -2222,7 +1858,7 @@ export const TeamSettlementPage: React.FC = () => {
         counterTeamName: p.counterTeamName,
         manDay: safeNumber(p.manDay),
         amount: safeNumber(p.amount),
-        memo: p.memo
+        memo: formatTeamSettlementMemo(p)
       }));
 
     const lines = [...sales, ...purchases];
@@ -2236,8 +1872,8 @@ export const TeamSettlementPage: React.FC = () => {
   }, [doc]);
 
   const getDeductionDetail = useCallback(
-    (item: TeamSettlementDeductionItem):
-      | { kind: 'office_expense'; sites: SiteSkkumiRow[]; totalManDay: number; totalAmount: number }
+    (item: DeductionDisplayItem):
+      | ({ kind: 'office_expense'; savedAmount: number } & ReturnType<typeof calculateTeamSettlementOfficeExpense>)
       | { kind: 'payroll'; rows: Array<{ workerId: string; workerName: string; manDay: number; amount: number }>; totalManDay: number; totalAmount: number }
       | {
         kind: 'accommodation_billing';
@@ -2276,430 +1912,43 @@ export const TeamSettlementPage: React.FC = () => {
       | null => {
       if (!doc) return null;
 
-      const deductionCategory = String(item.category ?? '').trim();
-      const itemIdText = String(item.id ?? '');
-      const isAggregateDetailItem = itemIdText.startsWith('deduction-aggregate:');
-      const isExpenseAggregateItem = itemIdText === EXPENSE_GROUP_AGGREGATE_ALL_ID;
-      const isExpenseOriginAggregateItem = itemIdText.startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX) && !isExpenseAggregateItem;
-      const extractBracketValue = (value: string, prefix: string): string => {
-        const regex = new RegExp(`^${prefix}\\s*\\((.+)\\)$`);
-        const matched = regex.exec(String(value ?? '').trim());
-        return matched ? matched[1].trim() : '';
-      };
-      const extractParenthesizedText = (value: string): string => {
-        const matched = /\((.+)\)/.exec(String(value ?? '').trim());
-        return matched ? matched[1].trim() : '';
-      };
-      const splitMemoParts = (memo?: string): string[] =>
-        String(memo ?? '')
-          .split('/')
-          .map((part) => part.trim())
-          .filter(Boolean);
-
-      if (isExpenseAggregateItem || isExpenseOriginAggregateItem) {
-        type ChildWithSubject = ExpenseAggregateDetailChildRow & { subject: string };
-
-        const buildWorkerTeamMaps = () => {
-          const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
-          const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
-          deductionSourceData.workers.forEach((w) => {
-            const info = { teamId: w.teamId, teamName: w.teamName };
-            const id = String(w.id ?? '').trim();
-            const legacyId = String(w.legacyId ?? '').trim();
-            const name = String(w.name ?? '').trim();
-            if (id) workerTeamByAnyId.set(id, info);
-            if (legacyId) workerTeamByAnyId.set(legacyId, info);
-            if (name) workerTeamByName.set(name, info);
-          });
-          return { workerTeamByAnyId, workerTeamByName };
-        };
-
-        const buildGenericExpenseRow = (
-          deduction: TeamSettlementDeductionItem,
-          originLabel = getDeductionSourceSummaryLabel(deduction.origin),
-          subject = extractParenthesizedText(String(deduction.category ?? '')) || '-',
-          category = String(deduction.category ?? '').trim() || getDeductionSourceSummaryLabel(deduction.origin)
-        ): ExpenseAggregateDetailRow => {
-          const memoParts = splitMemoParts(deduction.memo);
-          const date = memoParts.find((part) => /^\d{4}-\d{2}-\d{2}/.test(part));
-          const memo = memoParts.filter((part) => part !== date).join(' / ');
-          return {
-            key: `expense-detail:${deduction.origin}:${String(deduction.id ?? '')}:${subject}:${category}`,
-            origin: deduction.origin,
-            originLabel,
-            subject,
-            category,
-            amount: safeNumber(deduction.amount),
-            memo: memo || undefined,
-            details: []
-          };
-        };
-
-        const groupChildrenBySubject = (
-          deduction: TeamSettlementDeductionItem,
-          originLabel: string,
-          category: string,
-          fallbackSubject: string,
-          children: ChildWithSubject[]
-        ): ExpenseAggregateDetailRow[] => {
-          const bySubject = new Map<string, ChildWithSubject[]>();
-          children
-            .filter((child) => safeNumber(child.amount) > 0)
-            .forEach((child) => {
-              const subject = String(child.subject ?? '').trim() || fallbackSubject || '-';
-              const list = bySubject.get(subject) ?? [];
-              list.push({ ...child, subject });
-              bySubject.set(subject, list);
-            });
-
-          return Array.from(bySubject.entries()).map(([subject, detailRows]) => ({
-            key: `expense-detail:${deduction.origin}:${String(deduction.id ?? '')}:${subject}:${category}`,
-            origin: deduction.origin,
-            originLabel,
-            subject,
-            category,
-            amount: detailRows.reduce((sum, row) => sum + safeNumber(row.amount), 0),
-            memo: deduction.memo,
-            details: detailRows.map(({ subject: _subject, ...detail }) => detail)
-          }));
-        };
-
-        const buildVehicleExpenseRows = (deduction: TeamSettlementDeductionItem): ExpenseAggregateDetailRow[] => {
-          const category = String(deduction.category ?? '').trim();
-          const deductionIdText = String(deduction.id ?? '');
-          const targetPlate = extractBracketValue(category, '차량비') || extractParenthesizedText(category);
-          const originLabel = '차량';
-          const summaryCategory = '차량별 경비';
-
-          const selectedDocs = selectPreferredTeamBillings(
-            deductionSourceData.vehicleDocs.filter((row) =>
-              isTeamBillingTarget({
-                issuedToType: row.issuedToType,
-                teamId: row.teamId ?? row.assignedTeamId,
-                teamName: row.teamName ?? row.assignedTeamName,
-                issuedToWorkerId: row.issuedToWorkerId,
-                issuedToWorkerName: row.issuedToWorkerName
-              }) &&
-              matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
-            ),
-            (doc) => hasBillingLineSource(doc, 'vehicle_ledger'),
-            getVehicleSettlementBillingGroupKey,
-            getSettlementBillingRowScopeKey
-          );
-          const isLedgerVehicleItem = deductionIdText.endsWith(':ledger');
-          const matchedDocs = selectedDocs.filter((row) => {
-            if (isLedgerVehicleItem) return false;
-            const plate = String(row.vehiclePlate ?? '').trim();
-            const id = String(row.vehicleId ?? '').trim();
-            if (targetPlate && plate === targetPlate) return true;
-            if (id && deductionIdText.includes(id)) return true;
-            if (plate && deductionIdText.includes(plate)) return true;
-            return false;
-          });
-
-          const docChildren: ChildWithSubject[] = matchedDocs
-            .flatMap((billing) => {
-              const plate = String(billing.vehiclePlate ?? '').trim() || String(billing.vehicleId ?? '').trim() || targetPlate || '-';
-              if ((billing.lineItems ?? []).length === 0) {
-                return [
-                  { subject: plate, label: '고정비', amount: safeNumber(billing.fixedCost), note: 'FIXED' },
-                  { subject: plate, label: '변동비', amount: safeNumber(billing.variableCost), note: 'VARIABLE' }
-                ];
-              }
-              return (billing.lineItems ?? []).map((li) => ({
-                subject: plate,
-                label: String(li.label ?? '').trim() || '차량비',
-                amount: safeNumber(li.amount),
-                note: String(li.category ?? li.type ?? '').trim() || undefined
-              }));
-            })
-            .filter((row) => row.amount > 0);
-
-          if (docChildren.length > 0) {
-            return groupChildrenBySubject(deduction, originLabel, summaryCategory, targetPlate || '-', docChildren);
-          }
-
-          const { workerTeamByAnyId, workerTeamByName } = buildWorkerTeamMaps();
-          const expenseByVehicleId = new Map<string, VehicleExpenseRecord[]>();
-          deductionSourceData.vehicleExpenses.forEach((expense) => {
-            const vehicleId = String(expense.vehicleId ?? '').trim();
-            if (!vehicleId) return;
-            const list = expenseByVehicleId.get(vehicleId) ?? [];
-            list.push(expense);
-            expenseByVehicleId.set(vehicleId, list);
-          });
-
-          const ledgerChildren: ChildWithSubject[] = deductionSourceData.vehicles
-            .flatMap((vehicle) => {
-              const plate = String(vehicle.licensePlate ?? '').trim();
-              const vehicleId = String(vehicle.id ?? '').trim();
-              if (targetPlate && plate !== targetPlate) return [] as ChildWithSubject[];
-              if (!targetPlate && vehicleId && !deductionIdText.includes(vehicleId) && plate && !deductionIdText.includes(plate)) return [] as ChildWithSubject[];
-
-              let isAssignedTeam = false;
-              if (vehicle.currentAssigneeType === 'TEAM') {
-                isAssignedTeam = matchesTeamByIdOrName(vehicle.currentAssigneeId, vehicle.currentAssigneeName);
-              } else if (vehicle.currentAssigneeType === 'WORKER') {
-                const workerId = String(vehicle.currentAssigneeId ?? '').trim();
-                const workerName = String(vehicle.currentAssigneeName ?? '').trim();
-                const info = (workerId ? workerTeamByAnyId.get(workerId) : undefined) ?? (workerName ? workerTeamByName.get(workerName) : undefined);
-                isAssignedTeam = info ? matchesTeamByIdOrName(info.teamId, info.teamName) : false;
-              }
-              if (!isAssignedTeam) return [] as ChildWithSubject[];
-
-              const subject = plate || vehicleId || targetPlate || '-';
-              const rows: ChildWithSubject[] = [];
-              const fixedCost =
-                vehicle.type === 'RENT' || vehicle.type === 'LEASE'
-                  ? safeNumber(vehicle.contract?.monthlyFee)
-                  : 0;
-              if (fixedCost > 0) {
-                rows.push({ subject, label: '월 고정비', amount: fixedCost, note: 'FIXED' });
-              }
-
-              const expenses = [...(expenseByVehicleId.get(vehicleId) ?? [])].sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')));
-              expenses.forEach((expense) => {
-                rows.push({
-                  subject,
-                  label: String(expense.type ?? '').trim() || '변동비',
-                  amount: safeNumber(expense.amount),
-                  date: String(expense.date ?? '').trim() || undefined,
-                  note: 'VARIABLE'
-                });
-              });
-              return rows;
-            })
-            .filter((row) => row.amount > 0);
-
-          if (ledgerChildren.length > 0) {
-            return groupChildrenBySubject(deduction, originLabel, summaryCategory, targetPlate || '-', ledgerChildren);
-          }
-
-          return [buildGenericExpenseRow(deduction, originLabel, targetPlate || '-', summaryCategory)];
-        };
-
-        const buildAccommodationExpenseRows = (deduction: TeamSettlementDeductionItem): ExpenseAggregateDetailRow[] => {
-          const category = String(deduction.category ?? '').trim();
-          const deductionIdText = String(deduction.id ?? '');
-          const itemIdParts = deductionIdText.split(':');
-          const rawKey = itemIdParts.length >= 3 ? itemIdParts.slice(2).join(':') : '';
-          const isLedgerItem = rawKey.startsWith('ledger:');
-          const targetDocId = !isLedgerItem && rawKey ? rawKey : '';
-          const fallbackSubject = extractParenthesizedText(category) || '-';
-          const originLabel = '숙소';
-          const summaryCategory = '숙소별 경비';
-
-          const accommodationNameById = new Map<string, string>();
-          const accommodationNameByUtilityRecordId = new Map<string, string>();
-          deductionSourceData.utilityRecords.forEach((record) => {
-            const accommodationId = String(record.accommodationId ?? '').trim();
-            const accommodationName = String(record.accommodationName ?? '').trim();
-            const recordId = String(record.id ?? '').trim();
-            if (accommodationId && accommodationName) accommodationNameById.set(accommodationId, accommodationName);
-            if (recordId && accommodationName) accommodationNameByUtilityRecordId.set(recordId, accommodationName);
-          });
-
-          const selectedDocs = selectPreferredTeamBillings(
-            deductionSourceData.accommodationDocs.filter((row) =>
-              isTeamBillingTarget({
-                issuedToType: row.issuedToType,
-                teamId: row.teamId,
-                teamName: row.teamName,
-                issuedToWorkerId: row.issuedToWorkerId,
-                issuedToWorkerName: row.issuedToWorkerName
-              }) && matchesTeamByIdOrName(row.teamId, row.teamName)
-            ),
-            (doc) => hasBillingLineSource(doc, 'utility_ledger'),
-            getAccommodationSettlementBillingGroupKey
-          );
-
-          const docChildren: ChildWithSubject[] = selectedDocs
-            .filter((billing) => {
-              if (isLedgerItem) return false;
-              if (!targetDocId) return true;
-              return String(billing.id ?? '') === targetDocId;
-            })
-            .flatMap((billing) => {
-              const billedTo = billing.teamName ? String(billing.teamName) : selectedTeamName || '팀';
-              return (billing.lineItems ?? []).map((li) => ({
-                subject:
-                  (li.sourceUtilityRecordId ? accommodationNameByUtilityRecordId.get(String(li.sourceUtilityRecordId).trim()) : undefined) ||
-                  (li.sourceAccommodationId ? accommodationNameById.get(String(li.sourceAccommodationId).trim()) : undefined) ||
-                  String(li.sourceAccommodationId ?? '').trim() ||
-                  billedTo,
-                label: String(li.label ?? '').trim() || mapAccommodationTargetFieldLabel(String(li.targetField ?? '')),
-                amount: safeNumber(li.amount)
-              }));
-            })
-            .filter((row) => row.amount > 0);
-
-          if (docChildren.length > 0) {
-            return groupChildrenBySubject(deduction, originLabel, summaryCategory, fallbackSubject, docChildren);
-          }
-
-          const range = buildMonthRange(yearMonth);
-          const monthStart = parseYmdDate(range.startDate);
-          const monthEnd = parseYmdDate(range.endDate);
-          if (!monthStart || !monthEnd) return [buildGenericExpenseRow(deduction, originLabel, fallbackSubject, summaryCategory)];
-
-          const targetAccommodationId = isLedgerItem ? rawKey.replace(/^ledger:/, '').trim() : '';
-          const teamDaysByAccommodation = new Map<string, number>();
-          const totalDaysByAccommodation = new Map<string, number>();
-          const { workerTeamByAnyId, workerTeamByName } = buildWorkerTeamMaps();
-
-          deductionSourceData.accommodationAssignments.forEach((assignment) => {
-            const accommodationId = String(assignment.accommodationId ?? '').trim();
-            if (!accommodationId) return;
-
-            const startDate = parseYmdDate(String(assignment.startDate ?? '').trim());
-            if (!startDate) return;
-            const endDate = assignment.endDate ? parseYmdDate(String(assignment.endDate).trim()) : null;
-            const overlapDays = calculateOverlapDays({ monthStart, monthEnd, startDate, endDate });
-            if (overlapDays <= 0) return;
-
-            totalDaysByAccommodation.set(accommodationId, (totalDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
-
-            let teamMatched = matchesTeamByIdOrName(assignment.teamId, assignment.teamName);
-            if (!teamMatched) {
-              const workerId = String(assignment.workerId ?? '').trim();
-              const workerName = String(assignment.workerName ?? '').trim();
-              const workerTeam =
-                (workerId ? workerTeamByAnyId.get(workerId) : undefined) ??
-                (workerName ? workerTeamByName.get(workerName) : undefined);
-              if (workerTeam) {
-                teamMatched = matchesTeamByIdOrName(workerTeam.teamId, workerTeam.teamName);
-              }
-            }
-
-            if (teamMatched) {
-              teamDaysByAccommodation.set(accommodationId, (teamDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
-            }
-          });
-
-          const ledgerChildren: ChildWithSubject[] = deductionSourceData.utilityRecords
-            .flatMap((record) => {
-              const accommodationId = String(record.accommodationId ?? '').trim();
-              if (!accommodationId) return [] as ChildWithSubject[];
-              if (targetAccommodationId && accommodationId !== targetAccommodationId) return [] as ChildWithSubject[];
-
-              const teamDays = teamDaysByAccommodation.get(accommodationId) ?? 0;
-              const totalDays = totalDaysByAccommodation.get(accommodationId) ?? 0;
-              if (teamDays <= 0 || totalDays <= 0) return [] as ChildWithSubject[];
-
-              const ratio = teamDays / totalDays;
-              const subject = String(record.accommodationName ?? '').trim() || accommodationId;
-              const allocation = `${safeNumber(teamDays)}/${safeNumber(totalDays)}`;
-
-              return [
-                { label: '월세', amount: Math.round(safeNumber(record.costs?.rent) * ratio) },
-                { label: '전기', amount: Math.round(safeNumber(record.costs?.electricity) * ratio) },
-                { label: '가스', amount: Math.round(safeNumber(record.costs?.gas) * ratio) },
-                { label: '수도', amount: Math.round(safeNumber(record.costs?.water) * ratio) },
-                { label: '인터넷', amount: Math.round(safeNumber(record.costs?.internet) * ratio) },
-                { label: '관리비', amount: Math.round(safeNumber(record.costs?.maintenance) * ratio) },
-                { label: '기타', amount: Math.round(safeNumber(record.costs?.other) * ratio) }
-              ]
-                .filter((row) => row.amount > 0)
-                .map((row) => ({
-                  subject,
-                  label: row.label,
-                  amount: row.amount,
-                  allocation
-                }));
-            })
-            .filter((row) => row.amount > 0);
-
-          if (ledgerChildren.length > 0) {
-            return groupChildrenBySubject(deduction, originLabel, summaryCategory, fallbackSubject, ledgerChildren);
-          }
-
-          return [buildGenericExpenseRow(deduction, originLabel, fallbackSubject, summaryCategory)];
-        };
-
-        const rawRows = (doc.deductions ?? [])
-          .filter((deduction) => EXPENSE_DEDUCTION_ORIGINS.includes(deduction.origin))
-          .flatMap((deduction): ExpenseAggregateDetailRow[] => {
-            if (deduction.origin === 'vehicle_billing') return buildVehicleExpenseRows(deduction);
-            if (deduction.origin === 'accommodation_billing') return buildAccommodationExpenseRows(deduction);
-            return [buildGenericExpenseRow(deduction)];
-          })
-          .filter((row) => row.amount > 0);
-
-        const grouped = new Map<string, ExpenseAggregateDetailRow>();
-        rawRows.forEach((row) => {
-          const key = `${row.origin}:${row.subject}:${row.category}`;
-          const prev = grouped.get(key);
-          if (!prev) {
-            grouped.set(key, { ...row, key, details: [...row.details] });
-            return;
-          }
-          grouped.set(key, {
-            ...prev,
-            amount: prev.amount + row.amount,
-            memo: [prev.memo, row.memo].filter(Boolean).join(' / ') || undefined,
-            details: [...prev.details, ...row.details]
-          });
-        });
-
-        const resourceRows = Array.from(grouped.values()).sort((a, b) => {
-          const order = (EXPENSE_DEDUCTION_ORIGIN_ORDER[a.origin] ?? 99) - (EXPENSE_DEDUCTION_ORIGIN_ORDER[b.origin] ?? 99);
-          if (order !== 0) return order;
-          return a.subject.localeCompare(b.subject, 'ko');
-        });
-        if (isExpenseOriginAggregateItem) {
-          const rows = resourceRows.filter((row) => row.origin === item.origin);
-          const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
-          return { kind: 'expense_aggregate', rows, totalAmount };
-        }
-
-        const rows = EXPENSE_DEDUCTION_ORIGINS
-          .map((origin): ExpenseAggregateDetailRow | null => {
-            const originRows = resourceRows.filter((row) => row.origin === origin);
-            if (originRows.length === 0) return null;
-
-            const originLabel = formatDeductionOrigin(origin);
+      const isAggregateDetailItem = String(item.id).startsWith('deduction-aggregate:');
+      if (String(item.id).startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX)) {
+        const rows: ExpenseAggregateDetailRow[] = doc.deductions
+          .filter(deduction => EXPENSE_DEDUCTION_ORIGINS.includes(deduction.origin) && (item.id === EXPENSE_GROUP_AGGREGATE_ALL_ID || deduction.origin === item.origin))
+          .map(deduction => {
+            const detail = getTeamSettlementExpenseDetail(deduction, expenseSourceResult.entries);
             return {
-              key: `expense-origin:${origin}`,
-              origin,
-              originLabel,
-              subject: '전체',
-              category: `${originLabel} 전체`,
-              amount: originRows.reduce((sum, row) => sum + safeNumber(row.amount), 0),
-              memo: `${originRows.length}건`,
-              details: originRows.map((row) => ({
-                subject: row.subject,
-                label: row.subject,
-                category: row.category,
-                amount: row.amount,
-                note: row.memo,
-                allocation: row.details.length > 0 ? `${row.details.length}건` : undefined
-              }))
+              key: 'expense-detail:' + deduction.id,
+              origin: deduction.origin,
+              originLabel: getDeductionSourceSummaryLabel(deduction.origin),
+              subject: detail.rows[0]?.subject || '-',
+              category: deduction.category,
+              amount: detail.amount,
+              memo: detail.memo,
+              details: detail.rows.map(row => ({ ...row, category: row.label }))
             };
-          })
-          .filter((row): row is ExpenseAggregateDetailRow => Boolean(row));
-        const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'expense_aggregate', rows, totalAmount };
+          });
+        const grouped = new Map<string, ExpenseAggregateDetailRow>();
+        rows.forEach(row => {
+          const key = row.origin + ':' + row.subject + ':' + row.category;
+          const prior = grouped.get(key);
+          if (prior) grouped.set(key, { ...prior, amount: prior.amount + row.amount,
+            memo: [prior.memo, row.memo].filter(Boolean).join(' / '), details: [...prior.details, ...row.details] });
+          else grouped.set(key, { ...row, key });
+        });
+        return { kind: 'expense_aggregate', rows: [...grouped.values()], totalAmount: rows.reduce((sum, row) => sum + row.amount, 0) };
       }
 
       if (item.origin === 'office_expense') {
-        const bySite = new Map<string, SiteSkkumiRow>();
-        doc.sales
-          .filter((s) => s.source === 'auto' && (s.origin === 'daily_report' || s.origin === 'support_client_site') && (s.kind === '도급' || s.kind === '직영'))
-          .forEach((s) => {
-            const siteName = String(s.siteName ?? '').trim() || '현장 미지정';
-            const prev = bySite.get(siteName) ?? { siteName, quantity: 0, manDay: 0, amount: 0 };
-            bySite.set(siteName, {
-              siteName,
-              quantity: prev.quantity,
-              manDay: prev.manDay + safeNumber(s.manDay),
-              amount: prev.amount + safeNumber(s.amount)
-            });
-          });
-
-        const sites = Array.from(bySite.values()).sort((a, b) => b.manDay - a.manDay);
-        const totalManDay = sites.reduce((sum, x) => sum + x.manDay, 0);
-        const totalAmount = sites.reduce((sum, x) => sum + x.amount, 0);
-        return { kind: 'office_expense', sites, totalManDay, totalAmount };
+        const sales = item.officeExpenseKind ? doc.sales.filter(sale => sale.kind === item.officeExpenseKind) : doc.sales;
+        const detail = calculateTeamSettlementOfficeExpense(sales, item.officeExpenseRates ?? LEGACY_TEAM_SETTLEMENT_OFFICE_RATES);
+        return {
+          kind: 'office_expense',
+          ...detail,
+          memo: item.officeExpenseKind ? `${item.officeExpenseKind} ${item.memo}` : detail.memo,
+          savedAmount: item.amount
+        };
       }
 
       if (
@@ -2767,416 +2016,17 @@ export const TeamSettlementPage: React.FC = () => {
         return { kind: 'payroll', rows, totalManDay, totalAmount };
       }
 
-      if (item.origin === 'accommodation_billing') {
-        const selectedDocs = selectPreferredTeamBillings(
-          deductionSourceData.accommodationDocs.filter((row) =>
-            isTeamBillingTarget({
-              issuedToType: row.issuedToType,
-              teamId: row.teamId,
-              teamName: row.teamName,
-              issuedToWorkerId: row.issuedToWorkerId,
-              issuedToWorkerName: row.issuedToWorkerName
-            }) && matchesTeamByIdOrName(row.teamId, row.teamName)
-          ),
-          (doc) => hasBillingLineSource(doc, 'utility_ledger'),
-          getAccommodationSettlementBillingGroupKey
-        );
-
-        const itemIdParts = itemIdText.split(':');
-        const rawKey = isAggregateDetailItem ? '' : (itemIdParts.length >= 3 ? itemIdParts.slice(2).join(':') : '');
-        const isLedgerItem = rawKey.startsWith('ledger:');
-        const targetDocId = !isLedgerItem && rawKey ? rawKey : '';
-        const accommodationNameById = new Map<string, string>();
-        const accommodationNameByUtilityRecordId = new Map<string, string>();
-        deductionSourceData.utilityRecords.forEach((record) => {
-          const accommodationId = String(record.accommodationId ?? '').trim();
-          const accommodationName = String(record.accommodationName ?? '').trim();
-          const recordId = String(record.id ?? '').trim();
-          if (accommodationId && accommodationName) accommodationNameById.set(accommodationId, accommodationName);
-          if (recordId && accommodationName) accommodationNameByUtilityRecordId.set(recordId, accommodationName);
-        });
-
-        const docRows = selectedDocs
-          .filter((billing) => {
-            if (isLedgerItem) return false;
-            if (!targetDocId) return true;
-            return String(billing.id ?? '') === targetDocId;
-          })
-          .flatMap((billing) => {
-            const billedTo = billing.teamName ? String(billing.teamName) : selectedTeamName || '팀';
-            return (billing.lineItems ?? []).map((li) => ({
-              subject:
-                (li.sourceUtilityRecordId ? accommodationNameByUtilityRecordId.get(String(li.sourceUtilityRecordId).trim()) : undefined) ||
-                (li.sourceAccommodationId ? accommodationNameById.get(String(li.sourceAccommodationId).trim()) : undefined) ||
-                String(li.sourceAccommodationId ?? '').trim() ||
-                billedTo,
-              label: String(li.label ?? '').trim() || mapAccommodationTargetFieldLabel(String(li.targetField ?? '')),
-              amount: safeNumber(li.amount)
-            }));
-          })
-          .filter((row) => row.amount > 0);
-
-        if (docRows.length > 0) {
-          const totalAmount = docRows.reduce((sum, row) => sum + row.amount, 0);
-          return { kind: 'accommodation_billing', mode: 'document', rows: docRows, totalAmount };
-        }
-
-        const range = buildMonthRange(yearMonth);
-        const monthStart = parseYmdDate(range.startDate);
-        const monthEnd = parseYmdDate(range.endDate);
-        if (!monthStart || !monthEnd) return { kind: 'accommodation_billing', mode: 'ledger', rows: [], totalAmount: 0 };
-
-        const targetAccommodationId = isLedgerItem ? rawKey.replace(/^ledger:/, '').trim() : '';
-
-        const teamDaysByAccommodation = new Map<string, number>();
-        const totalDaysByAccommodation = new Map<string, number>();
-        const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
-        const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
-        deductionSourceData.workers.forEach((w) => {
-          const info = { teamId: w.teamId, teamName: w.teamName };
-          const id = String(w.id ?? '').trim();
-          const legacyId = String(w.legacyId ?? '').trim();
-          const name = String(w.name ?? '').trim();
-          if (id) workerTeamByAnyId.set(id, info);
-          if (legacyId) workerTeamByAnyId.set(legacyId, info);
-          if (name) workerTeamByName.set(name, info);
-        });
-
-        deductionSourceData.accommodationAssignments.forEach((assignment) => {
-
-          const accommodationId = String(assignment.accommodationId ?? '').trim();
-          if (!accommodationId) return;
-
-          const startDate = parseYmdDate(String(assignment.startDate ?? '').trim());
-          if (!startDate) return;
-          const endDate = assignment.endDate ? parseYmdDate(String(assignment.endDate).trim()) : null;
-          const overlapDays = calculateOverlapDays({ monthStart, monthEnd, startDate, endDate });
-          if (overlapDays <= 0) return;
-
-          totalDaysByAccommodation.set(accommodationId, (totalDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
-
-          let teamMatched = matchesTeamByIdOrName(assignment.teamId, assignment.teamName);
-          if (!teamMatched) {
-            const workerId = String(assignment.workerId ?? '').trim();
-            const workerName = String(assignment.workerName ?? '').trim();
-            const workerTeam =
-              (workerId ? workerTeamByAnyId.get(workerId) : undefined) ??
-              (workerName ? workerTeamByName.get(workerName) : undefined);
-            if (workerTeam) {
-              teamMatched = matchesTeamByIdOrName(workerTeam.teamId, workerTeam.teamName);
-            }
-          }
-
-          if (teamMatched) {
-            teamDaysByAccommodation.set(accommodationId, (teamDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays);
-          }
-        });
-
-        const ledgerRows = deductionSourceData.utilityRecords
-          .map((record) => {
-            const accommodationId = String(record.accommodationId ?? '').trim();
-            if (!accommodationId) return [] as Array<{ subject: string; label: string; amount: number; teamDays: number; totalDays: number }>;
-            if (targetAccommodationId && accommodationId !== targetAccommodationId) return [] as Array<{ subject: string; label: string; amount: number; teamDays: number; totalDays: number }>;
-
-            const teamDays = teamDaysByAccommodation.get(accommodationId) ?? 0;
-            const totalDays = totalDaysByAccommodation.get(accommodationId) ?? 0;
-            if (teamDays <= 0 || totalDays <= 0) return [] as Array<{ subject: string; label: string; amount: number; teamDays: number; totalDays: number }>;
-
-            const ratio = teamDays / totalDays;
-            const subject = String(record.accommodationName ?? '').trim() || accommodationId;
-
-            const rows = [
-              { label: '월세', amount: Math.round(safeNumber(record.costs?.rent) * ratio) },
-              { label: '전기', amount: Math.round(safeNumber(record.costs?.electricity) * ratio) },
-              { label: '가스', amount: Math.round(safeNumber(record.costs?.gas) * ratio) },
-              { label: '수도', amount: Math.round(safeNumber(record.costs?.water) * ratio) },
-              { label: '인터넷', amount: Math.round(safeNumber(record.costs?.internet) * ratio) },
-              { label: '관리비', amount: Math.round(safeNumber(record.costs?.maintenance) * ratio) },
-              { label: '기타', amount: Math.round(safeNumber(record.costs?.other) * ratio) }
-            ]
-              .filter((row) => row.amount > 0)
-              .map((row) => ({
-                subject,
-                label: row.label,
-                amount: row.amount,
-                teamDays,
-                totalDays
-              }));
-
-            return rows;
-          })
-          .flat()
-          .sort((a, b) => b.amount - a.amount);
-
-        const totalAmount = ledgerRows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'accommodation_billing', mode: 'ledger', rows: ledgerRows, totalAmount };
-      }
-
-      if (item.origin === 'vehicle_billing') {
-        const selectedDocs = selectPreferredTeamBillings(
-          deductionSourceData.vehicleDocs.filter((row) =>
-            isTeamBillingTarget({
-              issuedToType: row.issuedToType,
-              teamId: row.teamId ?? row.assignedTeamId,
-              teamName: row.teamName ?? row.assignedTeamName,
-              issuedToWorkerId: row.issuedToWorkerId,
-              issuedToWorkerName: row.issuedToWorkerName
-            }) &&
-            matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
-          ),
-          (doc) => hasBillingLineSource(doc, 'vehicle_ledger'),
-          getVehicleSettlementBillingGroupKey,
-          getSettlementBillingRowScopeKey
-        );
-        const isLedgerVehicleItem = !isAggregateDetailItem && itemIdText.endsWith(':ledger');
-        const targetPlate = extractBracketValue(deductionCategory, '차량비');
-
-        const matchedDocs = selectedDocs.filter((row) => {
-          if (isAggregateDetailItem) return true;
-          if (isLedgerVehicleItem) return false;
-          const plate = String(row.vehiclePlate ?? '').trim();
-          const id = String(row.vehicleId ?? '').trim();
-          if (targetPlate && plate === targetPlate) return true;
-          if (id && itemIdText.includes(id)) return true;
-          if (plate && itemIdText.includes(plate)) return true;
-          return false;
-        });
-
-        const docRows = matchedDocs
-          .flatMap((billing) => {
-            const plate = String(billing.vehiclePlate ?? '').trim() || String(billing.vehicleId ?? '').trim();
-            if ((billing.lineItems ?? []).length === 0) {
-              return [
-                { subject: plate, label: '고정비', amount: safeNumber(billing.fixedCost), note: 'FIXED' },
-                { subject: plate, label: '변동비', amount: safeNumber(billing.variableCost), note: 'VARIABLE' }
-              ];
-            }
-            return (billing.lineItems ?? []).map((li) => ({
-              subject: plate,
-              label: String(li.label ?? '').trim() || '차량비',
-              amount: safeNumber(li.amount),
-              note: String(li.category ?? li.type ?? '').trim() || undefined
-            }));
-          })
-          .filter((row) => row.amount > 0);
-
-        if (docRows.length > 0) {
-          const totalAmount = docRows.reduce((sum, row) => sum + row.amount, 0);
-          return { kind: 'vehicle_billing', mode: 'document', rows: docRows, totalAmount };
-        }
-
-        const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
-        const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
-        deductionSourceData.workers.forEach((w) => {
-          const info = { teamId: w.teamId, teamName: w.teamName };
-          const id = String(w.id ?? '').trim();
-          const legacyId = String(w.legacyId ?? '').trim();
-          const name = String(w.name ?? '').trim();
-          if (id) workerTeamByAnyId.set(id, info);
-          if (legacyId) workerTeamByAnyId.set(legacyId, info);
-          if (name) workerTeamByName.set(name, info);
-        });
-
-        const expenseByVehicleId = new Map<string, VehicleExpenseRecord[]>();
-        deductionSourceData.vehicleExpenses.forEach((expense) => {
-          const vehicleId = String(expense.vehicleId ?? '').trim();
-          if (!vehicleId) return;
-          const list = expenseByVehicleId.get(vehicleId) ?? [];
-          list.push(expense);
-          expenseByVehicleId.set(vehicleId, list);
-        });
-
-        const ledgerRows = deductionSourceData.vehicles
-          .flatMap((vehicle) => {
-            const plate = String(vehicle.licensePlate ?? '').trim();
-            const vehicleId = String(vehicle.id ?? '').trim();
-            if (targetPlate && plate !== targetPlate) return [];
-            if (!isAggregateDetailItem && !targetPlate && vehicleId && !itemIdText.includes(vehicleId) && plate && !itemIdText.includes(plate)) return [];
-
-            let isAssignedTeam = false;
-            if (vehicle.currentAssigneeType === 'TEAM') {
-              isAssignedTeam = matchesTeamByIdOrName(vehicle.currentAssigneeId, vehicle.currentAssigneeName);
-            } else if (vehicle.currentAssigneeType === 'WORKER') {
-              const workerId = String(vehicle.currentAssigneeId ?? '').trim();
-              const workerName = String(vehicle.currentAssigneeName ?? '').trim();
-              const info = (workerId ? workerTeamByAnyId.get(workerId) : undefined) ?? (workerName ? workerTeamByName.get(workerName) : undefined);
-              isAssignedTeam = info ? matchesTeamByIdOrName(info.teamId, info.teamName) : false;
-            }
-
-            if (!isAssignedTeam) return [];
-
-            const rows: Array<{ subject: string; label: string; amount: number; date?: string; note?: string }> = [];
-            const fixedCost =
-              vehicle.type === 'RENT' || vehicle.type === 'LEASE'
-                ? safeNumber(vehicle.contract?.monthlyFee)
-                : 0;
-            if (fixedCost > 0) {
-              rows.push({
-                subject: plate || vehicleId,
-                label: '월 고정비',
-                amount: fixedCost,
-                note: 'FIXED'
-              });
-            }
-
-            const expenses = [...(expenseByVehicleId.get(vehicleId) ?? [])].sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')));
-            expenses.forEach((expense) => {
-              rows.push({
-                subject: plate || vehicleId,
-                label: String(expense.type ?? '').trim() || '변동비',
-                amount: safeNumber(expense.amount),
-                date: String(expense.date ?? '').trim() || undefined,
-                note: 'VARIABLE'
-              });
-            });
-            return rows;
-          })
-          .filter((row) => row.amount > 0);
-
-        const totalAmount = ledgerRows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'vehicle_billing', mode: 'ledger', rows: ledgerRows, totalAmount };
-      }
-
-      if (item.origin === 'card_billing') {
-        const selectedDocs = selectPreferredTeamBillings(
-          deductionSourceData.cardDocs.filter((row) =>
-            isTeamBillingTarget({
-              issuedToType: row.issuedToType,
-              teamId: row.teamId ?? row.assignedTeamId,
-              teamName: row.teamName ?? row.assignedTeamName,
-              issuedToWorkerId: row.issuedToWorkerId,
-              issuedToWorkerName: row.issuedToWorkerName
-            }) &&
-            matchesTeamByIdOrName(row.teamId ?? row.assignedTeamId, row.teamName ?? row.assignedTeamName)
-          ),
-          (doc) => hasBillingLineSource(doc, 'card_ledger'),
-          getCardSettlementBillingGroupKey,
-          getSettlementBillingRowScopeKey
-        );
-        const isLedgerCardItem = !isAggregateDetailItem && itemIdText.endsWith(':ledger');
-        const targetCardLabel = extractBracketValue(deductionCategory, '카드비');
-
-        const matchedDocs = selectedDocs.filter((row) => {
-          if (isAggregateDetailItem) return true;
-          if (isLedgerCardItem) return false;
-          const cardId = String(row.cardId ?? '').trim();
-          const cardLabel = String(row.cardLabel ?? '').trim();
-          if (targetCardLabel && cardLabel === targetCardLabel) return true;
-          if (cardId && itemIdText.includes(cardId)) return true;
-          if (cardLabel && itemIdText.includes(cardLabel)) return true;
-          return false;
-        });
-
-        const docRows = matchedDocs
-          .flatMap((billing) => {
-            const label = String(billing.cardLabel ?? '').trim() || String(billing.cardId ?? '').trim();
-            return (billing.lineItems ?? []).map((li) => ({
-              subject: label,
-              label: String(li.label ?? '').trim() || '카드비',
-              amount: safeNumber(li.amount),
-              note: String(li.category ?? '').trim() || undefined
-            }));
-          })
-          .filter((row) => row.amount > 0);
-
-        if (docRows.length > 0) {
-          const totalAmount = docRows.reduce((sum, row) => sum + row.amount, 0);
-          return { kind: 'card_billing', mode: 'document', rows: docRows, totalAmount };
-        }
-
-        const workerTeamByAnyId = new Map<string, { teamId?: string; teamName?: string }>();
-        const workerTeamByName = new Map<string, { teamId?: string; teamName?: string }>();
-        deductionSourceData.workers.forEach((w) => {
-          const info = { teamId: w.teamId, teamName: w.teamName };
-          const id = String(w.id ?? '').trim();
-          const legacyId = String(w.legacyId ?? '').trim();
-          const name = String(w.name ?? '').trim();
-          if (id) workerTeamByAnyId.set(id, info);
-          if (legacyId) workerTeamByAnyId.set(legacyId, info);
-          if (name) workerTeamByName.set(name, info);
-        });
-
-        const txByCardId = new Map<string, CardTransaction[]>();
-        deductionSourceData.cardTransactions.forEach((tx) => {
-          const cardId = String(tx.cardId ?? '').trim();
-          if (!cardId) return;
-          const list = txByCardId.get(cardId) ?? [];
-          list.push(tx);
-          txByCardId.set(cardId, list);
-        });
-
-        const ledgerRows = deductionSourceData.cards
-          .flatMap((card) => {
-            const cardId = String(card.id ?? '').trim();
-            const cardLabel = `${String(card.name ?? '').trim()} (${String(card.last4 ?? '').trim()})`.trim();
-
-            if (targetCardLabel && cardLabel !== targetCardLabel) return [];
-            if (!isAggregateDetailItem && !targetCardLabel && cardId && !itemIdText.includes(cardId) && cardLabel && !itemIdText.includes(cardLabel)) return [];
-
-            let isAssignedTeam = false;
-            if (card.currentAssigneeType === 'TEAM') {
-              isAssignedTeam = matchesTeamByIdOrName(card.currentAssigneeId, card.currentAssigneeName);
-            } else if (card.currentAssigneeType === 'WORKER') {
-              const workerId = String(card.currentAssigneeId ?? '').trim();
-              const workerName = String(card.currentAssigneeName ?? '').trim();
-              const info = (workerId ? workerTeamByAnyId.get(workerId) : undefined) ?? (workerName ? workerTeamByName.get(workerName) : undefined);
-              isAssignedTeam = info ? matchesTeamByIdOrName(info.teamId, info.teamName) : false;
-            }
-            if (!isAssignedTeam) return [];
-
-            const txs = [...(txByCardId.get(cardId) ?? [])].sort((a, b) => String(a.date ?? '').localeCompare(String(b.date ?? '')));
-            return txs.map((tx) => ({
-              subject: cardLabel,
-              label: String(tx.merchant ?? '').trim() || '카드 사용',
-              amount: safeNumber(tx.amount),
-              date: String(tx.date ?? '').trim() || undefined,
-              note: String(tx.category ?? '').trim() || undefined
-            }));
-          })
-          .filter((row) => row.amount > 0);
-
-        const totalAmount = ledgerRows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'card_billing', mode: 'ledger', rows: ledgerRows, totalAmount };
-      }
-
-      if (item.origin === 'team_expense_claim') {
-        const itemIdParts = itemIdText.split(':');
-        const targetClaimId = itemIdParts.length >= 3 ? itemIdParts[2] : '';
-        const rows = deductionSourceData.teamExpenseClaims
-          .filter((claim) => claim.status === 'charged' || claim.status === 'settled')
-          .filter((claim) => !targetClaimId || String(claim.id ?? '') === targetClaimId)
-          .filter((claim) => {
-            const isOtherExpense = claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim();
-            if (isOtherExpense) return matchesTeamByIdOrName(claim.payerTeamId, claim.payerTeamName);
-            return matchesTeamByIdOrName(claim.chargeToTeamId, claim.chargeToTeamName);
-          })
-          .map((claim) => {
-            const isOtherExpense = claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim();
-            const subject = isOtherExpense
-              ? (claim.payerTeamName || selectedTeamName || '-')
-              : (claim.payerTeamName || '-');
-            const description = String(claim.description ?? '').trim();
-            return {
-              date: String(claim.date ?? '').trim(),
-              subject,
-              label: `${getTeamExpenseCategoryLabel(claim.category)}${description ? ` - ${description}` : ''}`,
-              amount: safeNumber(claim.amount),
-              note: [
-                isOtherExpense ? (claim.claimType === 'officeExpense' ? '사무실경비' : '기타청구') : '내야 할 후청구',
-                String(claim.siteName ?? '').trim(),
-                String(claim.cardLabel ?? '').trim()
-              ].filter(Boolean).join(' / ')
-            };
-          })
-          .filter((row) => row.amount > 0);
-
-        const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
-        return { kind: 'team_expense_claim', rows, totalAmount };
+      if (item.origin === 'accommodation_billing' || item.origin === 'vehicle_billing' || item.origin === 'card_billing' || item.origin === 'team_expense_claim') {
+        const saved = isAggregateDetailItem ? doc.deductions.filter(row => row.origin === item.origin) : [item];
+        const rows = saved.flatMap(row => getTeamSettlementExpenseDetail(row, expenseSourceResult.entries).rows);
+        const totalAmount = saved.reduce((sum, row) => sum + row.amount, 0);
+        if (item.origin === 'team_expense_claim') return { kind: item.origin, rows: rows.map(row => ({ ...row, date: row.date || '' })), totalAmount };
+        return { kind: item.origin, mode: 'document', rows, totalAmount };
       }
 
       return null;
     },
-    [deductionSourceData, detailRows, doc, matchesTeam, matchesTeamByIdOrName, selectedTeamName, yearMonth]
+    [expenseSourceResult.entries, detailRows, doc, matchesTeam]
   );
 
   const getLineDetailRows = useCallback(
@@ -3218,6 +2068,12 @@ export const TeamSettlementPage: React.FC = () => {
         const consistency = getTeamSettlementSupportDetailConsistency(safeNumber(line.manDay), rows);
         if (consistency.matches) {
           const targetAmount = Math.round(safeNumber(line.amount));
+          const recordedRate = safeAverage(targetAmount, safeNumber(line.manDay));
+          const rates = new Set(rows.map(row => row.unitPrice));
+          if (recordedRate !== null && rates.size <= 1) rows.forEach(row => {
+            row.unitPrice = recordedRate;
+            row.amount = Math.round(row.manDay * recordedRate);
+          });
           const currentAmount = rows.reduce((sum, row) => sum + safeNumber(row.amount), 0);
           const diff = Math.round(targetAmount - currentAmount);
           if (rows.length > 0 && diff !== 0) {
@@ -3734,7 +2590,7 @@ export const TeamSettlementPage: React.FC = () => {
         <React.Fragment key={line.id}>
           <tr className={summaryRowClassName}>
             {showKindColumn && (
-              <td className="px-2 py-2 border text-center align-middle whitespace-nowrap">
+              <td data-label="구분" className="px-2 py-2 border text-center align-middle whitespace-nowrap">
                 <span
                   className={`inline-flex items-center px-2 py-1 rounded-full border text-xs font-semibold ${getKindBadgeClassName(
                     line.kind
@@ -3744,10 +2600,10 @@ export const TeamSettlementPage: React.FC = () => {
                 </span>
               </td>
             )}
-            <td className="px-2 py-2 border text-center align-middle whitespace-nowrap">
+            <td data-label={showSiteInsteadOfCounterTeam ? '현장' : '상대팀'} className="px-2 py-2 border text-center align-middle whitespace-nowrap">
               {showSiteInsteadOfCounterTeam ? (
                 editableManual ? (
-                  <input
+                  <input aria-label={showSiteInsteadOfCounterTeam ? '현장' : '상대팀'}
                     className="mx-auto block w-full border rounded px-2 py-1 text-center"
                     value={line.siteName}
                     onChange={(e) => {
@@ -3769,7 +2625,7 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className="text-center text-slate-800 font-medium">{String(line.siteName ?? '').trim() || '-'}</div>
                 )
               ) : editableManual ? (
-                <input
+                <input aria-label={showSiteInsteadOfCounterTeam ? '현장' : '상대팀'}
                   className="mx-auto block w-full border rounded px-2 py-1 text-center"
                   value={line.counterTeamName ?? ''}
                   onChange={(e) => {
@@ -3791,8 +2647,8 @@ export const TeamSettlementPage: React.FC = () => {
                 <div className="text-center font-bold text-slate-900">{line.counterTeamName ?? '-'}</div>
               )}
             </td>
-            <td className="px-1 py-2 border text-center align-middle whitespace-nowrap">
-              <input
+            <td data-label="공수" className="px-1 py-2 border text-center align-middle whitespace-nowrap">
+              <input aria-label="공수"
                 className="mx-auto block w-20 border rounded px-2 py-1 text-center"
                 value={formatManDay1(line.manDay)}
                 disabled={!editableManual}
@@ -3813,8 +2669,8 @@ export const TeamSettlementPage: React.FC = () => {
               />
             </td>
             {showSupportRateColumn && (
-              <td className="px-1 py-2 border text-center align-middle whitespace-nowrap">
-                <input
+              <td data-label="지원단가" className="px-1 py-2 border text-center align-middle whitespace-nowrap">
+                <input aria-label="지원단가"
                   key={`support-rate:${line.id}:${Math.round(supportUnitPrice ?? 0)}`}
                   type="text"
                   inputMode="numeric"
@@ -3838,8 +2694,8 @@ export const TeamSettlementPage: React.FC = () => {
                 />
               </td>
             )}
-            <td className="px-1 py-2 border text-center align-middle whitespace-nowrap">
-              <CurrencyInput
+            <td data-label={line.kind === '지원' ? '노임총액' : '금액'} className="px-1 py-2 border text-center align-middle whitespace-nowrap">
+              <CurrencyInput aria-label={line.kind === '지원' ? '노임총액' : '금액'}
                 className="mx-auto block w-28 border rounded px-2 py-1 text-center"
                 value={line.amount}
                 disabled={!editableAmount}
@@ -3863,10 +2719,10 @@ export const TeamSettlementPage: React.FC = () => {
                 }}
               />
             </td>
-            <td className="px-2 py-2 border text-center align-middle">
-              <div className="flex min-w-[220px] items-center gap-2">
-                <input
-                  className="min-w-0 flex-1 border rounded px-2 py-1 text-center"
+            <td data-label="비고" className="px-2 py-2 border text-center align-middle">
+              <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
+                <input aria-label="비고"
+                  className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1 text-center"
                   value={line.memo ?? ''}
                   disabled={!canEdit || isMergedSupportLine}
                   onChange={(e) => {
@@ -3884,9 +2740,10 @@ export const TeamSettlementPage: React.FC = () => {
                     }
                   }}
                 />
+                {(!canEdit || isMergedSupportLine) && <span className="team-settlement-page__readonly-value">{(line.memo ?? '') || '—'}</span>}
               </div>
             </td>
-            <td className="px-2 py-2 border text-center">
+            <td data-label="상세" className="px-2 py-2 border text-center">
               <div className="flex items-center justify-center gap-1">
                 <button
                   type="button"
@@ -3909,6 +2766,11 @@ export const TeamSettlementPage: React.FC = () => {
                       ? `총 ${detail.length}건 / ${siteSummaries.length}개 현장`
                       : '상세 데이터 없음 (수기 항목이거나 필터 조건에 해당 없음)'}
                   </div>
+
+                  {lineIsSupportOrigin && supportDetailError && <div role="alert" className="mt-3 text-sm text-amber-800">
+                    인력교류 상세를 불러오지 못했습니다.
+                    <button type="button" className="ml-2 underline" onClick={() => setSupportDetailRetry(value => value + 1)}>다시 조회</button>
+                  </div>}
 
                   {hasSupportDetailMismatch && (
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
@@ -3966,15 +2828,15 @@ export const TeamSettlementPage: React.FC = () => {
                   {detail.length > 0 && (
                     <div className="mt-3 space-y-3">
                       <div className="overflow-auto">
-                        <table className="w-full text-sm border-collapse">
+                        <table className="team-settlement-page__site-detail w-full text-sm border-collapse">
                           <thead>
                             <tr className="bg-slate-50 text-slate-600">
-                              <th className="text-left px-2 py-2 border">현장</th>
-                              <th className="text-right px-2 py-2 border">작업자수</th>
-                              <th className="text-right px-2 py-2 border">공수 합계</th>
-                              {showSiteRateColumn && <th className="text-right px-2 py-2 border">지원단가</th>}
-                              <th className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액 합계' : '금액 합계'}</th>
-                              <th className="text-center px-2 py-2 border">상세</th>
+                              <th scope="col" className="text-left px-2 py-2 border">현장</th>
+                              <th scope="col" className="text-right px-2 py-2 border">작업자수</th>
+                              <th scope="col" className="text-right px-2 py-2 border">공수 합계</th>
+                              {showSiteRateColumn && <th scope="col" className="text-right px-2 py-2 border">지원단가</th>}
+                              <th scope="col" className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액 합계' : '금액 합계'}</th>
+                              <th scope="col" className="text-center px-2 py-2 border">상세</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -3988,15 +2850,17 @@ export const TeamSettlementPage: React.FC = () => {
                               const workerSummaries = (() => {
                                 const grouped = new Map<
                                   string,
-                                  { workerName: string; workerTeamName: string; manDay: number; amount: number }
+                                  { date: string; workerName: string; workerTeamName: string; manDay: number; amount: number }
                                 >();
 
                                 site.rows.forEach((r) => {
+                                  const date = String(r.date ?? '').trim();
                                   const workerName = String(r.workerName ?? '').trim() || '-';
                                   const workerTeamName = String(r.workerTeamName ?? '').trim() || '-';
-                                  const key = `${workerName}__${workerTeamName}`;
-                                  const prev = grouped.get(key) ?? { workerName, workerTeamName, manDay: 0, amount: 0 };
+                                  const key = JSON.stringify([date, workerName, workerTeamName]);
+                                  const prev = grouped.get(key) ?? { date, workerName, workerTeamName, manDay: 0, amount: 0 };
                                   grouped.set(key, {
+                                    date,
                                     workerName,
                                     workerTeamName,
                                     manDay: prev.manDay + safeNumber(r.manDay),
@@ -4004,18 +2868,18 @@ export const TeamSettlementPage: React.FC = () => {
                                   });
                                 });
 
-                                return Array.from(grouped.values()).sort((a, b) => b.amount - a.amount);
+                                return Array.from(grouped.values()).sort((a, b) => a.date.localeCompare(b.date) || b.amount - a.amount);
                               })();
 
                               return (
                                 <React.Fragment key={siteKey}>
                                   <tr className="bg-white">
-                                    <td className="px-2 py-2 border">{site.siteName}</td>
-                                    <td className="px-2 py-2 border text-right">{workerCount}</td>
-                                    <td className="px-2 py-2 border text-right">{formatManDay1(site.manDay)}</td>
+                                    <td data-label="현장" className="px-2 py-2 border">{site.siteName}</td>
+                                    <td data-label="작업자수" className="px-2 py-2 border text-right">{workerCount}</td>
+                                    <td data-label="공수 합계" className="px-2 py-2 border text-right">{formatManDay1(site.manDay)}</td>
                                     {showSiteRateColumn && (
-                                      <td className="px-2 py-2 border text-right">
-                                        <input
+                                      <td data-label="지원단가" className="px-2 py-2 border text-right">
+                                        <input aria-label="지원단가"
                                           key={`support-site-rate:${line.id}:${site.key}:${Math.round(siteSupportUnitPrice ?? 0)}`}
                                           type="text"
                                           inputMode="numeric"
@@ -4039,8 +2903,8 @@ export const TeamSettlementPage: React.FC = () => {
                                         />
                                       </td>
                                     )}
-                                    <td className="px-2 py-2 border text-right">{formatCurrency(site.amount)}</td>
-                                    <td className="px-2 py-2 border text-center">
+                                    <td data-label={lineIsSupportOrigin ? '노임총액 합계' : '금액 합계'} className="px-2 py-2 border text-right">{formatCurrency(site.amount)}</td>
+                                    <td data-label="상세" className="px-2 py-2 border text-center">
                                       <button
                                         type="button"
                                         className={ghostButtonClassName}
@@ -4057,26 +2921,28 @@ export const TeamSettlementPage: React.FC = () => {
                                         <div className="rounded-lg border bg-slate-50 p-3">
                                           <div className="text-sm font-semibold text-slate-700">작업자 상세 ({site.siteName})</div>
                                           <div className="mt-2 overflow-auto">
-                                            <table className="w-full text-sm border-collapse">
+                                            <table className="team-settlement-page__worker-detail w-full text-sm border-collapse" aria-label={`작업자 상세 (${site.siteName})`}>
                                               <thead>
                                                 <tr className="bg-white text-slate-600">
-                                                  <th className="text-left px-2 py-2 border">작업자</th>
-                                                  <th className="text-left px-2 py-2 border">소속팀</th>
-                                                  <th className="text-right px-2 py-2 border">공수</th>
-                                                  <th className="text-right px-2 py-2 border">평균단가</th>
-                                                  <th className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액' : '금액'}</th>
+                                                  <th scope="col" className="text-left px-2 py-2 border">날짜</th>
+                                                  <th scope="col" className="text-left px-2 py-2 border">작업자</th>
+                                                  <th scope="col" className="text-left px-2 py-2 border">소속팀</th>
+                                                  <th scope="col" className="text-right px-2 py-2 border">공수</th>
+                                                  <th scope="col" className="text-right px-2 py-2 border">평균단가</th>
+                                                  <th scope="col" className="text-right px-2 py-2 border">{lineIsSupportOrigin ? '노임총액' : '금액'}</th>
                                                 </tr>
                                               </thead>
                                               <tbody>
                                                 {workerSummaries.map((w) => {
                                                   const avgUnit = safeAverage(w.amount, w.manDay);
                                                   return (
-                                                    <tr key={`${siteKey}__${w.workerName}__${w.workerTeamName}`} className="bg-white">
-                                                      <td className="px-2 py-2 border">{w.workerName}</td>
-                                                      <td className="px-2 py-2 border">{w.workerTeamName}</td>
-                                                      <td className="px-2 py-2 border text-right">{formatManDay1(w.manDay)}</td>
-                                                      <td className="px-2 py-2 border text-right">{formatAverageCurrency(avgUnit)}</td>
-                                                      <td className="px-2 py-2 border text-right">{formatCurrency(w.amount)}</td>
+                                                    <tr key={JSON.stringify([siteKey, w.date, w.workerName, w.workerTeamName])} className="bg-white">
+                                                      <td data-label="날짜" className="px-2 py-2 border">{w.date.replace(/^\d{2}(\d{2}-\d{2}-\d{2})$/, '$1') || '-'}</td>
+                                                      <td data-label="작업자" className="px-2 py-2 border">{w.workerName}</td>
+                                                      <td data-label="소속팀" className="px-2 py-2 border">{w.workerTeamName}</td>
+                                                      <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(w.manDay)}</td>
+                                                      <td data-label="평균단가" className="px-2 py-2 border text-right">{formatAverageCurrency(avgUnit)}</td>
+                                                      <td data-label={lineIsSupportOrigin ? '노임총액' : '금액'} className="px-2 py-2 border text-right">{formatCurrency(w.amount)}</td>
                                                     </tr>
                                                   );
                                                 })}
@@ -4104,8 +2970,520 @@ export const TeamSettlementPage: React.FC = () => {
     });
   };
 
+  const renderAdjustmentGroup = (group: DeductionGroup) => (
+    <div key={group.key} className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
+      <div role="group" aria-label={`${group.title} 합계`} className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-slate-800">{group.title}</h3>
+          {group.key !== 'payroll' && group.key !== 'expense' && (
+            <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
+          )}
+        </div>
+        <div className="text-right">
+          <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
+        </div>
+      </div>
+
+      {group.items.some(item => item.origin === 'office_expense' && !item.officeExpenseRates) && (
+        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          사무실비 새 기준은 도급 공수×10,000원 + 직영 공수×5,000원입니다.
+          {' '}{doc?.confirmedAt ? '확정취소 후 재집계하면' : '상단의 재집계를 누르면'} 이 정산에도 새 기준이 적용됩니다.
+        </p>
+      )}
+
+      <div className="mt-2 overflow-auto">
+        <table data-compact="adjustment" className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-slate-50 text-slate-600">
+              <th scope="col" className="text-left px-2 py-2 border">구분</th>
+              <th scope="col" className="text-left px-2 py-2 border">항목</th>
+              <th scope="col" className="text-right px-2 py-2 border">금액</th>
+              <th scope="col" data-label="비고" className="text-left px-2 py-2 border">비고</th>
+              <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
+            </tr>
+          </thead>
+          <tbody>
+            {group.displayItems.length === 0 ? (
+              <tr className="bg-white">
+                <td className="px-2 py-3 border text-center text-slate-400" colSpan={5}>
+                  내역 없음
+                </td>
+              </tr>
+            ) : group.displayItems.map((item) => {
+        const editableRow = canEdit && item.source === 'manual';
+        const canExpand =
+          item.source === 'auto' && !item.isOfficeExpenseAdjustment &&
+          (
+            item.origin === 'office_expense' ||
+            item.origin === 'daily_wage_payroll' ||
+            item.origin === 'monthly_wage_payroll' ||
+            item.origin === 'service_team_payroll' ||
+            item.origin === 'team_expense_claim' ||
+            item.origin === 'accommodation_billing' ||
+            item.origin === 'vehicle_billing' ||
+            item.origin === 'card_billing'
+          );
+        const isExpanded = canExpand && expandedDeductionIds.has(item.id);
+        const detail = isExpanded ? getDeductionDetail(item) : null;
+        return (
+          <React.Fragment key={item.id}>
+            <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
+              <td data-label="구분" className="px-2 py-2 border text-slate-700">
+                {getDeductionDisplayOriginLabel(item)}
+              </td>
+              <td data-label="항목" className="px-2 py-2 border">
+                <input aria-label="항목"
+                  className="team-settlement-page__readonly-input w-full border rounded px-2 py-1"
+                  value={item.category}
+                  disabled={!editableRow}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    updateDoc((prev) => ({
+                      ...prev,
+                      deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, category: next } : x))
+                    }));
+                  }}
+                />
+                {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.category) || '—'}</span>}
+              </td>
+              <td data-label="금액" className="px-2 py-2 border text-right">
+                <CurrencyInput aria-label="금액"
+                  className="w-full border rounded px-2 py-1 text-right"
+                  value={item.amount}
+                  disabled={!editableRow}
+                  onChange={(n) => {
+                    updateDoc((prev) => ({
+                      ...prev,
+                      deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, amount: n } : x))
+                    }));
+                  }}
+                />
+              </td>
+              <td data-label="비고" className="px-2 py-2 border">
+                <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
+                  <input aria-label="비고"
+                    className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1"
+                    value={formatTeamSettlementMemo(item)}
+                    disabled={!editableRow}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      updateDoc((prev) => ({
+                        ...prev,
+                        deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, memo: next } : x))
+                      }));
+                    }}
+                  />
+                  {(!editableRow) && <span className="team-settlement-page__readonly-value">{formatTeamSettlementMemo(item) || '—'}</span>}
+                </div>
+              </td>
+              <td data-label="상세" className="px-2 py-2 border text-center">
+                <div className="flex items-center justify-center gap-1">
+                  {canExpand && (
+                    <button
+                      type="button"
+                      className={ghostButtonClassName}
+                      onClick={() => toggleDeductionExpanded(item.id)}
+                    >
+                      {isExpanded ? '닫기' : '상세'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded border bg-white text-slate-700 disabled:opacity-50"
+                    disabled={!editableRow}
+                    onClick={() => {
+                      updateDoc((prev) => ({
+                        ...prev,
+                        deductions: prev.deductions.filter((x) => x.id !== item.id)
+                      }));
+                    }}
+                  >
+                    삭제
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            {isExpanded && detail && (
+              <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
+                <td className="px-3 py-3 border" colSpan={5}>
+                  <div className={`rounded-lg border bg-white p-3 ${group.key === 'expense' ? 'team-settlement-page__expense-expanded-detail' : ''}`}>
+                    {detail.kind === 'office_expense' && (
+                      <TeamSettlementOfficeExpenseDetail detail={detail} />
+                    )}
+
+                    {detail.kind === 'payroll' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">급여 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          작업자별 공수·급여 내역
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table aria-label="급여 상세 내역" className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">작업자</th>
+                                <th scope="col" className="text-right px-2 py-2 border">공수</th>
+                                <th scope="col" className="text-right px-2 py-2 border">급여</th>
+                                <th scope="col" className="text-right px-2 py-2 border">총급여</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={4}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((r) => (
+                                  <tr key={r.workerId} className="bg-white">
+                                    <td data-label="작업자" className="px-2 py-2 border text-slate-800 font-medium">{r.workerName}</td>
+                                    <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
+                                    <td data-label="급여" className="px-2 py-2 border text-right">
+                                      {formatAverageCurrency(safeAverage(r.amount, r.manDay))}
+                                    </td>
+                                    <td data-label="총급여" className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between">
+                            <div className="text-slate-600">총공수</div>
+                            <div className="font-bold text-slate-900">{formatManDay1(detail.totalManDay)}</div>
+                          </div>
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총급여</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'accommodation_billing' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">숙소 공제 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {detail.mode === 'document' ? '숙소 청구서 기준' : '월별 공과금 대장 배분 기준'}
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                {detail.mode === 'ledger' && (
+                                  <th scope="col" className="text-right px-2 py-2 border">배분일수(팀/전체)</th>
+                                )}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={detail.mode === 'ledger' ? 4 : 3}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => (
+                                  <tr key={`accommodation-row-${idx}`} className="bg-white">
+                                    <td data-label="대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                    <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                    {detail.mode === 'ledger' && (
+                                      <td data-label="배분일수(팀/전체)" className="px-2 py-2 border text-right">
+                                        {safeNumber(row.teamDays)}/{safeNumber(row.totalDays)}
+                                      </td>
+                                    )}
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'vehicle_billing' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">차량 공제 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          정산에 반영된 차량 금액 기준
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">차량</th>
+                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={5}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => (
+                                  <tr key={`vehicle-row-${idx}`} className="bg-white">
+                                    <td data-label="차량" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                    <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                    <td data-label="구분" className="px-2 py-2 border">{row.note ?? '-'}</td>
+                                    <td data-label="일자" className="px-2 py-2 border">{row.date ?? '-'}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'card_billing' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">카드 공제 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          {detail.mode === 'document' ? '카드 청구서 기준' : '월별 카드 대장 자동집계 기준'}
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">카드</th>
+                                <th scope="col" className="text-left px-2 py-2 border">사용처</th>
+                                <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={5}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => (
+                                  <tr key={`card-row-${idx}`} className="bg-white">
+                                    <td data-label="카드" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                    <td data-label="사용처" className="px-2 py-2 border">{row.label}</td>
+                                    <td data-label="구분" className="px-2 py-2 border">{row.note ?? '-'}</td>
+                                    <td data-label="일자" className="px-2 py-2 border">{row.date ?? '-'}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'expense_aggregate' && (
+                      <div role="region" aria-label="경비 상세">
+                        <div className="text-sm font-semibold text-slate-800">경비 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          차량·숙소·카드·경비 청구 공제 항목 합계 기준
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                                <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">더상세</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={6}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => {
+                                  const hasMoreDetail = row.details.length > 0;
+                                  const isMoreDetailExpanded = expandedExpenseDetailKeys.has(row.key);
+                                  return (
+                                    <React.Fragment key={`expense-aggregate-row-${row.key}-${idx}`}>
+                                      <tr className="bg-white">
+                                        <td data-label="구분" className="px-2 py-2 border text-slate-800 font-medium">{row.originLabel}</td>
+                                        <td data-label="대상" className="px-2 py-2 border">{row.subject}</td>
+                                        <td data-label="항목" className="px-2 py-2 border">{row.category}</td>
+                                        <td data-label="비고" className="px-2 py-2 border">{row.memo || '-'}</td>
+                                        <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                        <td data-label="더상세" className="px-2 py-2 border text-center">
+                                          {hasMoreDetail ? (
+                                            <button
+                                              type="button"
+                                              className={ghostButtonClassName}
+                                              onClick={() => toggleExpenseDetailExpanded(row.key)}
+                                            >
+                                              {isMoreDetailExpanded ? '닫기' : '더상세'}
+                                            </button>
+                                          ) : (
+                                            <span className="text-slate-400">-</span>
+                                          )}
+                                        </td>
+                                      </tr>
+
+                                      {hasMoreDetail && isMoreDetailExpanded && (
+                                        <tr className="bg-slate-50">
+                                          <td className="px-3 py-3 border" colSpan={6}>
+                                            <div className="rounded-md border bg-white p-3">
+                                              <div className="text-xs font-semibold text-slate-700">
+                                                {row.originLabel}별 경비
+                                              </div>
+                                              <div className="mt-2 overflow-auto">
+                                                <table className="w-full text-xs border-collapse">
+                                                  <thead>
+                                                    <tr className="bg-slate-50 text-slate-600">
+                                                      <th scope="col" className="text-left px-2 py-2 border">대상</th>
+                                                      <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                                      <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                                      <th scope="col" className="text-right px-2 py-2 border">세부</th>
+                                                      <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {row.details.map((child, childIdx) => (
+                                                      <tr key={`expense-aggregate-child-${row.key}-${childIdx}`} className="bg-white">
+                                                        <td data-label="대상" className="px-2 py-2 border">{child.subject || child.label}</td>
+                                                        <td data-label="항목" className="px-2 py-2 border">{child.category || '-'}</td>
+                                                        <td data-label="비고" className="px-2 py-2 border">{child.note || '-'}</td>
+                                                        <td data-label="세부" className="px-2 py-2 border text-right">{child.allocation || '-'}</td>
+                                                        <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(child.amount)}</td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </React.Fragment>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {detail.kind === 'team_expense_claim' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">경비 차감 상세</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          청구완료/정산완료 경비내역 기준
+                        </div>
+
+                        <div className="mt-3 overflow-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th scope="col" className="text-left px-2 py-2 border">일자</th>
+                                <th scope="col" className="text-left px-2 py-2 border">상대/대상</th>
+                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                                <th scope="col" className="text-left px-2 py-2 border">비고</th>
+                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.rows.length === 0 ? (
+                                <tr>
+                                  <td className="px-2 py-2 border text-slate-500" colSpan={5}>
+                                    데이터 없음
+                                  </td>
+                                </tr>
+                              ) : (
+                                detail.rows.map((row, idx) => (
+                                  <tr key={`team-expense-row-${idx}`} className="bg-white">
+                                    <td data-label="일자" className="px-2 py-2 border">{row.date || '-'}</td>
+                                    <td data-label="상대/대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                    <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
+                                    <td data-label="비고" className="px-2 py-2 border">{row.note || '-'}</td>
+                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="mt-3 text-sm">
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-slate-600">총금액</div>
+                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            )}
+          </React.Fragment>
+        );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="team-settlement-page w-full p-3 sm:p-4 lg:p-6" style={teamSettlementAccentStyle}>
+    <div className="team-settlement-page min-w-0 w-full p-3 sm:p-4 lg:p-6" style={teamSettlementAccentStyle}>
       <style>{`
         .team-settlement-page {
           color: #0f172a;
@@ -4130,7 +3508,7 @@ export const TeamSettlementPage: React.FC = () => {
 
         .team-settlement-page__workspace-bar {
           border-color: var(--team-settlement-accent-border);
-          background: linear-gradient(90deg, var(--team-settlement-accent-soft-strong), rgba(255, 255, 255, 0.96));
+          background: linear-gradient(90deg, var(--team-settlement-accent-soft-strong), rgba(255, 255, 255, 0.96)), #ffffff;
         }
 
         .team-settlement-page__current-team {
@@ -4163,28 +3541,15 @@ export const TeamSettlementPage: React.FC = () => {
           line-height: 1.5rem;
         }
 
-        .team-settlement-page__team-list {
-          -webkit-overflow-scrolling: touch;
-          flex-wrap: nowrap;
-          overflow-x: auto;
-          padding: 0 0.125rem 0.375rem;
-          scroll-snap-type: x proximity;
-          scrollbar-width: thin;
-        }
-
-        .team-settlement-page__team-list > button {
-          flex: 0 0 auto;
-          scroll-snap-align: start;
-        }
-
         .team-settlement-page .overflow-auto {
           -webkit-overflow-scrolling: touch;
           overscroll-behavior-inline: contain;
         }
 
-        @media (max-width: 639px) {
+        @media (max-width: 767px) {
           .team-settlement-page__workspace-bar {
-            position: static;
+            position: sticky;
+            top: var(--header-height, 60px);
             backdrop-filter: none;
             box-shadow: none;
           }
@@ -4199,17 +3564,6 @@ export const TeamSettlementPage: React.FC = () => {
             word-break: keep-all;
           }
 
-          .team-settlement-page__team-list {
-            scroll-snap-type: x proximity;
-          }
-
-          .team-settlement-page__team-list > button {
-            min-height: 44px;
-          }
-
-          .team-settlement-page .overflow-auto > table {
-            min-width: 640px;
-          }
         }
       `}</style>
       <TeamSettlementWorkspaceHeader
@@ -4229,9 +3583,15 @@ export const TeamSettlementPage: React.FC = () => {
         onSave={handleSave}
         onConfirm={handleConfirm}
         onUnconfirm={handleUnconfirm}
+        onMonthChange={nextMonth => {
+          void (async () => {
+            if (nextMonth === yearMonth || !(await confirmBeforeDiscard('정산월 이동'))) return;
+            setYearMonth(nextMonth);
+          })();
+        }}
       />
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4">
         <div className="team-settlement-page__selector-card rounded-xl border bg-white p-3 sm:p-2.5">
           <div className="text-sm font-semibold text-slate-700">정산월</div>
           <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -4277,87 +3637,17 @@ export const TeamSettlementPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="team-settlement-page__selector-card rounded-xl border bg-white p-3 sm:p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <div className="text-base font-black text-slate-900">팀</div>
-                <span className="hidden rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 sm:inline-flex">
-                  회사 공통 순서
-                </span>
-              </div>
-              {isTeamOrderEditing && (
-                <div className="mt-0.5 hidden text-xs font-semibold text-blue-600 sm:block">
-                  팀 버튼을 드래그해 순서를 바꾸세요.
-                </div>
-              )}
-            </div>
-            <div className="hidden items-center gap-1.5 sm:flex">
-              {isTeamOrderEditing && (
-                <button
-                  type="button"
-                  className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-                  disabled={isTeamOrderSaving}
-                  onClick={handleResetTeamOrder}
-                >
-                  기본 순서
-                </button>
-              )}
-              <button
-                type="button"
-                className={`inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs font-black transition disabled:opacity-50 ${isTeamOrderEditing
-                  ? 'border-blue-600 bg-blue-600 text-white shadow-sm hover:bg-blue-700'
-                  : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700'
-                  }`}
-                aria-pressed={isTeamOrderEditing}
-                disabled={isTeamOrderSaving}
-                onClick={handleTeamOrderEditingToggle}
-              >
-                {isTeamOrderSaving ? '저장 중...' : isTeamOrderEditing ? '순서 변경 완료' : '순서 변경'}
-              </button>
-            </div>
-          </div>
-          <label className="sr-only" htmlFor="team-settlement-team-select">정산 팀 선택</label>
-          <select
-            id="team-settlement-team-select"
-            className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 sm:hidden"
-            value={selectedTeamId}
-            onChange={(event) => handleTeamSelect(event.target.value)}
-          >
-            {teams.map((team) => (
-              <option key={String(team.id ?? '')} value={String(team.id ?? '')}>{team.name}</option>
-            ))}
-          </select>
-          <DndContext
-            sensors={teamOrderSensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleTeamOrderDragEnd}
-          >
-            <SortableContext
-              items={teams.map(getTeamOrderId)}
-              strategy={horizontalListSortingStrategy}
-            >
-              <div
-                className="team-settlement-page__team-list mt-2 hidden gap-2.5 sm:flex"
-                role="group"
-                aria-label={isTeamOrderEditing ? '팀 순서 변경' : '팀 선택'}
-              >
-                {teams.map((team) => {
-                  const teamId = String(team.id ?? '');
-                  return (
-                    <SortableTeamButton
-                      key={getTeamOrderId(team)}
-                      team={team}
-                      isSelected={teamId === String(selectedTeamId)}
-                      isOrderEditing={isTeamOrderEditing}
-                      onSelect={handleTeamSelect}
-                    />
-                  );
-                })}
-              </div>
-            </SortableContext>
-          </DndContext>
-        </div>
+        <CompanyTeamSelector
+          internalTeams={teams.filter((team) => team.id).map((team) => ({
+            id: String(team.id),
+            name: team.name,
+            color: team.color
+          }))}
+          selectedTeamId={selectedTeamId}
+          onChange={handleTeamSelect}
+          allowAllTeams={false}
+          ariaLabel="정산 팀 선택"
+        />
       </div>
 
       {doc && (
@@ -4448,21 +3738,21 @@ export const TeamSettlementPage: React.FC = () => {
                   <table className="w-full min-w-[680px] border-collapse text-xs">
                     <thead className="sticky top-0 bg-slate-100 text-slate-700">
                       <tr>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">출력일</th>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">현장</th>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">당시 담당팀</th>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">출력일보 작성팀</th>
-                        <th className="border-b border-slate-200 px-3 py-2 text-left">작업팀</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">출력일</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">현장</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">당시 담당팀</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">출력일보 작성팀</th>
+                        <th scope="col" className="border-b border-slate-200 px-3 py-2 text-left">작업팀</th>
                       </tr>
                     </thead>
                     <tbody>
                       {doc.sourceSnapshot.dailyReports.map((report) => (
                         <tr key={report.reportId} className="text-slate-800 odd:bg-white even:bg-slate-50/70">
-                          <td className="border-b border-slate-100 px-3 py-2 whitespace-nowrap">{report.date}</td>
-                          <td className="border-b border-slate-100 px-3 py-2 font-bold">{report.siteName || '현장 미연결'}</td>
-                          <td className="border-b border-slate-100 px-3 py-2 font-bold">{report.responsibleTeamName || '담당팀 없음'}</td>
-                          <td className="border-b border-slate-100 px-3 py-2">{report.reportTeamName || '작성팀 없음'}</td>
-                          <td className="border-b border-slate-100 px-3 py-2">
+                          <td data-label="출력일" className="border-b border-slate-100 px-3 py-2 whitespace-nowrap">{report.date}</td>
+                          <td data-label="현장" className="border-b border-slate-100 px-3 py-2 font-bold">{report.siteName || '현장 미연결'}</td>
+                          <td data-label="당시 담당팀" className="border-b border-slate-100 px-3 py-2 font-bold">{report.responsibleTeamName || '담당팀 없음'}</td>
+                          <td data-label="출력일보 작성팀" className="border-b border-slate-100 px-3 py-2">{report.reportTeamName || '작성팀 없음'}</td>
+                          <td data-label="작업팀" className="border-b border-slate-100 px-3 py-2">
                             {report.workerTeamNames.length > 0 ? report.workerTeamNames.join(', ') : '작업팀 없음'}
                           </td>
                         </tr>
@@ -4490,23 +3780,23 @@ export const TeamSettlementPage: React.FC = () => {
                 <table className="w-full text-xs border-collapse bg-white">
                   <thead>
                     <tr className="bg-amber-100 text-amber-900">
-                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">구분</th>
-                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">현장</th>
-                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">상대팀</th>
-                      <th className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">공수</th>
-                      <th className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">현재단가</th>
-                      <th className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">사유</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">구분</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">현장</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">상대팀</th>
+                      <th scope="col" className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">공수</th>
+                      <th scope="col" className="text-right px-2 py-2 border border-amber-200 whitespace-nowrap">현재단가</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-amber-200 whitespace-nowrap">사유</th>
                     </tr>
                   </thead>
                   <tbody>
                     {supportRateMissingRows.map((row) => (
                       <tr key={row.key} className="text-slate-800">
-                        <td className="px-2 py-2 border border-amber-100 whitespace-nowrap">{row.directionLabel}</td>
-                        <td className="px-2 py-2 border border-amber-100 font-medium">{row.siteName}</td>
-                        <td className="px-2 py-2 border border-amber-100">{row.counterTeamName}</td>
-                        <td className="px-2 py-2 border border-amber-100 text-right">{formatManDay1(row.manDay)}</td>
-                        <td className="px-2 py-2 border border-amber-100 text-right">{formatCurrency(Math.round(row.currentRate))}</td>
-                        <td className="px-2 py-2 border border-amber-100 text-amber-800">{row.reason}</td>
+                        <td data-label="구분" className="px-2 py-2 border border-amber-100 whitespace-nowrap">{row.directionLabel}</td>
+                        <td data-label="현장" className="px-2 py-2 border border-amber-100 font-medium">{row.siteName}</td>
+                        <td data-label="상대팀" className="px-2 py-2 border border-amber-100">{row.counterTeamName}</td>
+                        <td data-label="공수" className="px-2 py-2 border border-amber-100 text-right">{formatManDay1(row.manDay)}</td>
+                        <td data-label="현재단가" className="px-2 py-2 border border-amber-100 text-right">{formatCurrency(Math.round(row.currentRate))}</td>
+                        <td data-label="사유" className="px-2 py-2 border border-amber-100 text-amber-800">{row.reason}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4531,23 +3821,23 @@ export const TeamSettlementPage: React.FC = () => {
                 <table className="w-full text-xs border-collapse bg-white">
                   <thead>
                     <tr className="bg-rose-100 text-rose-900">
-                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">구분</th>
-                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">원천</th>
-                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">현장</th>
-                      <th className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">공수</th>
-                      <th className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">현재금액</th>
-                      <th className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">사유</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">구분</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">원천</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">현장</th>
+                      <th scope="col" className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">공수</th>
+                      <th scope="col" className="text-right px-2 py-2 border border-rose-200 whitespace-nowrap">현재금액</th>
+                      <th scope="col" className="text-left px-2 py-2 border border-rose-200 whitespace-nowrap">사유</th>
                     </tr>
                   </thead>
                   <tbody>
                     {settlementAmountMissingRows.map((row) => (
                       <tr key={row.key} className="text-slate-800">
-                        <td className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.kind}</td>
-                        <td className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.originLabel}</td>
-                        <td className="px-2 py-2 border border-rose-100 font-medium">{row.siteName}</td>
-                        <td className="px-2 py-2 border border-rose-100 text-right">{formatManDay1(row.manDay)}</td>
-                        <td className="px-2 py-2 border border-rose-100 text-right">{formatCurrency(row.amount)}</td>
-                        <td className="px-2 py-2 border border-rose-100 text-rose-800">{row.reason}</td>
+                        <td data-label="구분" className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.kind}</td>
+                        <td data-label="원천" className="px-2 py-2 border border-rose-100 whitespace-nowrap">{row.originLabel}</td>
+                        <td data-label="현장" className="px-2 py-2 border border-rose-100 font-medium">{row.siteName}</td>
+                        <td data-label="공수" className="px-2 py-2 border border-rose-100 text-right">{formatManDay1(row.manDay)}</td>
+                        <td data-label="현재금액" className="px-2 py-2 border border-rose-100 text-right">{formatCurrency(row.amount)}</td>
+                        <td data-label="사유" className="px-2 py-2 border border-rose-100 text-rose-800">{row.reason}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4570,7 +3860,7 @@ export const TeamSettlementPage: React.FC = () => {
 
       {doc && (
         <div className="mt-6 grid grid-cols-1 2xl:grid-cols-3 gap-4">
-          <section id="settlement-transactions" className="team-settlement-page__transaction-card scroll-mt-36 rounded-2xl border bg-white p-5 shadow-sm 2xl:col-span-2">
+          <section id="settlement-transactions" className="team-settlement-page__transaction-card scroll-mt-36 min-w-0 rounded-2xl border bg-white p-3 shadow-sm sm:p-5 2xl:col-span-2">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <h2 className="team-settlement-page__transaction-title font-bold text-slate-900">
@@ -4618,15 +3908,15 @@ export const TeamSettlementPage: React.FC = () => {
                     </button>
                   </div>
                   <div className="mt-2 overflow-auto">
-                    <table className="w-full text-sm border-collapse">
+                    <table data-compact="support" className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
-                          <th className="px-2 py-2 border text-center align-middle">비고</th>
-                          <th className="px-2 py-2 border text-center align-middle"></th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
+                          <th scope="col" data-label="비고" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4636,7 +3926,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-2 flex items-center justify-end gap-3 rounded-lg bg-purple-50 px-3 py-2 text-sm">
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-purple-50 px-3 py-2 text-sm">
                     <span className="font-semibold text-purple-700">총금액</span>
                     <span className="font-extrabold text-purple-900">{formatCurrency(transactionSectionTotals.salesSupport.amount)}원</span>
                     <span className="font-semibold text-purple-700">공수</span>
@@ -4652,15 +3942,15 @@ export const TeamSettlementPage: React.FC = () => {
                     </button>
                   </div>
                   <div className="mt-2 overflow-auto">
-                    <table className="w-full text-sm border-collapse">
+                    <table data-compact="transaction" className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">구분</th>
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">현장</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">금액</th>
-                          <th className="px-2 py-2 border text-center align-middle">비고</th>
-                          <th className="px-2 py-2 border text-center align-middle"></th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">구분</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">현장</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">금액</th>
+                          <th scope="col" data-label="비고" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4686,10 +3976,11 @@ export const TeamSettlementPage: React.FC = () => {
                 </div>
               </div>
 
-              <div>
+              <div role="region" aria-label="매입 내역">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="team-settlement-page__transaction-section-title font-semibold text-slate-800">매입</div>
                 </div>
+
 
                 <div className="mt-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -4700,15 +3991,15 @@ export const TeamSettlementPage: React.FC = () => {
                   </div>
 
                   <div className="mt-2 overflow-auto">
-                    <table className="w-full text-sm border-collapse">
+                    <table data-compact="support" className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
-                          <th className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
-                          <th className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
-                          <th className="px-2 py-2 border text-center align-middle">비고</th>
-                          <th className="px-2 py-2 border text-center align-middle"></th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">상대팀</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">공수</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">지원단가</th>
+                          <th scope="col" className="px-1 py-2 border text-center align-middle whitespace-nowrap">노임총액</th>
+                          <th scope="col" data-label="비고" className="px-2 py-2 border text-center align-middle">비고</th>
+                          <th scope="col" className="px-2 py-2 border text-center align-middle"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4718,12 +4009,15 @@ export const TeamSettlementPage: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-2 flex items-center justify-end gap-3 rounded-lg bg-orange-50 px-3 py-2 text-sm">
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-orange-50 px-3 py-2 text-sm">
                     <span className="font-semibold text-orange-700">총금액</span>
                     <span className="font-extrabold text-orange-900">{formatCurrency(transactionSectionTotals.purchaseSupport.amount)}원</span>
                     <span className="font-semibold text-orange-700">공수</span>
                     <span className="font-extrabold text-orange-900">{formatManDay1(transactionSectionTotals.purchaseSupport.manDay)}공</span>
                   </div>
+                </div>
+                <div id="settlement-purchase-payroll" className="mt-6">
+                  {deductionGroups.filter(group => group.key === 'payroll').map(renderAdjustmentGroup)}
                 </div>
               </div>
             </div>
@@ -4778,7 +4072,11 @@ export const TeamSettlementPage: React.FC = () => {
                     정산 메모
                   </label>
                   <span id="team-settlement-transaction-memo-help" className="text-xs text-slate-500">
-                    {doc?.confirmedAt ? '확정된 정산입니다. 확정 해제 후 수정할 수 있습니다.' : '팀·월별 메모 · 상단 저장 버튼으로 저장'}
+                    {doc?.confirmedAt
+                      ? '확정된 정산입니다. 확정 해제 후 수정할 수 있습니다.'
+                      : saveState === 'saving'
+                      ? '저장 중입니다...'
+                      : '팀·월별 메모 · 상단 저장 버튼으로 저장'}
                   </span>
                 </div>
                 <textarea
@@ -4806,583 +4104,34 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
           </section>
 
-          <section id="settlement-deductions" className="scroll-mt-36 rounded-2xl border bg-white p-5 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
+          <section id="settlement-deductions" aria-label="공제 내역" className="min-w-0 scroll-mt-36 rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">02</span>공제</h2>
-                <div className="text-xs text-slate-500 mt-0.5">사무실비·급여·차량·숙소·카드·경비 구분</div>
+                <div className="text-xs text-slate-500 mt-0.5">사무실비·차량·숙소·카드·경비 구분</div>
               </div>
               <button type="button" className={addButtonClassName} onClick={handleAddManualDeduction} disabled={!canEdit}>
                 + 수기 공제
               </button>
             </div>
 
+            <div role="status" aria-label="경비 원본 검증" className="mt-4 rounded-lg border p-3 text-xs">
+              {expenseValidationMessages.length ? (
+                <>
+                  <div className="font-bold text-rose-700">경비 확인 필요</div>
+                  <ul className="mt-1 list-inside list-disc">{expenseValidationMessages.map(message => <li key={message}>{message}</li>)}</ul>
+                  {expenseSourceResult.status === 'ready' && <p className="mt-2">저장 금액을 유지하고 있습니다. 원본과 수기 항목을 확인한 뒤 재집계해 주세요.</p>}
+                </>
+              ) : <span className="text-emerald-700">경비 원본과 저장 내역이 일치합니다.</span>}
+              <button type="button" className="mt-2 font-bold text-blue-700" onClick={() => setExpenseSourceRevision(value => value + 1)}>경비 원본 다시 조회</button>
+            </div>
+
             <div className="mt-4 space-y-5">
-              {deductionGroups.map((group) => (
-                <div key={group.key} className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-bold text-slate-800">{group.title}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs text-slate-500">{group.items.length}건</div>
-                      <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
-                      {group.sourceSummaries.length > 0 && (group.key === 'expense' || group.sourceSummaries.length > 1) && (
-                        <div className="mt-2 flex max-w-sm flex-wrap justify-end gap-1">
-                          {group.sourceSummaries.map((summary) => (
-                            <span
-                              key={`${group.key}-${summary.origin}`}
-                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600"
-                            >
-                              <span>{summary.label}</span>
-                              <span className="text-slate-900">{formatCurrency(summary.amount)}원</span>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-2 overflow-auto">
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 text-slate-600">
-                          <th className="text-left px-2 py-2 border">구분</th>
-                          <th className="text-left px-2 py-2 border">항목</th>
-                          <th className="text-right px-2 py-2 border">금액</th>
-                          <th className="text-left px-2 py-2 border">비고</th>
-                          <th className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.displayItems.length === 0 ? (
-                          <tr className="bg-white">
-                            <td className="px-2 py-3 border text-center text-slate-400" colSpan={5}>
-                              내역 없음
-                            </td>
-                          </tr>
-                        ) : group.displayItems.map((item) => {
-                    const editableRow = canEdit && item.source === 'manual';
-                    const canExpand =
-                      item.source === 'auto' &&
-                      (
-                        item.origin === 'office_expense' ||
-                        item.origin === 'daily_wage_payroll' ||
-                        item.origin === 'monthly_wage_payroll' ||
-                        item.origin === 'service_team_payroll' ||
-                        item.origin === 'team_expense_claim' ||
-                        item.origin === 'accommodation_billing' ||
-                        item.origin === 'vehicle_billing' ||
-                        item.origin === 'card_billing'
-                      );
-                    const isExpanded = canExpand && expandedDeductionIds.has(item.id);
-                    const detail = isExpanded ? getDeductionDetail(item) : null;
-                    return (
-                      <React.Fragment key={item.id}>
-                        <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
-                          <td className="px-2 py-2 border text-slate-700">
-                            {getDeductionDisplayOriginLabel(item)}
-                          </td>
-                          <td className="px-2 py-2 border">
-                            <input
-                              className="w-full border rounded px-2 py-1"
-                              value={item.category}
-                              disabled={!editableRow}
-                              onChange={(e) => {
-                                const next = e.target.value;
-                                updateDoc((prev) => ({
-                                  ...prev,
-                                  deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, category: next } : x))
-                                }));
-                              }}
-                            />
-                          </td>
-                          <td className="px-2 py-2 border text-right">
-                            <CurrencyInput
-                              className="w-full border rounded px-2 py-1 text-right"
-                              value={item.amount}
-                              disabled={!editableRow}
-                              onChange={(n) => {
-                                updateDoc((prev) => ({
-                                  ...prev,
-                                  deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, amount: n } : x))
-                                }));
-                              }}
-                            />
-                          </td>
-                          <td className="px-2 py-2 border">
-                            <div className="flex min-w-[220px] items-center gap-2">
-                              <input
-                                className="min-w-0 flex-1 border rounded px-2 py-1"
-                                value={item.memo ?? ''}
-                                disabled={!editableRow}
-                                onChange={(e) => {
-                                  const next = e.target.value;
-                                  updateDoc((prev) => ({
-                                    ...prev,
-                                    deductions: prev.deductions.map((x) => (x.id === item.id ? { ...x, memo: next } : x))
-                                  }));
-                                }}
-                              />
-                            </div>
-                          </td>
-                          <td className="px-2 py-2 border text-center">
-                            <div className="flex items-center justify-center gap-1">
-                              {canExpand && (
-                                <button
-                                  type="button"
-                                  className={ghostButtonClassName}
-                                  onClick={() => toggleDeductionExpanded(item.id)}
-                                >
-                                  {isExpanded ? '닫기' : '상세'}
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                className="px-2 py-1 rounded border bg-white text-slate-700 disabled:opacity-50"
-                                disabled={!editableRow}
-                                onClick={() => {
-                                  updateDoc((prev) => ({
-                                    ...prev,
-                                    deductions: prev.deductions.filter((x) => x.id !== item.id)
-                                  }));
-                                }}
-                              >
-                                삭제
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-
-                        {isExpanded && detail && (
-                          <tr className={item.source === 'auto' ? 'bg-white' : 'bg-amber-50'}>
-                            <td className="px-3 py-3 border" colSpan={5}>
-                              <div className={`rounded-lg border bg-white p-3 ${group.key === 'expense' ? 'team-settlement-page__expense-expanded-detail' : ''}`}>
-                                {detail.kind === 'office_expense' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">사무실비 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      도급+직영 총공수 {formatManDay1(detail.totalManDay)} 기준
-                                    </div>
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">현장</th>
-                                            <th className="text-right px-2 py-2 border">공수</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                            <th className="text-right px-2 py-2 border">원/공수</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.sites.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={4}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.sites.map((s) => (
-                                              <tr key={s.siteName} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{s.siteName}</td>
-                                                <td className="px-2 py-2 border text-right">{formatManDay1(s.manDay)}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(s.amount)}</td>
-                                                <td className="px-2 py-2 border text-right">
-                                                  {formatAverageCurrency(safeAverage(s.amount, s.manDay))}
-                                                </td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between">
-                                        <div className="text-slate-600">총공수</div>
-                                        <div className="font-bold text-slate-900">{formatManDay1(detail.totalManDay)}</div>
-                                      </div>
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">사무실비(총공수×10,000)</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(Math.round(detail.totalManDay * 10000))}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'payroll' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">급여 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      작업자별 공수·금액 합계
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">작업자</th>
-                                            <th className="text-right px-2 py-2 border">공수</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                            <th className="text-right px-2 py-2 border">원/공수</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={4}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((r) => (
-                                              <tr key={r.workerId} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{r.workerName}</td>
-                                                <td className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
-                                                <td className="px-2 py-2 border text-right">
-                                                  {formatAverageCurrency(safeAverage(r.amount, r.manDay))}
-                                                </td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between">
-                                        <div className="text-slate-600">총공수</div>
-                                        <div className="font-bold text-slate-900">{formatManDay1(detail.totalManDay)}</div>
-                                      </div>
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'accommodation_billing' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">숙소 공제 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      {detail.mode === 'document' ? '숙소 청구서 기준' : '월별 공과금 대장 배분 기준'}
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">대상</th>
-                                            <th className="text-left px-2 py-2 border">항목</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                            {detail.mode === 'ledger' && (
-                                              <th className="text-right px-2 py-2 border">배분일수(팀/전체)</th>
-                                            )}
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={detail.mode === 'ledger' ? 4 : 3}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => (
-                                              <tr key={`accommodation-row-${idx}`} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td className="px-2 py-2 border">{row.label}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                                {detail.mode === 'ledger' && (
-                                                  <td className="px-2 py-2 border text-right">
-                                                    {safeNumber(row.teamDays)}/{safeNumber(row.totalDays)}
-                                                  </td>
-                                                )}
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'vehicle_billing' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">차량 공제 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      {detail.mode === 'document' ? '차량 청구서 기준' : '월별 차량 대장 자동집계 기준'}
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">차량</th>
-                                            <th className="text-left px-2 py-2 border">항목</th>
-                                            <th className="text-left px-2 py-2 border">구분</th>
-                                            <th className="text-left px-2 py-2 border">일자</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={5}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => (
-                                              <tr key={`vehicle-row-${idx}`} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td className="px-2 py-2 border">{row.label}</td>
-                                                <td className="px-2 py-2 border">{row.note ?? '-'}</td>
-                                                <td className="px-2 py-2 border">{row.date ?? '-'}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'card_billing' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">카드 공제 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      {detail.mode === 'document' ? '카드 청구서 기준' : '월별 카드 대장 자동집계 기준'}
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">카드</th>
-                                            <th className="text-left px-2 py-2 border">사용처</th>
-                                            <th className="text-left px-2 py-2 border">구분</th>
-                                            <th className="text-left px-2 py-2 border">일자</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={5}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => (
-                                              <tr key={`card-row-${idx}`} className="bg-white">
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td className="px-2 py-2 border">{row.label}</td>
-                                                <td className="px-2 py-2 border">{row.note ?? '-'}</td>
-                                                <td className="px-2 py-2 border">{row.date ?? '-'}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'expense_aggregate' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">경비 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      차량·숙소·카드·경비 청구 공제 항목 합계 기준
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">구분</th>
-                                            <th className="text-left px-2 py-2 border">대상</th>
-                                            <th className="text-left px-2 py-2 border">항목</th>
-                                            <th className="text-left px-2 py-2 border">비고</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                            <th className="text-center px-2 py-2 border whitespace-nowrap">더상세</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={6}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => {
-                                              const hasMoreDetail = row.details.length > 0;
-                                              const isMoreDetailExpanded = expandedExpenseDetailKeys.has(row.key);
-                                              return (
-                                                <React.Fragment key={`expense-aggregate-row-${row.key}-${idx}`}>
-                                                  <tr className="bg-white">
-                                                    <td className="px-2 py-2 border text-slate-800 font-medium">{row.originLabel}</td>
-                                                    <td className="px-2 py-2 border">{row.subject}</td>
-                                                    <td className="px-2 py-2 border">{row.category}</td>
-                                                    <td className="px-2 py-2 border">{row.memo || '-'}</td>
-                                                    <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                                    <td className="px-2 py-2 border text-center">
-                                                      {hasMoreDetail ? (
-                                                        <button
-                                                          type="button"
-                                                          className={ghostButtonClassName}
-                                                          onClick={() => toggleExpenseDetailExpanded(row.key)}
-                                                        >
-                                                          {isMoreDetailExpanded ? '닫기' : '더상세'}
-                                                        </button>
-                                                      ) : (
-                                                        <span className="text-slate-400">-</span>
-                                                      )}
-                                                    </td>
-                                                  </tr>
-
-                                                  {hasMoreDetail && isMoreDetailExpanded && (
-                                                    <tr className="bg-slate-50">
-                                                      <td className="px-3 py-3 border" colSpan={6}>
-                                                        <div className="rounded-md border bg-white p-3">
-                                                          <div className="text-xs font-semibold text-slate-700">
-                                                            {row.originLabel}별 경비
-                                                          </div>
-                                                          <div className="mt-2 overflow-auto">
-                                                            <table className="w-full text-xs border-collapse">
-                                                              <thead>
-                                                                <tr className="bg-slate-50 text-slate-600">
-                                                                  <th className="text-left px-2 py-2 border">대상</th>
-                                                                  <th className="text-left px-2 py-2 border">항목</th>
-                                                                  <th className="text-left px-2 py-2 border">비고</th>
-                                                                  <th className="text-right px-2 py-2 border">세부</th>
-                                                                  <th className="text-right px-2 py-2 border">금액</th>
-                                                                </tr>
-                                                              </thead>
-                                                              <tbody>
-                                                                {row.details.map((child, childIdx) => (
-                                                                  <tr key={`expense-aggregate-child-${row.key}-${childIdx}`} className="bg-white">
-                                                                    <td className="px-2 py-2 border">{child.subject || child.label}</td>
-                                                                    <td className="px-2 py-2 border">{child.category || '-'}</td>
-                                                                    <td className="px-2 py-2 border">{child.note || '-'}</td>
-                                                                    <td className="px-2 py-2 border text-right">{child.allocation || '-'}</td>
-                                                                    <td className="px-2 py-2 border text-right">{formatCurrency(child.amount)}</td>
-                                                                  </tr>
-                                                                ))}
-                                                              </tbody>
-                                                            </table>
-                                                          </div>
-                                                        </div>
-                                                      </td>
-                                                    </tr>
-                                                  )}
-                                                </React.Fragment>
-                                              );
-                                            })
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {detail.kind === 'team_expense_claim' && (
-                                  <div>
-                                    <div className="text-sm font-semibold text-slate-800">경비 차감 상세</div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      청구완료/정산완료 경비내역 기준
-                                    </div>
-
-                                    <div className="mt-3 overflow-auto">
-                                      <table className="w-full text-xs border-collapse">
-                                        <thead>
-                                          <tr className="bg-slate-50 text-slate-600">
-                                            <th className="text-left px-2 py-2 border">일자</th>
-                                            <th className="text-left px-2 py-2 border">상대/대상</th>
-                                            <th className="text-left px-2 py-2 border">항목</th>
-                                            <th className="text-left px-2 py-2 border">비고</th>
-                                            <th className="text-right px-2 py-2 border">금액</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detail.rows.length === 0 ? (
-                                            <tr>
-                                              <td className="px-2 py-2 border text-slate-500" colSpan={5}>
-                                                데이터 없음
-                                              </td>
-                                            </tr>
-                                          ) : (
-                                            detail.rows.map((row, idx) => (
-                                              <tr key={`team-expense-row-${idx}`} className="bg-white">
-                                                <td className="px-2 py-2 border">{row.date || '-'}</td>
-                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                                <td className="px-2 py-2 border">{row.label}</td>
-                                                <td className="px-2 py-2 border">{row.note || '-'}</td>
-                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                              </tr>
-                                            ))
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-
-                                    <div className="mt-3 text-sm">
-                                      <div className="flex items-center justify-between mt-1">
-                                        <div className="text-slate-600">총금액</div>
-                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
+              {deductionGroups.filter(group => group.key !== 'payroll').map(renderAdjustmentGroup)}
             </div>
 
             <div id="settlement-additions" className="mt-6 scroll-mt-36">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">03</span>추가</h2>
                   <div className="text-xs text-slate-500 mt-0.5">공제와 반대로 (+) 더해지는 항목</div>
@@ -5393,14 +4142,14 @@ export const TeamSettlementPage: React.FC = () => {
               </div>
 
               <div className="mt-3 overflow-auto">
-                <table className="w-full text-sm border-collapse">
+                <table data-compact="adjustment" className="w-full text-sm border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600">
-                      <th className="text-left px-2 py-2 border">구분</th>
-                      <th className="text-left px-2 py-2 border">항목</th>
-                      <th className="text-right px-2 py-2 border">금액</th>
-                      <th className="text-left px-2 py-2 border">비고</th>
-                      <th className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
+                      <th scope="col" className="text-left px-2 py-2 border">구분</th>
+                      <th scope="col" className="text-left px-2 py-2 border">항목</th>
+                      <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                      <th scope="col" data-label="비고" className="text-left px-2 py-2 border">비고</th>
+                      <th scope="col" className="text-center px-2 py-2 border whitespace-nowrap">상세</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5410,10 +4159,10 @@ export const TeamSettlementPage: React.FC = () => {
                       const editableRow = canEdit && item.source === 'manual';
                       return (
                         <tr key={item.id} className={item.source === 'auto' ? 'bg-white' : 'bg-emerald-50'}>
-                          <td className="px-2 py-2 border text-slate-700">{formatAdditionOrigin(item.origin)}</td>
-                          <td className="px-2 py-2 border">
-                            <input
-                              className="w-full border rounded px-2 py-1"
+                          <td data-label="구분" className="px-2 py-2 border text-slate-700">{formatAdditionOrigin(item.origin)}</td>
+                          <td data-label="항목" className="px-2 py-2 border">
+                            <input aria-label="항목"
+                              className="team-settlement-page__readonly-input w-full border rounded px-2 py-1"
                               value={item.category}
                               disabled={!editableRow}
                               onChange={(e) => {
@@ -5424,9 +4173,10 @@ export const TeamSettlementPage: React.FC = () => {
                                 }));
                               }}
                             />
+                            {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.category) || '—'}</span>}
                           </td>
-                          <td className="px-2 py-2 border text-right">
-                            <CurrencyInput
+                          <td data-label="금액" className="px-2 py-2 border text-right">
+                            <CurrencyInput aria-label="금액"
                               className="w-full border rounded px-2 py-1 text-right"
                               value={item.amount}
                               disabled={!editableRow}
@@ -5438,11 +4188,11 @@ export const TeamSettlementPage: React.FC = () => {
                               }}
                             />
                           </td>
-                          <td className="px-2 py-2 border">
-                            <div className="flex min-w-[220px] items-center gap-2">
-                              <input
-                                className="min-w-0 flex-1 border rounded px-2 py-1"
-                                value={item.memo ?? ''}
+                          <td data-label="비고" className="px-2 py-2 border">
+                            <div className="flex min-w-0 items-center gap-2 md:min-w-[220px]">
+                              <input aria-label="비고"
+                                className="team-settlement-page__readonly-input min-w-0 flex-1 border rounded px-2 py-1"
+                                value={formatTeamSettlementMemo(item)}
                                 disabled={!editableRow}
                                 onChange={(e) => {
                                   const next = e.target.value;
@@ -5452,9 +4202,10 @@ export const TeamSettlementPage: React.FC = () => {
                                   }));
                                 }}
                               />
+                              {(!editableRow) && <span className="team-settlement-page__readonly-value">{formatTeamSettlementMemo(item) || '—'}</span>}
                             </div>
                           </td>
-                          <td className="px-2 py-2 border text-center">
+                          <td data-label="상세" className="px-2 py-2 border text-center">
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 type="button"
@@ -5531,10 +4282,10 @@ export const TeamSettlementPage: React.FC = () => {
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-600">
-                        <th className="text-left px-2 py-2 border">현장</th>
-                        <th className="text-right px-2 py-2 border">공수</th>
-                        <th className="text-right px-2 py-2 border">금액</th>
-                        <th className="text-right px-2 py-2 border">쓰꾸미(원/공수)</th>
+                        <th scope="col" className="text-left px-2 py-2 border">현장</th>
+                        <th scope="col" className="text-right px-2 py-2 border">공수</th>
+                        <th scope="col" className="text-right px-2 py-2 border">금액</th>
+                        <th scope="col" className="text-right px-2 py-2 border">쓰꾸미(원/공수)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5550,10 +4301,10 @@ export const TeamSettlementPage: React.FC = () => {
 
                           return (
                             <tr key={r.siteName} className="bg-white">
-                              <td className="px-2 py-2 border text-slate-800 font-medium">{r.siteName}</td>
-                              <td className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
-                              <td className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
-                              <td className="px-2 py-2 border text-right">{formatAverageCurrency(skkumi)}</td>
+                              <td data-label="현장" className="px-2 py-2 border text-slate-800 font-medium">{r.siteName}</td>
+                              <td data-label="공수" className="px-2 py-2 border text-right">{formatManDay1(r.manDay)}</td>
+                              <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(r.amount)}</td>
+                              <td data-label="쓰꾸미(원/공수)" className="px-2 py-2 border text-right">{formatAverageCurrency(skkumi)}</td>
                             </tr>
                           );
                         })
@@ -5599,7 +4350,7 @@ export const TeamSettlementPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-lg bg-slate-900 text-white px-3 py-3 flex items-center justify-between">
+              <div className="rounded-lg bg-slate-900 text-white px-3 py-3 flex flex-wrap gap-2 items-center justify-between">
                 <div className="font-semibold">정산 잔액</div>
                 <div className="text-xl font-bold">{formatCurrency(totals.net)}원</div>
               </div>

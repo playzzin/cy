@@ -1,3 +1,6 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import { createHash } from 'crypto';
 import { requireCallableAuth } from './auth';
@@ -280,7 +283,7 @@ const toHttpsError = (error: unknown): functions.https.HttpsError => {
 export const analyzeIdentityDocuments = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: { sessionId?: unknown; files?: unknown[]; mode?: unknown }, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: { sessionId?: unknown; files?: unknown[]; mode?: unknown }, context) => {
         try {
             requireCallableAuth(context);
             const sessionId = sanitizeSessionId(data?.sessionId);
@@ -305,7 +308,7 @@ export const analyzeIdentityDocuments = functions
             if (!apiKey) {
                 throw new functions.https.HttpsError('failed-precondition', '/settings/ai에서 서버 Gemini API Key를 먼저 설정해 주세요.');
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{
                 text: mode === 'REGISTRATION' ? buildRegistrationPrompt() : buildGroupingPrompt(files),
             }];
@@ -314,13 +317,13 @@ export const analyzeIdentityDocuments = functions
                 parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
             });
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('identity-analysis')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: mode === 'REGISTRATION'
                             ? REGISTRATION_RESPONSE_SCHEMA
@@ -382,4 +385,4 @@ export const analyzeIdentityDocuments = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));

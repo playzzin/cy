@@ -26,7 +26,8 @@ import { Material, OutboundTransaction } from '../../types/materials';
 import { useAuth } from '../../contexts/AuthContext';
 import { filterCheongyeonMaterialSites } from './materialSiteFilters';
 import { handleMaterialQuantityInputKeyDown } from './materialKeyboardNavigation';
-import { getMaterialGroupKey, sortMaterialDisplayRows } from '../../utils/materialOrdering';
+import { sortMaterialDisplayRows } from '../../utils/materialOrdering';
+import { getMaterialMasterGroupKey, MaterialMasterGroupKey } from './materialMasterGrouping';
 import {
     applyAnalyzedMaterialItemsToQuantities,
     buildMaterialAnalyzeContext,
@@ -68,7 +69,7 @@ type OutboundTempData = {
     savedAt: number;
 };
 
-type MobileMaterialGroup = 'scaffolding' | 'dongbari' | 'other';
+type MobileMaterialGroup = MaterialMasterGroupKey;
 
 const ITEMS_PER_COLUMN = 10;
 const QUICK_QUANTITY_STEPS = [-1, -10, -100, 1, 10, 100];
@@ -606,10 +607,7 @@ const MaterialOutboundPage: React.FC = () => {
             alert('분석할 이미지 파일을 선택해주세요.');
             return;
         }
-        if (!geminiService.getKey()) {
-            alert('Gemini API 키가 설정되지 않았습니다. /settings/ai 또는 .env.local의 REACT_APP_GOOGLE_API_KEY를 확인해주세요.');
-            return;
-        }
+        
 
         setAnalyzingPhoto(true);
         try {
@@ -803,6 +801,7 @@ const MaterialOutboundPage: React.FC = () => {
     // 1. Consolidate into Dongbari vs Scaffolding vs Others
     const dongbariList: Material[] = [];
     const scaffoldingList: Material[] = [];
+    const systemList: Material[] = [];
     const otherList: Material[] = [];
 
     materials.forEach(m => {
@@ -819,15 +818,19 @@ const MaterialOutboundPage: React.FC = () => {
 
         if (!hasQty && !matchesSearch) return;
 
-        const groupKey = getMaterialGroupKey(m);
+        const groupKey = getMaterialMasterGroupKey(m);
 
         // 1. Right Column: Scaffolding (비계)
         if (groupKey === 'scaffolding') {
             scaffoldingList.push(m);
         }
-        // 2. Left Column: Dongbari (동바리) OR Support (서포트) OR System (시스템 - excluding Scaffolding)
+        // Dongbari (동바리) and Support (서포트)
         else if (groupKey === 'dongbari') {
             dongbariList.push(m);
+        }
+        // Match the standalone 시스템 group shown in the material master.
+        else if (groupKey === 'system') {
+            systemList.push(m);
         }
         // 3. Others
         else {
@@ -965,6 +968,7 @@ const MaterialOutboundPage: React.FC = () => {
     const mobileGroupOptions = [
         { key: 'scaffolding' as const, title: '시스템 비계', items: scaffoldingList, colorClass: 'red' },
         { key: 'dongbari' as const, title: '시스템 동바리', items: dongbariList, colorClass: 'red' },
+        ...(systemList.length > 0 ? [{ key: 'system' as const, title: '시스템', items: systemList, colorClass: 'red' }] : []),
         ...(otherList.length > 0 ? [{ key: 'other' as const, title: '기타', items: otherList, colorClass: 'slate' }] : []),
     ];
     const activeMobileGroup = mobileGroupOptions.find((option) => option.key === mobileMaterialGroup && option.items.length > 0)
@@ -988,6 +992,8 @@ const MaterialOutboundPage: React.FC = () => {
                 className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden mb-6"
                 data-material-nav-section="true"
                 data-section-index={sectionIndex}
+                role="region"
+                aria-label={`${title} 자재`}
             >
                 <div className={`bg-${colorClass}-50/50 px-4 py-3 border-b border-${colorClass}-100 flex justify-between items-center`}>
                     <h3 className="font-bold text-slate-700 flex items-center gap-2">
@@ -1483,10 +1489,16 @@ const MaterialOutboundPage: React.FC = () => {
                                 {renderSection('시스템 동바리', dongbariList, 'red', 1)}
                             </div>
 
+                            {systemList.length > 0 && (
+                                <div className="w-full">
+                                    {renderSection('시스템', systemList, 'red', 2)}
+                                </div>
+                            )}
+
                             {/* Others */}
                             {otherList.length > 0 && (
                                 <div className="w-full">
-                                    {renderSection('기타 및 소모품', otherList, 'slate', 2)}
+                                    {renderSection('기타 및 소모품', otherList, 'slate', 3)}
                                 </div>
                             )}
                         </div>

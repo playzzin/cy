@@ -565,6 +565,10 @@ const TeamEquipmentStatusPage: React.FC = () => {
     }, []);
 
     const persistSharedState = async (items: EquipmentItem[], nextRecords: TeamEquipmentRecord[]): Promise<boolean> => {
+        if (loadError) {
+            showToast('공용 DB를 정상적으로 불러오지 못한 상태에서는 데이터 보호를 위해 저장할 수 없습니다. 새로고침 후 다시 시도해 주세요.');
+            return false;
+        }
         setSaving(true);
         try {
             await supportSharedDataService.save('team_equipment_inventory', buildPersistedState(items, nextRecords));
@@ -664,17 +668,52 @@ const TeamEquipmentStatusPage: React.FC = () => {
     };
 
     const saveRecord = async (id: string) => {
-        const saved = await persistSharedState(equipmentItems, records);
-        if (!saved) return;
-        setChangedIds((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-        });
-        showToast('저장되었습니다.');
+        if (loadError) {
+            showToast('공용 DB를 정상적으로 불러오지 못한 상태에서는 데이터 보호를 위해 저장할 수 없습니다. 새로고침 후 다시 시도해 주세요.');
+            return;
+        }
+        const targetRecord = records.find((r) => r.id === id);
+        if (!targetRecord) return;
+
+        setSaving(true);
+        try {
+            const sharedState = await supportSharedDataService.load<PersistedEquipmentState>('team_equipment_inventory');
+            const baseState = normalizePersistedState(sharedState) || buildPersistedState(equipmentItems, records);
+            const nextState: PersistedEquipmentState = {
+                items: equipmentItems,
+                rows: {
+                    ...baseState.rows,
+                    [id]: {
+                        id: targetRecord.id,
+                        quantities: targetRecord.quantities,
+                        note: targetRecord.note,
+                        foremen: targetRecord.foremen,
+                        useForemanTotals: targetRecord.useForemanTotals
+                    }
+                }
+            };
+            await supportSharedDataService.save('team_equipment_inventory', nextState);
+            persistLocalState(equipmentItems, records);
+            setLoadError(null);
+            setChangedIds((prev) => {
+                const next = new Set(prev);
+                next.delete(id);
+                return next;
+            });
+            showToast('저장되었습니다.');
+        } catch (error) {
+            console.error('[TeamEquipmentStatusPage] Failed to save team equipment record:', error);
+            showToast('공용 DB 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+        } finally {
+            setSaving(false);
+        }
     };
 
     const saveAll = async () => {
+        if (loadError) {
+            showToast('공용 DB를 정상적으로 불러오지 못한 상태에서는 데이터 보호를 위해 저장할 수 없습니다. 새로고침 후 다시 시도해 주세요.');
+            return;
+        }
         const saved = await persistSharedState(equipmentItems, records);
         if (!saved) return;
         setChangedIds(new Set());
@@ -954,8 +993,9 @@ const TeamEquipmentStatusPage: React.FC = () => {
                         <button
                             type="button"
                             onClick={saveAll}
-                            disabled={saving}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition-colors hover:bg-blue-700"
+                            disabled={saving || Boolean(loadError)}
+                            title={loadError ? '공용 DB 조회가 실패한 상태에서는 저장할 수 없습니다' : undefined}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                         >
                             <FontAwesomeIcon icon={faFloppyDisk} />
                             전체 저장
@@ -1134,12 +1174,13 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                                         <button
                                                             type="button"
                                                             onClick={() => saveRecord(record.id)}
-                                                            disabled={saving}
+                                                            disabled={saving || Boolean(loadError)}
+                                                            title={loadError ? '공용 DB 조회가 실패한 상태에서는 저장할 수 없습니다' : undefined}
                                                             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black transition-colors ${
                                                                 changed
                                                                     ? 'bg-blue-600 text-white hover:bg-blue-700'
                                                                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                                            }`}
+                                                            } disabled:cursor-not-allowed disabled:opacity-50`}
                                                         >
                                                             <FontAwesomeIcon icon={faFloppyDisk} />
                                                             저장

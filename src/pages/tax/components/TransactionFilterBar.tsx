@@ -74,6 +74,7 @@ export const TransactionFilterBar: React.FC<FilterProps> = ({
                     <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-1">
                         <input
                             type="date"
+                            aria-label="조회 시작일"
                             className="bg-transparent border-none text-sm font-medium text-slate-700 outline-none px-2"
                             value={startDate}
                             onChange={(e) => onDateChange(e.target.value, endDate)}
@@ -83,6 +84,7 @@ export const TransactionFilterBar: React.FC<FilterProps> = ({
                             type="date"
                             className="bg-transparent border-none text-sm font-medium text-slate-700 outline-none px-2"
                             value={endDate}
+                            aria-label="조회 종료일"
                             onChange={(e) => onDateChange(startDate, e.target.value)}
                         />
                     </div>

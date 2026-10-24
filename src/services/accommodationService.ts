@@ -169,7 +169,7 @@ export const accommodationService = {
         const [accommodations, utilityRecords, billingTargets] = await Promise.all([
             accommodationFirestoreService.listAccommodations(),
             accommodationFirestoreService.listUtilityRecords(yearMonth),
-            accommodationBillingTargetService.listTargets().catch(() => [])
+            accommodationBillingTargetService.listTargets()
         ]);
 
         const existingByAccommodationId = new Map<string, UtilityRecord>();
@@ -225,8 +225,21 @@ export const accommodationService = {
     },
 
     saveUtilityRecords: async (records: Array<Partial<UtilityRecord> & { id?: string }>) => {
-        const uniqueRecords = dedupeAccommodationUtilityRecordWrites(records);
-        await Promise.all(uniqueRecords.map((record) => accommodationService.saveUtilityRecord(record)));
+        // Validate the complete request before deduplication or any Firestore write.
+        const validated = records.map(record => {
+            const accommodationId = String(record.accommodationId ?? '').trim();
+            const yearMonth = String(record.yearMonth ?? '').trim();
+            if (!accommodationId || !/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) {
+                throw new Error('공과금 대장의 숙소와 월을 확인해 주세요. 저장하지 않았습니다.');
+            }
+            if (record.costs && Object.values(record.costs).some(value => typeof value !== 'number' || !Number.isFinite(value))) {
+                throw new Error('공과금 대장 금액을 확인해 주세요. 저장하지 않았습니다.');
+            }
+            const id = String(record.id || buildAccommodationUtilityRecordId(accommodationId, yearMonth)).trim();
+            if (!id || id.includes('/')) throw new Error('공과금 대장 ID를 확인해 주세요. 저장하지 않았습니다.');
+            return { ...record, accommodationId, yearMonth, id };
+        });
+        await accommodationFirestoreService.saveUtilityRecords(dedupeAccommodationUtilityRecordWrites(validated));
     },
 
     replaceUtilityRecord: async (record: UtilityRecord) => {

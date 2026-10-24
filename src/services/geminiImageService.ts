@@ -1,3 +1,5 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
+import { DEFAULT_GEMINI_IMAGE_MODEL } from './geminiModelPolicy';
 import { storage, db } from '../config/firebase';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject, getMetadata, updateMetadata } from 'firebase/storage';
 import { 
@@ -123,12 +125,10 @@ export const IMAGE_SPECS: Record<'SQUARE' | 'WIDE', { label: string; width: numb
 export async function generateImage(prompt: string, categoryOrSpec: ImageCategory | KakaoImageSpec): Promise<GeminiImageResult> {
     aiSettingsService.assertCurrentPageEnabled('AI 이미지 생성');
 
-    const geminiApiKey = aiSettingsService.getApiKey() || process.env.REACT_APP_GOOGLE_API_KEY || '';
-    const geminiImageModel = aiSettingsService.getModels().imageModel || 'gemini-2.5-flash-image';
+    
+    const geminiImageModel = aiSettingsService.getModels().imageModel || DEFAULT_GEMINI_IMAGE_MODEL;
 
-    if (!geminiApiKey) {
-        return { success: false, error: 'Google API 키가 설정되지 않았습니다. (/settings/ai 또는 .env.local REACT_APP_GOOGLE_API_KEY)' };
-    }
+    
 
     let preset: ImagePreset;
     if (categoryOrSpec === 'SQUARE') preset = IMAGE_PRESETS['kakao-square'];
@@ -146,8 +146,8 @@ export async function generateImage(prompt: string, categoryOrSpec: ImageCategor
 User's request: ${prompt}`;
 
     try {
-        const endpoint = `${GEMINI_API_URL_BASE}/${geminiImageModel}:generateContent?key=${geminiApiKey}`;
-        const response = await fetch(endpoint, {
+        const endpoint = `${GEMINI_API_URL_BASE}/${geminiImageModel}:generateContent`;
+        const response = await trackedGeminiFetch('image-generation')(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -175,9 +175,9 @@ User's request: ${prompt}`;
             return { success: false, error: '응답 형식이 올바르지 않습니다.' };
         }
 
-        const imagePart = parts.find((p: any) => p.inlineData?.data);
+        const imagePart = parts.find((p: any) => !p.thought && p.inlineData?.data);
         if (!imagePart) {
-            const textPart = parts.find((p: any) => p.text);
+            const textPart = parts.find((p: any) => !p.thought && p.text);
             const reason = textPart?.text || '이미지가 생성되지 않았습니다.';
             return { success: false, error: `이미지 생성 실패: ${reason.substring(0, 300)}` };
         }
@@ -568,7 +568,7 @@ export async function applyAsFavicon(imageUrl: string, target: BrandingTarget = 
         const targetPaths = BRANDING_PATHS[target];
 
         // Download the image and re-upload to target favicon path
-        const response = await fetch(imageUrl);
+        const response = await trackedGeminiFetch('image-generation')(imageUrl);
         const blob = await response.blob();
         const storageRefObj = ref(storage, targetPaths.faviconPath);
         await uploadBytes(storageRefObj, blob, { contentType: blob.type });
@@ -613,7 +613,7 @@ export async function applyAsLogo(imageUrl: string, target: BrandingTarget = 'si
         const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
         const targetPaths = BRANDING_PATHS[target];
 
-        const response = await fetch(imageUrl);
+        const response = await trackedGeminiFetch('image-generation')(imageUrl);
         const blob = await response.blob();
         const storageRefObj = ref(storage, targetPaths.logoPath);
         await uploadBytes(storageRefObj, blob, { contentType: blob.type });
@@ -661,7 +661,7 @@ export async function applyAsDashboardBanner(imageUrl: string, stepIndex: number
         const { db } = await import('../config/firebase');
         const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
 
-        const response = await fetch(imageUrl);
+        const response = await trackedGeminiFetch('image-generation')(imageUrl);
         const blob = await response.blob();
         const ext = blob.type.includes('png') ? 'png' : 'jpg';
         const storagePath = `settings/dashboard_banners/step_${stepIndex}_${Date.now()}.${ext}`;

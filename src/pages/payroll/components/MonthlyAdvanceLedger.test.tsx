@@ -51,24 +51,66 @@ const initialInput = (laborAdvance: number): Record<string, LedgerManualInput> =
 });
 
 describe('MonthlyAdvanceLedger 공제 분류', () => {
-    it('전체 법인 적용 후에도 이름·구분·분류 열이 고정된 단일 선택기로 표시된다', () => {
+    it('확정한 행은 설정 변경과 일괄 분류 변경에도 저장된 세금과 실수령액을 유지한다', async () => {
+        const onComputed = jest.fn();
+        const frozen: MonthlyAdvanceLedgerRow = {
+            ...rows[0], finalizedAmounts: { corporateNet: 180000, personalNet: 250000 },
+            statementTaxAmounts: { pension: 0, health: 0, care: 0, employment: 0,
+                incomeTax: 0, residentTax: 0, businessIncomeTax: 15000, businessResidentTax: 1500,
+                dailyFee: 5000, isWithholdingTarget: false },
+        };
+        const input = initialInput(20000);
+        const editable = { ...rows[0], rowKey: 'editable', workerId: 'worker-2', workerName: '수정가능' };
+        const view = render(<MonthlyAdvanceLedger rows={[frozen, editable]} payrollConfig={null}
+            withholdingThreshold={7} initialInputs={input} applyBusinessIncome={false} applyDailyFee={false}
+            onComputedAmountsChange={onComputed} />);
+        expect((screen.getByRole('button', { name: '홍길동 공제 분류' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByDisplayValue('20,000') as HTMLInputElement).disabled).toBe(true);
+        fireEvent.click(screen.getByRole('button', { name: '전체 법인' }));
+        expect(screen.getByRole('button', { name: '홍길동 공제 분류' }).textContent).toContain('분리');
+        expect(screen.getByRole('button', { name: '수정가능 공제 분류' }).textContent).toContain('법인');
+        await waitFor(() => expect(onComputed.mock.calls.at(-1)?.[0].find((row: any) => row.rowKey === frozen.rowKey)).toMatchObject({ corporateNet: 180000, personalNet: 250000 }));
+        expect(screen.getAllByText('15,000').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('5,000').length).toBeGreaterThan(0);
+        view.rerender(<MonthlyAdvanceLedger rows={[frozen]} payrollConfig={null}
+            withholdingThreshold={7} initialInputs={input} applyBusinessIncome={false} applyDailyFee={false}
+            applyUtilities={false} onComputedAmountsChange={onComputed} />);
+        expect((screen.getByRole('button', { name: '전체 법인' }) as HTMLButtonElement).disabled).toBe(true);
+    });
+    it('공제분류 버튼 목록에서 법인·노무·분리를 선택하면 공수와 금액을 재분류한다', () => {
+        const onComputed = jest.fn();
         render(
             <MonthlyAdvanceLedger
                 rows={rows}
                 payrollConfig={null}
                 withholdingThreshold={7}
                 visibleSections={{ utilities: false, advances: false, taxes: false }}
+                onComputedAmountsChange={onComputed}
             />
         );
 
-        const allocationSelect = screen.getByRole('combobox', { name: '홍길동 공제 분류' });
-        expect((allocationSelect as HTMLSelectElement).value).toBe('split');
+        const allocationButton = screen.getByRole('button', { name: '홍길동 공제 분류' });
+        expect(allocationButton.textContent).toContain('분리');
         expect(screen.getByText('홍길동').getAttribute('title')).toBe('홍길동');
         expect(screen.getByText('월급제')).toBeTruthy();
 
         fireEvent.click(screen.getByRole('button', { name: '전체 법인' }));
 
-        expect((allocationSelect as HTMLSelectElement).value).toBe('corporate');
+        expect(allocationButton.textContent).toContain('법인');
+        for (const [label, mode, corporate, personal] of [
+            ['노무', 'labor', 0, 500000],
+            ['분리', 'split', 200000, 300000],
+            ['법인', 'corporate', 500000, 0],
+        ] as const) {
+            fireEvent.click(allocationButton);
+            expect(screen.getAllByRole('menuitemradio').map(button => button.textContent?.replace('✓', ''))).toEqual(['법인', '노무', '분리']);
+            fireEvent.click(screen.getByRole('menuitemradio', { name: label }));
+            expect(allocationButton.textContent).toContain(label);
+            expect(screen.queryByRole('menu')).toBeNull();
+            expect(onComputed.mock.calls.at(-1)?.[0][0]).toMatchObject({
+                allocationMode: mode, invoiceGrossAmount: corporate, laborGrossAmount: personal,
+            });
+        }
     });
 
     it('사용자가 건드리지 않은 행은 새로 조회된 가불 원본값으로 갱신한다', () => {

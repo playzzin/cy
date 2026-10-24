@@ -6,6 +6,8 @@ import { MenuItem } from '../../../../services/menuServiceV11';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFolder, faLink, faGripVertical, faEye, faEyeSlash, faArrowRight, faArrowLeft, faChartPie, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { resolveIcon } from '../../../../constants/iconMap';
+import { getDividerAppearance, isMenuDivider } from '../../../../utils/menuDivider';
+import { getLinkedMenuRef, isLinkedMenuContainer } from '../../../../utils/linkedPositionMenus';
 
 // --- Recursive Sortable Item ---
 interface SortableItemProps {
@@ -16,12 +18,17 @@ interface SortableItemProps {
     onDelete: (id: string) => void;
     onIndent?: (id: string) => void;
     onOutdent?: (id: string) => void;
+    onToggleVisibility?: (id: string) => void;
+    isSourceRoot?: boolean;
     isMultiSelectMode?: boolean;
     index: number; // Added index prop
     isFirst: boolean;
 }
 
-const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, selectedIds, onDelete, onIndent, onOutdent, isMultiSelectMode, index, isFirst }) => {
+const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, selectedIds, onDelete, onIndent, onOutdent, onToggleVisibility, isSourceRoot, isMultiSelectMode, index, isFirst }) => {
+    const isLinkedContainer = isLinkedMenuContainer(item.id);
+    const isLinkedGroup = isLinkedContainer && Boolean(getLinkedMenuRef(item.id));
+    const [groupOpen, setGroupOpen] = React.useState(false);
     const {
         attributes,
         listeners,
@@ -29,7 +36,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
         transform,
         transition,
         isDragging,
-    } = useSortable({ id: item.id || item.text, data: { ...item, depth } });
+    } = useSortable({ id: item.id || item.text, data: { ...item, depth }, disabled: { draggable: isLinkedContainer } });
 
     const [isHovered, setIsHovered] = React.useState(false);
 
@@ -48,6 +55,12 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
     const IconComponent = resolved !== faChartPie ? resolved : (item.sub ? faFolder : faLink);
 
     const isSelected = selectedIds.includes(item.id || '');
+    const isDivider = isMenuDivider(item);
+    const divider = getDividerAppearance(item);
+    const rowRef = React.useRef<HTMLDivElement | null>(null);
+    React.useEffect(() => {
+        if (isDivider && isSelected) rowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    }, [isDivider, isSelected]);
 
     // --- Dynamic Style Logic (Matching Sidebar.tsx) ---
     const activeColor = item.activeColor || '#1abc9c';
@@ -67,43 +80,49 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
     return (
         <>
             <div
-                ref={setNodeRef}
+                ref={node => { setNodeRef(node); rowRef.current = node; }}
                 style={{
                     ...style,
-                    backgroundColor: effectiveBgColor,
+                    backgroundColor: isDivider && !isSelected && !isHovered ? 'transparent' : effectiveBgColor,
                     borderColor: effectiveBorderColor,
                     borderWidth: '1px',
+                    ...(isDivider ? { paddingTop: divider.gap, paddingBottom: divider.gap } : {}),
                 }}
+                data-menu-kind={isDivider ? 'divider' : 'menu'}
                 className={`group relative flex items-center gap-3 p-2 rounded-md mb-1 transition-all duration-200
                     ${isSelected ? 'font-bold' : 'text-gray-300'}
                 `}
                 onClick={(e) => {
                     e.stopPropagation();
                     onSelect(item.id || '', e.ctrlKey || e.metaKey);
+                    if (isLinkedGroup) setGroupOpen(open => !open);
                 }}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
             >
                 {/* Drag Handle */}
-                <div {...attributes} {...listeners} className="cursor-grab opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white transition-opacity p-1 min-w-[20px]">
+                {!isLinkedContainer && <div {...attributes} {...listeners} aria-label={isDivider ? '구분선 순서 이동' : `${item.text} 순서 이동`} className="cursor-grab opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-gray-500 hover:text-white transition-opacity p-1 min-w-[20px]">
                     <FontAwesomeIcon icon={faGripVertical} />
-                </div>
+                </div>}
 
                 {/* Selection Checkbox */}
-                <div className="flex items-center justify-center mr-1" onClick={(e) => e.stopPropagation()}>
+                {!isLinkedContainer && <div className="flex items-center justify-center mr-1" onClick={(e) => e.stopPropagation()}>
                     <input
                         type="checkbox"
+                        aria-label={isDivider ? '구분선 선택' : `${item.text} 선택`}
                         checked={isSelected}
                         onChange={(_e) => onSelect(item.id || '', true)}
                         className="w-4 h-4 rounded border-gray-600 text-blue-500 focus:ring-blue-500 bg-gray-700 cursor-pointer"
                     />
-                </div>
+                </div>}
+                {isLinkedGroup && <button type="button" aria-expanded={groupOpen} aria-label={`${item.text} 연결 메뉴 ${groupOpen ? '접기' : '펼치기'}`} className="rounded px-2 py-1 text-blue-300">{groupOpen ? '▾' : '▸'}</button>}
 
-                {item.text === '-' ? (
-                    <div className="flex-1 select-none flex items-center justify-center">
-                        <div className="w-full border-t border-gray-600 my-2 mx-4 relative" />
-                        <span className="absolute text-xs text-gray-500 bg-gray-800 px-2">구분선</span>
-                    </div>
+                {isDivider ? (
+                    <button type="button" aria-label="구분선 설정 열기" className="flex min-w-0 flex-1 items-center gap-3 rounded py-1 text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+                        <span aria-hidden="true" className="min-w-4 flex-1 border-t border-slate-500/60" style={{ borderTopStyle: divider.lineStyle }} />
+                        <span className="shrink-0 text-[11px] font-normal tracking-wide">구분선{item.hide ? ' · 숨김' : ''}</span>
+                        <span aria-hidden="true" className="min-w-4 flex-1 border-t border-slate-500/60" style={{ borderTopStyle: divider.lineStyle }} />
+                    </button>
                 ) : (
                     <>
                         {/* Dynamic Icon */}
@@ -113,6 +132,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                         >
                             <FontAwesomeIcon icon={IconComponent} />
                         </div>
+                        {isLinkedGroup && <span className="text-xs text-blue-300">원본 연결</span>}
 
                         {/* Content */}
                         <div className="flex-1 select-none flex flex-col justify-center">
@@ -128,8 +148,8 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                 )}
 
                 {/* Indent/Outdent Actions (Hover) */}
-                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 mr-2 transition-opacity">
-                    {onOutdent && depth > 0 && (
+                {!isLinkedContainer && <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 flex items-center gap-1 mr-2 transition-opacity">
+                    {onOutdent && depth > 0 && !isSourceRoot && (
                         <button
                             title="상위로 이동 (Outdent)"
                             className="text-gray-400 hover:text-white p-1 hover:bg-gray-700 rounded"
@@ -153,12 +173,12 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                             <FontAwesomeIcon icon={faArrowRight} size="xs" />
                         </button>
                     )}
-                </div>
+                </div>}
 
                 {/* Quick Actions (Hover) */}
-                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-2 mr-2 bg-gray-900/90 rounded-lg px-2 py-1 backdrop-blur-sm shadow-md transition-all z-10">
+                {!isLinkedContainer && <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 flex items-center gap-2 mr-2 bg-gray-900/90 rounded-lg px-2 py-1 backdrop-blur-sm shadow-md transition-all z-10">
                     {/* Preview Button */}
-                    {item.path && (
+                    {!isDivider && item.path && (
                         <button
                             title="새 창에서 미리보기"
                             className="text-blue-400 hover:text-blue-300 p-1.5 hover:bg-blue-900/30 rounded"
@@ -171,31 +191,13 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                         </button>
                     )}
 
-                    {/* Visibility Button */}
-                    {!item.hide ? (
-                        <button
-                            title="표시됨 (클릭하여 숨기기)"
-                            className="text-green-500 hover:text-green-400 p-1.5 hover:bg-green-900/30 rounded"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                // We need a way to update the item. onItemsChange is prop of Parent.
-                                // We passed onDelete, but not onUpdate.
-                                // For now, this button is visual only unless we wire it up?
-                                // Ah, the existing code didn't wire it up either in this component (it just rendered).
-                                // Wait, the existing code had a button but no handler passed? 
-                                // Actually, existing code: onClick={()=>{}}... No, it had logic.
-                                // It seems the original code I read didn't have update logic here?
-                                // Let's check existing lines 82-117. 
-                                // It calls `onDelete`. It lacks `onUpdate`.
-                                // I will keep it as is (visual or implementing if I can).
-                                // User asked for "Sync". If I can't update, I should at least show state.
-                            }}
-                        >
-                            <FontAwesomeIcon icon={faEye} size="xs" />
-                        </button>
-                    ) : (
-                        <button title="숨겨짐 (클릭하여 표시)" className="text-gray-500 hover:text-gray-300 p-1.5 hover:bg-gray-700 rounded"><FontAwesomeIcon icon={faEyeSlash} size="xs" /></button>
-                    )}
+                    {!isDivider && onToggleVisibility && <button
+                        type="button" title={item.hide ? '숨겨짐 (클릭하여 표시)' : '표시됨 (클릭하여 숨기기)'}
+                        aria-label={item.text + (item.hide ? ' 표시하기' : ' 숨기기')}
+                        className="p-1.5 rounded hover:bg-gray-700 text-gray-300"
+                        onClick={event => { event.stopPropagation(); onToggleVisibility(item.id || item.text); }}>
+                        <FontAwesomeIcon icon={item.hide ? faEyeSlash : faEye} size="xs" />
+                    </button>}
 
                     <div className="w-px h-3 bg-gray-700 mx-1"></div>
 
@@ -210,25 +212,28 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                     >
                         <FontAwesomeIcon icon={faTrash} size="xs" />
                     </button>
-                </div>
+                </div>}
             </div>
 
             {/* Recursive Children Rendering */}
-            {item.sub && item.sub.length > 0 && (
+            {!isDivider && (!isLinkedGroup || groupOpen) && item.sub && item.sub.length > 0 && (
                 <div className="ml-4 border-l-2 border-gray-800 pl-2 mt-1">
                     <SortableContext items={item.sub.map(c => typeof c === 'string' ? c : (c.id || c.text))} strategy={verticalListSortingStrategy}>
                         {item.sub.map((child, idx) => {
-                            if (typeof child === 'string') return <div key={idx} className="p-2 text-gray-500">{child}</div>;
+                            if (typeof child === 'string' && !isMenuDivider(child)) return <div key={idx} className="p-2 text-gray-500">{child}</div>;
+                            const childItem = typeof child === 'string' ? { id: child, text: child } : child;
                             return (
                                 <SortableMenuNode
-                                    key={child.id || `fallback_${idx}_${child.text}`}
-                                    item={child}
+                                    key={childItem.id || `fallback_${idx}_${childItem.text}`}
+                                    item={childItem}
                                     depth={depth + 1}
                                     onSelect={onSelect}
                                     selectedIds={selectedIds}
                                     onDelete={onDelete}
                                     onIndent={onIndent}
                                     onOutdent={onOutdent}
+                                    onToggleVisibility={onToggleVisibility}
+                                    isSourceRoot={isLinkedGroup}
                                     isMultiSelectMode={isMultiSelectMode}
                                     index={idx}
                                     isFirst={idx === 0}
@@ -254,11 +259,12 @@ interface SortableTreeCanvasProps {
     onDelete: (id: string) => void;
     onIndent?: (id: string) => void;
     onOutdent?: (id: string) => void;
+    onToggleVisibility?: (id: string) => void;
     isMultiSelectMode?: boolean;
     headerActions?: React.ReactNode;
 }
 
-const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, title, emptyMessage, emptyHint, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, isMultiSelectMode, headerActions }) => {
+const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, title, emptyMessage, emptyHint, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, onToggleVisibility, isMultiSelectMode, headerActions }) => {
     // Flatten items to get list of IDs for SortableContext (only top level here, children handled recursively)
     const topLevelIds = items.map(i => i.id || i.text);
 
@@ -271,7 +277,7 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, title, 
             ref={setNodeRef}
             className={`flex-1 overflow-y-auto p-8 custom-scrollbar h-full transition-colors ${isOver ? 'bg-blue-500/10' : ''}`}
         >
-            <div className="max-w-3xl mx-auto space-y-4 pb-20 min-h-[500px]">
+            <div className="max-w-3xl mx-auto pb-20 min-h-[500px]">
                 <div className="mb-6 flex flex-col items-start gap-3 border-b border-gray-800 py-4">
                     <h2 className="flex items-center gap-3 whitespace-nowrap text-lg font-bold text-gray-100">
                         <span className="w-1.5 h-6 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]"></span>
@@ -297,6 +303,7 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, title, 
                                 onDelete={onDelete}
                                 onIndent={onIndent}
                                 onOutdent={onOutdent}
+                                onToggleVisibility={onToggleVisibility}
                                 isMultiSelectMode={isMultiSelectMode}
                                 index={idx}
                                 isFirst={idx === 0}

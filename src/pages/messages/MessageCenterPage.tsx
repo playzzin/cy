@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Timestamp } from 'firebase/firestore';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faArrowUpRightFromSquare,
@@ -21,7 +21,11 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveIcon } from '../../constants/iconMap';
 import { manpowerService, type Worker } from '../../services/manpowerService';
+import { getMessageRecipientUsers } from '../../services/messageRecipientDirectoryService';
 import { messageService } from '../../services/messageService';
+import { useMessageAccess } from '../../hooks/useMessageAccess';
+import { useMessageInbox } from '../../hooks/useMessageInbox';
+import { useMessageReadActions } from '../../hooks/useMessageReadActions';
 import {
   getLinkedWorkersForUser,
   getUserDisplayLabel,
@@ -30,7 +34,7 @@ import {
   type MessageRecipientMode
 } from '../../services/messageRecipientResolver';
 import { teamService, type Team } from '../../services/teamService';
-import { userService, type UserData } from '../../services/userService';
+import { type UserData } from '../../services/userService';
 import type { CreateErpMessageInput, ErpMessage, ErpMessagePriority, ErpMessageType } from '../../types/erpMessage';
 import MessagePageTabs from '../../components/messages/MessagePageTabs';
 import '../../components/messages/MessageSystem.css';
@@ -186,12 +190,14 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   const [users, setUsers] = useState<UserData[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [currentProfile, setCurrentProfile] = useState<UserData | null>(null);
-  const [inboxMessages, setInboxMessages] = useState<ErpMessage[]>([]);
+  const { profile: currentProfile, canSend: canWriteMessages, loading: accessLoading, error: accessError } = useMessageAccess();
+  const { messages: inboxMessages, loading: inboxLoading, error: inboxError, retry: retryInbox } = useMessageInbox(currentUser?.uid);
+  const { markRead, markAllRead, busy: reading, error: readError, retry: retryRead } = useMessageReadActions(currentUser?.uid);
+  const autoReadAttempt = useRef('');
   const [sentMessages, setSentMessages] = useState<ErpMessage[]>([]);
   const [allMessages, setAllMessages] = useState<ErpMessage[]>([]);
   const [tab, setTab] = useState<MessageTab>('inbox');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedId = new URLSearchParams(location.search).get('messageId');
   const [compose, setCompose] = useState<ComposeState>(initialCompose);
   const [messageSearch, setMessageSearch] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<MessagePriorityFilter>('all');
@@ -206,22 +212,22 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   const admin = isAdminRole(currentProfile?.role as string | undefined);
 
   useEffect(() => {
-    if (!admin && (tab === 'all' || tab === 'system')) {
+    if ((!admin && (tab === 'all' || tab === 'system')) || (!canWriteMessages && tab === 'sent')) {
       setTab('inbox');
-      setSelectedId(null);
     }
-  }, [admin, tab]);
+  }, [admin, canWriteMessages, tab]);
 
   useEffect(() => {
     if (!currentUser?.uid) return;
 
     let cancelled = false;
 
+    if (!canWriteMessages) { setUsers([]); setWorkers([]); setTeams([]); return; }
+
     const loadUsers = async () => {
       try {
-        const [allUsers, profile, allWorkers, allTeams] = await Promise.all([
-          userService.getAllUsers(),
-          userService.getUser(currentUser.uid),
+        const [allUsers, allWorkers, allTeams] = await Promise.all([
+          getMessageRecipientUsers(),
           manpowerService.getWorkers(true),
           teamService.getTeams()
         ]);
@@ -229,9 +235,12 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
         setUsers(allUsers);
         setWorkers(allWorkers);
         setTeams(allTeams);
-        setCurrentProfile(profile);
       } catch (error) {
         console.error('[MessageCenter] failed to load recipients:', error);
+        if (!cancelled) {
+          setStatusTone('error');
+          setStatusText('수신자 목록을 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+        }
       }
     };
 
@@ -240,19 +249,17 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, canWriteMessages]);
 
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || !canWriteMessages) { setSentMessages([]); return; }
 
-    const unsubscribeInbox = messageService.subscribeInbox(currentUser.uid, setInboxMessages);
     const unsubscribeSent = messageService.subscribeSent(currentUser.uid, setSentMessages);
 
     return () => {
-      unsubscribeInbox();
       unsubscribeSent();
     };
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, canWriteMessages]);
 
   useEffect(() => {
     if (!admin) {
@@ -379,9 +386,9 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   }, [baseVisibleMessages, currentUser?.uid, messageSearch, priorityFilter, sortMode]);
 
   const selectedMessage = useMemo(() => {
-    const combined = mergeMessages(visibleMessages, inboxMessages, sentMessages, allMessages);
+    const combined = mergeMessages(allMessages, sentMessages, inboxMessages);
     return selectedId ? combined.find((message) => message.id === selectedId) || null : null;
-  }, [allMessages, inboxMessages, selectedId, sentMessages, visibleMessages]);
+  }, [allMessages, inboxMessages, selectedId, sentMessages]);
 
   const unreadCount = useMemo(() => {
     if (!currentUser?.uid) return 0;
@@ -389,33 +396,16 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   }, [currentUser?.uid, inboxMessages]);
 
   useEffect(() => {
-    if (isComposeMode) return;
-
-    const params = new URLSearchParams(location.search);
-    const messageId = params.get('messageId');
-    if (messageId) {
-      setSelectedId(messageId);
-      return;
-    }
-
-    if (!selectedId && visibleMessages[0]) {
-      setSelectedId(visibleMessages[0].id);
-    }
-  }, [isComposeMode, location.search, selectedId, visibleMessages]);
-
-  useEffect(() => {
-    if (isComposeMode || !selectedId) return;
-    if (visibleMessages.some((message) => message.id === selectedId)) return;
-    setSelectedId(visibleMessages[0]?.id || null);
-  }, [isComposeMode, selectedId, visibleMessages]);
-
-  useEffect(() => {
-    if (isComposeMode) return;
+    if (isComposeMode || !selectedId) { autoReadAttempt.current = ''; return; }
     if (!currentUser?.uid || !selectedMessage) return;
     if (messageService.isReadBy(selectedMessage, currentUser.uid)) return;
-
-    void messageService.markAsRead(selectedMessage.id, currentUser.uid);
-  }, [currentUser?.uid, isComposeMode, selectedMessage]);
+    const key = JSON.stringify([currentUser.uid, selectedId]);
+    if (autoReadAttempt.current === key) return;
+    autoReadAttempt.current = key;
+    // A rejected write rolls the local snapshot back. Retry only on user action,
+    // otherwise that rollback would start another write indefinitely.
+    void markRead(selectedMessage);
+  }, [currentUser?.uid, isComposeMode, selectedId, selectedMessage, markRead]);
 
   const filteredUsers = useMemo(() => {
     const keyword = recipientSearch.trim().toLowerCase();
@@ -483,8 +473,8 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
       );
     }
 
-    return options;
-  }, [admin, messageStats.inbox, messageStats.sent, messageStats.system, messageStats.total, messageStats.unread]);
+    return options.filter(option => canWriteMessages || option.key !== 'sent');
+  }, [admin, canWriteMessages, messageStats.inbox, messageStats.sent, messageStats.system, messageStats.total, messageStats.unread]);
 
   const selectedRecipientPreview = useMemo(() => {
     if (resolvedComposeRecipients.recipientScope === 'all') return '전체 사용자에게 발송됩니다.';
@@ -497,12 +487,12 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   }, [resolvedComposeRecipients]);
 
   const canSend = useMemo(() => {
-    if (sending || !currentUser?.uid || !compose.body.trim()) return false;
+    if (!canWriteMessages || sending || !currentUser?.uid || !compose.body.trim()) return false;
     if (resolvedComposeRecipients.recipientScope === 'users' && resolvedComposeRecipients.recipientIds.length === 0) return false;
     if ((compose.recipientMode === 'teamMembers' || compose.recipientMode === 'teamLeaders') && compose.teamIds.length === 0) return false;
     if (!isValidActionUrl(compose.actionUrl.trim())) return false;
     return true;
-  }, [compose.actionUrl, compose.body, compose.recipientMode, compose.teamIds.length, currentUser?.uid, resolvedComposeRecipients, sending]);
+  }, [compose.actionUrl, compose.body, compose.recipientMode, compose.teamIds.length, currentUser?.uid, resolvedComposeRecipients, sending, canWriteMessages]);
 
   const resetCompose = () => {
     setCompose(initialCompose);
@@ -572,7 +562,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
   };
 
   const sendMessage = async () => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || !canWriteMessages) return;
 
     setSending(true);
     setStatusText('');
@@ -612,7 +602,6 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
       resetCompose();
       setStatusText('메시지를 발송했습니다.');
       setTab('sent');
-      setSelectedId(messageId);
       navigate(`/messages?messageId=${messageId}`, { replace: true });
     } catch (error) {
       console.error('[MessageCenter] send failed:', error);
@@ -630,7 +619,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
 
   const markSelectedRead = async () => {
     if (!currentUser?.uid || !selectedMessage) return;
-    await messageService.markAsRead(selectedMessage.id, currentUser.uid);
+    await markRead(selectedMessage);
   };
 
   const openMessageAction = (message: ErpMessage) => {
@@ -646,7 +635,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
 
   const markInboxRead = async () => {
     if (!currentUser?.uid) return;
-    await messageService.markAllAsRead(inboxMessages, currentUser.uid);
+    await markAllRead(inboxMessages);
   };
 
   const receiptUsers = selectedMessage ? getReceiptUsers(selectedMessage, users) : [];
@@ -657,26 +646,37 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
     selectedMessage && currentUser?.uid && !messageService.isReadBy(selectedMessage, currentUser.uid)
   );
 
+  if (isComposeMode && accessLoading) return <div role="status">메시지 권한을 확인하는 중입니다.</div>;
+  if (isComposeMode && !canWriteMessages) return <Navigate to="/messages" replace />;
+
   return (
     <div className="erp-message-shell">
       <header className="erp-message-page-header">
         <div>
           <h1 className="erp-message-page-title">{isComposeMode ? '메시지 보내기' : '메시지 보기'}</h1>
           <p className="erp-message-page-description">
-            {isComposeMode ? '받는 대상을 선택하고 업무 메시지를 발송합니다.' : '받은 메시지와 보낸 메시지를 확인합니다.'}
+            {isComposeMode ? '받는 대상을 선택하고 업무 메시지를 발송합니다.' : canWriteMessages ? '받은 메시지와 보낸 메시지를 확인합니다.' : '받은 업무메시지를 확인합니다.'}
           </p>
         </div>
 
         <div className="erp-message-page-header-actions">
-          <MessagePageTabs active={isComposeMode ? 'compose' : 'view'} />
+          <MessagePageTabs active={isComposeMode ? 'compose' : 'view'} readOnly={!canWriteMessages} />
           {!isComposeMode && (
-            <button type="button" className="erp-message-secondary-button" onClick={markInboxRead} disabled={unreadCount === 0}>
+            <button type="button" className="erp-message-secondary-button" onClick={markInboxRead} disabled={unreadCount === 0 || reading || inboxLoading || Boolean(inboxError)}>
               <FontAwesomeIcon icon={faCheck} />
               받은 메시지 모두 읽음
             </button>
           )}
         </div>
       </header>
+
+      {accessError && <div role="alert" className="erp-message-read-error">메시지 권한을 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.</div>}
+      {readError && <div role="alert" className="erp-message-read-error">{readError}
+        <button type="button" disabled={reading} onClick={() => void retryRead?.()}>읽음 처리 다시 시도</button>
+      </div>}
+      {inboxError && !isComposeMode && <div role="alert" className="erp-message-read-error">메시지를 불러오지 못했습니다.
+        <button type="button" onClick={retryInbox}>다시 불러오기</button>
+      </div>}
 
       {!isComposeMode && (
       <section className="erp-message-insight-grid" aria-label="메시지 요약">
@@ -692,10 +692,10 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
           <span>중요/긴급</span>
           <strong>{messageStats.important.toLocaleString('ko-KR')}</strong>
         </div>
-        <div className="erp-message-insight-item">
+        {canWriteMessages && <div className="erp-message-insight-item">
           <span>보낸 메시지</span>
           <strong>{messageStats.sent.toLocaleString('ko-KR')}</strong>
-        </div>
+        </div>}
       </section>
       )}
 
@@ -710,7 +710,6 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
                 className={`erp-message-tab ${tab === key ? 'active' : ''}`}
                 onClick={() => {
                   setTab(key);
-                  setSelectedId(null);
                   navigate('/messages', { replace: true });
                 }}
               >
@@ -765,7 +764,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
           </div>
 
           <div className="erp-message-list">
-            {visibleMessages.length === 0 ? (
+            {inboxLoading && (tab === 'inbox' || tab === 'unread') ? <div role="status" className="erp-message-empty">메시지를 불러오는 중입니다.</div> : visibleMessages.length === 0 ? (
               <div className="erp-message-empty">
                 표시할 메시지가 없습니다.
                 {(messageSearch || priorityFilter !== 'all') && (
@@ -785,8 +784,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
                     type="button"
                     className={`erp-message-preview ${unread ? 'unread' : ''} ${active ? 'active' : ''}`}
                     onClick={() => {
-                      setSelectedId(message.id);
-                      navigate(`/messages?messageId=${message.id}`, { replace: true });
+                      navigate(`/messages?messageId=${encodeURIComponent(message.id)}`, { replace: true });
                     }}
                   >
                     <div className="erp-message-preview-topline">
@@ -852,7 +850,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
                     type="button"
                     className="erp-message-secondary-button"
                     onClick={markSelectedRead}
-                    disabled={!selectedMessageUnread}
+                    disabled={!selectedMessageUnread || reading}
                   >
                     <FontAwesomeIcon icon={faCheck} />
                     {selectedMessageUnread ? '읽음 처리' : '읽음 완료'}
@@ -877,7 +875,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
                 )}
               </div>
 
-              <section className="erp-message-receipts">
+              {canWriteMessages && <section className="erp-message-receipts">
                 <h3 className="erp-message-receipts-title">
                   확인 현황 {readRecipientCount}/{receiptUsers.length || selectedMessage.readBy.length}
                 </h3>
@@ -913,7 +911,7 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
                     );
                   })}
                 </div>
-              </section>
+              </section>}
             </>
           )}
         </div>

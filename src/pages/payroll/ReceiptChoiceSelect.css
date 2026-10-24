@@ -1,0 +1,14 @@
+.dr-choice-select { width:100%; min-width:0; }
+.dr-choice-select .dr-choice-trigger { display:flex; align-items:center; gap:8px; width:100%; min-width:0; height:44px; padding:6px 9px; border:1px solid color-mix(in srgb,var(--dr-choice-color) 23%,#e2e8f0); border-radius:8px; background:var(--dr-choice-background); color:var(--dr-choice-color); font:inherit; font-size:14px; font-weight:600; text-align:left; cursor:pointer; }
+.dr-choice-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dr-choice-icon { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:26px; height:26px; border-radius:7px; background:color-mix(in srgb,var(--dr-choice-color) 12%,white); color:var(--dr-choice-color); }
+.dr-choice-trigger>svg { flex-shrink:0; opacity:.7; transition:transform .15s ease; }.dr-choice-chevron-open { transform:rotate(180deg); }
+.dr-choice-trigger:focus-visible { outline:2px solid var(--dr-choice-color); outline-offset:2px; }.dr-choice-trigger:disabled { opacity:.55; cursor:not-allowed; }
+.dr-choice-popup { position:fixed; z-index:1750; overflow:auto; overscroll-behavior:contain; padding:5px; box-sizing:border-box; border:1px solid #d5dfe8; border-radius:12px; background:#fff; box-shadow:0 12px 36px #172b4629; font-family:inherit; }
+.dr-choice-popup * { box-sizing:border-box; }
+.dr-choice-option { display:flex; align-items:center; gap:10px; min-height:46px; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:14px; color:#24384d; }
+.dr-choice-option-label { flex:1; min-width:0; overflow-wrap:anywhere; line-height:1.5; }
+.dr-choice-option[aria-selected=true] { background:var(--dr-choice-background); color:var(--dr-choice-color); font-weight:700; }
+.dr-choice-option.dr-choice-active { box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dr-choice-color) 35%,white); background:var(--dr-choice-background); }
+.dr-choice-check { flex-shrink:0; color:var(--dr-choice-color); }
+@media(max-width:600px) { .dr-choice-select .dr-choice-trigger { gap:5px; padding:6px; font-size:14px; }.dr-choice-icon { width:24px; height:26px; }.dr-choice-option { min-height:48px; } }

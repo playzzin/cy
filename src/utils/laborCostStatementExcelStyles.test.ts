@@ -16,16 +16,17 @@ const getFillArgb = (cell: ExcelJS.Cell): string | undefined => {
 };
 
 describe('labor cost statement Excel styles', () => {
-  it('splits every month after day 16', () => {
-    expect(getLaborStatementSplitPoint(31)).toBe(16);
-    expect(getLaborStatementSplitPoint(30)).toBe(16);
-    expect(getLaborStatementSplitPoint(28)).toBe(16);
+  it('splits every month after day 15', () => {
+    expect(getLaborStatementSplitPoint(31)).toBe(15);
+    expect(getLaborStatementSplitPoint(30)).toBe(15);
+    expect(getLaborStatementSplitPoint(29)).toBe(15);
+    expect(getLaborStatementSplitPoint(28)).toBe(15);
   });
 
-  it('uses separate fills for days 1-16 and days 17-31', () => {
+  it('uses separate fills for days 1-15 and days 16-31', () => {
     expect(getLaborStatementDayFillArgb(1)).toBe(LABOR_STATEMENT_FIRST_PERIOD_FILL_ARGB);
-    expect(getLaborStatementDayFillArgb(16)).toBe(LABOR_STATEMENT_FIRST_PERIOD_FILL_ARGB);
-    expect(getLaborStatementDayFillArgb(17)).toBe(LABOR_STATEMENT_SECOND_PERIOD_FILL_ARGB);
+    expect(getLaborStatementDayFillArgb(15)).toBe(LABOR_STATEMENT_FIRST_PERIOD_FILL_ARGB);
+    expect(getLaborStatementDayFillArgb(16)).toBe(LABOR_STATEMENT_SECOND_PERIOD_FILL_ARGB);
     expect(getLaborStatementDayFillArgb(31)).toBe(LABOR_STATEMENT_SECOND_PERIOD_FILL_ARGB);
   });
 
@@ -51,8 +52,8 @@ describe('labor cost statement Excel styles', () => {
       worksheet.mergeCells(primaryRow.number, col, secondaryRow.number, col);
     }
 
-    applyLaborStatementDayPeriodFills(primaryRow, 5, 1, 16, 31);
-    applyLaborStatementDayPeriodFills(secondaryRow, 5, 17, 16, 31);
+    applyLaborStatementDayPeriodFills(primaryRow, 5, 1, 15, 31);
+    applyLaborStatementDayPeriodFills(secondaryRow, 5, 16, 16, 31);
     applyLaborStatementDelegateHighlight(primaryRow, 21, true);
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -64,10 +65,11 @@ describe('labor cost statement Excel styles', () => {
     const loadedPrimaryRow = reloadedWorksheet!.getRow(1);
     const loadedSecondaryRow = reloadedWorksheet!.getRow(2);
     expect(getFillArgb(loadedPrimaryRow.getCell(5))).toBe(LABOR_STATEMENT_FIRST_PERIOD_FILL_ARGB);
-    expect(getFillArgb(loadedPrimaryRow.getCell(20))).toBe(LABOR_STATEMENT_FIRST_PERIOD_FILL_ARGB);
+    expect(getFillArgb(loadedPrimaryRow.getCell(19))).toBe(LABOR_STATEMENT_FIRST_PERIOD_FILL_ARGB);
+    expect(getFillArgb(loadedPrimaryRow.getCell(20))).toBeUndefined();
     expect(getFillArgb(loadedSecondaryRow.getCell(5))).toBe(LABOR_STATEMENT_SECOND_PERIOD_FILL_ARGB);
     expect(getFillArgb(loadedSecondaryRow.getCell(19))).toBe(LABOR_STATEMENT_SECOND_PERIOD_FILL_ARGB);
-    expect(getFillArgb(loadedSecondaryRow.getCell(20))).toBeUndefined();
+    expect(getFillArgb(loadedSecondaryRow.getCell(20))).toBe(LABOR_STATEMENT_SECOND_PERIOD_FILL_ARGB);
     for (let col = 24; col <= 27; col++) {
       expect(getFillArgb(loadedPrimaryRow.getCell(col))).toBe(LABOR_STATEMENT_DELEGATE_FILL_ARGB);
     }

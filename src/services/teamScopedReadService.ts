@@ -4,16 +4,22 @@ import { auth, db, functions } from '../config/firebase';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 
 const leaderRoles = new Set(['팀장', '반장', 'teamlead', 'teamleader', 'foreman']);
+const workerRoles = new Set(['worker', '작업자', '일반']);
 const roleKey = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/[\s_-]/g, '');
 const unrestricted = new Set(['admin', 'administrator', 'superadmin', 'owner', 'dev', 'developer', '관리자', '사장', '실장', 'manager', 'manager1', 'manager2', 'manager3', '매니저', '매니저1', '매니저2', '매니저3', '메니저1', '메니저2', '메니저3']);
 const scopedCollections = new Set([
-    'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches',
+    'worker_summary_directory',
+    'vehicle_oil_summary',
+    'site_work_reports',
+    'message_recipients',
+    'whiteboard_participation', 'whiteboard_source_report',
+    'workers', 'teams', 'sites', 'companies', 'daily_reports', 'daily_dispatches', 'team_settlement_incoming', 'team_settlement_support_details',
     'schedule_confirmation_boards', 'field_schedule_requests',
     'accommodations', 'accommodationAssignments', 'accommodationUtilityRecords', 'accommodation_billing_documents', 'accommodation_billing_line_items', 'accommodation_billing_targets',
     'vehicles', 'vehicleAssignments', 'vehicleBillingTargets', 'vehicle_billing_documents', 'vehicleExpenses',
     'cards', 'cardAssignments', 'cardBillingTargets', 'cardBillings', 'cardTransactions',
     'team_expense_claims', 'system_configs', 'office_transactions',
-    'materials', 'materialInbounds', 'materialOutbounds',
+    'materials', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches',
     'advance_payments', 'advance_requests',
 ]);
 const decode = (value: any): any => {
@@ -48,7 +54,7 @@ export const usesTeamScopedReads = async (): Promise<boolean> => {
             roles = roles.flatMap(value => [value, positions.find(position => value === position.id || value === `pos_${position.id}`)?.name]);
         }
         if (roles.some(value => unrestricted.has(roleKey(value)))) return false;
-        const leader = roles.some(value => leaderRoles.has(roleKey(value)));
+        const leader = roles.some(value => leaderRoles.has(roleKey(value)) || workerRoles.has(roleKey(value)));
         if (leader && auth.currentUser === user) leaderRoute = { user, until: Date.now() + 10_000 };
         return leader;
     })();
@@ -63,6 +69,7 @@ const pendingReads = new Map<string, Promise<unknown[]>>();
 let catalogInvalidatedUntil = 0;
 export const invalidateTeamScopedCache = () => {
     leaderRoute = null;
+    pendingReads.clear();
     catalogInvalidatedUntil = Date.now() + 30_000;
 };
 const waitingReads: Array<() => void> = [];
@@ -128,8 +135,14 @@ const flushReads = () => {
     const accounts = new Map<string | undefined, QueuedRead[]>();
     queue.forEach(item => accounts.set(item.uid, [...(accounts.get(item.uid) || []), item]));
     accounts.forEach(items => {
-        for (let offset = 0; offset < items.length; offset += 20) {
-            const group = items.slice(offset, offset + 20);
+        // A previous page can still have report reads in flight. Keep monthly
+        // reports out of directory batches so navigation never waits for them.
+        const batches = [
+            items.filter(item => !['daily_reports', 'site_work_reports'].includes(item.request.collection)),
+            items.filter(item => ['daily_reports', 'site_work_reports'].includes(item.request.collection)),
+        ].flatMap(reads => Array.from({ length: Math.ceil(reads.length / 20) },
+            (_, index) => reads.slice(index * 20, (index + 1) * 20)));
+        for (const group of batches) {
             if (legacyServerUntil > Date.now()) {
                 group.forEach(completeLegacyRead);
                 continue;

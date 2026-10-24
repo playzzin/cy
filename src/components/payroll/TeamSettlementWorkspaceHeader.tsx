@@ -1,4 +1,5 @@
 import React from 'react';
+import MonthNavigator from '../common/MonthNavigator';
 
 export type TeamSettlementSaveState = 'idle' | 'saving' | 'error';
 
@@ -19,6 +20,7 @@ type TeamSettlementWorkspaceHeaderProps = {
   onSave: () => void;
   onConfirm: () => void;
   onUnconfirm: () => void;
+  onMonthChange?: (month: string) => void;
 };
 
 const formatTimestamp = (value: string | null): string => {
@@ -52,7 +54,8 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
   onRecalculate,
   onSave,
   onConfirm,
-  onUnconfirm
+  onUnconfirm,
+  onMonthChange
 }) => {
   const isSaving = saveState === 'saving';
 
@@ -91,7 +94,9 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
             {teamName || '팀 선택'}
           </strong>
           <span className="text-slate-300">·</span>
-          <span className="font-semibold text-slate-700">{year}년 {month}월</span>
+          {onMonthChange ? <div className="team-settlement-page__sticky-month">
+            <MonthNavigator value={`${year}-${String(month).padStart(2, '0')}`} onChange={onMonthChange} disabled={isSaving} ariaLabel="정산 조회월" />
+          </div> : <span className="font-semibold text-slate-700">{year}년 {month}월</span>}
           <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${confirmedAt ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
             {confirmedAt ? '확정' : '미확정'}
           </span>

@@ -1,6 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ClipboardList } from 'lucide-react';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { hideTeamWorkflowLink } from '../../utils/teamWorkflowPolicy';
 
 export interface WorkflowAction {
     label: string;
@@ -22,6 +24,7 @@ export default function OperationalWorkflowPage({
     actions,
 }: OperationalWorkflowPageProps) {
     const navigate = useNavigate();
+    const restricted = useRestrictedTeamWorkflow();
 
     return (
         <div className="min-h-screen bg-slate-50 p-4 md:p-6">
@@ -36,7 +39,7 @@ export default function OperationalWorkflowPage({
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">
-                    {actions.map((action) => (
+                    {actions.filter(action => !restricted || !hideTeamWorkflowLink({ text: action.label, path: action.path })).map((action) => (
                         <button
                             key={action.path}
                             type="button"

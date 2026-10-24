@@ -1,3 +1,7 @@
+import { saveGeminiUsage, trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
+import { geminiEvent } from './geminiUsage';
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { requireCallableAuth } from './auth';
@@ -174,7 +178,7 @@ const getGeminiApiKey = async (): Promise<string> => {
 
 const getGeminiModel = async (): Promise<string> => {
     const settings = await getServerGeminiSettings();
-    return settings.model || 'gemini-2.5-flash';
+    return settings.model || DEFAULT_GEMINI_TEXT_MODEL;
 };
 
 const getErrorMessage = (error: unknown): string =>
@@ -241,7 +245,7 @@ const downloadStorageFileAsBase64 = async (
     };
 };
 
-const buildGeminiGenerateContentRequest = (image: { base64: string; mimeType: string }): Record<string, unknown> => ({
+const buildGeminiGenerateContentRequest = (image: { base64: string; mimeType: string }, model: string): Record<string, unknown> => ({
     contents: [{
         role: 'user',
         parts: [
@@ -250,7 +254,7 @@ const buildGeminiGenerateContentRequest = (image: { base64: string; mimeType: st
         ],
     }],
     generationConfig: {
-        temperature: 0.1,
+        ...geminiTextGenerationOptions(model, 0.1),
         responseMimeType: 'application/json',
         responseJsonSchema: PARTNER_RECOGNITION_SCHEMA,
     },
@@ -263,10 +267,10 @@ const callGeminiPartnerRecognition = async (
     const model = await getGeminiModel();
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    const response = await fetch(endpoint, {
+    const response = await trackedGeminiFetch('partner-recognition')(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildGeminiGenerateContentRequest(image)),
+        body: JSON.stringify(buildGeminiGenerateContentRequest(image, model)),
     });
 
     const rawText = await response.text();
@@ -621,7 +625,7 @@ const markRecognitionImagesFailed = async (
 
 const getGeminiBatchModel = async (): Promise<string> => {
     const settings = await getServerGeminiSettings();
-    return settings.batchModel || settings.model || 'gemini-2.5-flash';
+    return settings.batchModel || settings.model || DEFAULT_GEMINI_TEXT_MODEL;
 };
 
 const parseGeminiJsonPayload = (responsePayload: any): GeminiPartnerRecognitionOutput => {
@@ -671,7 +675,7 @@ const callGeminiBatchCreate = async (
         );
     }
 
-    const response = await fetch(endpoint, {
+    const response = await trackedGeminiFetch('partner-recognition')(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -693,7 +697,7 @@ const callGeminiBatchGet = async (batchName: string): Promise<any> => {
     const normalized = batchName.replace(/^\/+/, '');
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/${normalized}?key=${apiKey}`;
 
-    const response = await fetch(endpoint);
+    const response = await trackedGeminiFetch('partner-recognition')(endpoint);
     const rawText = await response.text();
     const payload = rawText ? JSON.parse(rawText) : {};
 
@@ -709,7 +713,7 @@ const callGeminiBatchGet = async (batchName: string): Promise<any> => {
 export const createPartnerRecognitionBatchJob = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 3 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const auth = requireCallableAuth(context);
         const jobId = asString(data?.jobId);
         const imageIds = Array.isArray(data?.imageIds) ? data.imageIds.map(asString).filter(Boolean) : [];
@@ -742,6 +746,7 @@ export const createPartnerRecognitionBatchJob = functions
             throw toHttpsError(error, 'failed-precondition');
         }
 
+        const batchModel = await getGeminiBatchModel();
         const requests: Array<Record<string, unknown>> = [];
         for (const imageDoc of images) {
             const image = imageDoc.data();
@@ -750,7 +755,7 @@ export const createPartnerRecognitionBatchJob = functions
                 String(image.mimeType || 'image/jpeg')
             );
             requests.push({
-                request: buildGeminiGenerateContentRequest(base64Image),
+                request: buildGeminiGenerateContentRequest(base64Image, batchModel),
                 metadata: {
                     key: imageDoc.id,
                     imageId: imageDoc.id,
@@ -769,7 +774,6 @@ export const createPartnerRecognitionBatchJob = functions
             throw toHttpsError(error);
         }
         const resource = getBatchResource(payload);
-        const batchModel = await getGeminiBatchModel();
         const batchName = asString(resource.name || payload.name);
         if (!batchName) {
             throw new Error('Gemini Batch 작업 이름을 확인할 수 없습니다.');
@@ -805,12 +809,12 @@ export const createPartnerRecognitionBatchJob = functions
             state: batchState,
             requestCount: images.length,
         };
-    });
+    }));
 
 export const syncPartnerRecognitionBatchJob = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 3 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const auth = requireCallableAuth(context);
         const jobId = asString(data?.jobId);
 
@@ -866,6 +870,11 @@ export const syncPartnerRecognitionBatchJob = functions
 
         for (let index = 0; index < inlinedResponses.length; index += 1) {
             const inlined = inlinedResponses[index] || {};
+            await saveGeminiUsage(geminiEvent(asString(job.geminiBatchModel), 'partner-recognition', inlined.response, 0,
+                inlined.error ? 'PROVIDER_ERROR' : '', 'batch'), {
+                id: `batch:${batchName}:${index}`,
+                actor: { uid: asString(job.createdBatchByUid), name: '' },
+            });
             const metadata = inlined.metadata || {};
             const imageId = asString(metadata.imageId || metadata.key || imageSnapshot.docs[index]?.id);
             const imageDoc = imageById.get(imageId);
@@ -908,12 +917,12 @@ export const syncPartnerRecognitionBatchJob = functions
 
         await recalculateJobCounters(jobId, 'reviewing');
         return { success: true, done: true, state, createdResults };
-    });
+    }));
 
 export const analyzePartnerRecognitionJob = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 3 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const auth = requireCallableAuth(context);
         const jobId = asString(data?.jobId);
         const imageIds = Array.isArray(data?.imageIds) ? data.imageIds.map(asString).filter(Boolean) : [];
@@ -1009,12 +1018,12 @@ export const analyzePartnerRecognitionJob = functions
             }, { merge: true });
         }
         return { success: true };
-    });
+    }));
 
 export const rematchPartnerRecognitionResult = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         requireCallableAuth(context);
         const resultId = asString(data?.resultId);
         if (!resultId) {
@@ -1049,7 +1058,7 @@ export const rematchPartnerRecognitionResult = functions
 
         await recalculateJobCounters(String(result.jobId || ''));
         return { success: true };
-    });
+    }));
 
 const getEffectiveExtracted = (result: FirebaseFirestore.DocumentData): ExtractedPartnerContact =>
     sanitizeExtracted({
@@ -1166,7 +1175,7 @@ const commitOneResult = async (
 export const commitPartnerRecognitionResults = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+    .https.onCall(withGeminiUsageContext(async (data, context) => {
         const auth = requireCallableAuth(context);
         const jobId = asString(data?.jobId);
         const resultIds = Array.isArray(data?.resultIds) ? data.resultIds.map(asString).filter(Boolean) : [];
@@ -1217,4 +1226,4 @@ export const commitPartnerRecognitionResults = functions
 
         await recalculateJobCounters(jobId, failed > 0 ? 'reviewing' : 'completed');
         return { committed, skipped, failed, errors };
-    });
+    }));

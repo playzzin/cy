@@ -2,9 +2,7 @@ import {
     calculatePayrollDeductions,
     formatRateAsPercent,
     formatCurrency,
-    calculateTotalNetPay,
-    DEFAULT_INSURANCE_CONFIG,
-    DEFAULT_TAX_RATE
+    calculateTotalNetPay
 } from './payrollCalculator';
 
 describe('payrollCalculator', () => {
@@ -142,18 +140,4 @@ describe('payrollCalculator', () => {
         });
     });
 
-    describe('DEFAULT_INSURANCE_CONFIG', () => {
-        it('기본 4대보험 요율이 정의되어 있다', () => {
-            expect(DEFAULT_INSURANCE_CONFIG.pensionRate).toBe(0.045);
-            expect(DEFAULT_INSURANCE_CONFIG.healthRate).toBe(0.03545);
-            expect(DEFAULT_INSURANCE_CONFIG.careRateOfHealth).toBe(0.1295);
-            expect(DEFAULT_INSURANCE_CONFIG.employmentRate).toBe(0.009);
-        });
-    });
-
-    describe('DEFAULT_TAX_RATE', () => {
-        it('기본 세금 요율이 3.3%이다', () => {
-            expect(DEFAULT_TAX_RATE).toBe(0.033);
-        });
-    });
 });

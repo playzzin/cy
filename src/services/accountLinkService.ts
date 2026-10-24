@@ -172,12 +172,12 @@ export const accountLinkService = {
         return sortByUpdatedDesc(snap.docs.map((item) => ({ id: item.id, ...item.data() } as AccountLink)));
     },
 
-    async getMyStatus(): Promise<MyAccountLinkStatusResult> {
-        const callable = httpsCallable<Record<string, never>, MyAccountLinkStatusResult>(
+    async getMyStatus(options: { refreshAccessClaims?: boolean } = {}): Promise<MyAccountLinkStatusResult> {
+        const callable = httpsCallable<typeof options, MyAccountLinkStatusResult>(
             functions,
             'getMyAccountLinkStatus'
         );
-        const response = await callable({});
+        const response = await callable(options);
         return response.data;
     },
 

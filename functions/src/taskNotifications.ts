@@ -9,6 +9,7 @@ interface TaskNotificationData {
     description?: string;
     status?: string;
     priority?: string;
+    dueDate?: string;
     createdBy?: string;
     createdById?: string;
     assignee?: string;
@@ -83,6 +84,8 @@ export function buildTaskNotification(kind: NotificationKind, taskId: string, ta
         readBy: [], readAtBy: {}, pinned: false,
         actionLabel: kind === 'review' ? '결과 확인하기' : '요청 확인하기', actionUrl: `/todo?taskId=${encodeURIComponent(taskId)}`,
         createdAt: timestamp, updatedAt: timestamp, expiresAt: null,
+        dueAt: task.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate) && Number.isFinite(Date.parse(task.dueDate + 'T23:59:59+09:00'))
+            ? admin.firestore.Timestamp.fromMillis(Date.parse(task.dueDate + 'T23:59:59+09:00')) : null,
     };
 }
 

@@ -1,3 +1,5 @@
+import { trackedGeminiFetch } from './geminiUsageLogging';
+import { geminiTextGenerationOptions, normalizeGeminiModelName } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 
 type Category = { id: string; label: string };
@@ -26,7 +28,7 @@ export async function analyzeExpenseReceipt(
     file: { contentType: string; base64: string }, categories: Category[], settings: Settings, fetcher: typeof fetch = fetch,
 ) {
     if (!settings.apiKey) throw new functions.https.HttpsError('failed-precondition', '사무실에서 AI 설정의 서버 Gemini API 키를 등록해 주세요. 직접 입력으로도 신청할 수 있습니다.');
-    const model = settings.documentModel.replace(/^models\//, '');
+    const model = normalizeGeminiModelName(settings.documentModel);
     if (!/^gemini-[a-zA-Z0-9._-]{1,90}$/.test(model)) throw new functions.https.HttpsError('failed-precondition', '서버 Gemini 문서 분석 모델 설정을 확인해 주세요.');
     const nullableString = { type: ['string', 'null'] };
     const schema = {
@@ -48,13 +50,13 @@ export async function analyzeExpenseReceipt(
 경비 구분은 아래에 등록된 항목에서 상호·품목에 맞는 id 하나만 선택하고 근거가 없으면 null이다. 경고는 짧은 한국어로 쓰고 개인정보·카드번호는 출력하지 않는다.
 등록된 경비 구분: ${JSON.stringify(categories)}`;
     try {
-        const response = await fetcher(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        const response = await trackedGeminiFetch('expense-receipt', fetcher)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey },
             signal: AbortSignal.timeout(75_000),
             body: JSON.stringify({
                 systemInstruction: { parts: [{ text: prompt }] },
                 contents: [{ role: 'user', parts: [{ inlineData: { mimeType: file.contentType, data: file.base64 } }] }],
-                generationConfig: { temperature: 0.1, responseMimeType: 'application/json', responseJsonSchema: schema },
+                generationConfig: { ...geminiTextGenerationOptions(model, 0.1), responseMimeType: 'application/json', responseJsonSchema: schema },
             }),
         });
         if (response.status === 429) throw new functions.https.HttpsError('resource-exhausted', '영수증 분석 사용량이 많습니다. 잠시 뒤 다시 분석하거나 직접 입력해 주세요.');

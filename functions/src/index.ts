@@ -4,8 +4,17 @@ import * as admin from 'firebase-admin';
 admin.initializeApp();
 admin.firestore().settings({ ignoreUndefinedProperties: true });
 
+export { getDevPreviewAccounts, createDevPreviewSession } from './devUserPreview';
+
+export { recordGeminiClientUsage, listGeminiUsageLogs } from './geminiUsageLogs';
+
 export { setSmartMemoReminder, dispatchSmartMemoReminders } from './smartMemoReminders';
 export { notifyTaskChanges } from './taskNotifications';
+export { getNoticeBoard, deleteNotice } from './noticeBoard';
+export {
+    saveNoticeWithNotification, setPersonalNotification, saveNotificationPreferences,
+    getNoticeDeliveryReport, retryNoticeDelivery, dispatchNoticeNotification, recoverNotificationDeliveries, archiveDeletedNoticeNotifications,
+} from './notificationCenter';
 
 export {
     createWelfareLedgerTransaction,
@@ -26,6 +35,9 @@ export {
 } from './partnerRecognition';
 export {
     analyzeCardBillingStatement,
+    analyzeStoredCardStatementFile,
+    getCardStatementFileDetail,
+    listCardStatementFiles,
     analyzeCardStatementImportJob,
     cancelCardStatementImportUploadSession,
     cancelCardStatementImportFile,
@@ -144,10 +156,21 @@ export { planExcelConversion, getExcelConversionStatus } from './excelConversion
 export { analyzeExcelStructure } from './excelStructurePlanning';
 
 export { getTeamScopedData } from './teamScopedRead';
+export { saveTeamVehicleOil } from './teamVehicleOilWrite';
 export { teamExpenseRequests } from './teamExpenseRequests';
 export { teamWorkerRequests } from './teamWorkerRequests';
 
 export { teamAdvanceRequests } from './teamAdvanceRequests';
+export { teamAccountApprovals } from './teamAccountApprovals';
 export { teamOffDutyRequests } from './teamOffDutyRequests';
 
 export { workerSignatures } from './workerSignatures';
+export { workerBankPhotos } from './workerBankPhotos';
+
+export { aiWorkspace } from './aiWorkspace';
+export { dailyReportAnalyticsAi } from './dailyReportAnalyticsAi';
+export { geminiGateway } from './geminiGateway';
+export { aiWorkspaceReports, generateScheduledWorkspaceReports } from './aiWorkspace/scheduledReports';
+
+export { teamMaterialTransactions } from './teamMaterialTransactions';
+export { updateTeamResourceStatus } from './teamResourceStatus';

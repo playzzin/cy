@@ -22,11 +22,19 @@ import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { loginLogService } from '../../services/loginLogService';
 import type { LoginLog, LoginLogAction, LoginLogStatus } from '../../types/loginLog';
+import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
+import { loginMethodLabel, loginProviderLabel } from '../../utils/loginLogLabels';
 
 type ActionFilter = 'all' | LoginLogAction;
 type StatusFilter = 'all' | LoginLogStatus;
 
 const ACTION_META: Record<LoginLogAction, { label: string; icon: any; badge: string; text: string }> = {
+  session_access: {
+    label: '앱 재접속',
+    icon: faRotate,
+    badge: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+    text: 'text-cyan-700',
+  },
   login_success: {
     label: '로그인 성공',
     icon: faCircleCheck,
@@ -88,6 +96,8 @@ const buildSearchText = (log: LoginLog): string => [
   log.actionLabel,
   log.provider,
   log.method,
+  loginProviderLabel(log.provider),
+  loginMethodLabel(log.method),
   log.client.browser,
   log.client.os,
   log.client.path,
@@ -129,7 +139,7 @@ const StatCard: React.FC<{
   icon: any;
   tone: string;
 }> = ({ label, value, icon, tone }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+  <div role="group" aria-label={label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
     <div className="flex items-center justify-between gap-3">
       <div>
         <div className="text-xs font-bold uppercase tracking-wide text-slate-400">{label}</div>
@@ -155,7 +165,7 @@ const DetailPanel: React.FC<{ log: LoginLog; onClose: () => void }> = ({ log, on
             <FontAwesomeIcon icon={meta.icon} />
             {meta.label}
           </div>
-          <h2 className="mt-3 text-xl font-black text-slate-900">로그인 상세 기록</h2>
+          <h2 className="mt-3 text-xl font-black text-slate-900">접속 상세 기록</h2>
           <p className="mt-1 text-sm text-slate-500">{formatDateTime(log.createdAt)}</p>
         </div>
         <button
@@ -183,8 +193,8 @@ const DetailPanel: React.FC<{ log: LoginLog; onClose: () => void }> = ({ log, on
           </div>
           <div className="rounded-lg bg-slate-50 p-3">
             <div className="text-xs font-bold text-slate-400">접속 방식</div>
-            <div className="mt-1 font-bold text-slate-800">{log.provider}</div>
-            <div className="text-xs text-slate-500">{log.method}</div>
+            <div className="mt-1 font-bold text-slate-800">{loginProviderLabel(log.provider)}</div>
+            <div className="text-xs text-slate-500">{loginMethodLabel(log.method)}</div>
           </div>
         </div>
 
@@ -261,6 +271,7 @@ const LoginLogPage: React.FC = () => {
   const [logs, setLogs] = useState<LoginLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState({
@@ -274,19 +285,23 @@ const LoginLogPage: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    const unsubscribe = loginLogService.subscribeRecentLogs(
+    setError(null);
+    try { return loginLogService.subscribeRecentLogs(
       (nextLogs) => {
         setLogs(nextLogs);
+        setError(null);
         setLoading(false);
       },
       500,
-      (err) => {
-        setError(err.message);
+      () => {
+        setError('접속 기록 조회 권한과 연결 상태를 확인해 주세요.');
         setLoading(false);
       }
-    );
-    return unsubscribe;
-  }, []);
+    ); } catch {
+      setError('접속 기록 조회 권한과 연결 상태를 확인해 주세요.');
+      setLoading(false);
+    }
+  }, [refreshVersion]);
 
   const filteredLogs = useMemo(() => filterLogs(logs, filters), [logs, filters]);
   const selectedLog = useMemo(
@@ -311,30 +326,20 @@ const LoginLogPage: React.FC = () => {
 
   const stats = useMemo(() => {
     const today = format(new Date(), 'yyyy-MM-dd');
+    const todayAccess = logs.filter((log) => {
+      const created = toDate(log.createdAt);
+      return created && format(created, 'yyyy-MM-dd') === today
+        && ['login_success', 'session_access', 'signup_success'].includes(log.action);
+    });
     return {
       total: logs.length,
-      today: logs.filter((log) => {
-        const created = toDate(log.createdAt);
-        return created ? format(created, 'yyyy-MM-dd') === today : false;
-      }).length,
+      today: todayAccess.length,
+      users: new Set(todayAccess.map((log) => log.actor.uid || log.actor.email).filter(Boolean)).size,
       success: logs.filter((log) => log.action === 'login_success').length,
       failed: logs.filter((log) => log.action === 'login_failed').length,
       logout: logs.filter((log) => log.action === 'logout').length,
     };
   }, [logs]);
-
-  const loadOnce = async () => {
-    setLoading(true);
-    try {
-      const nextLogs = await loginLogService.getRecentLogs(500);
-      setLogs(nextLogs);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const toggleRow = (id: string) => {
     setExpandedRows((current) => {
@@ -351,16 +356,19 @@ const LoginLogPage: React.FC = () => {
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-black text-slate-500 shadow-sm">
             <FontAwesomeIcon icon={faHistory} />
-            Authentication Audit Trail
+            사용자 접속 관리
           </div>
-          <h1 className="mt-3 text-3xl font-black text-slate-900">로그인 접근 로그</h1>
+          <h1 className="mt-3 text-3xl font-black text-slate-900">사용자 접속 기록</h1>
           <p className="mt-2 text-sm text-slate-500">
-            언제, 누가, 어떤 방식과 환경으로 로그인했는지 성공·실패·로그아웃 기록을 추적합니다.
+            로그인·로그아웃과 로그인 상태로 앱을 다시 연 기록을 사용자별로 확인합니다.
           </p>
+          <p className="mt-2 text-xs text-slate-500">새로고침·새 탭 접속을 기록하며, 앱 안의 메뉴 이동은 중복 기록하지 않습니다. 통계는 최근 500건 기준입니다.</p>
+          {isDevAdminSessionEnabled() && <p className="mt-2 text-xs text-amber-700">개발 모드 · 이 브라우저의 테스트 접속 기록입니다. 실제 사용자 기록은 실제 관리자 계정에서 확인해 주세요.</p>}
         </div>
         <button
           type="button"
-          onClick={loadOnce}
+          onClick={() => setRefreshVersion((value) => value + 1)}
+          disabled={loading}
           className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50"
         >
           <FontAwesomeIcon icon={faRotate} spin={loading} />
@@ -368,9 +376,10 @@ const LoginLogPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="전체 로그" value={stats.total.toLocaleString('ko-KR')} icon={faShieldHalved} tone="bg-slate-100 text-slate-700" />
         <StatCard label="오늘 접속" value={stats.today.toLocaleString('ko-KR')} icon={faClock} tone="bg-cyan-50 text-cyan-700" />
+        <StatCard label="오늘 접속 사용자" value={stats.users.toLocaleString('ko-KR')} icon={faUser} tone="bg-indigo-50 text-indigo-700" />
         <StatCard label="로그인 성공" value={stats.success.toLocaleString('ko-KR')} icon={faCircleCheck} tone="bg-emerald-50 text-emerald-700" />
         <StatCard label="로그인 실패" value={stats.failed.toLocaleString('ko-KR')} icon={faCircleExclamation} tone="bg-rose-50 text-rose-700" />
         <StatCard label="로그아웃" value={stats.logout.toLocaleString('ko-KR')} icon={faArrowRightFromBracket} tone="bg-slate-50 text-slate-700" />
@@ -385,6 +394,7 @@ const LoginLogPage: React.FC = () => {
           <div className="relative">
             <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
+              aria-label="접속 기록 검색"
               value={filters.keyword}
               onChange={(event) => setFilters((current) => ({ ...current, keyword: event.target.value }))}
               placeholder="사용자, 이메일, 경로, 브라우저 검색"
@@ -392,17 +402,20 @@ const LoginLogPage: React.FC = () => {
             />
           </div>
           <select
+            aria-label="접속 작업"
             value={filters.action}
             onChange={(event) => setFilters((current) => ({ ...current, action: event.target.value as ActionFilter }))}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"
           >
             <option value="all">전체 작업</option>
             <option value="login_success">로그인 성공</option>
+            <option value="session_access">앱 재접속</option>
             <option value="login_failed">로그인 실패</option>
             <option value="logout">로그아웃</option>
             <option value="signup_success">회원가입</option>
           </select>
           <select
+            aria-label="접속 결과"
             value={filters.status}
             onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value as StatusFilter }))}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"
@@ -413,13 +426,14 @@ const LoginLogPage: React.FC = () => {
             <option value="info">정보</option>
           </select>
           <select
+            aria-label="접속 방식"
             value={filters.provider}
             onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))}
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"
           >
             <option value="">전체 방식</option>
             {providers.map((provider) => (
-              <option key={provider} value={provider}>{provider}</option>
+              <option key={provider} value={provider}>{loginProviderLabel(provider)}</option>
             ))}
           </select>
           <input
@@ -440,8 +454,8 @@ const LoginLogPage: React.FC = () => {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
-          로그인 로그를 불러오지 못했습니다. {error}
+        <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+          접속 기록을 불러오지 못했습니다. {error}
         </div>
       )}
 
@@ -491,8 +505,8 @@ const LoginLogPage: React.FC = () => {
                           <div className="mt-1 break-all text-xs text-slate-400">{log.actor.email || log.actor.uid || '-'}</div>
                         </td>
                         <td className="px-4 py-4">
-                          <div className="font-bold text-slate-800">{log.provider}</div>
-                          <div className="mt-1 text-xs text-slate-400">{log.method}</div>
+                          <div className="font-bold text-slate-800">{loginProviderLabel(log.provider)}</div>
+                          <div className="mt-1 text-xs text-slate-400">{loginMethodLabel(log.method)}</div>
                         </td>
                         <td className="px-4 py-4">
                           <div className="font-bold text-slate-800">
@@ -532,17 +546,17 @@ const LoginLogPage: React.FC = () => {
                     </React.Fragment>
                   );
                 })}
-                {filteredLogs.length === 0 && !loading && (
+                {filteredLogs.length === 0 && !loading && !error && (
                   <tr>
                     <td colSpan={6} className="px-6 py-16 text-center text-slate-500">
-                      조건에 맞는 로그인 로그가 없습니다.
+                      조건에 맞는 접속 기록이 없습니다.
                     </td>
                   </tr>
                 )}
                 {loading && (
                   <tr>
                     <td colSpan={6} className="px-6 py-16 text-center text-slate-500">
-                      로그인 로그를 불러오는 중입니다.
+                      접속 기록을 불러오는 중입니다.
                     </td>
                   </tr>
                 )}

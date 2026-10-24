@@ -7,6 +7,7 @@ type MessagePageTab = 'view' | 'compose' | 'settings' | 'logs';
 
 interface MessagePageTabsProps {
   active: MessagePageTab;
+  readOnly?: boolean;
 }
 
 const tabs: Array<{ key: MessagePageTab; label: string; path: string; icon: typeof faInbox }> = [
@@ -16,12 +17,13 @@ const tabs: Array<{ key: MessagePageTab; label: string; path: string; icon: type
   { key: 'logs', label: '자동 발송 로그', path: '/messages/automation-logs', icon: faClockRotateLeft }
 ];
 
-const MessagePageTabs: React.FC<MessagePageTabsProps> = ({ active }) => {
+const MessagePageTabs: React.FC<MessagePageTabsProps> = ({ active, readOnly = false }) => {
   const navigate = useNavigate();
 
   return (
     <nav className="erp-message-page-tabs" aria-label="메시지 메뉴">
-      {tabs.map((tab) => (
+      <button type="button" className="erp-message-page-tab" onClick={() => navigate('/notices?tab=notifications')}>공지·알림 센터</button>
+      {tabs.filter(tab => !readOnly || tab.key === 'view').map((tab) => (
         <button
           key={tab.key}
           type="button"

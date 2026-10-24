@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { TaxInvoiceIssue, STATUS_CONFIG } from '../types/taxInvoiceList';
 
-export const exportIssuesToExcel = async (issues: TaxInvoiceIssue[], yearMonth: string) => {
+export const buildIssuesWorkbook = (issues: TaxInvoiceIssue[]): ExcelJS.Workbook => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('발행리스트');
 
@@ -20,6 +20,7 @@ export const exportIssuesToExcel = async (issues: TaxInvoiceIssue[], yearMonth: 
         { header: '현장구분', key: 'siteType', width: 12 },
         { header: '결제구분', key: 'paymentType', width: 12 },
         { header: '발행상태', key: 'issueStatus', width: 12 },
+        { header: '노임서류', key: 'scanCompleted', width: 12 },
         { header: '특이사항', key: 'remark', width: 30 },
     ];
 
@@ -58,6 +59,7 @@ export const exportIssuesToExcel = async (issues: TaxInvoiceIssue[], yearMonth: 
             siteType: issue.siteType || '',
             paymentType: issue.paymentType || '',
             issueStatus: STATUS_CONFIG[issue.issueStatus]?.label || issue.issueStatus,
+            scanCompleted: issue.scanCompleted ? '완료' : '미완료',
             remark: issue.remark || '',
         });
 
@@ -81,12 +83,17 @@ export const exportIssuesToExcel = async (issues: TaxInvoiceIssue[], yearMonth: 
             };
             
             // 중앙 정렬이 필요한 컬럼들
-            if ([1, 2, 3, 9, 10, 11, 12].includes(colNumber)) {
+            if ([1, 2, 3, 9, 10, 11, 12, 13].includes(colNumber)) {
                 cell.alignment = { horizontal: 'center' };
             }
         });
     });
 
+    return workbook;
+};
+
+export const exportIssuesToExcel = async (issues: TaxInvoiceIssue[], yearMonth: string) => {
+    const workbook = buildIssuesWorkbook(issues);
     // 파일 생성 및 다운로드
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });

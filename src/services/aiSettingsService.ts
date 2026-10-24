@@ -1,3 +1,6 @@
+import { DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_LITE_MODEL, DEFAULT_GEMINI_IMAGE_MODEL, normalizeGeminiModelName } from './geminiModelPolicy';
+export { normalizeGeminiModelName } from './geminiModelPolicy';
+
 export type AiModelScope = 'textModel' | 'analyticsModel' | 'imageModel' | 'server';
 
 export interface AiModelSettings {
@@ -37,49 +40,17 @@ export interface AiModelBinding {
 const AI_SETTINGS_STORAGE_KEY = 'cy_ai_settings_v1';
 const GEMINI_API_KEY_STORAGE_KEY = 'gemini_api_key';
 
-const getEnvironmentApiKey = (): string => {
-    return String(
-        process.env.REACT_APP_GEMINI_API_KEY ||
-        process.env.REACT_APP_GOOGLE_API_KEY ||
-        ''
-    ).trim();
-};
-
-const DEPRECATED_GEMINI_MODEL_REPLACEMENTS: Record<string, string> = {
-    'gemini-2.0-flash': 'gemini-2.5-flash',
-    'gemini-2.0-flash-001': 'gemini-2.5-flash',
-    'gemini-2.0-flash-lite': 'gemini-2.5-flash-lite',
-    'gemini-2.0-flash-lite-001': 'gemini-2.5-flash-lite',
-    'gemini-2.0-flash-preview-image-generation': 'gemini-2.5-flash-image',
-    'gemini-2.0-flash-lite-preview': 'gemini-2.5-flash-lite',
-    'gemini-2.0-flash-lite-preview-02-05': 'gemini-2.5-flash-lite',
-    'gemini-2.5-flash-preview-05-20': 'gemini-2.5-flash',
-    'gemini-2.5-flash-preview-09-25': 'gemini-2.5-flash',
-    'gemini-2.5-pro': 'gemini-2.5-flash',
-    'gemini-2.5-flash-lite-preview-09-2025': 'gemini-2.5-flash-lite',
-    'gemini-2.5-flash-image-preview': 'gemini-2.5-flash-image'
-};
-
-export const normalizeGeminiModelName = (model: string | null | undefined, fallback = 'gemini-2.5-flash'): string => {
-    const trimmed = String(model || fallback).trim().replace(/^models\//, '');
-    return DEPRECATED_GEMINI_MODEL_REPLACEMENTS[trimmed] || trimmed || fallback;
-};
-
-export const AI_CONVERSION_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
-    { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (최신 안정 모델)' },
-    { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
-    { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite (경제적)' },
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (기존 호환)' },
-    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' }
-];
 
 export const AI_TEXT_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (기존 기능 호환)' },
-    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' }
+    { value: DEFAULT_GEMINI_TEXT_MODEL, label: 'Gemini 3.8 Flash (권장)' },
+    { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+    { value: DEFAULT_GEMINI_LITE_MODEL, label: 'Gemini 3.5 Flash Lite (경제적)' }
 ];
 
+export const AI_CONVERSION_MODEL_OPTIONS = AI_TEXT_MODEL_OPTIONS;
+
 export const AI_IMAGE_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
-    { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image (권장)' }
+    { value: DEFAULT_GEMINI_IMAGE_MODEL, label: 'Gemini 3.1 Flash Image (권장)' }
 ];
 
 export const AI_MANAGED_PAGES: AiManagedPage[] = [
@@ -130,7 +101,14 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
         name: '일보 통계 AI 분석',
         description: '자연어 기반 통계 질의/인사이트 생성',
         paths: ['/reports/statistics'],
-        modelScope: 'analyticsModel'
+        modelScope: 'server'
+    },
+    {
+        id: 'reports-ai-workspace',
+        name: 'AI 업무 도우미',
+        description: '자연어 분석·저장 분석·정기 보고 (서버 운영 설정은 별도 적용)',
+        paths: ['/reports/ai-workspace'],
+        modelScope: 'server'
     },
     {
         id: 'gallery-ai-images',
@@ -212,9 +190,9 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
 ];
 
 const DEFAULT_MODELS: AiModelSettings = {
-    textModel: 'gemini-2.5-flash',
-    analyticsModel: 'gemini-2.5-flash',
-    imageModel: 'gemini-2.5-flash-image'
+    textModel: DEFAULT_GEMINI_TEXT_MODEL,
+    analyticsModel: DEFAULT_GEMINI_TEXT_MODEL,
+    imageModel: DEFAULT_GEMINI_IMAGE_MODEL
 };
 
 const normalizeModels = (models?: Partial<AiModelSettings> | null): AiModelSettings => ({
@@ -333,18 +311,9 @@ export const aiSettingsService = {
         return next;
     },
 
-    getApiKey(): string {
-        const storedKey = String(localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY) || '').trim();
-        return storedKey || getEnvironmentApiKey();
-    },
-
-    setApiKey(key: string): void {
-        const trimmed = String(key || '').trim();
-        if (!trimmed) {
-            localStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
-            return;
-        }
-        localStorage.setItem(GEMINI_API_KEY_STORAGE_KEY, trimmed);
+    clearLegacyApiKey(): void {
+        localStorage.removeItem(GEMINI_API_KEY_STORAGE_KEY);
+        localStorage.removeItem('geminiApiKey');
     },
 
     getPageEnabledById(): Record<string, boolean> {
@@ -412,10 +381,10 @@ export const aiSettingsService = {
             },
             {
                 id: 'binding-gemini-analytics',
-                service: 'geminiAnalyticsService',
-                model: models.analyticsModel,
-                source: 'analyticsModel',
-                note: '일보 통계 질의 파싱/인사이트 생성'
+                service: '일보 통계 AI (서버)',
+                model: 'server-managed',
+                source: 'server',
+                note: '서버용 Gemini 설정으로 질문 해석·인사이트 생성'
             },
             {
                 id: 'binding-gemini-image',

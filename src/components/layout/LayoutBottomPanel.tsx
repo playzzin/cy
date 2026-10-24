@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faXmark, faCalculator, faCamera } from '@fortawesome/free-solid-svg-icons';
-import Calculator from '../tools/Calculator';
-import QuickCameraCapture from '../tools/QuickCameraCapture';
+const Calculator = lazy(() => import('../tools/Calculator'));
+const QuickCameraCapture = lazy(() => import('../tools/QuickCameraCapture'));
 
 type QuickTool = 'calculator' | 'camera';
 
@@ -19,13 +19,20 @@ const LayoutBottomPanel: React.FC<LayoutBottomPanelProps> = ({
     togglePanel,
     activeTool
 }) => {
+    const [opened, setOpened] = useState({ calculator: false, camera: false });
+    useEffect(() => {
+        if (isOpen) setOpened(previous => previous[activeTool] ? previous : { ...previous, [activeTool]: true });
+    }, [isOpen, activeTool]);
+    // Keep a used tool mounted so closing the panel preserves its local work.
+    const showCalculator = opened.calculator || (isOpen && activeTool === 'calculator');
+    const showCamera = opened.camera || (isOpen && activeTool === 'camera');
     const LABEL_CALC = '\uacc4\uc0b0\uae30';
     const LABEL_CAMERA = '\uce74\uba54\ub77c';
     const activeLabel = activeTool === 'calculator' ? LABEL_CALC : LABEL_CAMERA;
     const activeIcon = activeTool === 'calculator' ? faCalculator : faCamera;
 
     return (
-        <aside id="bottom-panel" data-capture-exclude="true" className={`panel ${isOpen ? 'open' : ''}`}>
+        <aside id="bottom-panel" aria-hidden={!isOpen} data-capture-exclude="true" className={`panel ${isOpen ? 'open' : ''}`}>
             <div className="flex flex-col border-b border-white/10">
                 <div className="flex justify-between items-center px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -52,9 +59,11 @@ const LayoutBottomPanel: React.FC<LayoutBottomPanelProps> = ({
             </div>
 
             <div className="panel-content p-4 overflow-y-auto custom-scrollbar bg-[#1e1e1e]">
-                {activeTool === 'calculator' && <Calculator />}
+                <div hidden={!isOpen || activeTool !== 'calculator'}>
+                    {showCalculator && activeTool === 'calculator' && <Suspense fallback={<p role="status">계산기를 준비하는 중입니다.</p>}><Calculator /></Suspense>}
+                </div>
                 <div hidden={!isOpen || activeTool !== 'camera'}>
-                    <QuickCameraCapture active={isOpen && activeTool === 'camera'} />
+                    {showCamera && <Suspense fallback={<p role="status">카메라를 준비하는 중입니다.</p>}><QuickCameraCapture active={isOpen && activeTool === 'camera'} /></Suspense>}
                 </div>
             </div>
         </aside>

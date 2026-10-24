@@ -57,6 +57,9 @@ export const waitForStableCaptureViewport = (
     video: HTMLVideoElement,
     signal: AbortSignal
 ): Promise<CaptureViewport> => new Promise((resolve, reject) => {
+    // The owner's ended handler may detach srcObject before the next poll.
+    // Retain the original track so that sharing termination stays observable.
+    const track = (video.srcObject as MediaStream | null)?.getVideoTracks?.()[0];
     let previous = readCaptureViewport();
     let videoWidth = video.videoWidth;
     let videoHeight = video.videoHeight;
@@ -68,6 +71,11 @@ export const waitForStableCaptureViewport = (
     };
     const onAbort = () => { cleanup(); reject(aborted()); };
     const check = () => {
+        if (track?.readyState === 'ended' || video.ended || video.error) {
+            cleanup();
+            reject(new Error(video.error ? 'video-load-failed' : 'track-ended'));
+            return;
+        }
         const viewport = readCaptureViewport();
         const aspectError = Math.abs((video.videoWidth / video.videoHeight) / (viewport.width / viewport.height) - 1);
         if (!isSameCaptureViewport(previous, viewport)

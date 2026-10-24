@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Auth, User } from 'firebase/auth';
 import { createDevAdminUser, disableDevAdminSession, isDevAdminSessionEnabled } from '../utils/devAdminSession';
+import { loginAccessTracker, writeAuthLog, writeLogoutLog } from '../services/loginAccessTracker';
+import { isDevPreviewFrame, postPreviewMessage, startDevPreviewAuth } from '../utils/devPreviewRuntime';
 
 type FirebaseAuthModule = typeof import('firebase/auth');
 
@@ -57,10 +59,13 @@ export function useAuth() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(() => createDevAdminUser());
   const [loading, setLoading] = useState(() => !isDevAdminSessionEnabled());
+  const [previewError, setPreviewError] = useState('');
 
   useEffect(() => {
+    if (isDevPreviewFrame) return startDevPreviewAuth(user => { setCurrentUser(user); setLoading(false); }, message => { setPreviewError(message); setLoading(false); });
     const devAdminUser = createDevAdminUser();
     if (devAdminUser) {
+      loginAccessTracker.observe(devAdminUser);
       setCurrentUser(devAdminUser);
       setLoading(false);
       return () => undefined;
@@ -83,6 +88,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
 
         unsubscribe = authModule.onAuthStateChanged(auth, (user) => {
+          if (cancelled) return;
+          loginAccessTracker.observe(user);
           resolved = true;
           window.clearTimeout(timeoutId);
 
@@ -121,15 +128,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(email: string, password: string) {
+    if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
+    const finishAccess = loginAccessTracker.beginInteractiveLogin();
 
     try {
       const result = await authModule.signInWithEmailAndPassword(auth, email, password);
+      finishAccess(result.user);
       setCurrentUser(result.user);
       setLoading(false);
 
-      const { loginLogService } = await import('../services/loginLogService');
-      await loginLogService.safeCreateLog({
+      void writeAuthLog({
         action: 'login_success',
         provider: 'password',
         method: 'email/password',
@@ -137,8 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
       });
     } catch (error) {
-      const { loginLogService } = await import('../services/loginLogService');
-      await loginLogService.safeCreateLog({
+      void writeAuthLog({
         action: 'login_failed',
         provider: 'password',
         method: 'email/password',
@@ -147,27 +155,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       throw error;
+    } finally {
+      finishAccess();
     }
   }
 
   async function signup(email: string, password: string) {
+    if (isDevPreviewFrame) throw new Error('미리보기에서는 계정을 만들 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
-    const result = await authModule.createUserWithEmailAndPassword(auth, email, password);
-    setCurrentUser(result.user);
-    setLoading(false);
-
-    const { loginLogService } = await import('../services/loginLogService');
-    await loginLogService.safeCreateLog({
-      action: 'signup_success',
-      provider: 'password',
-      method: 'email/password',
-      user: result.user,
-      email,
-    });
+    const finishAccess = loginAccessTracker.beginInteractiveLogin();
+    try {
+      const result = await authModule.createUserWithEmailAndPassword(auth, email, password);
+      finishAccess(result.user);
+      setCurrentUser(result.user);
+      setLoading(false);
+      void writeAuthLog({ action: 'signup_success', provider: 'password', method: 'email/password', user: result.user, email });
+    } finally {
+      finishAccess();
+    }
   }
 
   async function logout() {
+    if (isDevPreviewFrame) { postPreviewMessage('cy-preview:exit'); return; }
     if (isDevAdminSessionEnabled()) {
+      const user = createDevAdminUser();
+      await writeLogoutLog({ action: 'logout', provider: 'dev-admin', method: 'manual', user });
+      loginAccessTracker.observe(null);
       disableDevAdminSession();
       setCurrentUser(null);
       setLoading(false);
@@ -176,8 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { auth, authModule } = await loadFirebaseAuth();
     const user = auth.currentUser;
-    const { loginLogService } = await import('../services/loginLogService');
-    await loginLogService.safeCreateLog({
+    await writeLogoutLog({
       action: 'logout',
       provider: 'firebase',
       method: 'manual',
@@ -216,22 +228,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     await authModule.signOut(auth);
+    loginAccessTracker.observe(null);
     setCurrentUser(null);
     setLoading(false);
   }
 
   async function loginWithGoogle() {
+    if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const provider = new authModule.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
+    const finishAccess = loginAccessTracker.beginInteractiveLogin();
 
     try {
       const result = await authModule.signInWithPopup(auth, provider);
+      finishAccess(result.user);
       setCurrentUser(result.user);
       setLoading(false);
 
-      const { loginLogService } = await import('../services/loginLogService');
-      await loginLogService.safeCreateLog({
+      void writeAuthLog({
         action: 'login_success',
         provider: 'google',
         method: 'popup',
@@ -239,8 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email: result.user.email,
       });
     } catch (error) {
-      const { loginLogService } = await import('../services/loginLogService');
-      await loginLogService.safeCreateLog({
+      void writeAuthLog({
         action: 'login_failed',
         provider: 'google',
         method: 'popup',
@@ -248,6 +262,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       throw error;
+    } finally {
+      finishAccess();
     }
   }
 
@@ -259,6 +275,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loginWithGoogle,
     loading
   };
+
+  if (isDevPreviewFrame && previewError) return <p role="alert" className="p-6">{previewError}</p>;
 
   return (
     <AuthContext.Provider value={value}>

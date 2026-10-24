@@ -14,6 +14,18 @@ const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 export const DEV_MENU_STORAGE_KEY = 'cy_dev_menu_config_v11';
 let devMenuConfig: SiteDataType | null = null;
 
+const currentDevMenuConfig = (config: SiteDataType): SiteDataType => {
+  const next = clone(config);
+  const retiredTitles = new Set(['대표', '사장']);
+  if (next.pos_ceo && retiredTitles.has(next.pos_ceo.name)) next.pos_ceo.name = 'CEO';
+  for (const site of Object.values(next)) {
+    for (const position of site.positionConfig || []) {
+      if (position.id === 'ceo' && retiredTitles.has(position.name)) position.name = 'CEO';
+    }
+  }
+  return next;
+};
+
 const readStoredDevMenuConfig = (): SiteDataType | null => {
   if (typeof window === 'undefined') return null;
 
@@ -31,14 +43,14 @@ const readStoredDevMenuConfig = (): SiteDataType | null => {
 
 export const getDevMenuConfig = (): SiteDataType => {
   if (!devMenuConfig) {
-    devMenuConfig = clone(readStoredDevMenuConfig() || DEFAULT_MENU_CONFIG);
+    devMenuConfig = currentDevMenuConfig(readStoredDevMenuConfig() || DEFAULT_MENU_CONFIG);
   }
 
   return clone(devMenuConfig);
 };
 
 export const reloadDevMenuConfigFromStorage = (): SiteDataType => {
-  devMenuConfig = clone(readStoredDevMenuConfig() || DEFAULT_MENU_CONFIG);
+  devMenuConfig = currentDevMenuConfig(readStoredDevMenuConfig() || DEFAULT_MENU_CONFIG);
   return clone(devMenuConfig);
 };
 
@@ -62,7 +74,7 @@ export const setDevMenuConfig = (config: SiteDataType): void => {
 };
 
 const initialDevPositions: Position[] = [
-  { id: 'dev-pos-admin', name: '사장', rank: 1, color: 'purple', iconKey: 'fa-crown', isDefault: true, systemRole: UserRole.ADMIN },
+  { id: 'dev-pos-admin', name: 'CEO', rank: 1, color: 'purple', iconKey: 'fa-crown', isDefault: true, systemRole: UserRole.ADMIN },
   { id: 'dev-pos-manager', name: '매니저1', rank: 2, color: 'orange', iconKey: 'fa-user-tie', isDefault: true, systemRole: UserRole.MANAGER },
   { id: 'dev-pos-support', name: '지원담당', rank: 3, color: 'cyan', iconKey: 'fa-hand-holding-dollar', isDefault: true, systemRole: UserRole.MANAGER },
   { id: 'dev-pos-general', name: '일반', rank: 5, color: 'gray', iconKey: 'fa-user', isDefault: true, systemRole: UserRole.GENERAL },
@@ -83,7 +95,7 @@ export let devUsers: UserData[] = [
     photoURL: null,
     lastLogin: Timestamp.now(),
     role: 'admin',
-    position: '사장',
+    position: 'CEO',
     accountType: 'office',
     status: 'active',
     linkedWorkerIds: [],
@@ -124,7 +136,7 @@ export let devWorkers: Worker[] = [
 ];
 
 export let devOfficeStaff: OfficeStaff[] = [
-  { id: 'dev-office-1', uid: 'dev-admin', name: '개발자 관리자', role: '사장', department: '관리부', status: '재직', isActive: true } as OfficeStaff,
+  { id: 'dev-office-1', uid: 'dev-admin', name: '개발자 관리자', role: 'CEO', department: '관리부', status: '재직', isActive: true } as OfficeStaff,
 ];
 
 let devUserPositionMap: Record<string, string[]> = {
@@ -228,11 +240,11 @@ export const buildDevClaimSyncResult = (uid: string): SyncUserAccessClaimsResult
     uid,
     role,
     position,
-    systemRole: position === '사장' ? '관리자' : position.startsWith('매니저') ? '매니저' : '일반',
+    systemRole: position === 'CEO' ? '관리자' : position.startsWith('매니저') ? '매니저' : '일반',
     accountType: String(user?.accountType || 'office'),
     additionalPositions,
     roles,
-    erpRoleGroups: position === '사장' ? ['admin'] : ['site', 'user'],
+    erpRoleGroups: position === 'CEO' ? ['admin'] : ['site', 'user'],
     syncedAt: new Date().toISOString(),
   };
 };

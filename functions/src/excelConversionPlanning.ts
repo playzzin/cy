@@ -1,3 +1,4 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { createHash } from 'crypto';
@@ -128,7 +129,7 @@ export async function withConversionErrors<T>(stage: string, action: () => Promi
     }
 }
 
-export const planExcelConversion = functions.runWith({ timeoutSeconds: 180, memory: '512MB', maxInstances: 3 }).region('asia-northeast3').https.onCall(async (data, context) => withConversionErrors('plan', async () => {
+export const planExcelConversion = functions.runWith({ timeoutSeconds: 180, memory: '512MB', maxInstances: 3 }).region('asia-northeast3').https.onCall(withGeminiUsageContext(async (data, context) => withConversionErrors('plan', async () => {
     const auth = requireCallableAuth(context);
     try {
         validatePlannerRequest(data);
@@ -179,7 +180,7 @@ export const planExcelConversion = functions.runWith({ timeoutSeconds: 180, memo
             throw error;
         throw new functions.https.HttpsError('internal', '분석 결과를 검증하지 못했습니다. 기존 규칙을 유지했습니다. 지시를 구체화해 다시 실행해 주세요.');
     }
-}));
+})));
 
 export async function generateExcelConversionPlan(data: any, settings: { apiKey: string; model: string; thinkingLevel?: string }, request: typeof fetch = fetch) {
     validatePlannerRequest(data); const started = Date.now();
@@ -188,7 +189,7 @@ export async function generateExcelConversionPlan(data: any, settings: { apiKey:
         const timer = setTimeout(() => controller.abort(), 150000);
         let response: any;
         try {
-            response = await request(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey }, body: JSON.stringify({ systemInstruction: { parts: [{ text: PLANNER_INSTRUCTION }] }, contents: [{ role: 'user', parts: [{ text: JSON.stringify(data) }] }], generationConfig: { ...excelGenerationOptions(model, settings.thinkingLevel), responseMimeType: 'application/json', responseJsonSchema: schemaForGemini(EXCEL_PLAN_SCHEMA), maxOutputTokens: 16000 } }) });
+            response = await trackedGeminiFetch('excel-conversion', request)(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': settings.apiKey }, body: JSON.stringify({ systemInstruction: { parts: [{ text: PLANNER_INSTRUCTION }] }, contents: [{ role: 'user', parts: [{ text: JSON.stringify(data) }] }], generationConfig: { ...excelGenerationOptions(model, settings.thinkingLevel), responseMimeType: 'application/json', responseJsonSchema: schemaForGemini(EXCEL_PLAN_SCHEMA), maxOutputTokens: 16000 } }) });
         if (!response.ok)
             throw new functions.https.HttpsError(response.status === 429 ? 'resource-exhausted' : 'unavailable', response.status === 429 ? 'Gemini 사용량 한도를 확인해 주세요.' : 'Gemini 분석 요청을 처리하지 못했습니다. 서버 AI 설정을 확인해 주세요.');
         const payload = await response.json();
@@ -208,4 +209,4 @@ export async function generateExcelConversionPlan(data: any, settings: { apiKey:
         finally { clearTimeout(timer); }
 }
 
-export const getExcelConversionStatus = functions.region('asia-northeast3').https.onCall(async (_data, context) => withConversionErrors('status', async () => { const auth = requireCallableAuth(context); const profile = await admin.firestore().collection('users').doc(auth.uid).get(); if (!profile.exists || ['pending','rejected','suspended'].includes(String(profile.data()?.status || '').toLowerCase())) throw new functions.https.HttpsError('permission-denied', '승인된 사용자 계정이 필요합니다.'); const settings = await getServerGeminiSettings(); return { configured: Boolean(settings.apiKey), model: settings.excelConversionModel, thinkingLevel: settings.excelConversionThinking }; }));
+export const getExcelConversionStatus = functions.region('asia-northeast3').https.onCall(withGeminiUsageContext(async (_data, context) => withConversionErrors('status', async () => { const auth = requireCallableAuth(context); const profile = await admin.firestore().collection('users').doc(auth.uid).get(); if (!profile.exists || ['pending','rejected','suspended'].includes(String(profile.data()?.status || '').toLowerCase())) throw new functions.https.HttpsError('permission-denied', '승인된 사용자 계정이 필요합니다.'); const settings = await getServerGeminiSettings(); return { configured: Boolean(settings.apiKey), model: settings.excelConversionModel, thinkingLevel: settings.excelConversionThinking }; })));

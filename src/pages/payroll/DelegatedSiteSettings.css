@@ -1,0 +1,14 @@
+.dr-site-settings { padding:20px; overflow:auto; min-height:0; }
+.dr-site-settings fieldset { border:0; margin:0; padding:0; min-width:0; }
+.dr-site-tax-fields { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(0,1fr); gap:16px; }
+.dr-site-tax-label { display:block; margin-bottom:6px; color:#52677c; font-size:14px; }
+.dr-site-settings .dr-form-help { display:flex; gap:5px; align-items:flex-start; line-height:1.6; }.dr-site-settings .dr-form-help svg { flex-shrink:0; margin-top:4px; }
+.dr-tax-existing { margin-top:22px; border-top:1px solid #dce5ec; padding-top:16px; }
+.dr-tax-existing-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }.dr-tax-existing-heading h3 { margin:0; font-size:16px; }.dr-tax-existing-heading>span { font-size:13px; color:#567568; }
+.dr-tax-existing-rows { display:grid; gap:8px; max-height:340px; overflow:auto; margin-top:10px; }
+.dr-site-settings .dr-tax-existing-rows>label { display:flex; align-items:center; flex-direction:row; gap:10px; border:1px solid #dce5ec; padding:12px; border-radius:8px; cursor:pointer; }
+.dr-site-settings .dr-tax-existing-rows input { width:18px; height:18px; flex-shrink:0; accent-color:#08775c; }
+.dr-tax-existing-rows>label>span { display:grid; gap:4px; min-width:0; overflow-wrap:anywhere; }.dr-tax-existing-rows small { font-size:12px; color:#6a7e8e; }.dr-tax-existing-rows b { font-size:14px; }.dr-tax-existing-rows strong { color:#08775c; font-size:14px; }
+.dr-tax-existing-rows .dr-tax-compare { margin-left:auto; text-align:right; }.dr-tax-existing-rows .dr-tax-selected { background:#edf8f3; border-color:#68ac91!important; }
+.dr-site-tax-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; padding-top:14px; border-top:1px solid #dce5ec; }
+@media(max-width:600px) { .dr-site-settings { padding:14px; }.dr-site-tax-fields { grid-template-columns:1fr; gap:12px; }.dr-tax-existing-rows>label { flex-wrap:wrap; }.dr-tax-existing-rows .dr-tax-compare { flex:1 0 calc(100% - 30px); margin-left:28px; text-align:left; }.dr-site-tax-actions { position:sticky; bottom:-14px; background:#fff; padding:12px 0; }.dr-site-settings input { font-size:16px; } }

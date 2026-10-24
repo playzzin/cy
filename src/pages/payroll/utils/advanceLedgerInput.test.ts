@@ -2,6 +2,7 @@ import type { AdvancePayment } from '../../../services/advancePaymentService';
 import type { LedgerManualInput } from '../types/payroll';
 import {
   buildManualInputFromAdvanceRecord,
+  isLedgerManualInputUnchanged,
   pickAdvanceRecordForPayrollRow,
   resolveInitialLedgerManualInput,
 } from './advanceLedgerInput';
@@ -64,6 +65,39 @@ const manualInput = (laborOverrides: Partial<LedgerManualInput['labor']> = {}): 
 });
 
 describe('가불관리 → 통합급여 입력 변환', () => {
+  it('재조회 시 화면에서 정규화된 기존 금액도 원본 수정액으로 갱신할 수 있다', () => {
+    const loaded = manualInput({ currentAdvance: 500000 });
+    const displayed = { ...loaded, allocationMode: 'split' as const };
+    expect(isLedgerManualInputUnchanged(displayed, loaded)).toBe(true);
+    expect(isLedgerManualInputUnchanged(manualInput({ currentAdvance: 0 }), loaded)).toBe(false);
+    expect(isLedgerManualInputUnchanged({ ...loaded, personalMemo: '수정 메모' }, loaded)).toBe(false);
+    expect(isLedgerManualInputUnchanged({ ...loaded, allocationMode: 'corporate' }, loaded)).toBe(false);
+    expect(isLedgerManualInputUnchanged({ ...loaded, itemAssignments: { other: 'corporate' } }, loaded)).toBe(false);
+  });
+  it.each([200000, 0, -50000])('중복 기록이 있어도 최근 수정액 %i원을 가져온다', (amount) => {
+    const previous = advanceRecord({
+      items: { laborAdvance3: 500000 },
+      updatedAt: new Date('2026-09-29T01:00:00.000Z'),
+    });
+    const edited = advanceRecord({
+      items: { laborAdvance3: amount },
+      updatedAt: new Date('2026-09-30T01:00:00.000Z'),
+    });
+
+    for (const records of [[previous, edited], [edited, previous]]) {
+      const selected = pickAdvanceRecordForPayrollRow(records, '2026-07', {
+        preferredTeamId: 'team-1', preferredSalaryModel: '월급제',
+      });
+      expect(buildManualInputFromAdvanceRecord(selected)?.labor.currentAdvance).toBe(amount);
+    }
+  });
+
+  it('저장 시각이 없는 중복 구형 기록보다 최근 0원 수정을 우선한다', () => {
+    const previous = advanceRecord({ items: { laborAdvance3: 500000 } });
+    const cleared = advanceRecord({ updatedAt: new Date('2026-09-30T01:00:00.000Z') });
+    expect(pickAdvanceRecordForPayrollRow([previous, cleared], '2026-07')).toBe(cleared);
+  });
+
   it('사용자 정의 ID로 저장된 기타와 노무 당월 가불을 모두 가져온다', () => {
     const result = buildManualInputFromAdvanceRecord(
       advanceRecord({

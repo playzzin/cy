@@ -93,8 +93,10 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
     allCategoryOptions,
     loadData,
     selectedRawDocs,
-    rawDocs
-  } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope);
+    rawDocs,
+    teamAverageExpenses = {},
+    dailyReportsError
+  } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope, true);
 
   const draftCount =
     statusCounts.accommodationDraft +
@@ -210,6 +212,42 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
             <RefreshCw size={16} className="animate-spin" />
             경비내역을 불러오는 중입니다.
           </div>
+        )}
+
+        {!loading && dailyReportsError && (
+          <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            공수 데이터를 불러오지 못해 평균경비를 계산할 수 없습니다. 새로고침해 주세요.
+          </p>
+        )}
+        {!loading && !dailyReportsError && summaries.length > 0 && (
+          <section aria-label="팀별 평균경비" className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+              <h2 className="text-base font-black text-slate-950">팀별 평균경비 (원/공수)</h2>
+              <p className="mt-1 text-xs text-slate-600">팀 경비(정산 반영 합계) ÷ (해당팀 담당현장 공수 + 다른현장 지원 공수). 타팀 공수는 제외하며, 공수가 없으면 평균을 표시하지 않습니다.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr>{['팀', '팀 경비', '담당현장 공수', '다른현장 지원 공수', '합산 공수', '평균경비 (원/공수)'].map(label => (
+                    <th key={label} className="px-4 py-2 text-right first:text-left">{label}</th>
+                  ))}</tr>
+                </thead>
+                <tbody>{summaries.map(row => {
+                  const average = teamAverageExpenses[row.teamId];
+                  return (
+                    <tr key={row.teamId} className="border-t border-slate-200 tabular-nums">
+                      <th scope="row" className="px-4 py-2 text-left">{row.teamName}</th>
+                      <td className="px-4 py-2 text-right">{formatCurrency(getSummaryTotal(row))}</td>
+                      <td className="px-4 py-2 text-right">{average?.responsibleSiteManDay.toLocaleString('ko-KR') ?? '-'}</td>
+                      <td className="px-4 py-2 text-right">{average?.supportManDay.toLocaleString('ko-KR') ?? '-'}</td>
+                      <td className="px-4 py-2 text-right">{average?.totalManDay.toLocaleString('ko-KR') ?? '-'}</td>
+                      <td className="px-4 py-2 text-right font-black">{average?.averageExpense != null ? formatCurrency(average.averageExpense) : '-'}</td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+          </section>
         )}
 
         {selectedTeamId === 'all' && (

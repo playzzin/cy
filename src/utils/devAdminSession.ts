@@ -1,4 +1,5 @@
 import type { User } from 'firebase/auth';
+import { isDevPreviewFrame } from './devPreviewRuntime';
 
 export const DEV_ADMIN_STORAGE_KEY = 'cy_dev_admin_session';
 
@@ -9,7 +10,7 @@ const isLocalDevelopmentHost = (): boolean => {
 };
 
 export const isDevAdminAllowed = (): boolean => (
-  process.env.NODE_ENV === 'development' && isLocalDevelopmentHost()
+  !isDevPreviewFrame && process.env.NODE_ENV === 'development' && isLocalDevelopmentHost()
 );
 
 export const enableDevAdminSession = (): void => {
@@ -68,9 +69,9 @@ export const createDevAdminUser = (): User | null => {
       signInSecondFactor: null,
       claims: {
         role: 'admin',
-        position: '사장',
+        position: 'CEO',
         systemRole: '관리자',
-        roles: ['admin', '관리자', '사장', '매니저1', '지원담당'],
+        roles: ['admin', '관리자', 'CEO', '매니저1', '지원담당'],
         additionalPositions: ['매니저1', '지원담당'],
       },
     }),

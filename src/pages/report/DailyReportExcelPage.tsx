@@ -97,13 +97,13 @@ const DailyReportExcelPage: React.FC = () => {
 
     // AI Analysis Handler
     const handleAIAnalysis = async () => {
-        const apiKey = geminiService.getKey();
+        
         const { value: formValues } = await Swal.fire({
             title: '카톡/일보 텍스트 AI 분석',
             html: `
                 <textarea id="ai-input" class="swal2-textarea" placeholder="카톡 내용이나 일보 텍스트를 붙여넣으세요..." style="height: 200px; width: 90%;"></textarea>
                 <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
-                    ${apiKey ? '✅ Gemini API Key가 감지되었습니다.' : '⚠ API Key가 필요합니다.'}
+                    서버 AI로 분석합니다.
                 </div>
             `,
             focusConfirm: false,
@@ -115,10 +115,7 @@ const DailyReportExcelPage: React.FC = () => {
         });
 
         if (formValues) {
-            if (!apiKey) {
-                Swal.fire('Error', 'API Key가 없습니다. /settings/ai 에서 키를 등록해주세요.', 'error');
-                return;
-            }
+            
 
             setLoading(true);
             try {

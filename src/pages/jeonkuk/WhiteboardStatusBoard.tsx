@@ -1,5 +1,7 @@
+import WhiteboardSourceReportDialog, { type SourceSelection } from './WhiteboardSourceReportDialog';
+import { formatManDay, positiveManDay } from '../../utils/manDayPrecision';
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion, type MotionProps } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faChartBar, faSearch, faBuilding, faUserGroup,
@@ -7,15 +9,20 @@ import {
     faCalculator, faUsers, faSort, faHardHat
 } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { dailyReportService } from '../../services/dailyReportService';
+import { dailyReportService, type DailyReport } from '../../services/dailyReportService';
 import { Site } from '../../services/siteService';
 import { Team } from '../../services/teamService';
 import { Company } from '../../services/companyService';
 import { useMasterData } from '../../contexts/MasterDataContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { getTeamScopedRows } from '../../services/teamScopedReadService';
+import { loadWhiteboardTeamAccess, scopeWhiteboardReports, type WhiteboardTeamAccess, type WhiteboardReport, type WhiteboardParticipationResult } from './whiteboardAccess';
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 import MonthNavigator from '../../components/common/MonthNavigator';
+import WhiteboardTeamSelector, { type WhiteboardTeamOption } from './WhiteboardTeamSelector';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 import { getContrastingTextColor, getReadableAccentColor } from '../../utils/color';
+import './WhiteboardStatusBoard.css';
 
 interface BoardItem {
     id: string;
@@ -41,11 +48,14 @@ interface BoardItem {
         workerCount: number; // New
         responsibleTeamId?: string;
         companyId?: string;
+        color?: string;
         workers?: {
+            workerKey: string;
             workerName: string;
             manDay: number;
             amount: number; // New
             dailyLogs: {
+                reportIds: string[];
                 date: string;
                 manDay: number;
                 amount: number; // New
@@ -69,12 +79,7 @@ type WhiteboardStatusViewState = {
     mainCompanyId: string;
 };
 
-type TeamSelectorOption = {
-    id: string;
-    name: string;
-    companyId?: string;
-    isSupport?: boolean;
-};
+type TeamSelectorOption = WhiteboardTeamOption;
 
 const WHITEBOARD_STATUS_VIEW_KEY = 'output-management:whiteboard-status:v1';
 
@@ -195,11 +200,112 @@ const getReadableColorOnWhite = (color: string): string => (
     getReadableAccentColor(color, '#ffffff', 4.5)
 );
 
+const BOARD_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const getCardRevealMotion = (index: number, reducedMotion: boolean): MotionProps => ({
+    initial: { opacity: reducedMotion ? 1 : 0, y: reducedMotion ? 0 : 16 },
+    animate: {
+        opacity: 1,
+        y: 0,
+        transition: {
+            duration: reducedMotion ? 0 : 0.42,
+            delay: reducedMotion ? 0 : Math.min(index, 8) * 0.025,
+            ease: BOARD_EASE
+        }
+    },
+    exit: {
+        opacity: 0,
+        y: reducedMotion ? 0 : -6,
+        transition: { duration: reducedMotion ? 0 : 0.16, ease: BOARD_EASE }
+    }
+});
+
+const BoardDisclosure: React.FC<{
+    open: boolean;
+    reducedMotion: boolean;
+    className?: string;
+    children: () => React.ReactNode;
+}> = ({ open, reducedMotion, className, children }) => (
+    <AnimatePresence initial={false}>
+        {open && (
+            <motion.div
+                layout={reducedMotion ? false : 'position'}
+                transition={{ layout: { duration: reducedMotion ? 0 : 0.42, ease: BOARD_EASE } }}
+                initial={{ height: 0, opacity: 0 }}
+                animate={{
+                    height: 'auto',
+                    opacity: 1,
+                    transition: {
+                        height: { duration: reducedMotion ? 0 : 0.38, ease: BOARD_EASE },
+                        opacity: { duration: reducedMotion ? 0 : 0.22, delay: reducedMotion ? 0 : 0.06 }
+                    }
+                }}
+                exit={{
+                    height: 0,
+                    opacity: 0,
+                    transition: {
+                        height: { duration: reducedMotion ? 0 : 0.28, ease: BOARD_EASE },
+                        opacity: { duration: reducedMotion ? 0 : 0.12 }
+                    }
+                }}
+                className="overflow-hidden"
+            >
+                <div className={className}>{children()}</div>
+            </motion.div>
+        )}
+    </AnimatePresence>
+);
+
 const WhiteboardStatusBoard: React.FC = () => {
+    const { currentUser } = useAuth();
+    return <WhiteboardAccessGate key={currentUser?.uid || 'signed-out'} signedIn={Boolean(currentUser)} />;
+};
+
+const WhiteboardAccessGate: React.FC<{ signedIn: boolean }> = ({ signedIn }) => {
+    const master = useMasterData();
+    const [access, setAccess] = useState<WhiteboardTeamAccess | null>();
+    const [error, setError] = useState('');
+    const [retry, setRetry] = useState(0);
+
+    useEffect(() => {
+        let active = true;
+        if (!signedIn) return;
+        setError('');
+        setAccess(undefined);
+        loadWhiteboardTeamAccess().then(result => {
+            if (active) setAccess(result);
+        }).catch(() => {
+            if (active) setError('소속 팀과 조회 권한을 확인하지 못했습니다. 계정의 팀 연결을 확인해 주세요.');
+        });
+        return () => { active = false; };
+    }, [retry, signedIn]);
+
+    if (!signedIn || error) return (
+        <div className="p-6" role="alert">
+            {error || '로그인이 필요합니다.'}
+            {signedIn && <button className="ml-3 text-indigo-600" onClick={() => setRetry(value => value + 1)}>다시 시도</button>}
+        </div>
+    );
+    if (access === undefined || (!access && master.loading)) return <div className="p-6" role="status">조회 권한을 확인하는 중입니다.</div>;
+
+    const teams = access?.teams ?? master.teams;
+    const sites = access?.sites ?? master.sites;
+    const companyIds = new Set([...teams, ...sites].map(row => row.companyId));
+    const companies = access ? master.companies.filter(company => companyIds.has(company.id)) : master.companies;
+    return <WhiteboardStatusContent companies={companies} teams={teams} sites={sites} teamAccess={access} />;
+};
+
+const WhiteboardStatusContent: React.FC<{
+    companies: Company[];
+    teams: Team[];
+    sites: Site[];
+    teamAccess: WhiteboardTeamAccess | null;
+}> = ({ companies, teams, sites, teamAccess }) => {
     const navigate = useNavigate();
+    const reducedMotion = Boolean(useReducedMotion());
+    const layoutTransition = { duration: reducedMotion ? 0 : 0.42, ease: BOARD_EASE };
     const [searchParams, setSearchParams] = useSearchParams();
-    // Context에서 마스터 데이터 가져오기 (Firebase 호출 없이 바로 사용!)
-    const { companies, teams, sites, loading: masterDataLoading } = useMasterData();
+    const masterDataLoading = false;
     const today = React.useMemo(() => new Date(), []);
     const urlYear = parseYearParam(searchParams.get('year'));
     const urlMonth = parseMonthParam(searchParams.get('month'));
@@ -229,14 +335,19 @@ const WhiteboardStatusBoard: React.FC = () => {
     const [month, setMonth] = useState(urlMonth ?? persistedViewState.month);
 
     // Filter State
-    const [selectedCompanyId, setSelectedCompanyId] = useState<string>(urlSelectedCompanyId ?? persistedViewState.selectedCompanyId);
+    const [requestedCompanyId, setSelectedCompanyId] = useState<string>(urlSelectedCompanyId ?? persistedViewState.selectedCompanyId);
+    const selectedCompanyId = teamAccess ? '' : requestedCompanyId;
     const [searchQuery, setSearchQuery] = useState<string>(urlSearchQuery ?? persistedViewState.searchQuery);
     const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc'>(urlSortBy ?? (persistedViewState.sortBy === 'name-desc' ? 'name-desc' : 'name-asc'));
-    const [selectedTeamId, setSelectedTeamId] = useState<string>(urlSelectedTeamId ?? persistedViewState.selectedTeamId);
+    const [requestedTeamId, setSelectedTeamId] = useState<string>(urlSelectedTeamId ?? persistedViewState.selectedTeamId);
+    const selectedTeamId = teamAccess ? (teams.length === 1 ? teams[0].id || '' : '') : requestedTeamId;
     const [mainCompanyId, setMainCompanyId] = useState<string>(persistedViewState.mainCompanyId);
 
-    const [rawReports, setRawReports] = useState<any[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [sourceSelection, setSourceSelection] = useState<SourceSelection | null>(null);
+    const [rawReports, setRawReports] = useState<WhiteboardReport[]>([]);
+    const [responsibleSiteView, setResponsibleSiteView] = useState(false);
+    const reportRequestRef = useRef(0);
+    const [loading, setLoading] = useState(true);
     const [errorMessage, setErrorMessage] = useState('');
 
     // Accordion State
@@ -257,7 +368,8 @@ const WhiteboardStatusBoard: React.FC = () => {
     }, []);
 
     const containerRef = useRef<HTMLDivElement>(null);
-    const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+    const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(scrollTimeoutRef.current), []);
     const lastSyncedSearchRef = useRef(searchParams.toString());
 
     const normalizeName = React.useCallback((value: string | undefined | null) => String(value ?? '').replace(/\s+/g, '').trim(), []);
@@ -272,10 +384,11 @@ const WhiteboardStatusBoard: React.FC = () => {
 
     const visibleCompanies = React.useMemo(
         () => companies.filter((company) => {
+            if (teamAccess) return true;
             const name = normalizeName(company.name);
             return name.includes('청연') || name.includes('다원');
         }).sort(compareCompaniesByPriorityThenName),
-        [companies, normalizeName]
+        [companies, normalizeName, teamAccess]
     );
 
     const visibleCompanyIdSet = React.useMemo(
@@ -493,6 +606,7 @@ const WhiteboardStatusBoard: React.FC = () => {
             .map((team) => ({
                 id: String(team.id ?? '').trim(),
                 name: team.name,
+                color: team.color,
                 companyId: String(team.companyId ?? '').trim() || undefined,
                 isSupport: false
             }))
@@ -522,6 +636,7 @@ const WhiteboardStatusBoard: React.FC = () => {
             optionMap.set(optionId, {
                 id: optionId,
                 name: optionName,
+                color: resolvedTeam?.color,
                 companyId: teamCompanyId || undefined,
                 isSupport: !isInternalVisibleTeam
             });
@@ -584,14 +699,16 @@ const WhiteboardStatusBoard: React.FC = () => {
     }, [mainCompanyId, normalizeName, visibleCompanies]);
 
     useEffect(() => {
+        if (masterDataLoading) return;
         if (!selectedCompanyId) return;
         if (visibleCompanyIdSet.has(selectedCompanyId)) return;
 
         const defaultCompany = visibleCompanies.find((company) => normalizeName(company.name).includes('청연')) ?? visibleCompanies[0];
         setSelectedCompanyId(defaultCompany?.id ?? '');
-    }, [normalizeName, selectedCompanyId, visibleCompanies, visibleCompanyIdSet]);
+    }, [masterDataLoading, normalizeName, selectedCompanyId, visibleCompanies, visibleCompanyIdSet]);
 
     useEffect(() => {
+        if (masterDataLoading || loading || (viewMode === 'team' && errorMessage)) return;
         if (!selectedTeamId) return;
 
         const selectableTeamIds = new Set(
@@ -603,11 +720,7 @@ const WhiteboardStatusBoard: React.FC = () => {
         if (!selectableTeamIds.has(selectedTeamId)) {
             setSelectedTeamId('');
         }
-    }, [dashboardTeamSelectorOptions, selectedTeamId]);
-
-    useEffect(() => {
-        fetchReports();
-    }, [year, month]);
+    }, [dashboardTeamSelectorOptions, errorMessage, loading, masterDataLoading, selectedTeamId, viewMode]);
 
     useEffect(() => {
         const currentSearch = searchParams.toString();
@@ -628,8 +741,8 @@ const WhiteboardStatusBoard: React.FC = () => {
         if (nextMonth && nextMonth !== month) setMonth(nextMonth);
         if (nextViewMode && nextViewMode !== viewMode) setViewMode(nextViewMode);
         if (nextSortBy && nextSortBy !== sortBy) setSortBy(nextSortBy);
-        if (nextSelectedCompanyId !== null && nextSelectedCompanyId !== selectedCompanyId) setSelectedCompanyId(nextSelectedCompanyId);
-        if (nextSelectedTeamId !== null && nextSelectedTeamId !== selectedTeamId) setSelectedTeamId(nextSelectedTeamId);
+        if (!teamAccess && nextSelectedCompanyId !== null && nextSelectedCompanyId !== selectedCompanyId) setSelectedCompanyId(nextSelectedCompanyId);
+        if (!teamAccess && nextSelectedTeamId !== null && nextSelectedTeamId !== selectedTeamId) setSelectedTeamId(nextSelectedTeamId);
         if (nextSearchQuery !== null && nextSearchQuery !== searchQuery) setSearchQuery(nextSearchQuery);
     }, [searchParams]);
 
@@ -676,23 +789,50 @@ const WhiteboardStatusBoard: React.FC = () => {
         } satisfies WhiteboardStatusViewState);
     }, [mainCompanyId, month, searchQuery, selectedCompanyId, selectedTeamId, sortBy, viewMode, year]);
 
-    const fetchReports = async () => {
+    const fetchReports = React.useCallback(async () => {
+        const requestId = ++reportRequestRef.current;
         setLoading(true);
+        setRawReports([]);
+        setResponsibleSiteView(false);
         setErrorMessage('');
         try {
             const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
             const lastDay = new Date(year, month, 0).getDate();
             const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
-            const reports = await dailyReportService.getReportsByRange(startDate, endDate);
-            setRawReports(reports);
+            if (teamAccess) {
+                const results = await getTeamScopedRows<WhiteboardParticipationResult>('whiteboard_participation', {
+                    yearMonth: `${year}-${String(month).padStart(2, '0')}`,
+                });
+                if (reportRequestRef.current !== requestId) return;
+                const result = results?.[0];
+                if (result?.mode === 'responsible-sites' && Array.isArray(result.reports)) {
+                    setResponsibleSiteView(true);
+                    setRawReports(result.reports.map(report => ({ ...report, workers: [], participationSummary: true })));
+                    return;
+                }
+                if (result?.mode !== 'own-workers') throw new Error('참여 현황 조회 응답을 확인해 주세요.');
+            }
+            const reports = teamAccess
+                ? await getTeamScopedRows<DailyReport>('daily_reports', { startDate, endDate })
+                : await dailyReportService.getReportsByRange(startDate, endDate);
+            if (reports === null) throw new Error('팀 조회 권한을 다시 확인해 주세요.');
+            if (reportRequestRef.current === requestId) {
+                setRawReports(teamAccess ? scopeWhiteboardReports(reports, teamAccess) : reports);
+            }
         } catch (error) {
+            if (reportRequestRef.current !== requestId) return;
             console.error("Error fetching reports:", error);
             setRawReports([]);
             setErrorMessage('현황 데이터를 불러오지 못했습니다. 네트워크 또는 권한 상태를 확인한 뒤 새로고침해주세요.');
         } finally {
-            setLoading(false);
+            if (reportRequestRef.current === requestId) setLoading(false);
         }
-    };
+    }, [month, teamAccess, year]);
+
+    useEffect(() => {
+        void fetchReports();
+        return () => { reportRequestRef.current += 1; };
+    }, [fetchReports]);
 
     const openDailyReportList = React.useCallback((item: BoardItem, event: React.MouseEvent) => {
         event.stopPropagation();
@@ -722,6 +862,9 @@ const WhiteboardStatusBoard: React.FC = () => {
         const itemMap = new Map<string, BoardItem>();
 
         const isWithinCompanyScope = (teamCompanyId?: string | null, siteCompanyId?: string | null) => {
+            // These reports already contain only server-authorized own workers.
+            // An optional company catalog must not erase their participation.
+            if (teamAccess) return true;
             const normalizedTeamCompanyId = String(teamCompanyId ?? '').trim();
             const normalizedSiteCompanyId = String(siteCompanyId ?? '').trim();
 
@@ -812,29 +955,43 @@ const WhiteboardStatusBoard: React.FC = () => {
             workerName: string,
             date: string,
             manDay: number,
-            amount: number
+            amount: number,
+            workerId?: string,
+            reportId?: string
         ) => {
             if (!detail.workers) detail.workers = [];
-            let workerEntry = detail.workers.find((entry) => entry.workerName === workerName);
+            const workerKey = workerId ? `id:${workerId}` : `name:${workerName}`;
+            let workerEntry = detail.workers.find((entry) => entry.workerKey === workerKey);
             if (!workerEntry) {
-                workerEntry = { workerName, manDay: 0, amount: 0, dailyLogs: [] };
+                workerEntry = { workerKey, workerName, manDay: 0, amount: 0, dailyLogs: [] };
                 detail.workers.push(workerEntry);
             }
             workerEntry.manDay += manDay;
             workerEntry.amount += amount;
-            workerEntry.dailyLogs.push({ date, manDay, amount });
+            const day = workerEntry.dailyLogs.find(log => log.date === date);
+            if (day) {
+                day.manDay += manDay; day.amount += amount;
+                if (reportId && !day.reportIds.includes(reportId)) day.reportIds.push(reportId);
+            } else workerEntry.dailyLogs.push({ date, manDay, amount, reportIds: reportId ? [reportId] : [] });
+        };
+
+        const appendParticipationLogs = (detail: NonNullable<BoardItem['workDetails']>[number], report: WhiteboardReport) => {
+            report.participationDetails?.forEach(entry => {
+                appendWorkerLog(detail, entry.workerName, entry.date, positiveManDay(entry.manDay), 0, entry.workerId, entry.reportId);
+            });
         };
 
         if (viewMode === 'site') {
             sites
                 .filter((site) => site.status === 'active')
                 .filter((site) => {
+                    if (teamAccess) return true;
                     const companyId = String(site.companyId ?? '').trim();
                     if (selectedCompanyId) return companyId === selectedCompanyId;
                     return companyId ? visibleCompanyIdSet.has(companyId) : false;
                 })
                 .filter((site) => {
-                    if (!selectedTeamId) return true;
+                    if (teamAccess || !selectedTeamId) return true;
                     const reportResponsibleTeam = getReportResponsibleTeamForSite(site);
                     return matchesSelectedDashboardTeam(
                         reportResponsibleTeam?.id ?? site.responsibleTeamId,
@@ -882,7 +1039,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                 const siteResponsibleId = responsibleTeam.id;
                 const siteResponsibleName = responsibleTeam.name;
 
-                if (selectedTeamId && !matchesSelectedDashboardTeam(siteResponsibleId, siteResponsibleName)) {
+                if (!teamAccess && selectedTeamId && !matchesSelectedDashboardTeam(siteResponsibleId, siteResponsibleName)) {
                     return;
                 }
 
@@ -931,7 +1088,7 @@ const WhiteboardStatusBoard: React.FC = () => {
 
                         const detail = getOrCreateDetail(siteItem, detailId, detailName, detailCompanyId, detailId);
 
-                        const workerManDay = Number(worker.manDay ?? 0);
+                        const workerManDay = positiveManDay(worker.manDay);
                         const workerAmount = workerManDay * Number(worker.unitPrice ?? 0);
                         if (workerManDay <= 0) return;
 
@@ -945,7 +1102,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                         siteItem.totalAmount = (siteItem.totalAmount || 0) + workerAmount;
                         siteItem.workerCount = (siteItem.workerCount || 0) + 1;
 
-                        appendWorkerLog(detail, worker.name || 'Unknown Worker', report.date, workerManDay, workerAmount);
+                        appendWorkerLog(detail, worker.name || 'Unknown Worker', report.date, workerManDay, workerAmount, worker.workerId, report.id);
 
                         const isResponsibleTeam = detailId === siteItem.responsibleTeamId;
                         if (detailCompanyId && siteItem.companyId && detailCompanyId !== siteItem.companyId) {
@@ -959,12 +1116,13 @@ const WhiteboardStatusBoard: React.FC = () => {
                     const detailName = reportWriterTeam?.name ?? report.teamName ?? 'Unknown Team';
                     if (!detailId || !detailName) return;
 
-                    const detailCompanyId = String(reportWriterTeam?.companyId ?? '').trim() || undefined;
+                    const detailCompanyId = String(reportWriterTeam?.companyId ?? report.teamCompanyId ?? '').trim() || undefined;
                     if (!isWithinCompanyScope(detailCompanyId, siteCompanyId)) return;
 
                     const detail = getOrCreateDetail(siteItem, detailId, detailName, detailCompanyId, detailId);
+                    detail.color = report.teamColor;
 
-                    const reportManDay = Number(report.totalManDay ?? 0);
+                    const reportManDay = positiveManDay(report.totalManDay);
                     const reportAmount = Number(report.totalAmount ?? 0);
                     if (reportManDay <= 0) return;
 
@@ -978,7 +1136,8 @@ const WhiteboardStatusBoard: React.FC = () => {
                     siteItem.totalAmount = (siteItem.totalAmount || 0) + reportAmount;
                     siteItem.workerCount = (siteItem.workerCount || 0) + (reportManDay > 0 ? 1 : 0);
 
-                    appendWorkerLog(detail, '작업자 정보 없음', report.date, reportManDay, reportAmount);
+                    if (report.participationSummary) appendParticipationLogs(detail, report);
+                    else appendWorkerLog(detail, '작업자 정보 없음', report.date, reportManDay, reportAmount, undefined, report.id);
 
                     const isResponsibleTeam = detailId === siteItem.responsibleTeamId;
                     if (detailCompanyId && siteItem.companyId && detailCompanyId !== siteItem.companyId) {
@@ -998,12 +1157,14 @@ const WhiteboardStatusBoard: React.FC = () => {
                 teamCompanyIdValue: string | undefined,
                 workerName: string,
                 manDay: number,
-                amount: number
+                amount: number,
+                workerId?: string
             ) => {
+                if (manDay <= 0) return;
                 const nextItemId = teamIdValue || `team:${normalizeName(teamNameValue)}`;
                 if (!nextItemId || !teamNameValue) return;
                 if (!isWithinCompanyScope(teamCompanyIdValue, siteCompanyId)) return;
-                if (selectedTeamId && !matchesSelectedDashboardTeam(teamIdValue ?? nextItemId, teamNameValue)) return;
+                if (!report.participationSummary && selectedTeamId && !matchesSelectedDashboardTeam(teamIdValue ?? nextItemId, teamNameValue)) return;
 
                 const teamItem = getOrCreateItem({
                     id: nextItemId,
@@ -1031,6 +1192,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                     siteCompanyId || undefined,
                     responsibleTeam.id
                 );
+                teamItem.color = report.teamColor;
 
                 detail.manDay += manDay;
                 detail.amount += amount;
@@ -1040,7 +1202,8 @@ const WhiteboardStatusBoard: React.FC = () => {
                 teamItem.totalAmount = (teamItem.totalAmount || 0) + amount;
                 teamItem.workerCount = (teamItem.workerCount || 0) + 1;
 
-                appendWorkerLog(detail, workerName, report.date, manDay, amount);
+                if (report.participationSummary) appendParticipationLogs(detail, report);
+                else appendWorkerLog(detail, workerName, report.date, manDay, amount, workerId, report.id);
             };
 
             if (workers.length > 0) {
@@ -1052,7 +1215,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                     const workerTeamId = String(workerTeam?.id ?? worker.teamId ?? report.teamId ?? '').trim() || undefined;
                     const workerTeamName = workerTeam?.name ?? worker.workerTeamName ?? report.teamName ?? 'Unknown Team';
                     const workerTeamCompanyId = String(workerTeam?.companyId ?? '').trim() || undefined;
-                    const workerManDay = Number(worker.manDay ?? 0);
+                    const workerManDay = positiveManDay(worker.manDay);
                     const workerAmount = workerManDay * Number(worker.unitPrice ?? 0);
 
                     appendTeamWork(
@@ -1061,14 +1224,15 @@ const WhiteboardStatusBoard: React.FC = () => {
                         workerTeamCompanyId,
                         worker.name || 'Unknown Worker',
                         workerManDay,
-                        workerAmount
+                        workerAmount,
+                        worker.workerId
                     );
                 });
             } else {
                 const reportTeamId = String(reportWriterTeam?.id ?? report.teamId ?? '').trim() || undefined;
                 const reportTeamName = reportWriterTeam?.name ?? report.teamName ?? 'Unknown Team';
-                const reportTeamCompanyId = String(reportWriterTeam?.companyId ?? '').trim() || undefined;
-                const reportManDay = Number(report.totalManDay ?? 0);
+                const reportTeamCompanyId = String(reportWriterTeam?.companyId ?? report.teamCompanyId ?? '').trim() || undefined;
+                const reportManDay = positiveManDay(report.totalManDay);
                 const reportAmount = Number(report.totalAmount ?? 0);
 
                 appendTeamWork(
@@ -1100,9 +1264,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                 }
                 const totalFromDetails = item.workDetails?.reduce((sum, detail) => sum + detail.manDay, 0) || 0;
                 item.totalManDay = totalFromDetails;
-                if (Math.abs((item.manDay || 0) - totalFromDetails) > 0.1) {
-                    item.manDay = totalFromDetails;
-                }
+                item.manDay = totalFromDetails;
                 return item;
             })
             .sort((a, b) => {
@@ -1126,6 +1288,7 @@ const WhiteboardStatusBoard: React.FC = () => {
         selectedTeamId,
         sites,
         sortBy,
+        teamAccess,
         teams,
         viewMode,
         visibleCompanyIdSet
@@ -1133,6 +1296,7 @@ const WhiteboardStatusBoard: React.FC = () => {
 
     const toggleAccordion = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
+        clearTimeout(scrollTimeoutRef.current);
         const newSet = new Set(expandedItems);
         // Exclusive Open Logic: Close all others when opening a new one
         if (newSet.has(id)) {
@@ -1142,11 +1306,11 @@ const WhiteboardStatusBoard: React.FC = () => {
             newSet.add(id);
 
             // Scroll Container to Top (Since item moves to #1 spot)
-            setTimeout(() => {
+            scrollTimeoutRef.current = setTimeout(() => {
                 if (containerRef.current) {
-                    containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                    containerRef.current.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
                 }
-            }, 100);
+            }, reducedMotion ? 0 : 100);
         }
         setExpandedItems(newSet);
     };
@@ -1231,17 +1395,18 @@ const WhiteboardStatusBoard: React.FC = () => {
             <OutputManagementTabs activeTab="status" />
 
             {/* Header Controls */}
-            <div className="bg-white border-b border-slate-200 p-6 flex flex-col gap-4 shadow-sm z-10">
-                <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                    <div className="flex items-center gap-6">
+            <div className="bg-white border-b border-slate-200 px-4 py-3 flex flex-col gap-2 shadow-sm z-10">
+                <div className="flex flex-wrap justify-between items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
                         <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
                             <FontAwesomeIcon icon={faChartBar} className="text-indigo-600" />
                             통합 현황판
                         </h1>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             {/* Company Filter - 청연/다원만 표시 */}
-                            <select
+                            {!teamAccess && <select
+                                aria-label="회사 선택"
                                 value={selectedCompanyId}
                                 onChange={(e) => { setSelectedCompanyId(e.target.value); setExpandedItems(new Set()); }}
                                 className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 font-bold focus:outline-none focus:border-indigo-500"
@@ -1250,30 +1415,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 {visibleCompanies.map(company => (
                                     <option key={company.id} value={company.id}>{company.name}</option>
                                 ))}
-                            </select>
-
-                            {/* Team Filter */}
-                            <select
-                                value={selectedTeamId}
-                                onChange={(e) => { setSelectedTeamId(e.target.value); setExpandedItems(new Set()); }}
-                                className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 font-bold focus:outline-none focus:border-indigo-500 ml-2"
-                            >
-                                <option value="">전체 팀 (All Teams)</option>
-                                {dashboardTeamSelectorOptions.internal.length > 0 && (
-                                    <optgroup label={selectedCompanyId ? '소속팀' : '청연팀'}>
-                                        {dashboardTeamSelectorOptions.internal.map(team => (
-                                            <option key={team.id} value={team.id}>{team.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {dashboardTeamSelectorOptions.support.length > 0 && (
-                                    <optgroup label="지원팀">
-                                        {dashboardTeamSelectorOptions.support.map(team => (
-                                            <option key={team.id} value={team.id}>{team.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                            </select>
+                            </select>}
 
                             {/* View Mode Toggle */}
                             <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 ml-2">
@@ -1301,7 +1443,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
                         {/* 검색 입력 필드 */}
                         <div className="relative">
                             <input
@@ -1337,7 +1479,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                         >
                             <div className="text-xs font-bold uppercase tracking-wider" style={{ color: accentText }}>Total</div>
                             <div className="text-xl font-black" style={{ color: accentText }}>
-                                {grandTotalManDaysFiltered.toFixed(1)} <span className="text-sm font-bold" style={{ color: accentTextMuted }}>공수</span>
+                                {formatManDay(grandTotalManDaysFiltered)} <span className="text-sm font-bold" style={{ color: accentTextMuted }}>공수</span>
                             </div>
                         </div>
 
@@ -1359,6 +1501,24 @@ const WhiteboardStatusBoard: React.FC = () => {
                         </button>
                     </div>
                 </div>
+
+                {teamAccess ? (
+                    <p className="text-sm font-semibold text-indigo-700" role="status">
+                        {teams.map(team => team.name).join(', ')} · {responsibleSiteView ? '내 팀 담당 현장에 참여한 모든 팀의 공수입니다.' : '담당 현장과 지원 현장의 내 팀 참여 내역입니다.'}
+                    </p>
+                ) : <WhiteboardTeamSelector
+                    compact
+                    internalTeams={dashboardTeamSelectorOptions.internal}
+                    supportTeams={dashboardTeamSelectorOptions.support}
+                    internalLabel={selectedCompanyId ? '소속팀' : '청연팀'}
+                    selectedTeamId={selectedTeamId}
+                    onChange={(teamId) => {
+                        setSelectedTeamId(teamId);
+                        setExpandedItems(new Set());
+                        setExpandedDetails(new Set());
+                        setExpandedWorkers(new Set());
+                    }}
+                />}
 
                 {errorMessage && (
                     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
@@ -1384,7 +1544,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                             총 공수
                         </div>
                         <div className="text-2xl font-black" style={{ color: accentText }}>
-                            {grandTotalManDaysFiltered.toFixed(1)}
+                            {formatManDay(grandTotalManDaysFiltered)}
                             <span className="ml-1 text-sm font-bold" style={{ color: accentTextMuted }}>공수</span>
                         </div>
                     </div>
@@ -1409,9 +1569,11 @@ const WhiteboardStatusBoard: React.FC = () => {
                     <p className="text-slate-600 text-sm font-medium">
                         <span className="font-bold mr-2 inline-flex items-center gap-1" style={{ color: accentText }}>
                                     <FontAwesomeIcon icon={faBuilding} className="text-slate-400" />
-                                    {companies.find(c => c.id === selectedCompanyId)?.name || '청연 · 다원'}
+                                    {teamAccess ? '내 소속팀' : companies.find(c => c.id === selectedCompanyId)?.name || '청연 · 다원'}
                         </span>
-                        {selectedTeamId ? (
+                        {teamAccess ? (
+                            <span>{responsibleSiteView ? '내 팀 담당 현장에 투입된 소속팀·내부지원팀·외부지원팀의 공수를 합산합니다.' : '담당·지원 현장에 참여한 내 팀원의 공수와 상세 내역입니다.'}</span>
+                        ) : selectedTeamId ? (
                             <>
                                 <span className="font-bold text-slate-800 inline-flex items-center gap-1 mr-1">
                                     <FontAwesomeIcon icon={faUserGroup} className="text-slate-400" />
@@ -1453,9 +1615,10 @@ const WhiteboardStatusBoard: React.FC = () => {
             </div>
 
             {/* Grid Area */}
-            <div
+            <motion.div
+                layoutScroll
                 ref={containerRef}
-                className="flex-1 overflow-y-auto p-8 bg-slate-100/50 relative scroll-smooth"
+                className="whiteboard-card-area flex-1 overflow-y-auto p-8 bg-slate-100/50 relative scroll-smooth motion-reduce:scroll-auto"
             >
                 {/* Background Grid Pattern */}
                 <div className="absolute inset-0 opacity-[0.03] pointer-events-none"
@@ -1468,19 +1631,20 @@ const WhiteboardStatusBoard: React.FC = () => {
                         <p className="font-semibold">현황 데이터를 불러오는 중입니다.</p>
                     </div>
                 ) : dashboardItems.length > 0 ? (
-                    <div className="flex flex-wrap gap-2 w-full px-2">
-                        {sortedItems.map(item => {
+                    <div key={`${viewMode}:${year}-${month}:${selectedCompanyId}:${selectedTeamId}`} className="whiteboard-site-grid">
+                        <AnimatePresence mode="popLayout">
+                        {sortedItems.map((item, itemIndex) => {
                             // Check expansion state for dynamic sizing
                             const isItemExpanded = expandedItems.has(item.id);
                             // Check if any detail is expanded
                             const hasExpandedDetail = Array.from(expandedDetails).some(key => key.startsWith(`${item.id}-`));
 
                             // Determine Flex Class (Flexible width with min-width)
-                            let colSpanClass = 'flex-1 min-w-[220px]';
+                            let colSpanClass = 'min-w-0';
 
                             // Only expand width if the main item is expanded
                             if (isItemExpanded) {
-                                colSpanClass = 'w-full flex-none'; // Take full width
+                                colSpanClass = 'col-span-full';
                             }
 
                             // Defensive check for totalManDay
@@ -1505,6 +1669,10 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 : undefined;
                             const responsibleTeamColor = normalizeHexColor(responsibleTeamForItem?.color);
                             const displayedResponsibleTeamColor = responsibleTeamColor || (item.responsibleTeamName ? '#8b5cf6' : undefined);
+                            const headerColor = item.type === 'site'
+                                ? displayedResponsibleTeamColor
+                                : normalizeHexColor(resolveDashboardTeam(item.id, item.name)?.color || item.color) || '#8b5cf6';
+                            const headerTextColor = headerColor ? getContrastingTextColor(headerColor) : undefined;
                             const externalSiteTeamColor = item.type === 'site' && isOtherCompany
                                 ? displayedResponsibleTeamColor
                                 : undefined;
@@ -1525,24 +1693,41 @@ const WhiteboardStatusBoard: React.FC = () => {
 
                             return (
                                 <motion.div
-                                    layout
-                                    transition={{ layout: { duration: 0.3, type: "spring", stiffness: 300, damping: 30 } }}
-                                    key={item.id}
-                                    ref={(el) => {
-                                        if (el) itemRefs.current.set(item.id, el);
-                                        else itemRefs.current.delete(item.id);
-                                    }}
-                                    className={`bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden transition-shadow duration-300 ease-in-out group cursor-pointer 
+                                    {...getCardRevealMotion(itemIndex, reducedMotion)}
+                                    layout={!reducedMotion}
+                                    transition={{ layout: layoutTransition }}
+                                    whileHover={!isItemExpanded && !reducedMotion ? { y: -3, transition: { duration: 0.2, ease: BOARD_EASE } } : undefined}
+                                    key={`${item.type}:${item.id}`}
+                                    className={`whiteboard-site-card bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden transition-shadow duration-300 ease-in-out group cursor-pointer
                                         ${colSpanClass} 
-                                        ${isItemExpanded ? 'ring-1 shadow-xl z-20' : 'hover:shadow-lg hover:-translate-y-1'}
+                                        ${isItemExpanded ? 'ring-1 shadow-xl z-20' : 'hover:shadow-lg'}
                                     `}
-                                    style={ringStyle}
+                                    style={{ ...ringStyle, borderRadius: 16 }}
+                                    data-expanded={isItemExpanded}
+                                    tabIndex={0}
+                                    role="button"
+                                    aria-label={`${item.name} 상세`}
+                                    aria-expanded={isItemExpanded}
+                                    onKeyDown={event => {
+                                        if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+                                            event.preventDefault(); event.currentTarget.click();
+                                        }
+                                    }}
                                     onClick={(e) => toggleAccordion(item.id, e)}
                                 >
-                                    <div className="p-3 border-b border-slate-200 bg-gradient-to-br from-white to-slate-50/30">
+                                    <motion.div
+                                        layout={reducedMotion ? false : 'position'}
+                                        transition={{ layout: layoutTransition }}
+                                        className={`p-3 border-b border-slate-200 ${headerColor ? '' : 'bg-gradient-to-br from-white to-slate-50/30'}`}
+                                        style={headerColor ? { backgroundColor: headerColor } : undefined}
+                                    >
                                         {/* 컨텐츠 영역 */}
                                         <div className="min-w-0 flex-1">
-                                            <h3 className="font-bold text-base text-slate-800 truncate whitespace-nowrap flex items-center gap-2" title={item.name}>
+                                            <h3
+                                                className="whiteboard-site-card__title font-bold text-base text-slate-800 flex items-center gap-2"
+                                                title={item.name}
+                                                style={headerTextColor ? { color: headerTextColor } : undefined}
+                                            >
                                                 {item.type === 'site' && (
                                                     <span
                                                         className="inline-flex items-center justify-center w-6 h-6 rounded-full border border-slate-200 flex-shrink-0"
@@ -1553,7 +1738,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 )}
                                                 {item.name}
                                             </h3>
-                                            {isItemExpanded && (
+                                            {isItemExpanded && !teamAccess && (
                                                 <button
                                                     type="button"
                                                     onClick={(event) => openDailyReportList(item, event)}
@@ -1599,12 +1784,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 </span>
                                             )}
                                         </div>
-                                    </div>
+                                    </motion.div>
 
 
-                                    {!isItemExpanded && (
-                                        <div className="p-3 flex flex-col gap-2 min-h-[96px] relative">
-                                            <div className="flex items-baseline justify-between gap-4">
+                                    <BoardDisclosure open={!isItemExpanded} reducedMotion={reducedMotion} className="p-3 flex flex-col gap-2 min-h-[96px] relative">
+                                        {() => (<>
+                                            <div className="whiteboard-card-metrics flex items-baseline justify-between gap-4">
                                                 <div>
                                                     <div className="text-[10px] font-extrabold text-indigo-700 uppercase tracking-wider whitespace-nowrap drop-shadow-sm">
                                                         총 공수
@@ -1613,7 +1798,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                         className={`mt-1 text-3xl md:text-4xl font-extrabold whitespace-nowrap drop-shadow-lg ${item.manDay && item.manDay > 0 ? '' : 'text-slate-300'}`}
                                                         style={item.manDay && item.manDay > 0 ? { color: brandTextColor, textShadow: `0 2px 8px ${hexToRgba(brandColor, 0.18)}` } : undefined}
                                                     >
-                                                        {(item.manDay || 0).toFixed(1)}
+                                                        {formatManDay(item.manDay || 0)}
                                                         <span className="ml-1 text-lg font-bold text-indigo-400 align-top">공수</span>
                                                     </div>
                                                 </div>
@@ -1636,25 +1821,19 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                 </span>
                                             </div>
 
-                                        </div>
-                                    )}
+                                        </>)}
+                                    </BoardDisclosure>
 
                                     {/* Accordion Content (Smart Dynamic Layout) */}
-                                    <AnimatePresence>
-                                        {isItemExpanded && item.workDetails && (
-                                            <motion.div
-                                                initial={{ opacity: 0, height: 0 }}
-                                                animate={{ opacity: 1, height: 'auto' }}
-                                                exit={{ opacity: 0, height: 0 }}
-                                                className="bg-white border-t border-slate-100 text-sm p-4"
-                                            >
+                                    <BoardDisclosure open={isItemExpanded && Boolean(item.workDetails)} reducedMotion={reducedMotion} className="bg-white border-t border-slate-100 text-sm p-4">
+                                        {() => (<>
 
                                                 {/* 1. Header Summary Section */}
                                                 <div className="flex flex-col md:flex-row justify-between items-end border-b border-slate-100 pb-4 mb-4">
                                                     <div>
                                                         <div className="flex items-center gap-2 mb-2">
                                                             <span className="px-2 py-1 bg-indigo-50 text-indigo-600 text-xs font-bold rounded whitespace-nowrap">
-                                                                {companies.find(c => c.id === selectedCompanyId)?.name || '전체 회사'}
+                                                                {responsibleSiteView ? '내 팀 담당 현장' : teamAccess ? '내 소속팀' : companies.find(c => c.id === selectedCompanyId)?.name || '전체 회사'}
                                                             </span>
                                                             <h2 className="text-xl md:text-2xl font-bold text-slate-800 whitespace-nowrap">
                                                                 {viewMode === 'site' ? '참여 팀 현황' : '진행 현장 현황'}
@@ -1662,14 +1841,16 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                         </div>
                                                         <p className="text-slate-500 mb-2 text-sm line-clamp-2 md:line-clamp-none">
                                                             <span className="font-bold text-slate-800">{item.name}</span>
-                                                            {viewMode === 'site' ? ' 현장에 투입된 팀들의 상세 공수 내역입니다.' : ' 팀이 수행한 현장별 상세 공수 내역입니다.'}
+                                                            {viewMode === 'site'
+                                                                ? (teamAccess && !responsibleSiteView ? ' 현장에 참여한 내 팀원의 상세 공수 내역입니다.' : ' 현장에 투입된 팀들의 상세 공수 내역입니다.')
+                                                                : (responsibleSiteView ? ' 팀이 내 담당 현장에 투입한 공수 내역입니다.' : ' 팀이 수행한 현장별 상세 공수 내역입니다.')}
                                                         </p>
                                                         {/* Level 1 Formula Explanation */}
                                                         <div className="flex items-start gap-2 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100/50 text-xs text-indigo-800 max-w-lg">
                                                             <FontAwesomeIcon icon={faInfoCircle} className="mt-0.5 text-indigo-400 flex-shrink-0" />
                                                             <div>
                                                                 <span className="font-bold mr-1">산출 공식:</span>
-                                                                {viewMode === 'site'
+                                                                {responsibleSiteView ? '해당 기간 내 팀 담당 현장에 참여한 모든 팀의 작업 공수 합계' : teamAccess ? '해당 기간 내 팀원의 작업 공수 합계' : viewMode === 'site'
                                                                     ? '해당 기간 동안 이 현장에 투입된 모든 팀의 작업 공수 합계 (Teams Sum)'
                                                                     : '해당 기간 동안 이 팀이 수행한 모든 현장의 작업 공수 합계 (Sites Sum)'
                                                                 }
@@ -1679,38 +1860,27 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                     <div className="text-right mt-4 md:mt-0 flex-shrink-0">
                                                         <span className="text-sm text-slate-500 block mb-1">총 투입 공수</span>
                                                         <span className="text-3xl md:text-4xl font-black tracking-tight whitespace-nowrap" style={{ color: brandTextColor }}>
-                                                            {totalManDayDisplay.toFixed(1)}
+                                                            {formatManDay(totalManDayDisplay)}
                                                             <span className="text-lg text-slate-400 font-medium ml-1">MD</span>
                                                         </span>
                                                     </div>
                                                 </div>
 
                                                 {/* 2. Team Grid (Response to "30 Teams") */}
-                                                <div className="mb-6 p-1 min-h-[300px] transition-all duration-500">
+                                                <div className="mb-6 p-1 min-h-[300px]">
                                                     <div className="flex justify-between items-center mb-3">
                                                         <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                                                             <FontAwesomeIcon icon={faCalculator} className="text-indigo-500" />
-                                                            상세 목록 ({item.workDetails.length}건)
+                                                            상세 목록 ({item.workDetails?.length || 0}건)
                                                         </h4>
                                                     </div>
 
                                                     {/* Smart Grid: Sequential Expansion logic - Responsive Cols Adjustment */}
-                                                    <motion.div
-                                                        variants={{
-                                                            hidden: { opacity: 0 },
-                                                            show: {
-                                                                opacity: 1,
-                                                                transition: {
-                                                                    staggerChildren: 0.03
-                                                                }
-                                                            }
-                                                        }}
-                                                        initial="hidden"
-                                                        animate="show"
+                                                    <div
                                                         className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 auto-rows-min grid-flow-row-dense"
                                                     >
                                                         {item.workDetails
-                                                            .map((detail, idx) => {
+                                                            ?.map((detail, idx) => {
                                                                 const isDetailSelected = expandedDetails.has(`${item.id}-${detail.targetId}`);
 
                                                                 // Logic for Level 2 (Team in Site)
@@ -1720,7 +1890,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                 const detailTeam = viewMode === 'site'
                                                                     ? resolveDashboardTeam(detail.targetId, detail.targetName)
                                                                     : undefined;
-                                                                const detailTeamColor = normalizeHexColor(detailTeam?.color) || '#8b5cf6';
+                                                                const detailTeamColor = normalizeHexColor(detailTeam?.color || detail.color) || '#8b5cf6';
                                                                 const detailTeamTextColor = getContrastingTextColor(detailTeamColor);
                                                                 const detailManDayColor = isExternalSupport ? getReadableColorOnWhite(detailTeamColor) : '#4f46e5';
                                                                 const externalSupportBadgeStyle = getSolidColorBadgeStyle(detailTeamColor);
@@ -1734,11 +1904,10 @@ const WhiteboardStatusBoard: React.FC = () => {
 
                                                                 return (
                                                                     <motion.div
-                                                                        key={idx}
-                                                                        variants={{
-                                                                            hidden: { opacity: 0, y: 20 },
-                                                                            show: { opacity: 1, y: 0 }
-                                                                        }}
+                                                                        key={detail.targetId}
+                                                                        {...getCardRevealMotion(idx, reducedMotion)}
+                                                                        layout={reducedMotion ? false : 'position'}
+                                                                        transition={{ layout: layoutTransition }}
                                                                         className={`
                                                                     relative rounded-xl transition-colors duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden
                                                                     ${isDetailSelected
@@ -1749,9 +1918,14 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                     >
                                                                         {/* Summary Header (Always Visible) */}
                                                                         <div
+                                                                            role="button"
+                                                                            tabIndex={0}
+                                                                            aria-label={`${detail.targetName} 작업자별 공수 상세`}
+                                                                            aria-expanded={isDetailSelected}
+                                                                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); e.currentTarget.click(); } }}
                                                                             onClick={(e) => toggleDetail(item.id, detail.targetId, e)}
                                                                             className={`
-                                                                        cursor-pointer text-center flex flex-col items-center justify-center transition-all relative
+                                                                        cursor-pointer text-center flex flex-col items-center justify-center transition-colors relative
                                                                         ${isDetailSelected ? 'p-4 border-b border-indigo-100 bg-white' : 'p-2 min-h-[80px] hover:bg-slate-50'}
                                                                     `}
                                                                         >
@@ -1806,14 +1980,14 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                 className={`font-black transition-colors ${isDetailSelected ? 'text-3xl' : 'text-lg'}`}
                                                                                 style={{ color: detailManDayColor }}
                                                                             >
-                                                                                {(detail.manDay || 0).toFixed(1)}
+                                                                                {formatManDay(detail.manDay || 0)}
                                                                             </div>
                                                                             {isDetailSelected && <span className="text-xs text-slate-400 mt-1 whitespace-nowrap">클릭하여 접기</span>}
                                                                         </div>
 
                                                                         {/* EXPANDED CONTENT: Worker List (Level 3) */}
-                                                                        {isDetailSelected && (
-                                                                            <div className="p-4 animate-fadeIn bg-slate-50/50">
+                                                                        <BoardDisclosure open={isDetailSelected} reducedMotion={reducedMotion} className="p-4 bg-slate-50/50">
+                                                                            {() => (<>
                                                                                 <div className="flex justify-between items-center mb-4">
                                                                                     <h4 className="text-sm font-bold text-slate-600 flex items-center gap-2 whitespace-nowrap">
                                                                                         <FontAwesomeIcon icon={faUsers} className="text-slate-400" />
@@ -1836,13 +2010,15 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 auto-rows-min grid-flow-row-dense">
                                                                                     {detail.workers && detail.workers.length > 0 ? (
                                                                                         detail.workers.map((worker, wIdx) => {
-                                                                                            const isWorkerExpanded = expandedWorkers.has(`${item.id}-${detail.targetId}-${worker.workerName}`);
+                                                                                            const isWorkerExpanded = expandedWorkers.has(`${item.id}-${detail.targetId}-${worker.workerKey}`);
                                                                                             return (
-                                                                                                <div
-                                                                                                    key={wIdx}
-                                                                                                    style={{ animationDelay: `${wIdx * 30}ms`, animationFillMode: 'forwards' }}
+                                                                                                <motion.div
+                                                                                                    key={worker.workerKey}
+                                                                                                    {...getCardRevealMotion(wIdx, reducedMotion)}
+                                                                                                    layout={reducedMotion ? false : 'position'}
+                                                                                                    transition={{ layout: layoutTransition }}
                                                                                                     className={`
-                                                                                                rounded-xl overflow-hidden transition-all duration-300 border
+                                                                                                rounded-xl overflow-hidden transition-shadow duration-300 border
                                                                                                 ${isWorkerExpanded
                                                                                                             ? 'bg-white border-indigo-200 shadow-xl ring-2 ring-indigo-200 col-span-full z-10'
                                                                                                             : 'bg-white border-slate-200 hover:shadow-sm col-span-1'
@@ -1851,7 +2027,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                                 >
                                                                                                     <div
                                                                                                         className={`p-3 flex justify-between items-center cursor-pointer hover:bg-slate-50 transition-colors ${isWorkerExpanded ? 'border-b border-indigo-50 p-4 bg-indigo-50/10' : ''}`}
-                                                                                                        onClick={(e) => toggleWorker(`${item.id}-${detail.targetId}`, worker.workerName, e)}
+                                                                                                        role="button"
+                                                                                                        tabIndex={0}
+                                                                                                        aria-label={`${worker.workerName} 날짜별 공수 상세`}
+                                                                                                        aria-expanded={isWorkerExpanded}
+                                                                                                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); e.currentTarget.click(); } }}
+                                                                                                        onClick={(e) => toggleWorker(`${item.id}-${detail.targetId}`, worker.workerKey, e)}
                                                                                                     >
                                                                                                         <div className="flex items-center gap-2 min-w-0">
                                                                                                             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors flex-shrink-0 ${isWorkerExpanded ? 'bg-indigo-100 text-indigo-600 scale-110' : 'bg-slate-100 text-slate-500'}`}>
@@ -1866,17 +2047,20 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                                         </div>
                                                                                                         <div className="flex items-center gap-1.5 flex-shrink-0">
                                                                                                             <span className={`font-black tracking-tight whitespace-nowrap ${isWorkerExpanded ? 'text-indigo-600 text-xl' : 'text-indigo-600 text-lg'}`}>
-                                                                                                                {(worker.manDay || 0).toFixed(1)}
+                                                                                                                {formatManDay(worker.manDay || 0)}
                                                                                                             </span>
-                                                                                                            <FontAwesomeIcon
-                                                                                                                icon={isWorkerExpanded ? faChevronDown : faChevronRight}
-                                                                                                                className={`text-xs transition-transform duration-300 ${isWorkerExpanded ? 'rotate-180 text-indigo-400' : 'text-slate-300'}`}
-                                                                                                            />
+                                                                                                            <motion.span
+                                                                                                                animate={{ rotate: isWorkerExpanded ? 90 : 0 }}
+                                                                                                                transition={{ duration: reducedMotion ? 0 : 0.22, ease: BOARD_EASE }}
+                                                                                                                className={`inline-flex text-xs ${isWorkerExpanded ? 'text-indigo-400' : 'text-slate-300'}`}
+                                                                                                            >
+                                                                                                                <FontAwesomeIcon icon={faChevronRight} />
+                                                                                                            </motion.span>
                                                                                                         </div>
                                                                                                     </div>
 
-                                                                                                    {isWorkerExpanded && (
-                                                                                                        <div className="bg-slate-50 border-t border-indigo-100/30">
+                                                                                                    <BoardDisclosure open={isWorkerExpanded} reducedMotion={reducedMotion} className="bg-slate-50 border-t border-indigo-100/30">
+                                                                                                        {() => (<>
                                                                                                             {/* Level 3 Formula Explanation */}
                                                                                                             <div className="px-3 py-2 bg-indigo-50/30 border-b border-indigo-100/30 text-[10px] text-indigo-800 flex items-center gap-2">
                                                                                                                 <FontAwesomeIcon icon={faInfoCircle} className="text-indigo-400 flex-shrink-0" />
@@ -1891,13 +2075,18 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                                                         className="flex flex-col items-center justify-center p-2 bg-white border border-slate-100 rounded-lg shadow-sm hover:border-indigo-200 transition-colors"
                                                                                                                     >
                                                                                                                         <span className="text-slate-400 text-[10px] uppercase font-bold mb-0.5 tracking-wider whitespace-nowrap">{log.date}</span>
-                                                                                                                        <span className="font-black text-indigo-600 text-base">{log.manDay.toFixed(1)}</span>
+                                                                                                                        <span className="font-black text-indigo-600 text-base">{formatManDay(log.manDay)}</span>
+                                                                                                                        {log.reportIds.length > 0 ? <button type="button" className="mt-2 min-h-[44px] text-xs font-bold text-indigo-700 underline"
+                                                                                                                            aria-label={`${worker.workerName} ${log.date} 원본 일보 ${log.reportIds.length}건`}
+                                                                                                                            onClick={event => { event.stopPropagation(); setSourceSelection({ reportIds: log.reportIds, date: log.date, workerKey: worker.workerKey, workerName: worker.workerName, manDay: log.manDay }); }}>
+                                                                                                                            원본 일보 {log.reportIds.length}건 보기
+                                                                                                                        </button> : <span className="mt-1 text-xs text-slate-500">원본 연결 정보 없음</span>}
                                                                                                                     </div>
                                                                                                                 ))}
                                                                                                             </div>
-                                                                                                        </div>
-                                                                                                    )}
-                                                                                                </div>
+                                                                                                        </>)}
+                                                                                                    </BoardDisclosure>
+                                                                                                </motion.div>
                                                                                             );
                                                                                         })
                                                                                     ) : (
@@ -1906,12 +2095,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                         </div>
                                                                                     )}
                                                                                 </div>
-                                                                            </div>
-                                                                        )}
+                                                                            </>)}
+                                                                        </BoardDisclosure>
                                                                     </motion.div>
                                                                 );
                                                             })}
-                                                    </motion.div>
+                                                    </div>
                                                 </div>
 
                                                 {/* Close Button */}
@@ -1924,29 +2113,30 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                     </button>
                                                 </div>
 
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
+                                        </>)}
+                                    </BoardDisclosure>
                                 </motion.div>
                             );
                         })}
+                        </AnimatePresence>
                     </div >
                 ) : (
 
                     <div className="flex flex-col items-center justify-center h-full text-slate-400">
                         <FontAwesomeIcon icon={faChartBar} size="3x" className="mb-4 opacity-20" />
                         <p className="font-medium text-lg">
-                            {viewMode === 'site' ? '진행 중인 현장이 없습니다.' : '등록된 팀이 없습니다.'}
+                            {responsibleSiteView ? '선택한 조건에 해당하는 담당 현장의 참여 공수가 없습니다.' : teamAccess ? '선택한 조건에 해당하는 내 팀 참여 현황이 없습니다.' : viewMode === 'site' ? '진행 중인 현장이 없습니다.' : '등록된 팀이 없습니다.'}
                         </p>
                         <p className="text-sm mt-2">
-                            {viewMode === 'site'
+                            {responsibleSiteView ? '조회 월·검색어와 현장의 담당팀 설정을 확인해 주세요. 다른 팀이 작성한 참여 일보도 함께 집계됩니다.' : teamAccess ? '조회 월과 검색어를 확인해 주세요. 해당 월에 팀원의 참여 일보가 등록되면 표시됩니다.' : viewMode === 'site'
                                 ? "현장 관리 메뉴에서 현장 상태를 '진행중'으로 변경해주세요."
                                 : "팀 관리 메뉴에서 팀을 등록해주세요."}
                         </p>
                     </div>
                 )
                 }
-            </div >
+            </motion.div>
+            <WhiteboardSourceReportDialog selection={sourceSelection} onClose={() => setSourceSelection(null)} />
         </div >
     );
 };

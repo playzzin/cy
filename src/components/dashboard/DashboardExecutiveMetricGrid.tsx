@@ -9,6 +9,7 @@ import {
   faUsers,
 } from '@fortawesome/free-solid-svg-icons';
 import type { DashboardExecutiveStats } from '../../services/dashboardExecutiveService';
+import { getReportCoverageLabel } from '../../features/daily-report-coverage/dailyReportCoverage';
 
 const formatManDay = (value: number) =>
   Number(value || 0).toLocaleString('ko-KR', {
@@ -133,9 +134,9 @@ export const DashboardExecutiveMetricGrid = React.memo<DashboardExecutiveMetricG
     <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-3">
       <OperationInsightCard
         label="일보 커버리지"
-        value={stats.operations.reportCoverageRate}
-        unit="%"
-        description="활성 현장 대비 오늘 일보 등록률"
+        value={stats.operations.reportCoverageRate ?? getReportCoverageLabel(stats.dailyReportCoverage)}
+        unit={stats.operations.reportCoverageRate === null ? '' : '%'}
+        description="등록된 작업 일정과 실제 일보로 확인한 제출 대상 기준"
       />
       <OperationInsightCard
         label="평균 일보 공수"

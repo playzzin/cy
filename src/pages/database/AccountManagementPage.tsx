@@ -1,5 +1,8 @@
+import PagePrimaryAccountManager from '../../components/accounts/PagePrimaryAccountManager';
+import AccountPhotoRegistrationModal from '../../components/accounts/AccountPhotoRegistrationModal';
+import { BankAccountFields } from '../../services/bankAccountPhotoService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding,
@@ -251,18 +254,11 @@ const getCustomAccountKey = (entry: Pick<AccountDirectory, 'id' | 'name' | 'cate
     return `custom:${normalizedId || `${entry.category}:${normalizeText(entry.name) || '__unknown__'}`}`;
 };
 
+// 종료 상태는 배지에만 표시하며 계좌 조회에서 자동으로 제외하지 않는다.
 const isEndedAccountStatus = (value: unknown) => {
     const normalized = normalizeText(value).toLowerCase();
-    if (!normalized) return false;
-
-    return (
-        normalized === 'inactive' ||
-        normalized === 'archived' ||
-        normalized === 'closed' ||
-        normalized === 'ended' ||
-        normalized.includes('\uC885\uB8CC') ||
-        normalized.includes('\uBCF4\uAD00')
-    );
+    return ['inactive', 'archived', 'closed', 'ended'].includes(normalized)
+        || normalized.includes('종료') || normalized.includes('보관');
 };
 
 const parseAccountTab = (value: string | null): AccountTab => {
@@ -327,7 +323,7 @@ const getCompanyTypeBadgeClass = (type?: string | null) => {
 const getWorkerEmploymentStatus = (worker: Pick<Worker, 'status' | 'isActive'>): WorkerEmploymentFilter => {
     const normalizedStatus = normalizeText(worker.status).toLowerCase();
     if (worker.isActive === false) return 'retired';
-    if (normalizedStatus.includes('\uD1F4\uC0AC') || normalizedStatus === 'inactive') return 'retired';
+    if (normalizedStatus.includes('\uD1F4\uC0AC') || ['inactive', 'resigned', 'retired'].includes(normalizedStatus)) return 'retired';
     return 'active';
 };
 
@@ -405,6 +401,7 @@ const SummaryCard = ({
 
 const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded = false }) => {
     const [loading, setLoading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [searchParams] = useSearchParams();
     const requestedTabParam = searchParams.get('tab');
     const requestedTab = useMemo(() => parseAccountTab(requestedTabParam), [requestedTabParam]);
@@ -422,6 +419,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [companies, setCompanies] = useState<Company[]>([]);
     const [customAccounts, setCustomAccounts] = useState<AccountDirectory[]>([]);
     const [primaryAccount, setPrimaryAccount] = useState<PrimaryAccountSetting | null>(null);
+    useEffect(() => primaryAccountService.subscribe(setPrimaryAccount, () => setPrimaryAccount(null)), []);
 
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [savingKeys, setSavingKeys] = useState<Record<string, boolean>>({});
@@ -441,6 +439,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [uploadPreviewFileName, setUploadPreviewFileName] = useState('');
     const [uploadPreviewSections, setUploadPreviewSections] = useState<UploadPreviewSection[]>([]);
     const [applyingUpload, setApplyingUpload] = useState(false);
+    const [photoRegistrationOpen, setPhotoRegistrationOpen] = useState(false);
 
     useEffect(() => {
         writeHiddenAccountKeys(hiddenAccountKeys);
@@ -502,6 +501,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const loadData = useCallback(async () => {
         setLoading(true);
+        setLoadError(null);
         try {
             const [workerRows, teamRows, companyRows, customRows, savedPrimaryAccount] = await Promise.all([
                 manpowerService.getWorkers(true),
@@ -523,6 +523,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             setRowSnapshots({});
         } catch (error) {
             console.error('Failed to load account management data:', error);
+            setLoadError('계좌 데이터를 불러오지 못했습니다. 새로고침을 눌러 다시 시도해 주세요.');
         } finally {
             setLoading(false);
         }
@@ -583,7 +584,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const getWorkerTeamMeta = useCallback((worker: Worker) => {
         const team = teamById.get(worker.teamId || '');
-        const company = companyById.get(team?.companyId || '');
+        const company = companyById.get(team?.companyId || worker.companyId || '');
         const resolvedTeamName = normalizeText(team?.name) || normalizeText(worker.teamName);
         const teamKey = normalizeText(worker.teamId) || (resolvedTeamName ? `name:${resolvedTeamName}` : '__unassigned__');
         const teamType = normalizeText(team?.type) || normalizeText(worker.teamType) || '미지정';
@@ -591,7 +592,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             normalizeText(team?.companyName) ||
             normalizeText(company?.name) ||
             normalizeText(worker.companyName);
-        const companyKey = normalizeText(company?.id) || normalizeText(team?.companyId) || (companyName ? `name:${companyName}` : '__unassigned__');
+        const companyKey = normalizeText(company?.id) || normalizeText(team?.companyId) || normalizeText(worker.companyId) || (companyName ? `name:${companyName}` : '__unassigned__');
 
         return {
             teamKey,
@@ -599,38 +600,34 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             teamType,
             companyName,
             companyKey,
-            teamStatus: normalizeText(team?.status),
-            companyStatus: normalizeText(company?.status),
         };
     }, [companyById, teamById]);
 
     const isTeamAccountHidden = useCallback(
-        (team: Pick<Team, 'id' | 'name' | 'status'>) => isEndedAccountStatus(team.status) || isAccountKeyHidden(getTeamAccountKey(team)),
+        (team: Pick<Team, 'id' | 'name'>) => isAccountKeyHidden(getTeamAccountKey(team)),
         [isAccountKeyHidden]
     );
 
     const isCompanyAccountHidden = useCallback(
-        (company: Pick<Company, 'id' | 'name' | 'status'>) => isEndedAccountStatus(company.status) || isAccountKeyHidden(getCompanyAccountKey(company)),
+        (company: Pick<Company, 'id' | 'name'>) => isAccountKeyHidden(getCompanyAccountKey(company)),
         [isAccountKeyHidden]
     );
 
     const isCustomAccountHidden = useCallback(
-        (entry: Pick<AccountDirectory, 'id' | 'name' | 'category' | 'status'>) => isEndedAccountStatus(entry.status) || isAccountKeyHidden(getCustomAccountKey(entry)),
+        (entry: Pick<AccountDirectory, 'id' | 'name' | 'category'>) => isAccountKeyHidden(getCustomAccountKey(entry)),
         [isAccountKeyHidden]
     );
 
     const isWorkerAccountHidden = useCallback(
-        (worker: Pick<Worker, 'id' | 'name' | 'status' | 'isActive'>) => getWorkerEmploymentStatus(worker) === 'retired' || isAccountKeyHidden(getWorkerAccountKey(worker)),
+        (worker: Pick<Worker, 'id' | 'name'>) => isAccountKeyHidden(getWorkerAccountKey(worker)),
         [isAccountKeyHidden]
     );
 
     const isWorkerHiddenByAccountScope = useCallback(
         (worker: Worker) => {
-            const { teamKey, companyKey, teamStatus, companyStatus } = getWorkerTeamMeta(worker);
+            const { teamKey, companyKey } = getWorkerTeamMeta(worker);
             return (
                 isWorkerAccountHidden(worker) ||
-                isEndedAccountStatus(teamStatus) ||
-                isEndedAccountStatus(companyStatus) ||
                 isAccountKeyHidden(`team:${teamKey}`) ||
                 isAccountKeyHidden(`company:${companyKey}`)
             );
@@ -641,7 +638,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const cheongyeonWorkers = useMemo(() => {
         return workers.filter((worker) => {
             const { teamKey, companyName } = getWorkerTeamMeta(worker);
-            if (teamKey === '__unassigned__') return false;
+            if (teamKey === '__unassigned__' && getWorkerEmploymentStatus(worker) !== 'retired') return false;
             return isCheongyeonText(companyName);
         });
     }, [getWorkerTeamMeta, workers]);
@@ -806,8 +803,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     );
 
     const visibleWorkerCount = useMemo(
-        () => filteredWorkers.length,
-        [filteredWorkers]
+        () => visibleWorkerRows.length,
+        [visibleWorkerRows]
     );
 
     const filteredTeams = useMemo(() => {
@@ -969,6 +966,36 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         setWorkers((prev) => prev.map((worker) => (worker.id === workerId ? { ...worker, [field]: value } : worker)));
     };
 
+
+    const photoTargets = [
+        ...visibleCheongyeonWorkersForStats.filter(item => item.id).map(item => ({
+            id: `worker:${item.id}`, label: `작업자 · ${item.name} · ${item.teamName || '미배정'}${item.companyName ? ` · ${item.companyName}` : ''}`,
+        })),
+        ...visibleTeamsForStats.filter(item => item.id).map(item => ({ id: `team:${item.id}`, label: `팀 · ${item.name}` })),
+        ...visibleCompaniesForStats.filter(item => item.id).map(item => ({ id: `company:${item.id}`, label: `회사 · ${item.name}` })),
+        ...visibleCustomAccountsForStats.filter(item => item.id).map(item => ({ id: `custom:${item.id}`, label: `매입/기타 · ${item.name}` })),
+    ];
+
+    const savePhotoAccount = async (targetId: string, fields: BankAccountFields) => {
+        if (!photoTargets.some(target => target.id === targetId)) throw new Error('등록할 대상을 다시 선택해 주세요.');
+        const separator = targetId.indexOf(':');
+        const kind = targetId.slice(0, separator);
+        const id = targetId.slice(separator + 1);
+        if (kind === 'worker') {
+            await manpowerService.updateWorker(id, fields);
+            setWorkers(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        } else if (kind === 'team') {
+            await teamService.updateTeam(id, fields);
+            setTeams(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        } else if (kind === 'company') {
+            await companyService.updateCompany(id, fields);
+            setCompanies(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        } else if (kind === 'custom') {
+            await accountDirectoryService.updateEntry(id, fields);
+            setCustomAccounts(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        }
+        clearRowControl(targetId);
+    };
 
     const saveWorkerAccount = async (workerId: string) => {
         const target = workers.find((worker) => worker.id === workerId);
@@ -1815,7 +1842,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const renderStickyToolbar = (
         <div
-            className="sticky z-30 -mx-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-white/90"
+            className="sticky z-30 rounded-2xl border border-slate-200 bg-white/95 p-2.5 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-white/90"
             style={{ top: 'var(--header-height, 60px)' }}
             aria-label="계좌번호 관리 고정 도구"
         >
@@ -1828,7 +1855,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                             onChange={(event) => setSearchTerm(event.target.value)}
                             placeholder="작업자, 팀, 회사, 계좌번호, 예금주로 검색"
                             aria-label="계좌번호 관리 검색"
-                            className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                            className="w-full rounded-xl border border-slate-200 py-2 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                         />
                     </div>
 
@@ -1843,17 +1870,23 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                             계좌 미등록만 보기
                         </label>
 
-                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                            <input
-                                type="checkbox"
-                                checked={showHiddenAccounts}
-                                onChange={(event) => setShowHiddenAccounts(event.target.checked)}
-                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                            />
-                            {'\uC228\uAE40/\uC885\uB8CC \uD3EC\uD568'}
-                            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">{hiddenAccountCount}</span>
-                        </label>
+                        {(hiddenAccountCount > 0 || showHiddenAccounts) && (
+                            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={showHiddenAccounts}
+                                    onChange={(event) => setShowHiddenAccounts(event.target.checked)}
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                숨긴 계좌 보기
+                                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">{hiddenAccountCount}</span>
+                            </label>
+                        )}
 
+                        <button type="button" onClick={() => setPhotoRegistrationOpen(true)} disabled={loading || !!loadError || applyingUpload || Object.values(savingKeys).some(Boolean)}
+                            className="inline-flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-50">
+                            <FontAwesomeIcon icon={faUpload} />계좌번호 등록 (사진 분석)
+                        </button>
                         <button
                             type="button"
                             onClick={loadData}
@@ -1874,7 +1907,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                 role="tab"
                                 aria-selected={activeTab === tab.key}
                                 onClick={() => setActiveTab(tab.key)}
-                                className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                                className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${
                                     activeTab === tab.key
                                         ? 'bg-indigo-600 text-white shadow-sm'
                                         : 'text-slate-600 hover:bg-white'
@@ -1890,9 +1923,9 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     );
 
     const renderTransferToolbar = (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="flex flex-col gap-3">
-                <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-2.5 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <div className="text-sm font-semibold text-slate-800">계좌 엑셀 업로드 / 다운로드</div>
                         <div className="mt-1 text-xs text-slate-500">
@@ -2072,74 +2105,24 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const rowActionDangerClass = `${rowActionButtonClass} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`;
 
     return (
-        <div className={`space-y-6 ${embedded ? '' : 'min-h-screen bg-slate-50 p-6'}`}>
+        <div className={`space-y-3 ${embedded ? '' : 'min-h-screen bg-slate-50 p-4'}`}>
             {!embedded && (
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                            <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
-                                <FontAwesomeIcon icon={faCreditCard} />
-                                통합 계좌 운영 허브
-                            </div>
-                            <h1 className="mt-3 text-3xl font-bold text-slate-900">계좌번호 관리</h1>
-                            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                                작업자는 팀별로, 팀은 시공팀/지원팀/용역팀별로, 회사는 시공사/협력사/건설사별로 계좌를 묶어서 관리합니다.
-                                별도 지급이 필요한 매입계좌와 기타계좌도 같은 화면에서 함께 운영할 수 있습니다.
-                            </p>
-                        </div>
-
-                        <div className="grid min-w-[280px] grid-cols-2 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div>
-                                <div className="text-xs font-semibold text-slate-500">작업자 미등록</div>
-                                <div className="mt-1 text-2xl font-bold text-slate-900">{workerMissingCount}</div>
-                            </div>
-                            <div>
-                                <div className="text-xs font-semibold text-slate-500">팀 미등록</div>
-                                <div className="mt-1 text-2xl font-bold text-slate-900">{teamMissingCount}</div>
-                            </div>
-                            <div>
-                                <div className="text-xs font-semibold text-slate-500">회사 미등록</div>
-                                <div className="mt-1 text-2xl font-bold text-slate-900">{companyMissingCount}</div>
-                            </div>
-                            <div>
-                                <div className="text-xs font-semibold text-slate-500">커스텀 계좌</div>
-                                <div className="mt-1 text-2xl font-bold text-slate-900">{purchaseCount + otherCount}</div>
-                            </div>
-                        </div>
+                <header className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <h1 className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xl font-bold text-slate-900">
+                        <FontAwesomeIcon icon={faCreditCard} className="text-base text-indigo-600" />
+                        계좌번호 관리
+                    </h1>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500" aria-label="계좌 등록 현황">
+                        <span className="whitespace-nowrap">작업자 미등록 <strong className="ml-1 text-sm font-bold text-slate-900">{workerMissingCount}</strong></span>
+                        <span className="whitespace-nowrap">팀 미등록 <strong className="ml-1 text-sm font-bold text-slate-900">{teamMissingCount}</strong></span>
+                        <span className="whitespace-nowrap">회사 미등록 <strong className="ml-1 text-sm font-bold text-slate-900">{companyMissingCount}</strong></span>
+                        <span className="whitespace-nowrap">커스텀 계좌 <strong className="ml-1 text-sm font-bold text-slate-900">{purchaseCount + otherCount}</strong></span>
                     </div>
-                </div>
+                    <Link to="/payroll/bank-transfer" className="ml-auto inline-flex shrink-0 items-center whitespace-nowrap rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-sm font-bold text-amber-950 hover:bg-amber-200">국민은행 송금 목록 만들기 →</Link>
+                </header>
             )}
 
-            <div className={`rounded-2xl border p-5 shadow-sm ${primaryAccount ? 'border-amber-200 bg-amber-50' : 'border-dashed border-slate-300 bg-white'}`}>
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex items-start gap-3">
-                        <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${primaryAccount ? 'border-amber-300 bg-white text-amber-500' : 'border-slate-200 bg-slate-50 text-slate-400'}`}>
-                            <FontAwesomeIcon icon={faStar} />
-                        </span>
-                        <div>
-                            <div className="text-sm font-bold text-slate-900">대표계좌</div>
-                            {primaryAccount ? (
-                                <>
-                                    <div className="mt-1 font-semibold text-slate-800">
-                                        {[primaryAccount.bankName, primaryAccount.accountNumber, primaryAccount.accountHolder ? `(${primaryAccount.accountHolder})` : ''].filter(Boolean).join(' ')}
-                                    </div>
-                                    <div className="mt-1 text-xs text-slate-500">
-                                        {PRIMARY_ACCOUNT_SOURCE_LABEL[primaryAccount.sourceType]} · {primaryAccount.sourceName || '이름 없음'}
-                                    </div>
-                                </>
-                            ) : (
-                                <div className="mt-1 text-sm text-slate-500">아래 계좌의 “대표 설정” 버튼을 누르면 노무비 명세서의 위임 계좌 기본값으로 사용됩니다.</div>
-                            )}
-                        </div>
-                    </div>
-                    {primaryAccount && (
-                        <div className="inline-flex items-center gap-2 self-start rounded-full border border-amber-200 bg-white px-3 py-1.5 text-xs font-bold text-amber-700 lg:self-center">
-                            <FontAwesomeIcon icon={faCheck} />
-                            위임 계좌 기본값 적용
-                        </div>
-                    )}
-                </div>
-            </div>
+            <PagePrimaryAccountManager />
 
             {renderStickyToolbar}
 
@@ -2148,6 +2131,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             {loading ? (
                 <div className="rounded-2xl border border-slate-200 bg-white px-6 py-16 text-center text-sm text-slate-500 shadow-sm">
                     계좌 데이터를 불러오는 중입니다...
+                </div>
+            ) : loadError ? (
+                <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-8 text-sm text-rose-700">
+                    {loadError}
                 </div>
             ) : (
                 <>
@@ -2293,10 +2280,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                 <div className="flex flex-col gap-4">
                                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                                         <div>
-                                            <div className="text-sm font-semibold text-slate-900">청연 소속 팀 작업자 계좌만 표시합니다.</div>
+                                            <div className="text-sm font-semibold text-slate-900">청연 소속 작업자 계좌를 표시합니다.</div>
                                             <div className="mt-1 text-sm text-slate-500">
                                                 청연 소속 전체 {visibleCheongyeonWorkersForStats.length}명 중 현재 {visibleWorkerCount}명을 보고 있습니다.
-                                                기본값은 현재 작업자만 표시하며, 퇴사자는 필요할 때만 열어볼 수 있습니다.
+                                                퇴사자에는 종료된 팀과 미배정 퇴사자도 포함됩니다.
                                             </div>
                                         </div>
                                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -2330,6 +2317,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         key={option.key}
                                                         type="button"
                                                         onClick={() => setWorkerEmploymentFilter(option.key)}
+                                                        aria-pressed={workerEmploymentFilter === option.key}
                                                         className={getWorkerFilterButtonClass(workerEmploymentFilter === option.key)}
                                                     >
                                                         <span>{option.label}</span>
@@ -2351,6 +2339,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         key={option.key}
                                                         type="button"
                                                         onClick={() => setWorkerSalaryFilter(option.key)}
+                                                        aria-pressed={workerSalaryFilter === option.key}
                                                         className={getWorkerFilterButtonClass(workerSalaryFilter === option.key)}
                                                     >
                                                         <span>{option.label}</span>
@@ -2549,7 +2538,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                 className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                                                                             >
                                                                                 <FontAwesomeIcon icon={faStar} />
-                                                                                {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                                {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '공통 대표계좌' : '공통 대표 설정'}
                                                                             </button>
                                                                             <button
                                                                                 type="button"
@@ -2619,7 +2608,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         const accountKey = getTeamAccountKey(team);
                                                         const isManuallyHidden = isAccountKeyHidden(accountKey);
                                                         const isEndedStatus = isEndedAccountStatus(team.status);
-                                                        const isHiddenRow = isManuallyHidden || isEndedStatus;
+                                                        const isHiddenRow = isManuallyHidden;
                                                         return (
                                                             <tr key={team.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                 <td className="px-4 py-3">
@@ -2706,7 +2695,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                             className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                                                                         >
                                                                             <FontAwesomeIcon icon={faStar} />
-                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '공통 대표계좌' : '공통 대표 설정'}
                                                                         </button>
                                                                         <button
                                                                             type="button"
@@ -2775,7 +2764,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         const accountKey = getCompanyAccountKey(company);
                                                         const isManuallyHidden = isAccountKeyHidden(accountKey);
                                                         const isEndedStatus = isEndedAccountStatus(company.status);
-                                                        const isHiddenRow = isManuallyHidden || isEndedStatus;
+                                                        const isHiddenRow = isManuallyHidden;
                                                         return (
                                                             <tr key={company.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                 <td className="px-4 py-3">
@@ -2862,7 +2851,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                             className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                                                                         >
                                                                             <FontAwesomeIcon icon={faStar} />
-                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                            {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '공통 대표계좌' : '공통 대표 설정'}
                                                                         </button>
                                                                         <button
                                                                             type="button"
@@ -2960,8 +2949,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                     const isEditing = !!editingKeys[rowKey];
                                                                     const accountKey = getCustomAccountKey(entry);
                                                                     const isManuallyHidden = isAccountKeyHidden(accountKey);
-                                                                    const isEndedStatus = isEndedAccountStatus(entry.status);
-                                                                    const isHiddenRow = isManuallyHidden || isEndedStatus;
+                                                                    const isHiddenRow = isManuallyHidden;
                                                                     return (
                                                                         <tr key={entry.id} className={`align-top ${isHiddenRow ? 'bg-slate-50 text-slate-500' : ''}`}>
                                                                             <td className="px-4 py-3">
@@ -3047,7 +3035,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                                         className={`${rowActionButtonClass} ${isPrimary ? 'border-amber-400 bg-amber-400 text-slate-900' : 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
                                                                                     >
                                                                                         <FontAwesomeIcon icon={faStar} />
-                                                                                        {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '대표계좌' : '대표 설정'}
+                                                                                        {savingKeys[primarySavingKey] ? '설정중' : isPrimary ? '공통 대표계좌' : '공통 대표 설정'}
                                                                                     </button>
                                                                                     <button type="button" disabled={!entry.id || !!savingKeys[rowSavingKey]} onClick={() => entry.id && deleteCustomEntry(entry.id)} className={rowActionDangerClass}>
                                                                                         <FontAwesomeIcon icon={faTrash} />
@@ -3080,6 +3068,11 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                     )}
                 </>
             )}
+            {photoRegistrationOpen && <AccountPhotoRegistrationModal
+                targets={photoTargets}
+                onSave={savePhotoAccount}
+                onClose={() => setPhotoRegistrationOpen(false)}
+            />}
         </div>
     );
 };

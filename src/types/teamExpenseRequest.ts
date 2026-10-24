@@ -1,6 +1,7 @@
 import type { TeamExpenseClaimAttachment } from './teamExpenseLedger';
 
 export interface ExpenseTeamOption { id: string; name: string; color: string; icon?: string }
+export interface ExpensePaymentCardOption { id: string; label: string; teamId: string }
 
 export interface ExpenseReceiptAnalysis {
   date: string | null;
@@ -33,6 +34,7 @@ export interface TeamExpenseRequest {
   amount: number;
   paymentMethod: string;
   memo: string;
+  paymentCardId?: string;
   attachments: TeamExpenseClaimAttachment[];
   status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
@@ -47,6 +49,7 @@ export interface TeamExpenseRequestData {
   canReview: boolean;
   teams: ExpenseTeamOption[];
   payerTeams: ExpenseTeamOption[];
+  paymentCards?: ExpensePaymentCardOption[];
   categories: Array<{ id: string; label: string }>;
   requests: TeamExpenseRequest[];
 }
@@ -60,6 +63,7 @@ export interface SubmitTeamExpenseRequest {
   description: string;
   amount: number;
   paymentMethod: string;
+  paymentCardId?: string;
   memo: string;
   receiptIds: string[];
 }

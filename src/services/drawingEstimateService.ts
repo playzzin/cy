@@ -1,3 +1,5 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
+import { DEFAULT_GEMINI_TEXT_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 
 export type DrawingWorkType = 'scaffold' | 'shoring' | 'common';
@@ -719,9 +721,9 @@ const normalizeAnalysis = (raw: any): DrawingAnalysisResult => {
     };
 };
 
-const getGeminiGenerateContentUrl = (apiKey: string): string => {
-    const model = normalizeGeminiModelName(aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
-    return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+const getGeminiGenerateContentUrl = (): string => {
+    const model = normalizeGeminiModelName(aiSettingsService.getModels().textModel, DEFAULT_GEMINI_TEXT_MODEL);
+    return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 };
 
 const roundWon = (value: number): number => Math.round(value || 0);
@@ -794,10 +796,8 @@ const difficultyText = (install: DifficultyGrade, dismantle: DifficultyGrade): s
 export const drawingEstimateService = {
     async analyzeDrawingFiles(files: File[], projectHint: string): Promise<DrawingAnalysisResult> {
         aiSettingsService.assertCurrentPageEnabled('도면 Gemini 분석');
-        const apiKey = aiSettingsService.getApiKey();
-        if (!apiKey) {
-            throw new Error('Gemini API Key가 없습니다. /settings/ai에서 API Key를 등록해 주세요.');
-        }
+        
+        
 
         if (files.length === 0) {
             throw new Error('분석할 도면 파일을 업로드해 주세요.');
@@ -821,7 +821,7 @@ export const drawingEstimateService = {
             }
         })));
 
-        const response = await fetch(getGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('drawing-estimate')(getGeminiGenerateContentUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -833,7 +833,7 @@ export const drawingEstimateService = {
                     ]
                 }],
                 generationConfig: {
-                    temperature: 0.05,
+                    ...geminiTextGenerationOptions(aiSettingsService.getModels().textModel, 0.05),
                     responseMimeType: 'application/json',
                     responseJsonSchema: DRAWING_ANALYSIS_SCHEMA
                 }

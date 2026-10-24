@@ -121,11 +121,11 @@ export const GoogleDriveManagerPage = () => {
                 <FontAwesomeIcon icon={faExclamationTriangle} className="text-4xl text-amber-500 mb-4" />
                 <h2 className="text-xl font-bold text-slate-700 mb-2">Configuration Missing</h2>
                 <p className="max-w-md text-center">
-                    Please set <code>REACT_APP_GOOGLE_CLIENT_ID</code> and <code>REACT_APP_GOOGLE_API_KEY</code> in your environment (<code>.env.local</code>).
+                    Please set <code>REACT_APP_GOOGLE_CLIENT_ID</code> and <code>REACT_APP_GOOGLE_DRIVE_API_KEY</code> in your environment (<code>.env.local</code>).
                 </p>
                 <div className="mt-6 bg-slate-100 p-4 rounded-lg text-sm font-mono text-left">
                     REACT_APP_GOOGLE_CLIENT_ID=your_client_id<br />
-                    REACT_APP_GOOGLE_API_KEY=your_api_key
+                    REACT_APP_GOOGLE_DRIVE_API_KEY=your_api_key
                 </div>
             </div>
         );

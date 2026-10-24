@@ -1,0 +1,96 @@
+.engine-oil-field-label {
+    display: none;
+}
+
+/* Reflow the same inputs into vertical vehicle cards without duplicating drafts. */
+@media (max-width: 1023px) {
+    .engine-oil-table,
+    .engine-oil-table > tbody {
+        display: block;
+    }
+
+    .engine-oil-table > tbody > tr:not(.engine-oil-record),
+    .engine-oil-table > tbody > tr:not(.engine-oil-record) > td {
+        display: block;
+        width: 100%;
+    }
+
+    .engine-oil-table .engine-oil-record {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        overflow: hidden;
+        border: 1px solid #e2e8f0;
+        border-radius: 1rem;
+    }
+
+    .engine-oil-record + .engine-oil-record {
+        margin-top: 0.75rem;
+    }
+
+    .engine-oil-record > td {
+        min-width: 0;
+        padding: 0.5rem 0.75rem;
+    }
+
+    .engine-oil-record .engine-oil-plate {
+        grid-column: 1;
+        grid-row: 1;
+        align-self: center;
+        overflow-wrap: anywhere;
+    }
+
+    .engine-oil-plate > span > svg {
+        flex-shrink: 0;
+    }
+
+    .engine-oil-record .engine-oil-status {
+        grid-column: 2;
+        grid-row: 1;
+        padding-left: 0;
+        background: transparent;
+    }
+
+    .engine-oil-record .engine-oil-field {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        border-top: 1px solid rgb(148 163 184 / 20%);
+    }
+
+    .engine-oil-record .engine-oil-field-label {
+        display: block;
+        flex-shrink: 0;
+        color: #64748b;
+        font-family: inherit;
+        font-size: 0.875rem;
+        font-weight: 600;
+        text-align: left;
+    }
+
+    .engine-oil-field > span:last-child {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        text-align: right;
+    }
+
+    .engine-oil-field > input {
+        width: 9rem;
+        min-width: 0;
+        max-width: 55%;
+        min-height: 44px;
+        font-size: 1rem;
+    }
+
+    .engine-oil-record .engine-oil-actions {
+        grid-column: 1 / -1;
+        border-top: 1px solid rgb(148 163 184 / 20%);
+    }
+
+    .engine-oil-actions button {
+        width: 100%;
+        min-height: 44px;
+        justify-content: center;
+    }
+}

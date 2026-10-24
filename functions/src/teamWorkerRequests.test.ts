@@ -1,7 +1,7 @@
 import { strict as assert } from 'assert';
 import { test } from 'node:test';
 import * as admin from 'firebase-admin';
-import { handleTeamWorkerRequest, workerFields, workerPayroll } from './teamWorkerRequests';
+import { handleTeamWorkerRequest, readTeamWorkerRequestList, workerFields, workerPayroll } from './teamWorkerRequests';
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=';
 const rejected = (code: string) => (error: any) => error.code === code;
 test('인증과 필수 입력을 검증한다', async () => {
@@ -117,4 +117,38 @@ test('소속팀·서류 접근 제한, 승인 전 미등록, 승인 원자성·�
 
 test('급여 설정은 지원되는 구분과 양의 정수 단가만 허용한다', () => {
  for (const payroll of [undefined, {}, {payType:'일급제',unitPrice:0}, {payType:'일급제',unitPrice:'150000'}, {payType:'일급제',unitPrice:1.2}, {payType:'일급제',unitPrice:1000000001}, {payType:'unknown',unitPrice:1}]) assert.throws(() => workerPayroll(payroll), rejected('invalid-argument'));
+});
+
+
+test('인력 신청 목록과 회사 정보를 병렬 조회하고 월·소유자 범위를 유지한다', async () => {
+    let finishPage!: (value: any) => void, finishCompany!: (value: any) => void;
+    const page = new Promise(resolve => { finishPage = resolve; });
+    const company = new Promise(resolve => { finishCompany = resolve; });
+    const reads: string[] = [], predicates: unknown[][] = [], projections: string[][] = [];
+    const db = { collection: (name: string) => {
+        const query = {
+            where: (...predicate: unknown[]) => { predicates.push(predicate); return query; },
+            orderBy: () => query, limit: () => query,
+            select: (...fields: string[]) => { projections.push(fields); return query; },
+            get: () => { reads.push(name); return name === 'companies' ? company : page; },
+        };
+        return query;
+    } };
+    const actor = { uid: 'leader', name: '팀장', canReview: false, teams: [] };
+    const loading = readTeamWorkerRequestList(db as any, actor, { yearMonth: '2026-09' });
+    assert.deepEqual(reads, ['team_worker_requests', 'companies']);
+    assert.deepEqual(predicates, [['ownerUid', '==', 'leader'], ['yearMonth', '==', '2026-09']]);
+    assert.deepEqual(projections, [['name', 'status', 'isActive']]);
+    const document = (id: string, data: any) => ({ id, data: () => data });
+    finishPage({ size: 3, docs: [
+        document('pending', { yearMonth: '2026-09', status: 'pending', submittedAt: '2026-09-01' }),
+        document('draft', { yearMonth: '2026-09', status: 'uploading' }),
+        document('other-month', { yearMonth: '2026-08', status: 'approved' }),
+    ] });
+    finishCompany({ size: 2, docs: [document('current', { name: '㈜청연이엔지' }), document('old', { name: '청연이엔지', isActive: false })] });
+    const result = await loading;
+    assert.deepEqual(result.requests.map(row => row.id), ['pending']);
+    assert.deepEqual(result.company, { id: 'current', name: '(주)청연이엔지' });
+    assert.equal(result.nextCursor, null);
+    assert.equal(result.canReview, false);
 });

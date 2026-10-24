@@ -1,3 +1,5 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 /**
  * 개선된 에이전트 오케스트레이터
  * 스마트 작업 분배, 진행 추적, 병렬 처리 지원
@@ -29,19 +31,15 @@ function getTodayDate(): string {
 
 // Gemini AI 호출
 async function callGeminiSimple(prompt: string): Promise<string> {
-    const apiKey = aiSettingsService.getApiKey();
-    if (!apiKey) {
-        return 'Gemini API Key가 설정되지 않아 일반 대화 응답을 생성할 수 없습니다.\n\n' +
-            '- 데이터 조회형 질문(예: "오늘 일보 몇 건?")은 API Key 없이도 동작합니다.\n' +
-            '- 일반 대화형 응답이 필요하면 /settings/ai 에서 API Key를 설정해 주세요.';
-    }
+    
+    
 
     try {
         aiSettingsService.assertCurrentPageEnabled('AI 에이전트 대화');
-        const model = aiSettingsService.getModels().textModel || 'gemini-2.5-flash';
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const model = aiSettingsService.getModels().textModel || DEFAULT_GEMINI_TEXT_MODEL;
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-        const response = await fetch(
+        const response = await trackedGeminiFetch('agent-orchestrator')(
             endpoint,
             {
                 method: 'POST',

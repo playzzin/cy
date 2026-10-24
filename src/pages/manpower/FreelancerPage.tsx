@@ -6,6 +6,10 @@ import 'handsontable/dist/handsontable.full.min.css';
 import Handsontable from 'handsontable';
 import { freelancerService } from '../../services/freelancerService';
 import { buildFreelancerTaxExcelRows } from '../../utils/freelancerTaxExcel';
+import { freelancerReportRowKey } from '../../utils/freelancerYearlyData';
+import { buildFreelancerTeamHistory, freelancerTeamBackground } from '../../utils/freelancerTeamHistory';
+import type { FreelancerTeamHistory } from '../../utils/freelancerTeamHistory';
+import FreelancerTeamHistoryDialog from './FreelancerTeamHistoryDialog';
 
 import { addYears, subYears } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -25,11 +29,15 @@ const FreelancerPage: React.FC = () => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [allFreelancers, setAllFreelancers] = useState<any[]>([]);
     const [displayData, setDisplayData] = useState<any[]>([]);
+    const [historyDetails, setHistoryDetails] = useState<{ name: string; teamId: string; history: FreelancerTeamHistory } | null>(null);
+    const [editedTeamHistory, setEditedTeamHistory] = useState<Map<string, FreelancerTeamHistory> | null>(null);
+    const historyRefreshFrame = useRef<number | null>(null);
     const EXTRA_EDIT_ROWS = 10;
     const { teams: masterTeams, companies: masterCompanies, loading: masterLoading } = useMasterData();
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [reportTeams, setReportTeams] = useState<Array<{ id: string; name: string }>>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [downloadingExcel, setDownloadingExcel] = useState(false);
     const [downloadingTaxExcel, setDownloadingTaxExcel] = useState(false);
     const [taxExcelMonth, setTaxExcelMonth] = useState(new Date().getMonth() + 1);
@@ -214,9 +222,10 @@ const FreelancerPage: React.FC = () => {
         if (masterLoading) return;
         setLoading(true);
         setAllFreelancers([]);
+        setLoadError('');
 
         try {
-            // 서비스에서 모든 소스(FreelancerPayment + 일보)를 병합한 결과를 가져옴
+            // 월 정산 당시의 작업자·팀별 신고 금액과 수기 입력을 병합한다.
             const freelancerResult = await freelancerService.getFreelancerYearlyData(year);
 
             const cheongyeonTeamIds = cheongyeonTeams
@@ -249,7 +258,7 @@ const FreelancerPage: React.FC = () => {
             setAllFreelancers(normalized);
             allFreelancersRef.current = normalized;
         } catch (error) {
-            console.error('Failed to fetch yearly data (suppressed alert):', error);
+            setLoadError(error instanceof Error ? error.message : '신고 자료를 불러오지 못했습니다. 다시 시도해 주세요.');
         } finally {
             setLoading(false);
         }
@@ -312,8 +321,8 @@ const FreelancerPage: React.FC = () => {
 
         // gridNo가 없는 데이터는 남은 빈 자리에 순차 배치한다.
         const standard = filtered.filter(f => !(Number(f?.gridNo) || 0));
-        const anchoredIds = new Set(anchored.map(a => a.id));
-        const standardToPlace = standard.filter(f => !anchoredIds.has(f.id));
+        const anchoredIds = new Set(anchored.map(freelancerReportRowKey));
+        const standardToPlace = standard.filter(f => !anchoredIds.has(freelancerReportRowKey(f)));
 
         let standardIdx = 0;
         for (let i = 0; i < totalSlots; i++) {
@@ -367,18 +376,41 @@ const FreelancerPage: React.FC = () => {
         setDisplayData(formatted);
     }, [EXTRA_EDIT_ROWS, allFreelancers, selectedTeamId, normalizeTeamId, sortFreelancers, toFiniteAmount]);
 
-    const colors = [
-        'linear-gradient(135deg, #FF5252 0%, #D32F2F 100%)', // Red
-        'linear-gradient(135deg, #2196F3 0%, #1976D2 100%)', // Blue
-        'linear-gradient(135deg, #7C4DFF 0%, #512DA8 100%)', // Deep Purple
-        'linear-gradient(135deg, #E040FB 0%, #C2185B 100%)', // Pink
-        'linear-gradient(135deg, #FFAB40 0%, #F57C00 100%)', // Orange
-        'linear-gradient(135deg, #FFD740 0%, #FFA000 100%)', // Amber
-        'linear-gradient(135deg, #69F0AE 0%, #388E3C 100%)', // Green
-        'linear-gradient(135deg, #40C4FF 0%, #0288D1 100%)', // Light Blue
-        'linear-gradient(135deg, #18FFFF 0%, #0097A7 100%)', // Cyan
-        'linear-gradient(135deg, #EEFF41 0%, #AFB42B 100%)'  // Lime
-    ];
+    const historyThemes = useMemo(() => visibleTeams.map((team, index) => ({
+            id: team.id,
+            name: team.name,
+            background: freelancerTeamBackground(team, index),
+        })), [visibleTeams]);
+    const loadedTeamHistory = useMemo(() => buildFreelancerTeamHistory(allFreelancers, historyThemes, year), [allFreelancers, historyThemes, year]);
+    const teamHistory = editedTeamHistory ?? loadedTeamHistory;
+
+    useEffect(() => {
+        setEditedTeamHistory(null);
+        return () => {
+            if (historyRefreshFrame.current !== null) cancelAnimationFrame(historyRefreshFrame.current);
+            historyRefreshFrame.current = null;
+        };
+    }, [loadedTeamHistory, selectedTeamId]);
+
+    const readGridHistory = useCallback((instance: any) => {
+        const latestRows = new Map(allFreelancers.map(item => [freelancerReportRowKey(item), item]));
+        instance.getSourceData().filter((item: any) => item && !item.isEmpty && !item.isFooter)
+            .forEach((item: any) => latestRows.set(freelancerReportRowKey(item), item));
+        return buildFreelancerTeamHistory(Array.from(latestRows.values()), historyThemes, year);
+    }, [allFreelancers, historyThemes, year]);
+
+    const refreshHistoryAfterEdit = useCallback(() => {
+        if (historyRefreshFrame.current !== null) cancelAnimationFrame(historyRefreshFrame.current);
+        // 입력 확정과 새 행 승격이 끝난 다음 안내만 갱신한다. 그리드 원본/행 순서는 유지한다.
+        historyRefreshFrame.current = requestAnimationFrame(() => {
+            historyRefreshFrame.current = null;
+            const instance = hotRef.current?.hotInstance;
+            if (instance && !instance.isDestroyed) setEditedTeamHistory(readGridHistory(instance));
+        });
+    }, [readGridHistory]);
+
+    const closeHistoryDetails = useCallback(() => setHistoryDetails(null), []);
+    useEffect(() => { closeHistoryDetails(); }, [selectedTeamId, year, closeHistoryDetails]);
 
     const selectedTeamTheme = useMemo(() => {
         const selectedIndex = visibleTeams.findIndex((team: any) => team.id === selectedTeamId);
@@ -389,15 +421,24 @@ const FreelancerPage: React.FC = () => {
             };
         }
         return {
-            background: visibleTeams[selectedIndex]?.color || colors[selectedIndex % colors.length],
+            background: freelancerTeamBackground(visibleTeams[selectedIndex], selectedIndex),
             borderColor: '#0f172a'
         };
-    }, [colors, selectedTeamId, visibleTeams]);
+    }, [selectedTeamId, visibleTeams]);
 
     const columns = useMemo((): any[] => [
         { data: 'no', title: 'No', readOnly: true, width: 45, renderer: centerRenderer },
         {
-            data: 'name', title: '이     름', type: 'text', width: 90, renderer: (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) => {
+            data: 'name', title: '이     름', type: 'text', width: 170, renderer: (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) => {
+                centerRenderer(instance, td, row, col, prop, value, cellProperties);
+                // Handsontable은 팀 전환/스크롤 시 셀을 재사용한다.
+                td.style.removeProperty('--previous-team-background');
+                td.style.removeProperty('--previous-team-text');
+                td.style.removeProperty('font-weight');
+                td.style.removeProperty('color');
+                td.removeAttribute('title');
+                td.removeAttribute('aria-label');
+                td.removeAttribute('data-previous-team-id');
                 if (cellProperties.isFooter) {
                     td.style.fontWeight = '900';
                     td.style.color = '#ff0000';
@@ -405,7 +446,42 @@ const FreelancerPage: React.FC = () => {
                     td.innerText = value;
                     return td;
                 }
-                return centerRenderer(instance, td, row, col, prop, value, cellProperties);
+                const rowData = instance.getSourceDataAtRow(instance.toPhysicalRow(row));
+                const history = rowData?.id && !rowData.isEmpty ? teamHistory.get(freelancerReportRowKey(rowData)) : undefined;
+                if (history) {
+                    td.title = history.title;
+                    td.setAttribute('aria-label', `${value}\n${history.title}`);
+                    if (history.background && history.textColor) {
+                        td.classList.add('freelancer-previous-team-cell');
+                        td.style.setProperty('--previous-team-background', history.background);
+                        td.style.setProperty('--previous-team-text', history.textColor);
+                        if (history.previousTeamId) td.dataset.previousTeamId = history.previousTeamId;
+                    }
+                    const detailsButton = document.createElement('button');
+                    detailsButton.type = 'button';
+                    detailsButton.className = 'freelancer-history-button';
+                    detailsButton.setAttribute('aria-label', `${value} · ${history.otherTeams.map(team => team.teamName).join(', ')} · 신고 내역 보기`);
+                    history.otherTeams.forEach(team => {
+                        const chip = document.createElement('span');
+                        chip.className = 'freelancer-history-team-chip';
+                        chip.dataset.teamId = team.teamId;
+                        chip.textContent = team.teamName;
+                        if (team.background) chip.style.background = team.background;
+                        if (team.textColor) chip.style.color = team.textColor;
+                        detailsButton.append(chip);
+                    });
+                    detailsButton.onmousedown = event => event.stopPropagation();
+                    detailsButton.ondblclick = event => event.stopPropagation();
+                    detailsButton.onkeydown = event => event.stopPropagation();
+                    detailsButton.onclick = event => {
+                        event.stopPropagation();
+                        // 입력 중에는 그리드만 갱신되므로, 열 때 최신 화면 금액을 함께 읽는다.
+                        const latestHistory = readGridHistory(instance).get(freelancerReportRowKey(rowData));
+                        if (latestHistory) setHistoryDetails({ name: String(value), teamId: rowData.teamId || '', history: latestHistory });
+                    };
+                    td.append(detailsButton);
+                }
+                return td;
             }
         },
         { data: 'total', title: '합     계', readOnly: true, width: 110, renderer: currencyRedRenderer },
@@ -428,7 +504,7 @@ const FreelancerPage: React.FC = () => {
         { data: 'reportableAmount', title: '신고 가능 금액', type: 'numeric', width: 120, className: 'col-orange-bg', renderer: glowRenderer },
         { data: 'depositDate', title: '입금 날짜', type: 'date', dateFormat: 'YYYY-MM-DD', width: 110, className: 'htCenter htMiddle' },
         { data: 'paymentMemo', title: '비     고', type: 'text', width: 180, className: 'htMiddle px-3' }
-    ], [centerRenderer, currencyRedRenderer, currencyRenderer, glowRenderer]);
+    ], [centerRenderer, currencyRedRenderer, currencyRenderer, glowRenderer, teamHistory, readGridHistory]);
 
     const nestedHeaders = useMemo(() => [
         [
@@ -466,7 +542,7 @@ const FreelancerPage: React.FC = () => {
         setAllFreelancers(prev => {
             const next = [...prev];
             modifiedInGrid.forEach((item: any) => {
-                const idx = next.findIndex(f => f.id === item.id);
+                const idx = next.findIndex(f => freelancerReportRowKey(f) === freelancerReportRowKey(item));
                 if (idx !== -1) {
                     next[idx] = { ...item };
                 } else {
@@ -486,13 +562,14 @@ const FreelancerPage: React.FC = () => {
         const hotInstance = hotRef.current?.hotInstance;
         if (!hotInstance) return;
 
-        let hasStructuralChange = false;
+        let hasDataChange = false;
 
         changes.forEach(([row, prop, oldValue, newValue]: any) => {
             if (oldValue === newValue) return;
 
             let rowData = hotInstance.getSourceDataAtRow(row);
             if (!rowData || rowData.isFooter) return;
+            hasDataChange = true;
 
             // 1. 숫자/텍스트 타입 변환
             const numericCols = ['m01', 'm02', 'm03', 'm04', 'm05', 'm06', 'm07', 'm08', 'm09', 'm10', 'm11', 'm12', 'performanceBonus', 'reportableAmount'];
@@ -525,13 +602,14 @@ const FreelancerPage: React.FC = () => {
                 requestAnimationFrame(() => {
                     hotInstance.setDataAtRowProp([
                         [row, 'id', tempId, 'internal'],
+                        [row, 'teamId', newRecord.teamId, 'internal'],
+                        [row, 'teamName', newRecord.teamName, 'internal'],
                         [row, 'isEmpty', false, 'internal'],
                         [row, 'gridNo', rowData.no, 'internal'],
                         [row, prop, processedValue, 'internal']
                     ]);
                     recalculateRow(row, hotInstance);
                 });
-                hasStructuralChange = true;
             } else {
                 // 3. 기존 행 수정
                 rowData[prop] = processedValue;
@@ -545,6 +623,7 @@ const FreelancerPage: React.FC = () => {
 
         // 4. Ref 업데이트 (상태 변경 없이 메모리 상에서만 유지)
         allFreelancersRef.current = hotInstance.getSourceData().filter((r: any) => r && !r.isEmpty && !r.isFooter);
+        if (hasDataChange) refreshHistoryAfterEdit();
     };
 
     const recalculateRow = (row: number, hotInstance: any) => {
@@ -985,6 +1064,10 @@ const FreelancerPage: React.FC = () => {
 
     return (
         <div className="freelancer-page-container">
+            {loadError && <div role="alert" className="p-3 text-red-700 bg-red-50">
+                신고 자료를 표시할 수 없습니다. {loadError}
+                <button type="button" onClick={fetchData} className="ml-3 underline">다시 불러오기</button>
+            </div>}
             {/* 상단 팀 내비게이션 */}
             <div className="team-tab-navigation">
                 {/* 년도 조절기 (전체보기 버튼 대신 위치) */}
@@ -1005,7 +1088,7 @@ const FreelancerPage: React.FC = () => {
                         key={team.id}
                         onClick={() => handleTeamChange(team.id)}
                         className={`team-tab-btn ${selectedTeamId === team.id ? 'active' : ''}`}
-                        style={{ ['--tab-color' as any]: team.color || colors[idx % 10] }}
+                        style={{ ['--tab-color' as any]: freelancerTeamBackground(team, idx) }}
                     >
                         {team.name}
                     </button>
@@ -1029,9 +1112,17 @@ const FreelancerPage: React.FC = () => {
                 <span className="freelancer-salary-legend-chip is-monthly">월급제</span>
                 <span className="freelancer-salary-legend-chip is-agency">용역팀</span>
                 <span className="ml-3 text-xs font-semibold text-slate-600">
-                    월별 금액은 통합급여관리에서 전체법인으로 정산 저장한 세전 금액이며 직접 수정할 수 있습니다.
+                    월별 금액은 전체법인 정산에 저장된 세전 금액입니다. 팀을 이동해도 이전 신고액은 당시 팀에서 조회하며, 수정값은 선택한 팀에만 반영됩니다.
                 </span>
             </div>
+
+            <p className="freelancer-team-history-hint">
+                이름 아래 팀명을 누르면 팀별 신고 내역을 볼 수 있습니다.
+            </p>
+
+            {historyDetails && <FreelancerTeamHistoryDialog
+                name={historyDetails.name} year={year} teamId={historyDetails.teamId}
+                history={historyDetails.history} onClose={closeHistoryDetails} />}
 
             <main className="excel-main">
                 <div className="relative freelancer-table-shell" ref={tableWrapRef}>
@@ -1043,6 +1134,7 @@ const FreelancerPage: React.FC = () => {
                     <HotTable
                         ref={hotRef}
                         data={displayData}
+                        readOnly={!!loadError}
                         columns={columns}
                         rowHeaders={false}
                         nestedHeaders={nestedHeaders}
@@ -1094,6 +1186,11 @@ const FreelancerPage: React.FC = () => {
                         licenseKey="non-commercial-and-evaluation"
                         stretchH="all"
                         fixedColumnsLeft={2}
+                        rowHeights={row => {
+                            const data = displayData[row];
+                            const history = data && !data.isEmpty && !data.isFooter ? teamHistory.get(freelancerReportRowKey(data)) : undefined;
+                            return history ? 28 + history.otherTeams.length * 28 : 26;
+                        }}
                         manualColumnResize={true}
                         contextMenu={true}
                         copyPaste={true}
@@ -1115,11 +1212,11 @@ const FreelancerPage: React.FC = () => {
                     />
                 </div>
 
-                <div className="flex justify-end gap-3 mt-4">
+                <div className="flex flex-wrap justify-end gap-3 mt-4">
                     <select
                         value={taxExcelMonth}
                         onChange={(event) => setTaxExcelMonth(Number(event.target.value))}
-                        disabled={loading || downloadingTaxExcel}
+                        disabled={loading || !!loadError || downloadingTaxExcel}
                         aria-label="세무용 엑셀 월 선택"
                         className="rounded border border-emerald-300 bg-white px-3 py-3 font-bold text-emerald-800 shadow-sm disabled:opacity-60"
                     >
@@ -1129,7 +1226,7 @@ const FreelancerPage: React.FC = () => {
                     </select>
                     <button
                         onClick={handleDownloadTaxExcel}
-                        disabled={loading || downloadingTaxExcel}
+                        disabled={loading || !!loadError || downloadingTaxExcel}
                         className="flex items-center gap-2 px-6 py-3 bg-teal-700 text-white rounded font-black shadow-lg hover:bg-teal-800 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                         <FontAwesomeIcon icon={downloadingTaxExcel ? faSpinner : faFileExcel} spin={downloadingTaxExcel} />
@@ -1137,7 +1234,7 @@ const FreelancerPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleDownloadExcel}
-                        disabled={loading || downloadingExcel}
+                        disabled={loading || !!loadError || downloadingExcel}
                         className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded font-black shadow-lg hover:bg-emerald-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                         <FontAwesomeIcon icon={downloadingExcel ? faSpinner : faFileExcel} spin={downloadingExcel} />
@@ -1145,7 +1242,7 @@ const FreelancerPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={loading}
+                        disabled={loading || !!loadError}
                         className="flex items-center gap-2 px-8 py-3 bg-[#1e40af] text-white rounded font-black shadow-lg hover:bg-[#1e3a8a] transition-all"
                     >
                         <FontAwesomeIcon icon={faSave} />

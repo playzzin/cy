@@ -13,7 +13,7 @@ jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorke
 jest.mock('../../services/userService', () => ({ userService: { getUser: async () => ({ linkedWorkerIds: ['worker-a'] }) } }));
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getWorkerRows: jest.fn() } }));
 jest.mock('../../services/advancePaymentService', () => ({ advancePaymentService: { getAdvancePaymentsByYearMonth: jest.fn() } }));
-jest.mock('../../services/advanceRequestService', () => ({ advanceRequestService: { listForWorkerIds: jest.fn(), createRequest: jest.fn() } }));
+jest.mock('../../services/advanceRequestService', () => ({ advanceRequestService: { listForWorkerIds: jest.fn(), createRequest: jest.fn(), cancelRequest: jest.fn() } }));
 jest.mock('../../services/payrollConfigService', () => ({ ADVANCE_ITEM_LABEL_KEYS: ['advance1'] }));
 
 const worker = { id: 'worker-a', legacyId: 'legacy-a', uid: 'leader', name: '테스트 팀장', teamId: 'team-a', status: '재직' };
@@ -49,6 +49,19 @@ it('팀장이 서버에서 허용한 소속 팀원을 선택해 가불을 대신
     fireEvent.click(screen.getByRole('button', { name: '가불 신청' }));
     await waitFor(() => expect(advanceRequestService.createRequest).toHaveBeenCalledWith(
         expect.objectContaining({ workerId: 'member-a', requesterUid: 'leader', requestedAmount: 10000 }), expect.any(String)));
+    await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
+    expect(screen.getByText('가불 신청을 등록했습니다.')).toBeInTheDocument();
+});
+
+it('신청 취소 후 내역 재조회가 완료되어도 취소 안내를 유지한다', async () => {
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+        render(<WorkerAdvanceRequestPage />);
+        fireEvent.click(await screen.findByRole('button', { name: '신청 취소' }));
+        await waitFor(() => expect(advanceRequestService.cancelRequest).toHaveBeenCalled());
+        await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
+        expect(screen.getByText('신청을 취소했습니다.')).toBeInTheDocument();
+    } finally { confirm.mockRestore(); }
 });
 
 it('본인 근무금액에서 기존 가불과 유효 신청을 빼고 동명이인은 합산하지 않는다', async () => {

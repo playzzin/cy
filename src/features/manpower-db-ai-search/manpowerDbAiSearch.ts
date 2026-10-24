@@ -1152,12 +1152,6 @@ const searchManpowerDbSnapshotWithQuery = (
     }
 };
 
-const getGeminiApiKeyForParser = (): string | undefined => {
-    if (typeof window === 'undefined') return undefined;
-    return window.localStorage.getItem('gemini_api_key') ||
-        window.localStorage.getItem('geminiApiKey') ||
-        undefined;
-};
 
 export const searchManpowerDatabase = async (
     question: string,
@@ -1166,8 +1160,7 @@ export const searchManpowerDatabase = async (
     const { loadIntegratedDatabaseOverviewSnapshot } = await import('../../pages/database/useIntegratedDatabaseOverview');
     const { snapshot, warning } = await loadIntegratedDatabaseOverviewSnapshot(today);
     const parserResult = await parseManpowerDbQuestionHybrid(question, today, {
-        apiKey: getGeminiApiKeyForParser(),
-        fetchImpl: typeof fetch !== 'undefined' ? fetch : undefined,
+        useAi: true,
     });
     const result = searchManpowerDbSnapshotWithQuery(question.trim(), parserResult.query, snapshot);
     return {

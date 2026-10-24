@@ -162,3 +162,94 @@
 	color: #6d28d9 !important;
 	font-weight: 700;
 }
+
+.freelancer-team-history-hint {
+	margin: 0;
+	padding: 6px 16px;
+	color: #475569;
+	background: #f8fafc;
+	font-size: 12px;
+}
+
+.custom-ledger-grid .freelancer-history-button {
+	display: block;
+	width: calc(100% - 8px);
+	margin: 3px 4px;
+	padding: 0;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 1.4;
+	white-space: normal;
+	cursor: pointer;
+}
+
+.custom-ledger-grid .freelancer-history-button:hover .freelancer-history-team-chip {
+	box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.custom-ledger-grid .freelancer-history-button:focus-visible {
+	outline: 2px solid #2563eb;
+	outline-offset: 1px;
+}
+
+.freelancer-history-team-chip {
+	display: block;
+	margin-top: 4px;
+	padding: 3px 6px;
+	border: 1px solid #cbd5e1;
+	border-radius: 5px;
+	background: #e2e8f0;
+	color: #334155;
+	line-height: 1.5;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.freelancer-history-dialog {
+	width: min(640px, calc(100% - 32px));
+	max-height: calc(100dvh - 48px);
+	padding: 24px;
+	margin: auto;
+	border: 1px solid #cbd5e1;
+	border-radius: 16px;
+	background: #fff;
+	color: #0f172a;
+	box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
+	overflow-y: auto;
+}
+
+.freelancer-history-dialog::backdrop { background: rgba(15, 23, 42, 0.45); }
+.freelancer-history-dialog header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.freelancer-history-dialog header p { margin: 0 0 6px; color: #64748b; font-size: 13px; }
+.freelancer-history-dialog h2 { margin: 0; font-size: 21px; font-weight: 800; line-height: 1.5; word-break: keep-all; }
+.freelancer-history-dialog header button { flex-shrink: 0; padding: 7px 12px; border: 1px solid #cbd5e1; border-radius: 7px; background: #f8fafc; color: #334155; cursor: pointer; font-weight: 700; }
+.freelancer-history-summary { padding: 12px; border-radius: 8px; background: #eff6ff; font-size: 14px; }
+.freelancer-history-notice { padding: 12px; border: 1px solid #fed7aa; border-radius: 8px; background: #fff7ed; color: #9a3412; font-size: 14px; }
+.freelancer-history-notice span { display: block; margin-top: 5px; line-height: 1.6; }
+.freelancer-history-teams { display: grid; gap: 12px; }
+.freelancer-history-team { padding: 16px; border: 1px solid #e2e8f0; border-radius: 10px; }
+.freelancer-history-team-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.freelancer-history-team h3 { margin: 0; font-size: 17px; font-weight: 800; }
+.freelancer-history-team-heading span { padding: 3px 7px; background: #f1f5f9; border-radius: 4px; font-size: 12px; color: #475569; }
+.freelancer-history-team dl { margin: 12px 0 0; }
+.freelancer-history-team dl > div { display: flex; justify-content: space-between; gap: 16px; margin-top: 7px; font-size: 15px; }
+.freelancer-history-team dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.freelancer-history-team-total { padding-top: 10px; border-top: 1px solid #e2e8f0; font-weight: 800; }
+.freelancer-history-dialog footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding: 14px 0; font-size: 18px; }
+.freelancer-history-footnote { margin: 0; color: #64748b; font-size: 12px; line-height: 1.6; }
+
+@media (max-width: 600px) {
+	.freelancer-history-dialog { padding: 16px; }
+	.freelancer-history-dialog h2 { font-size: 18px; }
+}
+
+.custom-ledger-grid .htCore tbody td.freelancer-previous-team-cell {
+	background: var(--previous-team-background) !important;
+	color: var(--previous-team-text) !important;
+	font-weight: 800;
+}

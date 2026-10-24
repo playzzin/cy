@@ -22,3 +22,242 @@
   font-size: inherit;
   line-height: 1.5;
 }
+
+.advance-filter-bar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 3%);
+}
+
+.advance-team-selector {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.advance-filter-label {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-size: calc(0.75rem + 2pt);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.advance-team-buttons {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 4px 2px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.advance-team-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 13px;
+  border: 1px solid;
+  border-radius: 10px;
+  font-size: calc(0.75rem + 2pt);
+  font-weight: 700;
+  white-space: nowrap;
+  transition: box-shadow 150ms, filter 150ms;
+}
+
+.advance-team-button:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.advance-team-button[aria-pressed='true'] {
+  box-shadow: 0 2px 5px rgb(15 23 42 / 15%);
+}
+
+.advance-team-button--all {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.advance-team-button--all[aria-pressed='true'] {
+  border-color: #334155;
+  background: #334155;
+  color: #fff;
+}
+
+.advance-team-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  font-size: 11px;
+}
+
+.advance-team-marker > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.advance-team-empty {
+  color: #64748b;
+  font-size: calc(0.75rem + 2pt);
+  white-space: nowrap;
+}
+
+.advance-month-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding-left: 18px;
+  border-left: 1px solid #e2e8f0;
+}
+
+.advance-month-picker {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.advance-month-step {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 36px;
+  border-radius: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.advance-month-step:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.advance-month-input {
+  width: 150px;
+  min-width: 0;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  color: #334155;
+  font-size: calc(0.75rem + 2pt);
+  font-weight: 700;
+}
+
+.advance-search-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 17px;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #fff;
+  font-size: calc(0.75rem + 2pt);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.advance-search-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.advance-filter-bar button:disabled,
+.advance-month-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.advance-filter-bar button:focus-visible,
+.advance-month-input:focus-visible,
+.advance-salary-tabs button:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.advance-worker-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  padding: 2px;
+}
+
+.advance-worker-toolbar > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.advance-salary-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #e9eef5;
+}
+
+.advance-salary-tabs button {
+  min-height: 32px;
+  padding: 4px 14px;
+  border-radius: 8px;
+  color: #64748b;
+  font-size: calc(0.75rem + 2pt);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.advance-salary-tabs button:hover {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.advance-salary-tabs button[aria-pressed='true'] {
+  background: #fff;
+  color: #1d4ed8;
+  box-shadow: 0 1px 4px rgb(15 23 42 / 10%);
+}
+
+@media (max-width: 1000px) {
+  .advance-filter-bar {
+    gap: 12px;
+    overflow-x: auto;
+    padding: 10px 12px;
+  }
+
+  .advance-team-selector {
+    min-width: 280px;
+  }
+
+  .advance-month-actions {
+    padding-left: 12px;
+  }
+}

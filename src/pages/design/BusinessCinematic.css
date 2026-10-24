@@ -1,0 +1,135 @@
+.cy-story .cy-cinematic-scene { width: 100%; height: clamp(270px, 50vh, 540px); max-height: none; aspect-ratio: auto; overflow: hidden; }
+.cy-story .cy-story-stage { scroll-margin-top: 76px; }
+.cy-art-thumbnail { display: block; width: 100%; height: 100%; transition: transform .6s cubic-bezier(.16,1,.3,1); }
+.cy-motion-thumbnail:has(.cy-art-thumbnail) { background: radial-gradient(ellipse at 50% 80%, #18496a, #071525 75%); height: 116px; }
+.is-preview .cy-art-thumbnail { transform: scale(1.07); }
+.cy-film-motion, .cy-film-signature { animation-duration: var(--film-duration, 6500ms); animation-timing-function: cubic-bezier(.22,.61,.36,1); animation-fill-mode: both; animation-delay: calc(var(--piece-order, 0) * .16s); }
+.cy-film-camera { transform-origin: 50% 60%; animation: cy-film-camera var(--film-duration, 6500ms) ease-out both; }
+.cy-film-annotation { animation-name: cy-film-annotation; }
+.cy-film-confirm { animation-name: cy-film-confirm; }
+.cy-film-row { animation-name: cy-film-row; }
+.cy-film-request, .cy-film-contract-reveal { animation-name: cy-film-request; }
+.cy-film-foundation { animation-name: cy-film-foundation; }
+.cy-film-tier-0 { animation-name: cy-film-tier-0; }
+.cy-film-tier-1 { animation-name: cy-film-tier-1; }
+.cy-film-tier-2 { animation-name: cy-film-tier-2; }
+.cy-film-hoist { animation-name: cy-film-hoist; }
+.cy-film-survey { animation-name: cy-film-survey; }
+.cy-film-target { animation-name: cy-film-target; transform-box: fill-box; transform-origin: center; }
+.cy-film-level-line { animation-name: cy-film-level-line; }
+.cy-film-engineer { animation-name: cy-film-engineer; }
+.cy-film-rail-trace, .cy-film-route-draw, .cy-film-data-route, .cy-film-deployment-route, .cy-film-chart-line, .cy-film-network-link { animation-name: cy-film-draw; stroke-dasharray: 1; }
+.cy-film-rail-trace { animation-name: cy-film-rail; }
+.cy-film-inspection-sweep { animation-name: cy-film-inspection; animation-timing-function: linear; }
+.cy-film-rack-scan { animation-name: cy-film-rack-scan; }
+.cy-film-truck-depart { animation-name: cy-film-truck-depart; }
+.cy-film-truck-return { animation-name: cy-film-truck-return; }
+.cy-film-cargo-load { animation-name: cy-film-cargo-load; }
+.cy-film-cargo-unload { animation-name: cy-film-cargo-unload; }
+.cy-film-forklift-load { animation-name: cy-film-forklift-load; }
+.cy-film-forklift-return { animation-name: cy-film-forklift-return; }
+.cy-film-departure-light { animation-name: cy-film-departure-light; }
+.cy-film-circulation { animation-name: cy-film-circulation; animation-timing-function: linear; }
+.cy-film-worker-match { animation-name: cy-film-worker-match; }
+.cy-film-selection-ring { animation-name: cy-film-ring; transform-box: fill-box; transform-origin: center; }
+.cy-film-worker-deploy { animation-name: cy-film-worker-deploy; }
+.cy-film-worker-check-in { animation-name: cy-film-worker-check-in; }
+.cy-film-safety-shield { animation-name: cy-film-safety; transform-box: fill-box; transform-origin: center; }
+.cy-film-check-in-scan { animation-name: cy-film-check-in-scan; }
+.cy-film-data-packet { animation-name: cy-film-data-packet; animation-timing-function: linear; }
+.cy-film-server-scan { animation-name: cy-film-server-scan; }
+.cy-film-cost-merge { animation-name: cy-film-cost-merge; }
+.cy-film-chart-bar { animation-name: cy-film-chart-bar; transform-box: fill-box; transform-origin: bottom; }
+.cy-film-chart-line { animation-name: cy-film-chart-line; }
+.cy-film-archive-page { animation-name: cy-film-archive-page; }
+.cy-film-building-register { animation-name: cy-film-building-register; }
+.cy-film-signature { stroke-dasharray: 1; animation-name: cy-film-signature; }
+.cy-film-network-packet-0 { animation-name: cy-film-network-0; }
+.cy-film-network-packet-1 { animation-name: cy-film-network-1; }
+.cy-film-network-packet-2 { animation-name: cy-film-network-2; }
+.cy-film-collaboration { animation-name: cy-film-collaboration; transform-box: fill-box; transform-origin: center; }
+
+@keyframes cy-film-camera { from { transform: translateY(4px) scale(.985); } to { transform: none; } }
+@keyframes cy-film-annotation { 0% { opacity: 0; transform: translateY(10px); } 15%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-confirm { 0%,53% { opacity: 0; transform: translateY(7px); } 64% { opacity: 1; transform: translateY(-2px); } 70%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-row { 0%,12% { opacity: 0; transform: translateX(-10px); } 32%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-request { 0% { opacity: 0; transform: translateY(24px); } 24%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-foundation { 0% { transform: translateY(20px) rotate(-1deg); } 34% { transform: translateY(-4px); } 52%,100% { transform: none; } }
+@keyframes cy-film-tier-0 { 0% { opacity: 0; transform: translateY(55px); } 23%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-tier-1 { 0%,18% { opacity: 0; transform: translateX(85px); } 47%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-tier-2 { 0%,37% { opacity: 0; transform: translateY(-90px); } 68%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-hoist { 0% { opacity: 0; transform: translateY(-165px); } 18% { opacity: 1; transform: translateY(-70px); } 48%,62% { opacity: 1; transform: translateY(25px); } 90%,100% { opacity: 0; transform: translateY(-165px); } }
+@keyframes cy-film-survey { 0% { opacity: 0; } 20% { opacity: 1; } 35% { opacity: .35; } 55%,100% { opacity: 1; } }
+@keyframes cy-film-target { 0% { opacity: 0; transform: scale(1.8); } 25% { opacity: 1; transform: scale(1); } 45% { transform: scale(1.18); } 65%,100% { opacity: 1; transform: scale(1); } }
+@keyframes cy-film-level-line { 0% { opacity: 0; transform: rotate(-3deg); } 20% { opacity: 1; transform: rotate(2deg); } 45%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-engineer { 0% { opacity: 0; transform: translateX(80px); } 37%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-draw { 0%,10% { stroke-dashoffset: 1; opacity: .2; } 48%,100% { stroke-dashoffset: 0; opacity: 1; } }
+@keyframes cy-film-rail { 0%,15% { stroke-dashoffset: 1; opacity: 0; } 55%,75% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: .65; } }
+@keyframes cy-film-inspection { 0% { transform: translateY(0); opacity: 0; } 12% { opacity: 1; } 65% { transform: translateY(350px); opacity: 1; } 75%,100% { transform: translateY(350px); opacity: 0; } }
+@keyframes cy-film-rack-scan { 0% { opacity: 0; transform: translateY(0); } 10% { opacity: 1; } 60% { transform: translateY(226px); opacity: 1; } 80%,100% { transform: translateY(226px); opacity: 0; } }
+/* One shared 6.5s timeline: approach (0–30%), lift/load (30–62%), depart (62–100%). */
+@keyframes cy-film-truck-depart { 0%,66% { transform: none; } 100% { transform: translate(115px,8px); } }
+@keyframes cy-film-truck-return { 0% { transform: translate(145px,9px); opacity: .4; } 28%,100% { transform: none; opacity: 1; } }
+@keyframes cy-film-cargo-load { 0%,15% { transform: translate(-153px,98px); } 33% { transform: translate(-88px,98px); } 52% { transform: translate(-88px,-20px); } 65%,100% { transform: none; } }
+@keyframes cy-film-cargo-unload { 0%,30% { transform: none; } 47% { transform: translate(-45px,-25px); } 68% { transform: translate(-150px,22px); } 85%,100% { transform: translate(-150px,98px); } }
+@keyframes cy-film-forklift-load { 0%,15% { transform: none; } 33%,55% { transform: translateX(65px); } 80%,100% { transform: translateX(-26px); } }
+@keyframes cy-film-forklift-return { 0%,28% { transform: translateX(-28px); } 43%,58% { transform: translateX(68px); } 85%,100% { transform: none; } }
+@keyframes cy-film-departure-light { 0%,61% { opacity: 0; } 66% { opacity: .85; transform: none; } 100% { opacity: .15; transform: translateX(115px); } }
+@keyframes cy-film-circulation { 0%,10% { opacity: 0; transform: none; } 17% { opacity: 1; transform: none; } 40% { transform: translate(270px,-41px); } 65% { transform: translate(554px,11px); opacity: 1; } 80%,100% { transform: translate(623px,122px); opacity: 0; } }
+@keyframes cy-film-worker-match { 0% { opacity: .4; transform: translateY(13px); } 38%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-ring { 0% { opacity: 0; transform: scale(.6); } 30% { opacity: 1; transform: scale(1.2); } 60%,100% { opacity: .65; transform: scale(1); } }
+@keyframes cy-film-worker-deploy { 0%,15% { transform: none; } 30% { transform: translate(48px,-5px); } 45% { transform: translate(97px,-3px); } 60% { transform: translate(142px,-14px); } 80%,100% { transform: translate(190px,-26px); } }
+@keyframes cy-film-worker-check-in { 0%,10% { transform: none; } 38%,70% { transform: translateX(-93px); } 100% { transform: translateX(-32px); } }
+@keyframes cy-film-safety { 0% { opacity: 0; transform: scale(.7); } 27% { opacity: 1; transform: scale(1.04); } 43%,100% { opacity: 1; transform: scale(1); } }
+@keyframes cy-film-check-in-scan { 0%,28% { opacity: 0; } 38% { opacity: 1; } 52% { transform: translateY(30px); opacity: .4; } 68%,100% { transform: none; opacity: 1; } }
+@keyframes cy-film-data-packet { 0%,12% { opacity: 0; transform: none; } 17% { opacity: 1; transform: none; } 45% { transform: translateX(207px); } 60% { transform: translate(207px,-85px); opacity: 1; } 78%,100% { transform: translate(320px,-85px); opacity: 0; } }
+@keyframes cy-film-server-scan { 0%,12% { transform: none; opacity: 0; } 25% { opacity: 1; } 62% { transform: translateY(125px); opacity: 1; } 75%,100% { transform: translateY(125px); opacity: 0; } }
+@keyframes cy-film-cost-merge { 0% { opacity: 0; transform: translateY(-25px); } 22%,42% { opacity: 1; transform: none; } 70% { opacity: .1; transform: translate(calc((1 - var(--piece-order)) * 80px),185px) scale(.65); } 100% { opacity: .1; transform: translate(calc((1 - var(--piece-order)) * 80px),185px) scale(.65); } }
+@keyframes cy-film-chart-bar { 0%,12% { transform: scaleY(.03); } 53%,100% { transform: scaleY(1); } }
+@keyframes cy-film-chart-line { 0%,37% { stroke-dashoffset: 1; } 74%,100% { stroke-dashoffset: 0; } }
+@keyframes cy-film-archive-page { 0% { opacity: 0; transform: translateY(-20px); } 25%,35% { opacity: 1; transform: none; } 76% { opacity: 1; transform: translate(115px,193px) scale(.96); } 87%,100% { opacity: 0; transform: translate(115px,200px) scale(.96); } }
+@keyframes cy-film-building-register { 0% { opacity: 0; transform: translateY(70px); } 38%,100% { opacity: 1; transform: none; } }
+@keyframes cy-film-signature { 0%,42% { stroke-dashoffset: 1; } 78%,100% { stroke-dashoffset: 0; } }
+@keyframes cy-film-network-0 { 0%,18% { opacity: 0; transform: none; } 25% { opacity: 1; } 65% { opacity: 1; transform: translate(-278px,-39px); } 80%,100% { opacity: 0; transform: translate(-278px,-39px); } }
+@keyframes cy-film-network-1 { 0%,24% { opacity: 0; transform: none; } 35% { opacity: 1; } 72% { opacity: 1; transform: translate(-2px,-159px); } 87%,100% { opacity: 0; transform: translate(-2px,-159px); } }
+@keyframes cy-film-network-2 { 0%,30% { opacity: 0; transform: none; } 40% { opacity: 1; } 79% { opacity: 1; transform: translate(291px,-24px); } 94%,100% { opacity: 0; transform: translate(291px,-24px); } }
+@keyframes cy-film-collaboration { 0% { opacity: 0; transform: scale(.75); } 30% { opacity: .8; transform: scale(1); } 65%,100% { opacity: 0; transform: scale(1.4); } }
+
+.cy-story .cy-story-theater.is-cinema { grid-template-columns: 1fr; }
+.cy-story-theater.is-cinema .cy-story-stage { padding: 0; }
+.cy-story-theater.is-cinema .cy-story-narrative { border-left: 0; border-top: 1px solid #28455c; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 40px; padding: 28px 32px; }
+.cy-story-theater.is-cinema .cy-story-narrative > .cy-story-kicker { grid-column: 1; }
+.cy-story-theater.is-cinema .cy-story-narrative h3 { grid-column: 1; margin: 0; font-size: 27px; }
+.cy-story-theater.is-cinema .cy-story-overview { grid-column: 1; }
+.cy-story-theater.is-cinema .cy-story-current-action { grid-column: 2; grid-row: 1 / 4; border-top: 0; border-left: 1px solid #28455c; margin: 0; padding: 8px 0 8px 30px; align-self: center; }
+.cy-story-theater.is-cinema .cy-story-workspace-link { grid-column: 1 / -1; padding-top: 14px; border-top: 1px solid #28455c; margin-top: 12px; }
+.cy-story-stage .cy-cinema-toolbar { display: flex; align-items: center; gap: 12px; }
+.business-page .cy-cinema-toolbar button { display: flex; align-items: center; gap: 7px; background: #102a40; border: 1px solid #31556e; color: #accfe1; border-radius: 4px; min-height: 30px; padding: 5px 9px; font: 10px/1.3 inherit; letter-spacing: 0; }
+.cy-story .cy-story-action-beats { display: flex; justify-content: center; gap: 18px; margin: 0; padding: 10px 16px 16px; list-style: none; border-bottom: 1px solid #1d374d; }
+.cy-story-action-beats li { display: flex; gap: 7px; align-items: center; color: #6f92af; font-size: 10px; }
+.cy-story-action-beats li + li::before { content: '→'; margin-right: 10px; color: #4a6c84; }
+.cy-story-action-beats i { height: 4px; width: 4px; border-radius: 50%; background: currentColor; }
+.cy-story-action-beats li:nth-child(1) { animation: cy-film-beat-1 var(--film-duration,6500ms) linear both; }
+.cy-story-action-beats li:nth-child(2) { animation: cy-film-beat-2 var(--film-duration,6500ms) linear both; }
+.cy-story-action-beats li:nth-child(3) { animation: cy-film-beat-3 var(--film-duration,6500ms) linear both; }
+@keyframes cy-film-beat-1 { 0%,32% { color: #bef4ff; } 33%,100% { color: #7395ae; } }
+@keyframes cy-film-beat-2 { 0%,32% { color: #7395ae; } 33%,65% { color: #bef4ff; } 66%,100% { color: #7395ae; } }
+@keyframes cy-film-beat-3 { 0%,65% { color: #7395ae; } 66%,100% { color: #bef4ff; } }
+.cy-story[data-step-paused=true] .cy-story-action-beats * { animation-play-state: paused !important; }
+@media (max-width: 600px) {
+    .cy-motion-thumbnail:has(.cy-art-thumbnail) { height: 90px; }
+    .cy-story .cy-cinematic-scene { height: auto; min-height: 200px; aspect-ratio: 16 / 9; }
+    .cy-story-theater.is-cinema .cy-story-narrative { display: block; padding: 22px 18px; }
+    .cy-story-theater.is-cinema .cy-story-current-action { padding: 20px 0 0; margin: 18px 0 0; border-left: 0; border-top: 1px solid #28455c; min-height: 0; }
+    .cy-story-theater.is-cinema .cy-story-overview { margin-top: 14px; }
+    .cy-story-theater.is-cinema .cy-story-narrative h3 { margin-top: 10px; font-size: 25px; }
+    .cy-story .cy-story-action-beats { gap: 7px; padding: 8px 6px 13px; flex-wrap: wrap; }
+    .cy-story-action-beats li { font-size: 9px; gap: 4px; }
+    .cy-story-action-beats li + li::before { margin-right: 3px; }
+    .cy-story-stage .cy-cinema-toolbar { gap: 5px; }
+    .cy-cinema-toolbar > span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .cy-story .cy-film-motion, .cy-story .cy-film-camera, .cy-story .cy-film-signature { animation: none !important; }
+    .cy-film-hoist, .cy-film-data-packet, .cy-film-circulation, .cy-film-archive-page, .cy-film-inspection-sweep, .cy-film-rack-scan, .cy-film-server-scan, .cy-film-network-packet-0, .cy-film-network-packet-1, .cy-film-network-packet-2 { display: none; }
+}

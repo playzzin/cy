@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { calculateTeamAverageExpense } from '../../../features/team-expense-average/teamExpenseAverage';
 import { accommodationBillingService } from '../../../services/accommodationBillingService';
 import { cardBillingService } from '../../../services/cardBillingService';
 import { cardService } from '../../../services/cardService';
@@ -570,6 +571,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   const [claims, setClaims] = useState<TeamExpenseClaim[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<TeamExpenseCategory[]>(DEFAULT_TEAM_EXPENSE_CATEGORIES);
   const [dailyReports, setDailyReports] = useState<DailyReport[]>([]);
+  const [dailyReportsError, setDailyReportsError] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const generation = useRef(0);
@@ -577,6 +579,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
     const sequence = ++generation.current;
     setAccommodationDocs([]); setVehicleDocs([]); setCardDocs([]); setClaims([]); setDailyReports([]);
     setLoading(true);
+    setDailyReportsError(false);
     try {
       const monthStart = `${yearMonth}-01`;
       const monthEnd = `${yearMonth}-31`;
@@ -585,6 +588,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
           .then(({ dailyReportService }) => dailyReportService.getReports({ startDate: monthStart, endDate: monthEnd }))
           .catch((error) => {
             console.warn('[useExpenseLedgerData] daily reports load failed', error);
+            if (sequence === generation.current) setDailyReportsError(true);
             return [] as DailyReport[];
           })
         : Promise.resolve([] as DailyReport[]);
@@ -1060,7 +1064,19 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
     };
   }, [includedAccommodationDocs, includedCardDocs, includedVehicleDocs, resolveTeam, selectedTeamId]);
 
+  const teamAverageExpenses = useMemo(() => Object.fromEntries((dailyReportsError || !includeDailyReports ? [] : summaries).map(row => [
+    row.teamId,
+    calculateTeamAverageExpense(
+      getSummaryTotal(row),
+      teams.find(team => getTeamStableId(team) === row.teamId) ?? { id: row.teamId, name: row.teamName },
+      dailyReports,
+      yearMonth
+    )
+  ])), [summaries, teams, dailyReports, yearMonth, dailyReportsError, includeDailyReports]);
+
   return {
+    teamAverageExpenses,
+    dailyReportsError,
     loading,
     teams,
     teamOptions,

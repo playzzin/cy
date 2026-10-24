@@ -95,6 +95,103 @@ describe('menuServiceV11 canonical Firestore document', () => {
     expect(mockedGetDoc).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves multiple separators and their appearance through save and reload', async () => {
+    const config = { admin: { name: '테스트', icon: 'faFolder', menu: [
+      { text: '-', path: '/invalid-link', icon: 'faLink', dividerStyle: 'dashed', dividerSpacing: 'relaxed' },
+      { text: '그룹', sub: ['-', { text: '항목', path: '/test' }, '-'] },
+      { text: '-' }
+    ] } } as any;
+    const saved = await menuServiceV11.saveMenuConfig(config);
+    const dividers = saved.admin.menu.filter(item => item.text === '-');
+    expect(dividers).toHaveLength(2);
+    expect(new Set(dividers.map(item => item.id)).size).toBe(2);
+    expect(dividers[0]).toMatchObject({ dividerStyle: 'dashed', dividerSpacing: 'relaxed' });
+    expect(dividers[0]).not.toHaveProperty('path');
+    expect(dividers[0]).not.toHaveProperty('icon');
+    const nested = saved.admin.menu.find(item => item.text === '그룹')!.sub as any[];
+    expect(nested[0].id).not.toBe(nested[2].id);
+    mockedGetDoc.mockResolvedValue(existingDoc(saved) as any);
+    menuServiceV11.clearCache();
+    const loaded = await menuServiceV11.getMenuConfig();
+    expect(loaded!.admin.menu.filter(item => item.text === '-')).toEqual(dividers);
+    await menuServiceV11.pruneDuplicates();
+    const pruned = await menuServiceV11.getMenuConfig();
+    expect(pruned!.admin.menu.filter(item => item.text === '-')).toHaveLength(2);
+    expect((pruned!.admin.menu.find(item => item.text === '그룹')!.sub as any[]).filter(item => item.text === '-')).toHaveLength(2);
+  });
+
+  it('removes retired ledger links from saved menus without writing or losing active ledger pages', async () => {
+    const currentLedger = { text: '매입매출 관리', path: '/payroll/workbook-ledger' };
+    const ledgerLogs = { text: '매입매출 로그', path: '/payroll/workbook-ledger/logs' };
+    const dawonLedger = { text: '다원 장부', path: '/payroll/workbook-ledger-dawon' };
+    const customLink = { text: '매입매출 스마트 장부', path: '/custom-ledger' };
+    const legacy = { pos_ceo: { name: 'CEO', icon: 'faFolder', menu: [
+      { text: '세무관리', sub: [currentLedger, ledgerLogs, dawonLedger,
+        { text: '사용자 지정 이름', path: '/payroll/workbook-ledger-upgrade/?tab=open#ledger' },
+        '매입매출 스마트 장부', '매입매출 업그레이드', '매입매출V2', '미수미지급 관리', customLink
+      ] },
+      { text: '옛 장부', path: '/payroll/workbook-ledger-upgrade', sub: [{ text: '보존할 메뉴', path: '/custom-child' }] }
+    ], headerActions: [{ text: '장부 바로가기', path: '/payroll/workbook-ledger-upgrade' }],
+    trash: [{ text: '삭제된 장부', path: '/payroll/workbook-ledger-upgrade' }] } };
+    mockedGetDoc.mockResolvedValue(existingDoc(legacy) as any);
+
+    const loaded = await menuServiceV11.getMenuConfig();
+
+    expect(loaded!.pos_ceo.menu[0].sub).toEqual([
+      expect.objectContaining(currentLedger), expect.objectContaining(ledgerLogs),
+      expect.objectContaining(dawonLedger), expect.objectContaining(customLink),
+      expect.objectContaining({ text: '법인세 관리', path: '/payroll/corporate-tax' })
+    ]);
+    expect(loaded!.pos_ceo.menu[1]).toMatchObject({ path: '/custom-child' });
+    expect(loaded!.pos_ceo.headerActions).toEqual([]);
+    expect(loaded!.pos_ceo.trash).toEqual([]);
+    expect(mockedSetDoc).not.toHaveBeenCalled();
+    expect(legacy.pos_ceo.menu[0].sub).toHaveLength(9);
+  });
+
+  it('keeps the retired ledger out of saved configs and rental defaults after reload', async () => {
+    const config = { admin: { name: '관리자', icon: 'faFolder', menu: [
+      { text: '매입매출 관리' },
+      { text: '옛 장부', path: '/payroll/workbook-ledger-upgrade' }
+    ] } };
+
+    const saved = await menuServiceV11.saveMenuConfig(config);
+    expect(saved.admin.menu).toEqual([expect.objectContaining({
+      text: '매입매출 관리', path: '/payroll/workbook-ledger'
+    })]);
+    expect(saved.pos_rental.menu).toContainEqual(expect.objectContaining({
+      id: 'rental_workbook_ledger', text: '매입매출 관리', path: '/payroll/workbook-ledger'
+    }));
+    expect(JSON.stringify(mockedSetDoc.mock.calls[0][1])).not.toContain('/payroll/workbook-ledger-upgrade');
+    mockedGetDoc.mockResolvedValue(existingDoc(saved) as any);
+    menuServiceV11.clearCache();
+    const reloaded = await menuServiceV11.getMenuConfig();
+    expect(reloaded!.admin.menu).toEqual(saved.admin.menu);
+    expect(JSON.stringify(reloaded)).not.toContain('/payroll/workbook-ledger-upgrade');
+  });
+
+  it('registers Gemini usage in an existing CEO log folder without replacing custom items or duplicating it', async () => {
+    const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
+    legacy.pos_ceo.menu = [{ text: '설정', sub: [{ text: '로그관리', sub: [{ text: '기존 기록', path: '/custom-log' }] }] }];
+    mockedGetDoc.mockResolvedValue(existingDoc(legacy) as any);
+    const config = await menuServiceV11.getMenuConfig();
+    const folder = (config!.pos_ceo.menu[0] as any).sub[0];
+    expect(folder.sub).toEqual(expect.arrayContaining([expect.objectContaining({ path: '/custom-log' }), expect.objectContaining({ path: '/admin/gemini-usage-logs' })]));
+    expect(folder.sub.filter((item: any) => item.path === '/admin/gemini-usage-logs')).toHaveLength(1);
+    menuServiceV11.clearCache();
+    mockedGetDoc.mockResolvedValue(existingDoc(config) as any);
+    const again = await menuServiceV11.getMenuConfig();
+    expect((again!.pos_ceo.menu[0] as any).sub[0].sub.filter((item: any) => item.path === '/admin/gemini-usage-logs')).toHaveLength(1);
+  });
+
+  it('creates the requested CEO log folder for saved configurations that do not yet have it', async () => {
+    const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
+    legacy.pos_ceo.menu = [{ text: '기존 메뉴', path: '/custom-ceo' }];
+    mockedGetDoc.mockResolvedValue(existingDoc(legacy) as any);
+    const config = await menuServiceV11.getMenuConfig();
+    expect(config!.pos_ceo.menu).toEqual(expect.arrayContaining([expect.objectContaining({ path: '/custom-ceo' }), expect.objectContaining({ text: '로그관리', sub: expect.arrayContaining([expect.objectContaining({ path: '/admin/gemini-usage-logs' })]) })]));
+  });
+
   it('adds identity history to existing nested log folders without duplicating or replacing other logs', async () => {
     const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
     legacy.admin.menu = [{ text: '설정', sub: [{ text: '로그관리', sub: ['로그인 로그', { text: '기존 로그', path: '/custom-log' }] }] }];
@@ -124,12 +221,12 @@ describe('menuServiceV11 canonical Firestore document', () => {
 
     const config = await menuServiceV11.getMenuConfig();
 
-    expect(config?.pos_ceo.menu).toEqual([
+    expect(config?.pos_ceo.menu).toEqual(expect.arrayContaining([
       expect.objectContaining({
         text: '바이백',
         path: '/payroll/field-buyback'
       })
-    ]);
+    ]));
   });
 
   it('writes only settings/menus_v12 and does not fall back on permission errors', async () => {

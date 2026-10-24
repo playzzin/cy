@@ -56,7 +56,7 @@ describe('resolveAccountOnboardingMode', () => {
 
     it('keeps an existing legacy administrator active when status is absent', () => {
         expect(resolveAccountOnboardingMode({
-            profile: profile({ status: undefined, role: 'admin', position: '사장' }),
+            profile: profile({ status: undefined, role: 'admin', position: 'CEO' }),
             retrySetup: false,
             adminLike: true,
         })).toBe('active');

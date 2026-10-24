@@ -1,4 +1,6 @@
 import { type Unsubscribe } from 'firebase/firestore';
+import { auth } from '../config/firebase';
+import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { companyService } from './companyService';
 import { dailyReportService, type DailyReport } from './dailyReportService';
 import { manpowerService } from './manpowerService';
@@ -6,8 +8,14 @@ import { siteService } from './siteService';
 import { taskService } from './taskService';
 import { teamService } from './teamService';
 import type { Task } from '../types/task';
+import { getKoreanDateKey, getKoreanMinuteOfDay } from '../utils/koreanBusinessDate';
+import { dispatchService } from './dispatchService';
+import { fieldScheduleRequestService } from './fieldScheduleRequestService';
+import { scheduleConfirmationBoardService } from './scheduleConfirmationBoardService';
+import { resolveDailyReportTargets } from '../features/daily-report-coverage/dailyReportTargets';
 import {
     buildDailyReportCoverage,
+    DASHBOARD_REPORT_DEADLINE_MINUTES,
     type DailyReportCoverageSummary,
 } from '../features/daily-report-coverage/dailyReportCoverage';
 import {
@@ -40,15 +48,10 @@ export interface DashboardExecutiveStats {
         outbound: number;
         total: number;
     };
-    operations: {
-        reportCoverageRate: number;
+    operations: DashboardOperationInsights & {
+        reportCoverageRate: number | null;
         averageManDayPerReport: number;
         supportBalance: number;
-        reportCountTrendPercent: number;
-        manDayTrendPercent: number;
-        monthlyManDayRunRate: number;
-        healthScore: number;
-        healthLabel: DashboardOperationInsights['healthLabel'];
     };
     dailyReportCoverage: DailyReportCoverageSummary;
     dailyTrend: DashboardDailyTrendPoint[];
@@ -57,8 +60,10 @@ export interface DashboardExecutiveStats {
 }
 
 const SNAPSHOT_CACHE_TTL_MS = 60 * 1000;
-let snapshotCache: { value: DashboardExecutiveStats; expiresAt: number } | null = null;
-let snapshotRequest: Promise<DashboardExecutiveStats> | null = null;
+const getSnapshotOwner = () => isDevAdminSessionEnabled() ? 'dev-admin' as const : auth.currentUser;
+type SnapshotOwner = NonNullable<ReturnType<typeof getSnapshotOwner>>;
+let snapshotCache: { owner: SnapshotOwner; value: DashboardExecutiveStats; expiresAt: number } | null = null;
+let snapshotRequest: { owner: SnapshotOwner; promise: Promise<DashboardExecutiveStats> } | null = null;
 
 export const createEmptyDashboardExecutiveStats = (): DashboardExecutiveStats => ({
     workers: { total: 0, active: 0 },
@@ -67,21 +72,26 @@ export const createEmptyDashboardExecutiveStats = (): DashboardExecutiveStats =>
     reports: { today: 0, thisMonth: 0, todayManDay: 0, thisMonthManDay: 0 },
     support: { inbound: 0, outbound: 0, total: 0 },
     operations: {
-        reportCoverageRate: 0,
+        reportCoverageRate: null,
         averageManDayPerReport: 0,
         supportBalance: 0,
-        reportCountTrendPercent: 0,
-        manDayTrendPercent: 0,
+        reportCountTrendPercent: null,
+        manDayTrendPercent: null,
         monthlyManDayRunRate: 0,
-        healthScore: 0,
-        healthLabel: 'critical',
+        healthScore: null,
+        healthLabel: 'unavailable',
+        healthReason: '운영 데이터를 불러온 뒤 평가합니다.',
     },
     dailyReportCoverage: {
-        date: new Date().toISOString().slice(0, 10),
+        date: getKoreanDateKey(),
         activeSiteCount: 0,
         reportedSiteCount: 0,
         missingSiteCount: 0,
-        coverageRate: 100,
+        expectedSiteCount: 0,
+        coverageRate: null,
+        source: 'unavailable',
+        status: 'unavailable',
+        detail: '운영 데이터를 불러온 뒤 제출 대상을 확인합니다.',
         missingSites: [],
     },
     dailyTrend: [],
@@ -102,24 +112,38 @@ const sortTasksByCreatedDateDesc = (tasks: Task[]): Task[] => {
 };
 
 const loadSnapshotFromFirebase = async (): Promise<DashboardExecutiveStats> => {
-    const [workersData, sitesData, teamsData, reportsData, companiesData] = await Promise.all([
-        manpowerService.getWorkersPaginated(1000),
+    const now = new Date();
+    const todayStr = getKoreanDateKey(now);
+    const [workersData, sitesData, teamsData, reportsData, companiesData, scheduleResults] = await Promise.all([
+        manpowerService.getWorkerCounts(),
         siteService.getSites(),
         teamService.getTeams(),
         dailyReportService.getAllReports(),
         companyService.getCompanies(),
+        Promise.allSettled([
+            scheduleConfirmationBoardService.getBoardByDate(todayStr),
+            dispatchService.getDispatchByDate(todayStr, { throwOnError: true }),
+            fieldScheduleRequestService.listByDate(todayStr),
+        ]),
     ]);
 
-    const todayStr = new Date().toISOString().split('T')[0];
     const thisMonthStr = todayStr.substring(0, 7);
     const todayReports = reportsData.filter((report) => getReportDate(report) === todayStr);
-    const thisMonthReports = reportsData.filter((report) => getReportDate(report).startsWith(thisMonthStr));
+    const thisMonthReports = reportsData.filter((report) => getReportDate(report).startsWith(thisMonthStr) && getReportDate(report) <= todayStr);
     const dailyReportCoverage = buildDailyReportCoverage({
         sites: sitesData as Array<Record<string, any>>,
         reports: reportsData as Array<Record<string, any>>,
         date: todayStr,
+        now,
+        plan: resolveDailyReportTargets({
+            date: todayStr,
+            confirmed: scheduleResults[0].status === 'fulfilled' ? scheduleResults[0].value : null,
+            dispatch: scheduleResults[1].status === 'fulfilled' ? scheduleResults[1].value : null,
+            requests: scheduleResults[2].status === 'fulfilled' ? scheduleResults[2].value : [],
+            failed: scheduleResults.some((result) => result.status === 'rejected'),
+        }),
     });
-    const activeSiteCount = sitesData.filter((site) => site.status === 'active').length;
+    const activeSiteCount = dailyReportCoverage.activeSiteCount;
     const myCompany = companiesData.find((company) => company.name.includes('청연')) || companiesData[0];
     const myCompanyId = myCompany?.id;
     let inboundManDay = 0;
@@ -154,16 +178,11 @@ const loadSnapshotFromFirebase = async (): Promise<DashboardExecutiveStats> => {
     const operationInsights = buildDashboardOperationInsights({
         reports: reportsData,
         today: todayStr,
-        reportCoverageRate: dailyReportCoverage.coverageRate,
-        activeSiteCount,
-        supportBalance,
+        coverage: dailyReportCoverage,
     });
 
     return {
-        workers: {
-            total: workersData.workers.length,
-            active: workersData.workers.filter((worker) => worker.status === '재직').length,
-        },
+        workers: workersData,
         sites: {
             total: sitesData.length,
             active: activeSiteCount,
@@ -199,28 +218,42 @@ const loadSnapshotFromFirebase = async (): Promise<DashboardExecutiveStats> => {
 
 export const dashboardExecutiveService = {
     async getSnapshot(options: { forceRefresh?: boolean } = {}): Promise<DashboardExecutiveStats> {
+        const owner = getSnapshotOwner();
+        if (snapshotCache?.owner !== owner) snapshotCache = null;
+        if (snapshotRequest?.owner !== owner) snapshotRequest = null;
+        if (!owner) throw new Error('로그인 후 대시보드를 조회해 주세요.');
         const now = Date.now();
-        if (!options.forceRefresh && snapshotCache && snapshotCache.expiresAt > now) {
+        const cachedDeadlineReached = snapshotCache?.value.dailyReportCoverage.status === 'collecting'
+            && DASHBOARD_REPORT_DEADLINE_MINUTES !== null
+            && getKoreanMinuteOfDay() >= DASHBOARD_REPORT_DEADLINE_MINUTES;
+        if (!options.forceRefresh && snapshotCache && snapshotCache.expiresAt > now
+            && !cachedDeadlineReached && snapshotCache.value.dailyReportCoverage.date === getKoreanDateKey()) {
             return snapshotCache.value;
         }
 
         if (!options.forceRefresh && snapshotRequest) {
-            return snapshotRequest;
+            return snapshotRequest.promise;
         }
 
-        snapshotRequest = loadSnapshotFromFirebase()
+        const promise = loadSnapshotFromFirebase()
             .then((value) => {
+                // A cleared/replaced request must never repopulate the cache or reach the UI.
+                if (getSnapshotOwner() !== owner || snapshotRequest?.promise !== promise) {
+                    throw new Error('대시보드 조회가 만료되었습니다. 현재 계정으로 다시 조회해 주세요.');
+                }
                 snapshotCache = {
+                    owner,
                     value,
                     expiresAt: Date.now() + SNAPSHOT_CACHE_TTL_MS,
                 };
                 return value;
             })
             .finally(() => {
-                snapshotRequest = null;
+                if (snapshotRequest?.promise === promise) snapshotRequest = null;
             });
 
-        return snapshotRequest;
+        snapshotRequest = { owner, promise };
+        return promise;
     },
 
     clearSnapshotCache(): void {

@@ -12,8 +12,7 @@ if (existsSync(path.join(javaHome, 'bin', 'java.exe'))) {
   env[pathKey] = `${path.join(javaHome, 'bin')}${path.delimiter}${env[pathKey] || ''}`;
 }
 const configPath = path.join(temporaryDirectory, 'firebase.json');
-const firestoreRules = path.join(temporaryDirectory, 'firestore.rules');
-writeFileSync(firestoreRules, "rules_version = '2'; service cloud.firestore { match /databases/{database}/documents { match /{document=**} { allow read, write: if false; } } }");
+const firestoreRules = path.resolve('firestore.rules');
 writeFileSync(configPath, JSON.stringify({
   firestore: { rules: firestoreRules },
   storage: { rules: path.resolve('storage.rules') },

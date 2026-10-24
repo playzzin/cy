@@ -6,6 +6,7 @@ import {
     getDoc,
     getDocs,
     setDoc,
+    writeBatch,
     deleteDoc,
     query,
     where,
@@ -89,6 +90,18 @@ export const accommodationFirestoreService = {
             ...data,
             updatedAt: Timestamp.now()
         }, { merge: true });
+    },
+
+    saveUtilityRecords: async (records: Array<Partial<UtilityRecord> & { id: string }>) => {
+        if (!records.length) return;
+        if (records.length > 500) throw new Error('한 번에 최대 500개의 공과금 대장을 저장할 수 있습니다. 저장하지 않았습니다.');
+        const batch = writeBatch(db);
+        const converter = createConverter(utilityRecordSchema);
+        records.forEach(record => {
+            const ref = doc(db, UTILITY_RECORD_COLLECTION, record.id).withConverter(converter);
+            batch.set(ref, { ...record, updatedAt: Timestamp.now() }, { merge: true });
+        });
+        await batch.commit();
     },
 
     /**

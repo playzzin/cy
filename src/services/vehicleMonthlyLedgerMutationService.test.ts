@@ -50,6 +50,31 @@ const buildDependencies = (): jest.Mocked<VehicleMonthlyLedgerMutationDependenci
   recordOperation: jest.fn().mockResolvedValue(undefined)
 });
 
+test('정비대장 원본은 취소하거나 복제하지 않고 수동 추가분만 저장한다', async () => {
+  const dependencies = buildDependencies();
+  const source = buildExpense({ id: 'repair-ledger-source:r1', type: 'REPAIR', amount: 30000 });
+  const input = { yearMonth: '2026-07', visibleRows: [{ row: buildRow({ amounts: { REPAIR: 35000 } }) }],
+    originalExpenses: [source], expenseTypes: ['REPAIR'] as VehicleExpenseType[], dependencies };
+  await saveVehicleMonthlyLedgerMutation(input);
+  const first = dependencies.applyExpenseChanges.mock.calls[0][0];
+  expect(first.upserts).toEqual([expect.objectContaining({ amount: 5000 })]);
+  expect(first.cancelIds).toEqual([]);
+  await saveVehicleMonthlyLedgerMutation({ ...input, originalExpenses: [source, first.upserts[0] as VehicleExpenseRecord] });
+  expect(dependencies.applyExpenseChanges.mock.calls[1][0]).toEqual(first);
+});
+
+test('월중 다른 청구기간의 정비비는 차감하지 않고 연결 정비비보다 작은 합계를 거부한다', async () => {
+  const dependencies = buildDependencies();
+  const originalExpenses = [buildExpense({ id: 'repair-ledger-source:r1', type: 'REPAIR', amount: 30000, date: '2026-07-20' })];
+  await saveVehicleMonthlyLedgerMutation({ yearMonth: '2026-07', originalExpenses, expenseTypes: ['REPAIR'], dependencies,
+    visibleRows: [{ row: buildRow({ segment: { startDate: '2026-07-01', endDate: '2026-07-15' }, amounts: { REPAIR: 10000 } }) }] });
+  expect(dependencies.applyExpenseChanges.mock.calls[0][0].upserts[0].amount).toBe(10000);
+  dependencies.applyExpenseChanges.mockClear();
+  await expect(saveVehicleMonthlyLedgerMutation({ yearMonth: '2026-07', originalExpenses, expenseTypes: ['REPAIR'], dependencies,
+    visibleRows: [{ row: buildRow({ amounts: { REPAIR: 10000 } }) }] })).rejects.toThrow('정비내역');
+  expect(dependencies.applyExpenseChanges).not.toHaveBeenCalled();
+});
+
 describe('saveVehicleMonthlyLedgerMutation', () => {
   beforeEach(() => jest.clearAllMocks());
 

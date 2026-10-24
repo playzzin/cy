@@ -197,6 +197,43 @@ describe('viewport readiness after the sharing permission UI', () => {
         await expect(result).resolves.toHaveProperty('message', 'capture-viewport-unsettled');
         expect(jest.getTimerCount()).toBe(0);
     });
+    it.each(['ended-track', 'ended-video', 'video-error'])('stops waiting promptly for %s', async (failure) => {
+        const track = { readyState: 'live' };
+        Object.defineProperty(video, 'srcObject', { value: { getVideoTracks: () => [track] } });
+        const result = waitForStableCaptureViewport(video, new AbortController().signal).catch((error) => error);
+        jest.advanceTimersByTime(100);
+        if (failure === 'ended-track') track.readyState = 'ended';
+        if (failure === 'ended-video') Object.defineProperty(video, 'ended', { value: true });
+        if (failure === 'video-error') Object.defineProperty(video, 'error', { value: { code: 3 } });
+        jest.advanceTimersByTime(50);
+        await expect(result).resolves.toHaveProperty('message', failure === 'video-error' ? 'video-load-failed' : 'track-ended');
+        expect(jest.getTimerCount()).toBe(0);
+    });
+    it('does not choose a stable baseline until the app tab becomes visible', async () => {
+        const visibility = jest.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+        const ready = jest.fn();
+        const result = waitForStableCaptureViewport(video, new AbortController().signal).then(ready);
+        jest.advanceTimersByTime(1000);
+        await Promise.resolve();
+        expect(ready).not.toHaveBeenCalled();
+        visibility.mockReturnValue('visible');
+        jest.advanceTimersByTime(350);
+        await result;
+        expect(ready).toHaveBeenCalledTimes(1);
+        expect(jest.getTimerCount()).toBe(0);
+        visibility.mockRestore();
+    });
+    it('detects sharing termination even after the owner detaches the video stream', async () => {
+        const track = { readyState: 'live' };
+        Object.defineProperty(video, 'srcObject', { value: { getVideoTracks: () => [track] }, writable: true });
+        const result = waitForStableCaptureViewport(video, new AbortController().signal).catch((error) => error);
+        jest.advanceTimersByTime(100);
+        track.readyState = 'ended';
+        video.srcObject = null;
+        jest.advanceTimersByTime(50);
+        await expect(result).resolves.toHaveProperty('message', 'track-ended');
+        expect(jest.getTimerCount()).toBe(0);
+    });
     it('cleans up immediately when preparation is cancelled', async () => {
         const controller = new AbortController();
         const result = waitForStableCaptureViewport(video, controller.signal).catch((error) => error);

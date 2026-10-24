@@ -401,9 +401,9 @@ const RelationshipConsolePage: React.FC = () => {
     return (
         <div className="p-6 max-w-[1800px] mx-auto h-screen flex flex-col bg-gradient-to-br from-slate-50 to-white">
             {/* Header with Title and Actions */}
-            <div className="flex justify-between items-center mb-6 flex-shrink-0">
+            <div className="flex flex-wrap gap-3 justify-between items-center mb-6 flex-shrink-0">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-3">
+                    <h1 className="text-3xl font-bold text-slate-800 flex flex-wrap items-center gap-3">
                         <FontAwesomeIcon icon={faProjectDiagram} className="text-indigo-600" />
                         <span>관계 관리 콘솔</span>
                         <span className="text-sm font-normal text-slate-500">(Worker → Team → Site → Company)</span>

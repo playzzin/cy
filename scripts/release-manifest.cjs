@@ -3,8 +3,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
+const { resolveBuildDirectory, outputSuffix, loadBuildEnvironment } = require('./hosting-build-paths.cjs');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
-const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+const git = (args, cwd = root) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const groups = {
   hosting: ['src/', 'public/', 'scripts/', 'package.json', 'package-lock.json', 'tsconfig.json', 'tailwind.config.js', 'postcss.config.js'],
   functions: ['functions/src/', 'functions/package.json', 'functions/package-lock.json', 'functions/tsconfig.json'],
@@ -12,15 +13,17 @@ const groups = {
   storage: ['storage.rules'],
   deployment: ['firebase.json', 'firebase.staging.json', '.firebaserc'],
 };
-const buildStartPath = path.join(root, '.firebase', 'release-source-start.json');
-function sourceState() {
-  const files = git(['ls-files', '-z']).split('\0').filter(Boolean).sort();
+const buildStartPath = (workspaceRoot, directory) => path.join(workspaceRoot, '.firebase', `release-source-start${outputSuffix(workspaceRoot, directory)}.json`);
+function sourceState(workspaceRoot = root) {
+  const prefixes = [...new Set(Object.values(groups).flat())];
+  // New feature files affect the bundle before they are tracked by Git as well.
+  const files = [...new Set(git(['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...prefixes], workspaceRoot).split('\0').filter(Boolean))].sort();
   const fingerprints = Object.fromEntries(Object.entries(groups).map(([group, prefixes]) => {
     const selected = files.filter(file => prefixes.some(prefix => prefix.endsWith('/') ? file.startsWith(prefix) : file === prefix));
-    return [group, hash(selected.map(file => `${file}\0${fs.existsSync(path.join(root, file)) ? hash(fs.readFileSync(path.join(root, file))) : 'deleted'}`).join('\n'))];
+    return [group, hash(selected.map(file => `${file}\0${fs.existsSync(path.join(workspaceRoot, file)) ? hash(fs.readFileSync(path.join(workspaceRoot, file))) : 'deleted'}`).join('\n'))];
   }));
-  const untrackedSource = git(['ls-files', '--others', '--exclude-standard', '--', 'src', 'public', 'functions/src']);
-  return { commit: git(['rev-parse', 'HEAD']), dirty: Boolean(git(['status', '--porcelain', '--untracked-files=no'])) || Boolean(untrackedSource), fingerprints };
+  const untrackedSource = git(['ls-files', '--others', '--exclude-standard', '--', ...prefixes], workspaceRoot);
+  return { commit: git(['rev-parse', 'HEAD'], workspaceRoot), dirty: Boolean(git(['status', '--porcelain', '--untracked-files=no'], workspaceRoot)) || Boolean(untrackedSource), fingerprints };
 }
 function compareRelease(local, remote) {
   if (!remote || remote.schemaVersion !== 1 || !remote.fingerprints || !remote.assetManifestHash) {
@@ -36,23 +39,28 @@ function sameSourceState(start, end) {
   return start.commit === end.commit && start.dirty === end.dirty
     && Object.keys(groups).every(key => start.fingerprints?.[key] === end.fingerprints?.[key]);
 }
-function beginBuild() {
-  fs.mkdirSync(path.dirname(buildStartPath), { recursive: true });
-  fs.writeFileSync(buildStartPath, JSON.stringify({ ...sourceState(), deployment: {
-    environment: process.env.REACT_APP_DEPLOYMENT_ENV || 'production',
-    projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+function beginBuild(workspaceRoot = root, environment = process.env) {
+  const directory = resolveBuildDirectory(workspaceRoot, environment);
+  const startPath = buildStartPath(workspaceRoot, directory);
+  fs.mkdirSync(path.dirname(startPath), { recursive: true });
+  fs.writeFileSync(startPath, JSON.stringify({ ...sourceState(workspaceRoot), directory, deployment: {
+    environment: environment.REACT_APP_DEPLOYMENT_ENV || 'production',
+    projectId: environment.REACT_APP_FIREBASE_PROJECT_ID,
   } }));
 }
-function writeManifest() {
-  const state = sourceState();
-  const started = JSON.parse(fs.readFileSync(buildStartPath, 'utf8'));
+function writeManifest(workspaceRoot = root, environment = process.env) {
+  const directory = resolveBuildDirectory(workspaceRoot, environment);
+  const startPath = buildStartPath(workspaceRoot, directory);
+  const state = sourceState(workspaceRoot);
+  const started = JSON.parse(fs.readFileSync(startPath, 'utf8'));
+  if (started.directory !== directory) throw new Error('빌드 출력 경로가 바뀌었습니다. 다시 빌드해 주세요.');
   if (!sameSourceState(started, state)) throw new Error('빌드 중 코드가 바뀌었습니다. 현재 코드를 다시 빌드해 주세요.');
-  const assetManifestHash = hash(fs.readFileSync(path.join(root, 'build', 'asset-manifest.json')));
+  const assetManifestHash = hash(fs.readFileSync(path.join(directory, 'asset-manifest.json')));
   const manifest = { schemaVersion: 1, ...state, deployment: started.deployment, builtAt: new Date().toISOString(), assetManifestHash };
-  fs.writeFileSync(path.join(root, 'build', 'release.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  fs.unlinkSync(buildStartPath);
+  fs.writeFileSync(path.join(directory, 'release.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  fs.unlinkSync(startPath);
   console.log(`배포 확인 기록 생성: ${state.commit.slice(0, 8)}${state.dirty ? ' (커밋 전 변경 포함)' : ''}`);
   return manifest;
 }
 module.exports = { root, hash, sourceState, compareRelease, sameSourceState, beginBuild, writeManifest };
-if (require.main === module) writeManifest();
+if (require.main === module) { loadBuildEnvironment(); writeManifest(); }

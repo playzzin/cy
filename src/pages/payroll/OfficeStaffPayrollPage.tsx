@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     Calculator,
@@ -16,473 +16,24 @@ import {
 } from 'lucide-react';
 import { officeStaffService, OfficeStaff } from '../../services/officeStaffService';
 
-type RowSource = 'staff' | 'manual';
-type StatusFilter = 'active' | 'all';
-type PayBasis = 'gross' | 'net';
-type InsuranceBurdenMode = 'shared' | 'employer';
-
-interface InsuranceSettings {
-    pensionEnabled: boolean;
-    healthEnabled: boolean;
-    careEnabled: boolean;
-    employmentEnabled: boolean;
-    industrialAccidentEnabled: boolean;
-    pensionEmployeeRate: number;
-    pensionEmployerRate: number;
-    pensionMinBase: number;
-    pensionMaxBase: number;
-    healthEmployeeRate: number;
-    healthEmployerRate: number;
-    careEmployeeRateOfHealth: number;
-    careEmployerRateOfHealth: number;
-    employmentEmployeeRate: number;
-    employmentEmployerRate: number;
-    industrialAccidentEmployeeRate: number;
-    industrialAccidentEmployerRate: number;
-}
-
-interface PayrollInputState {
-    baseSalary?: number;
-    bonus?: number;
-    deduction?: number;
-    payBasis?: PayBasis;
-    insuranceApplied?: boolean;
-    insuranceBurdenMode?: InsuranceBurdenMode;
-    memo?: string;
-}
-
-interface ManualPayrollRow extends PayrollInputState {
-    id: string;
-    name: string;
-    department?: string;
-    role?: string;
-}
-
-interface PayrollDisplayRow {
-    id: string;
-    source: RowSource;
-    name: string;
-    department: string;
-    role: string;
-    salaryModel: string;
-    status: string;
-    baseSalary: number;
-    bonus: number;
-    deduction: number;
-    payBasis: PayBasis;
-    insuranceApplied: boolean;
-    insuranceBurdenMode: InsuranceBurdenMode;
-    memo: string;
-}
-
-interface PayrollCalculation {
-    grossPay: number;
-    pension: number;
-    health: number;
-    care: number;
-    employment: number;
-    industrialAccident: number;
-    employeeInsurance: number;
-    extraDeduction: number;
-    totalDeduction: number;
-    netPay: number;
-    employerPension: number;
-    employerHealth: number;
-    employerCare: number;
-    employerEmployment: number;
-    employerIndustrialAccident: number;
-    companyPaidEmployeeInsurance: number;
-    employerInsurance: number;
-    companyCost: number;
-}
-
-interface InsuranceBreakdown {
-    pension: number;
-    health: number;
-    care: number;
-    employment: number;
-    industrialAccident: number;
-    employeeInsurance: number;
-    employerPension: number;
-    employerHealth: number;
-    employerCare: number;
-    employerEmployment: number;
-    employerIndustrialAccident: number;
-    companyPaidEmployeeInsurance: number;
-    employerInsurance: number;
-}
-
-interface StoredMonthData {
-    rowInputs?: Record<string, PayrollInputState>;
-    manualRows?: ManualPayrollRow[];
-    settings?: Partial<InsuranceSettings>;
-}
-
-type StoredPayrollData = Record<string, StoredMonthData>;
-
-const STORAGE_KEY = 'cy-office-staff-payroll-v1';
-
-const DEFAULT_INSURANCE_SETTINGS: InsuranceSettings = {
-    pensionEnabled: true,
-    healthEnabled: true,
-    careEnabled: true,
-    employmentEnabled: true,
-    industrialAccidentEnabled: true,
-    pensionEmployeeRate: 4.75,
-    pensionEmployerRate: 4.75,
-    pensionMinBase: 400000,
-    pensionMaxBase: 6370000,
-    healthEmployeeRate: 3.595,
-    healthEmployerRate: 3.595,
-    careEmployeeRateOfHealth: 13.14,
-    careEmployerRateOfHealth: 13.14,
-    employmentEmployeeRate: 0.9,
-    employmentEmployerRate: 1.15,
-    industrialAccidentEmployeeRate: 0,
-    industrialAccidentEmployerRate: 0.8,
-};
-
-const inputClassName =
-    'h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
-const numberInputClassName =
-    'h-10 w-full min-w-[112px] rounded-md border border-slate-300 bg-white px-3 text-right text-sm text-slate-800 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
-const buttonClassName =
-    'inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
-const primaryButtonClassName =
-    'inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700';
-
-const currencyFormatter = new Intl.NumberFormat('ko-KR');
-
-const getCurrentMonth = (): string => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-};
-
-const isYearMonth = (value: unknown): value is string => {
-    const matched = /^(\d{4})-(\d{2})$/.exec(String(value ?? '').trim());
-    if (!matched) return false;
-    const month = Number(matched[2]);
-    return Number.isFinite(month) && month >= 1 && month <= 12;
-};
-
-const getMonthFromSearchParams = (params: URLSearchParams): string | null => {
-    const value = params.get('yearMonth') || params.get('month');
-    return isYearMonth(value) ? value : null;
-};
-
-const getStatusFilterFromSearchParams = (params: URLSearchParams): StatusFilter => {
-    const value = params.get('status');
-    return value === 'all' || value === 'active' ? value : 'active';
-};
-
-const getSearchFromSearchParams = (params: URLSearchParams): string =>
-    (params.get('q') || params.get('search') || '').trim();
-
-const toNumber = (value: unknown): number => {
-    const numberValue = Number(value || 0);
-    return Number.isFinite(numberValue) ? numberValue : 0;
-};
-
-const toText = (value: unknown): string => String(value ?? '').trim();
-
-const formatCurrency = (value: number): string => currencyFormatter.format(Math.round(value));
-
-const roundWon = (value: number): number => Math.round(Number.isFinite(value) ? value : 0);
-
-const getStaffRowId = (staff: OfficeStaff, index: number): string => {
-    const key = staff.id || staff.legacyId || `${staff.name}-${index}`;
-    return `staff:${key}`;
-};
-
-type LegacyInsuranceSettings = Partial<InsuranceSettings> & {
-    careRateOfHealth?: number;
-};
-
-const normalizeStoredSettings = (settings?: LegacyInsuranceSettings): InsuranceSettings => {
-    const legacyCareRate = settings?.careRateOfHealth;
-    return {
-        ...DEFAULT_INSURANCE_SETTINGS,
-        ...(settings || {}),
-        careEmployeeRateOfHealth:
-            settings?.careEmployeeRateOfHealth ?? legacyCareRate ?? DEFAULT_INSURANCE_SETTINGS.careEmployeeRateOfHealth,
-        careEmployerRateOfHealth:
-            settings?.careEmployerRateOfHealth ?? legacyCareRate ?? DEFAULT_INSURANCE_SETTINGS.careEmployerRateOfHealth,
-        industrialAccidentEmployeeRate:
-            settings?.industrialAccidentEmployeeRate ?? DEFAULT_INSURANCE_SETTINGS.industrialAccidentEmployeeRate,
-    };
-};
-
-const readStoredPayrollData = (): StoredPayrollData => {
-    try {
-        const raw = window.localStorage.getItem(STORAGE_KEY);
-        if (!raw) return {};
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-        return {};
-    }
-};
-
-const writeStoredPayrollData = (data: StoredPayrollData) => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-};
-
-const normalizeRate = (rate: number): number => Math.max(0, toNumber(rate)) / 100;
-
-const clampPensionBase = (grossPay: number, settings: InsuranceSettings): number => {
-    if (grossPay <= 0) return 0;
-    const minBase = Math.max(0, settings.pensionMinBase);
-    const maxBase = Math.max(minBase, settings.pensionMaxBase);
-    return Math.min(Math.max(grossPay, minBase), maxBase);
-};
-
-const calculateInsuranceBreakdown = (
-    grossPay: number,
-    row: Pick<PayrollDisplayRow, 'insuranceApplied' | 'insuranceBurdenMode'>,
-    settings: InsuranceSettings
-): InsuranceBreakdown => {
-    const pensionBase = clampPensionBase(grossPay, settings);
-    const insuranceApplied = row.insuranceApplied !== false;
-    const companyPaysAll = insuranceApplied && row.insuranceBurdenMode === 'employer';
-
-    const employeePensionShare = insuranceApplied && settings.pensionEnabled
-        ? roundWon(pensionBase * normalizeRate(settings.pensionEmployeeRate))
-        : 0;
-    const employerPensionShare = insuranceApplied && settings.pensionEnabled
-        ? roundWon(pensionBase * normalizeRate(settings.pensionEmployerRate))
-        : 0;
-
-    const employeeHealthShare = insuranceApplied && settings.healthEnabled
-        ? roundWon(grossPay * normalizeRate(settings.healthEmployeeRate))
-        : 0;
-    const employerHealthShare = insuranceApplied && settings.healthEnabled
-        ? roundWon(grossPay * normalizeRate(settings.healthEmployerRate))
-        : 0;
-
-    const employeeCareShare = insuranceApplied && settings.healthEnabled && settings.careEnabled
-        ? roundWon(employeeHealthShare * normalizeRate(settings.careEmployeeRateOfHealth))
-        : 0;
-    const employerCareShare = insuranceApplied && settings.healthEnabled && settings.careEnabled
-        ? roundWon(employerHealthShare * normalizeRate(settings.careEmployerRateOfHealth))
-        : 0;
-
-    const employeeEmploymentShare = insuranceApplied && settings.employmentEnabled
-        ? roundWon(grossPay * normalizeRate(settings.employmentEmployeeRate))
-        : 0;
-    const employerEmploymentShare = insuranceApplied && settings.employmentEnabled
-        ? roundWon(grossPay * normalizeRate(settings.employmentEmployerRate))
-        : 0;
-
-    const employeeIndustrialAccidentShare = insuranceApplied && settings.industrialAccidentEnabled
-        ? roundWon(grossPay * normalizeRate(settings.industrialAccidentEmployeeRate))
-        : 0;
-    const employerIndustrialAccidentShare = insuranceApplied && settings.industrialAccidentEnabled
-        ? roundWon(grossPay * normalizeRate(settings.industrialAccidentEmployerRate))
-        : 0;
-
-    const companyPaidEmployeeInsurance = companyPaysAll
-        ? employeePensionShare +
-            employeeHealthShare +
-            employeeCareShare +
-            employeeEmploymentShare +
-            employeeIndustrialAccidentShare
-        : 0;
-    const pension = companyPaysAll ? 0 : employeePensionShare;
-    const health = companyPaysAll ? 0 : employeeHealthShare;
-    const care = companyPaysAll ? 0 : employeeCareShare;
-    const employment = companyPaysAll ? 0 : employeeEmploymentShare;
-    const industrialAccident = companyPaysAll ? 0 : employeeIndustrialAccidentShare;
-    const employerPension = employerPensionShare + (companyPaysAll ? employeePensionShare : 0);
-    const employerHealth = employerHealthShare + (companyPaysAll ? employeeHealthShare : 0);
-    const employerCare = employerCareShare + (companyPaysAll ? employeeCareShare : 0);
-    const employerEmployment = employerEmploymentShare + (companyPaysAll ? employeeEmploymentShare : 0);
-    const employerIndustrialAccident =
-        employerIndustrialAccidentShare + (companyPaysAll ? employeeIndustrialAccidentShare : 0);
-    const employeeInsurance = pension + health + care + employment + industrialAccident;
-    const employerInsurance =
-        employerPension +
-        employerHealth +
-        employerCare +
-        employerEmployment +
-        employerIndustrialAccident;
-
-    return {
-        pension,
-        health,
-        care,
-        employment,
-        industrialAccident,
-        employeeInsurance,
-        employerPension,
-        employerHealth,
-        employerCare,
-        employerEmployment,
-        employerIndustrialAccident,
-        companyPaidEmployeeInsurance,
-        employerInsurance,
-    };
-};
-
-const resolveGrossPayForTargetNet = (
-    targetNetPay: number,
-    row: Pick<PayrollDisplayRow, 'insuranceApplied' | 'insuranceBurdenMode'>,
-    settings: InsuranceSettings
-): number => {
-    const target = Math.max(0, toNumber(targetNetPay));
-    if (target <= 0) return 0;
-
-    const netBeforeExtraDeduction = (grossPay: number): number => {
-        const insurance = calculateInsuranceBreakdown(grossPay, row, settings);
-        return grossPay - insurance.employeeInsurance;
-    };
-
-    let low = target;
-    let high = Math.max(target + 100000, Math.ceil(target * 1.35));
-    let guard = 0;
-
-    while (netBeforeExtraDeduction(high) < target && guard < 24) {
-        low = high;
-        high = Math.ceil(high * 1.5 + 100000);
-        guard += 1;
-    }
-
-    if (guard >= 24 && netBeforeExtraDeduction(high) < target) {
-        return roundWon(high);
-    }
-
-    for (let index = 0; index < 36; index += 1) {
-        const mid = (low + high) / 2;
-        if (netBeforeExtraDeduction(mid) >= target) {
-            high = mid;
-        } else {
-            low = mid;
-        }
-    }
-
-    return roundWon(high);
-};
-
-const calculatePayroll = (
-    row: Pick<PayrollDisplayRow, 'baseSalary' | 'bonus' | 'deduction' | 'payBasis' | 'insuranceApplied' | 'insuranceBurdenMode'>,
-    settings: InsuranceSettings
-): PayrollCalculation => {
-    const inputPay = Math.max(0, toNumber(row.baseSalary) + toNumber(row.bonus));
-    const grossPay = row.payBasis === 'net'
-        ? resolveGrossPayForTargetNet(inputPay, row, settings)
-        : inputPay;
-    const insurance = calculateInsuranceBreakdown(grossPay, row, settings);
-    const extraDeduction = Math.max(0, toNumber(row.deduction));
-    const totalDeduction = insurance.employeeInsurance + extraDeduction;
-    const netPay = grossPay - totalDeduction;
-
-    return {
-        grossPay,
-        pension: insurance.pension,
-        health: insurance.health,
-        care: insurance.care,
-        employment: insurance.employment,
-        industrialAccident: insurance.industrialAccident,
-        employeeInsurance: insurance.employeeInsurance,
-        extraDeduction,
-        totalDeduction,
-        netPay,
-        employerPension: insurance.employerPension,
-        employerHealth: insurance.employerHealth,
-        employerCare: insurance.employerCare,
-        employerEmployment: insurance.employerEmployment,
-        employerIndustrialAccident: insurance.employerIndustrialAccident,
-        companyPaidEmployeeInsurance: insurance.companyPaidEmployeeInsurance,
-        employerInsurance: insurance.employerInsurance,
-        companyCost: grossPay + insurance.employerInsurance,
-    };
-};
-
-const isActiveOfficeStaff = (staff: OfficeStaff): boolean => {
-    const status = toText(staff.status);
-    if (staff.isActive === false) return false;
-    return !status.includes('퇴사') && !status.toLowerCase().includes('inactive');
-};
-
-const isInsuranceExcludedStaff = (staff: OfficeStaff): boolean => {
-    const searchable = [
-        staff.employmentType,
-        staff.salaryModel,
-        staff.payType,
-        staff.role,
-        staff.department,
-        staff.memo,
-    ].map(toText).join(' ').toLowerCase();
-
-    return /외부|프리랜서|freelance|contractor|용역/.test(searchable);
-};
-
-const inferPayBasis = (staff: OfficeStaff): PayBasis => {
-    const searchable = [
-        staff.salaryModel,
-        staff.payType,
-        staff.employmentType,
-        staff.memo,
-    ].map(toText).join(' ').toLowerCase();
-
-    return /세후|실수령|실지급|net/.test(searchable) ? 'net' : 'gross';
-};
-
-const buildStaffDisplayRow = (
-    staff: OfficeStaff,
-    index: number,
-    input: PayrollInputState | undefined
-): PayrollDisplayRow => ({
-    id: getStaffRowId(staff, index),
-    source: 'staff',
-    name: toText(staff.name) || '이름 없음',
-    department: toText(staff.department) || '사무실',
-    role: toText(staff.role) || '-',
-    salaryModel: toText(staff.salaryModel || staff.payType) || '월급제',
-    status: toText(staff.status) || '재직',
-    baseSalary: input?.baseSalary ?? toNumber(staff.unitPrice),
-    bonus: input?.bonus ?? 0,
-    deduction: input?.deduction ?? 0,
-    payBasis: input?.payBasis ?? inferPayBasis(staff),
-    insuranceApplied: input?.insuranceApplied ?? !isInsuranceExcludedStaff(staff),
-    insuranceBurdenMode: input?.insuranceBurdenMode ?? 'shared',
-    memo: input?.memo ?? '',
-});
-
-const buildManualDisplayRow = (row: ManualPayrollRow): PayrollDisplayRow => ({
-    id: row.id,
-    source: 'manual',
-    name: row.name || '임시 직원',
-    department: row.department || '사무실',
-    role: row.role || '-',
-    salaryModel: '직접입력',
-    status: '수동',
-    baseSalary: row.baseSalary ?? 0,
-    bonus: row.bonus ?? 0,
-    deduction: row.deduction ?? 0,
-    payBasis: row.payBasis ?? 'gross',
-    insuranceApplied: row.insuranceApplied ?? false,
-    insuranceBurdenMode: row.insuranceBurdenMode ?? 'shared',
-    memo: row.memo ?? '',
-});
-
-const getCsvValue = (value: unknown): string => {
-    const text = String(value ?? '');
-    return `"${text.replace(/"/g, '""')}"`;
-};
+import { StatusFilter, PayBasis, InsuranceBurdenMode, InsuranceSettings, PayrollInputState, ManualPayrollRow, PayrollDisplayRow, DEFAULT_INSURANCE_SETTINGS, inputClassName, numberInputClassName, buttonClassName, primaryButtonClassName, getCurrentMonth, getMonthFromSearchParams, getStatusFilterFromSearchParams, getSearchFromSearchParams, toNumber, formatCurrency, getStaffRowId, normalizeStoredSettings, calculatePayroll, isActiveOfficeStaff, buildStaffDisplayRow, buildManualDisplayRow, getCsvValue } from './officeStaffPayrollModel';
+import { useSharedOfficePayroll } from './useSharedOfficePayroll';
 
 const OfficeStaffPayrollPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const [selectedMonth, setSelectedMonth] = useState(() => getMonthFromSearchParams(searchParams) ?? getCurrentMonth());
     const [staffRows, setStaffRows] = useState<OfficeStaff[]>([]);
-    const [rowInputs, setRowInputs] = useState<Record<string, PayrollInputState>>({});
-    const [manualRows, setManualRows] = useState<ManualPayrollRow[]>([]);
-    const [settings, setSettings] = useState<InsuranceSettings>(DEFAULT_INSURANCE_SETTINGS);
+    const shared = useSharedOfficePayroll(selectedMonth);
+    const rowInputs = useMemo(() => shared.data.rowInputs || {}, [shared.data.rowInputs]);
+    const manualRows = useMemo(() => shared.data.manualRows || [], [shared.data.manualRows]);
+    const settings = useMemo(() => normalizeStoredSettings(shared.data.settings), [shared.data.settings]);
+    const setRowInputs = (change: React.SetStateAction<Record<string, PayrollInputState>>) => shared.update(previous => ({ ...previous, rowInputs: typeof change === 'function' ? change(previous.rowInputs || {}) : change }));
+    const setManualRows = (change: React.SetStateAction<ManualPayrollRow[]>) => shared.update(previous => ({ ...previous, manualRows: typeof change === 'function' ? change(previous.manualRows || []) : change }));
+    const setSettings = (change: React.SetStateAction<InsuranceSettings>) => shared.update(previous => ({ ...previous, settings: typeof change === 'function' ? change(normalizeStoredSettings(previous.settings)) : change }));
     const [searchTerm, setSearchTerm] = useState(() => getSearchFromSearchParams(searchParams));
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => getStatusFilterFromSearchParams(searchParams));
     const [loading, setLoading] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
-    const [periodReady, setPeriodReady] = useState(false);
-    const isHydratingPeriodRef = useRef(false);
 
     const fetchStaff = async () => {
         setLoading(true);
@@ -491,7 +42,6 @@ const OfficeStaffPayrollPage: React.FC = () => {
             const rows = await officeStaffService.getOfficeStaff(true);
             setStaffRows(rows);
         } catch (error) {
-            console.error('[OfficeStaffPayrollPage] Failed to load office staff:', error);
             setLoadError('사무실 직원 목록을 불러오지 못했습니다.');
         } finally {
             setLoading(false);
@@ -543,41 +93,29 @@ const OfficeStaffPayrollPage: React.FC = () => {
         }, { replace: true });
     }, [searchTerm, selectedMonth, setSearchParams, statusFilter]);
 
-    useEffect(() => {
-        isHydratingPeriodRef.current = true;
-        const stored = readStoredPayrollData();
-        const monthData = stored[selectedMonth] || {};
-        setRowInputs(monthData.rowInputs || {});
-        setManualRows(monthData.manualRows || []);
-        setSettings(normalizeStoredSettings(monthData.settings));
-        setPeriodReady(true);
-    }, [selectedMonth]);
+    const monthlyStaffRows = useMemo(() => {
+        if (shared.data.staffSnapshot) return shared.data.staffSnapshot.map(row => ({ ...row, ...rowInputs[row.id] }));
+        // Preserve the names and input amounts in legacy monthly snapshots, including former employees.
+        if (shared.data.grossPaySnapshot) return shared.data.grossPaySnapshot.filter(row => !manualRows.some(manual => manual.id === row.id)).map(row => {
+            const staff = staffRows.find((item, index) => getStaffRowId(item, index) === row.id);
+            const fallback: PayrollDisplayRow = { id: row.id, name: row.name, source: 'staff', department: '사무실', role: '-', salaryModel: '월 저장본', status: '재직', baseSalary: row.baseSalary, bonus: row.bonus, deduction: 0, payBasis: row.payBasis, insuranceApplied: true, insuranceBurdenMode: 'shared', memo: '' };
+            return { ...(staff ? buildStaffDisplayRow(staff, 0, undefined) : fallback), ...row, ...rowInputs[row.id], id: row.id };
+        });
+        return staffRows.map((staff, index) => buildStaffDisplayRow(staff, index, rowInputs[getStaffRowId(staff, index)]));
+    }, [shared.data.staffSnapshot, shared.data.grossPaySnapshot, rowInputs, manualRows, staffRows]);
 
-    useEffect(() => {
-        if (!periodReady) return;
-        if (isHydratingPeriodRef.current) {
-            isHydratingPeriodRef.current = false;
-            return;
-        }
-        const stored = readStoredPayrollData();
-        stored[selectedMonth] = {
-            rowInputs,
-            manualRows,
-            settings,
-        };
-        writeStoredPayrollData(stored);
-    }, [manualRows, periodReady, rowInputs, selectedMonth, settings]);
+    const activeMonthlyStaffRows = useMemo(() => monthlyStaffRows.filter(row => {
+        if (shared.data.staffSnapshot || shared.data.grossPaySnapshot) return true;
+        const staff = staffRows.find((item, index) => getStaffRowId(item, index) === row.id);
+        return staff ? isActiveOfficeStaff(staff) : true;
+    }), [monthlyStaffRows, shared.data.staffSnapshot, shared.data.grossPaySnapshot, staffRows]);
+    const allRows = useMemo(() => (statusFilter === 'all' ? monthlyStaffRows : activeMonthlyStaffRows).concat(manualRows.map(buildManualDisplayRow)), [statusFilter, monthlyStaffRows, activeMonthlyStaffRows, manualRows]);
 
-    const allRows = useMemo(() => {
-        const staffDisplayRows = staffRows
-            .filter((staff) => statusFilter === 'all' || isActiveOfficeStaff(staff))
-            .map((staff, index) => {
-                const rowId = getStaffRowId(staff, index);
-                return buildStaffDisplayRow(staff, index, rowInputs[rowId]);
-            });
-
-        return staffDisplayRows.concat(manualRows.map(buildManualDisplayRow));
-    }, [manualRows, rowInputs, staffRows, statusFilter]);
+    const saveSharedMonth = () => {
+        const rows = activeMonthlyStaffRows.concat(manualRows.map(buildManualDisplayRow));
+        void shared.save({ rowInputs, manualRows, settings, staffSnapshot: activeMonthlyStaffRows,
+            grossPaySnapshot: rows.map(row => ({ id: row.id, name: row.name, baseSalary: row.baseSalary, bonus: row.bonus, payBasis: row.payBasis, grossPay: calculatePayroll(row, settings).grossPay })) });
+    };
 
     const filteredRows = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
@@ -690,9 +228,7 @@ const OfficeStaffPayrollPage: React.FC = () => {
 
     const resetCurrentMonth = () => {
         if (!window.confirm(`${selectedMonth} 급여 입력값을 초기화하시겠습니까?`)) return;
-        setRowInputs({});
-        setManualRows([]);
-        setSettings(DEFAULT_INSURANCE_SETTINGS);
+        shared.update(() => ({}));
     };
 
     const exportCsv = () => {
@@ -780,6 +316,7 @@ const OfficeStaffPayrollPage: React.FC = () => {
                             onChange={(event) => setSelectedMonth(event.target.value || getCurrentMonth())}
                             className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
                             aria-label="지급월"
+                            disabled={shared.saving}
                         />
                         <button
                             type="button"
@@ -791,6 +328,10 @@ const OfficeStaffPayrollPage: React.FC = () => {
                             <RefreshCw size={16} />
                             새로고침
                         </button>
+                        <button type="button" onClick={shared.reload} disabled={shared.loading || shared.saving} className={buttonClassName}>공용 자료 다시 불러오기</button>
+                        <button type="button" onClick={saveSharedMonth} disabled={!shared.ready || shared.loading || shared.saving || ((!shared.data.staffSnapshot && !shared.data.grossPaySnapshot) && (loading || !!loadError))} className={primaryButtonClassName}>
+                            <Save size={16} />{shared.saving ? '저장 중…' : '공용 저장'}
+                        </button>
                         <button type="button" onClick={exportCsv} aria-label="현재 필터 조건 CSV 다운로드" className={buttonClassName}>
                             <Download size={16} />
                             CSV
@@ -800,6 +341,12 @@ const OfficeStaffPayrollPage: React.FC = () => {
             </div>
 
             <main className="min-w-0 space-y-5 px-4 py-5 sm:px-6">
+                <section className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+                    <p role="status">{shared.loading ? '공용 급여 자료를 불러오는 중…' : shared.message}</p>
+                    {shared.error && <p role="alert" className="mt-2 text-rose-700">{shared.error}</p>}
+                    <p className="mt-2 text-slate-500">법인세 급여는 공용 저장한 월별 총세전지급액을 사용합니다. 검색 조건과 관계없이 해당 월의 대상 직원과 직접 추가한 행을 함께 저장합니다. 이전 브라우저 자료는 원본을 유지합니다.</p>
+                </section>
+                <fieldset disabled={!shared.ready || shared.loading || shared.saving} className="min-w-0 space-y-5">
                 <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-lg border border-slate-200 bg-white p-4">
                         <div className="flex items-center gap-2 text-sm font-semibold text-slate-500">
@@ -1350,7 +897,7 @@ const OfficeStaffPayrollPage: React.FC = () => {
                                         <td className="px-4 py-3" colSpan={2}>
                                             <span className="inline-flex items-center gap-2 text-xs text-slate-500">
                                                 <Save size={14} />
-                                                월별 자동 저장
+                                                {shared.dirty ? '공용 저장 전' : '월별 공용 저장'}
                                             </span>
                                         </td>
                                     </tr>
@@ -1375,6 +922,7 @@ const OfficeStaffPayrollPage: React.FC = () => {
                         </div>
                     </div>
                 </section>
+                </fieldset>
             </main>
         </div>
     );

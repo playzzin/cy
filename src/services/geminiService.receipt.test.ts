@@ -1,12 +1,12 @@
 import { aiSettingsService } from './aiSettingsService';
 import { geminiService } from './geminiService';
 
+jest.mock('./geminiUsageFetch', () => ({ trackedGeminiFetch: () => (url: RequestInfo, init?: RequestInit) => global.fetch(url, init) }));
 describe('geminiService.analyzeReceiptImage', () => {
     const originalFetch = global.fetch;
 
     beforeEach(() => {
         jest.spyOn(aiSettingsService, 'assertCurrentPageEnabled').mockImplementation(() => undefined);
-        jest.spyOn(aiSettingsService, 'getApiKey').mockReturnValue('test-api-key');
         jest.spyOn(aiSettingsService, 'getModels').mockReturnValue({
             textModel: 'gemini-2.5-flash',
             analyticsModel: 'gemini-2.5-flash',

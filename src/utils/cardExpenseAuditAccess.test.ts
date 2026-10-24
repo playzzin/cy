@@ -2,7 +2,8 @@ import { canAccessCardExpenseAudit } from './cardExpenseAuditAccess';
 
 describe('cardExpenseAuditAccess', () => {
   it('allows CEO and DEV roles including additional positions', () => {
-    expect(canAccessCardExpenseAudit({ role: 'user', position: '대표' })).toBe(true);
+    expect(canAccessCardExpenseAudit({ role: 'user', position: 'CEO' })).toBe(true);
+    expect(canAccessCardExpenseAudit({ role: 'user', position: 'ceo' })).toBe(true);
     expect(canAccessCardExpenseAudit({ role: 'user', position: '일반', additionalPositions: ['DEV'] })).toBe(true);
   });
 

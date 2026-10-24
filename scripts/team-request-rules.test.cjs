@@ -23,6 +23,11 @@ test('일반 사용자와 관리자 모두 신청·원본 직접 접근 및 위�
       const [storageHost, storagePort] = process.env.FIREBASE_STORAGE_EMULATOR_HOST.split(':');
       connectFirestoreEmulator(db, dbHost, Number(dbPort)); connectStorageEmulator(storage, storageHost, Number(storagePort));
       try {
+        if (role === 'user') {
+          for (const target of ['account_links/forged-approval', `users/${user.uid}`, 'workers/forged-worker', 'daily_reports/forged-report', 'field_schedule_requests/forged-off-duty']) {
+            await assert.rejects(setDoc(doc(db, target), { status: 'active', role: 'admin', approvedBy: user.uid }), error => error.code === 'permission-denied');
+          }
+        }
         for (const [collection, nested, folder] of [['team_worker_requests', 'documents', 'team-worker-documents'], ['team_expense_requests', 'receipts', 'team-expense-receipts']]) {
           await assert.rejects(setDoc(doc(db, collection, 'forged'), { ownerUid: user.uid, status: 'approved' }), error => error.code === 'permission-denied');
           await assert.rejects(setDoc(doc(db, collection, 'forged', nested, 'file'), { forged: true }), error => error.code === 'permission-denied');

@@ -82,7 +82,7 @@ export const dispatchService = {
     },
 
     // Get dispatch plan for a specific date
-    getDispatchByDate: async (date: string): Promise<DailyDispatch | null> => {
+    getDispatchByDate: async (date: string, options: { throwOnError?: boolean } = {}): Promise<DailyDispatch | null> => {
         try {
             const res = await getDailyDispatch({ id: date });
             const row = (res as any)?.data?.dailyDispatch;
@@ -94,6 +94,7 @@ export const dispatchService = {
                 updatedAt: toTimestamp(row.updatedAt)
             } as DailyDispatch;
         } catch (e) {
+            if (options.throwOnError) throw e;
             console.error(e);
             return null;
         }

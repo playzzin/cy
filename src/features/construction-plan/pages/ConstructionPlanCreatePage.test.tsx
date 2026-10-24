@@ -21,6 +21,11 @@ import { downloadReferenceConstructionPlanExcel } from '../services/construction
 import { fetchConstructionPlanMapSnapshot } from '../services/constructionPlanMapService';
 import ConstructionPlanCreatePage from './ConstructionPlanCreatePage';
 
+// These full-page workflows render the 33-item preview several times. Keep a
+// bounded integration-test budget so a busy release machine does not abort a
+// valid workflow mid-render and leak its pending work into the next test.
+jest.setTimeout(15_000);
+
 jest.mock('../services/referenceConstructionPlanPdfService', () => ({
   REFERENCE_CONSTRUCTION_PLAN_TEMPLATE_URL: '/assets/construction-plan/system-shoring-rev5-template.pdf',
   REFERENCE_CONSTRUCTION_PLAN_DEFAULT_LOGO_URL: '/assets/construction-plan/cheongyeon-rev5-logo.png',
@@ -455,9 +460,14 @@ describe('ConstructionPlanCreatePage selectable reference PDF flow', () => {
     fireEvent.click(updateButton);
 
     await waitFor(() => expect(saveCatalog).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole('button', { name: '현장 특별 안전계획 목차 수정' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '현장 특별 안전계획 목차 삭제' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: '현장 특별 안전계획 목차 수정' })).not.toBeInTheDocument());
+    const updatedEditButton = await screen.findByRole('button', { name: '현장 특별 안전계획 목차 수정' });
+    expect(updatedEditButton).toBeInTheDocument();
+    const deleteButton = await screen.findByRole('button', { name: '현장 특별 안전계획 목차 삭제' });
+    await waitFor(() => expect(deleteButton).toBeEnabled());
+    fireEvent.click(deleteButton);
+    // Observe the existing element; rescanning every accessible role in this
+    // large preview can block the async render and exhaust waitFor's timeout.
+    await waitFor(() => expect(updatedEditButton).not.toBeInTheDocument());
     expect(confirm).toHaveBeenCalled();
     confirm.mockRestore();
   }, 15_000);

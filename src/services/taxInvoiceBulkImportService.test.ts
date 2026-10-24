@@ -1,10 +1,19 @@
 import {
+    analyzeTaxInvoiceFiles,
     createTaxInvoiceDuplicateFingerprint,
     getTaxInvoiceGeminiApiErrorMessage,
     normalizeTaxInvoiceCandidate,
     validateTaxInvoiceCandidate,
     validateTaxInvoiceFiles,
 } from './taxInvoiceBulkImportService';
+import { GeminiBillingError } from './geminiGatewayClient';
+import { trackedGeminiFetch } from './geminiUsageFetch';
+
+jest.mock('./geminiUsageFetch', () => ({ trackedGeminiFetch: jest.fn() }));
+jest.mock('./aiSettingsService', () => ({
+    aiSettingsService: { assertCurrentPageEnabled: jest.fn(), getModels: () => ({ textModel: 'synthetic-model' }) },
+    normalizeGeminiModelName: (value: string, fallback: string) => value || fallback,
+}));
 
 describe('taxInvoiceBulkImportService', () => {
     const sampleRaw = {
@@ -112,5 +121,69 @@ describe('taxInvoiceBulkImportService', () => {
         expect(message).toContain('Gemini API Key가 유효하지 않습니다.');
         expect(message).toContain('/settings/ai 상단');
         expect(message).toContain('서버 Gemini API Key 입력란이 아닙니다.');
+    });
+});
+
+describe('tax invoice batch stops dispatching after a billing failure', () => {
+    const files = () => Array.from({ length: 5 }, (_, index) => new File(['synthetic'], `synthetic-${index}.png`, { type: 'image/png' }));
+    const successResponse = () => ({
+        ok: true,
+        text: async () => JSON.stringify({ candidates: [{ content: { parts: [{
+            text: JSON.stringify({ invoices: [{ supplierName: 'synthetic', totalAmount: 110, supplyAmount: 100, taxAmount: 10 }] }),
+        }] } }] }),
+    });
+    beforeEach(() => {
+        jest.clearAllMocks();
+        jest.spyOn(FileReader.prototype, 'readAsDataURL').mockImplementation(function (this: FileReader) {
+            Object.defineProperty(this, 'result', { configurable: true, value: 'data:image/png;base64,c3ludGhldGlj' });
+            this.onload?.(new ProgressEvent('load') as ProgressEvent<FileReader>);
+        });
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    test('allows only the two in-flight requests and explicitly marks remaining files as unrequested', async () => {
+        const invoke = jest.fn().mockRejectedValue(new GeminiBillingError());
+        (trackedGeminiFetch as jest.Mock).mockReturnValue(invoke);
+        const progress = jest.fn();
+        const batch = await analyzeTaxInvoiceFiles(files(), { companyLabel: 'synthetic', onProgress: progress });
+
+        expect(invoke).toHaveBeenCalledTimes(2);
+        expect(batch.candidates).toHaveLength(0);
+        expect(batch.errors).toHaveLength(5);
+        expect(batch.errors.filter(error => error.skipped)).toHaveLength(3);
+        expect(batch.errors.filter(error => error.skipped).every(error => error.message.includes('요청하지 않았습니다'))).toBe(true);
+        expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ completedFiles: 2, totalFiles: 5 }));
+    });
+
+    test('preserves a successful response that was already in flight when billing rejected another file', async () => {
+        const invoke = jest.fn().mockRejectedValueOnce(new GeminiBillingError()).mockResolvedValueOnce(successResponse());
+        (trackedGeminiFetch as jest.Mock).mockReturnValue(invoke);
+        const batch = await analyzeTaxInvoiceFiles(files(), { companyLabel: 'synthetic' });
+
+        expect(invoke).toHaveBeenCalledTimes(2);
+        expect(batch.candidates).toHaveLength(1);
+        expect(batch.candidates[0].sourceFileIndex).toBe(1);
+        expect(batch.errors.map(error => error.sourceFileIndex)).toEqual([0, 2, 3, 4]);
+    });
+
+    test('continues to subsequent files after an ordinary per-file analysis error', async () => {
+        const invoke = jest.fn().mockRejectedValue(new Error('Synthetic unreadable document'));
+        (trackedGeminiFetch as jest.Mock).mockReturnValue(invoke);
+        const batch = await analyzeTaxInvoiceFiles(files(), { companyLabel: 'synthetic' });
+
+        expect(invoke).toHaveBeenCalledTimes(5);
+        expect(batch.errors).toHaveLength(5);
+        expect(batch.errors.some(error => error.skipped)).toBe(false);
+    });
+
+    test('keeps pre-existing cancellation behavior without dispatching any file', async () => {
+        const invoke = jest.fn();
+        (trackedGeminiFetch as jest.Mock).mockReturnValue(invoke);
+        const controller = new AbortController();
+        controller.abort();
+        const batch = await analyzeTaxInvoiceFiles(files(), { companyLabel: 'synthetic', signal: controller.signal });
+
+        expect(invoke).not.toHaveBeenCalled();
+        expect(batch).toEqual({ candidates: [], errors: [] });
     });
 });

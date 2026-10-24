@@ -9,11 +9,14 @@ import { setupDeferredSentry } from './app/bootstrap/sentry';
 import { setupPwaInstallPromptCapture } from './pwaInstallPrompt';
 import { registerServiceWorker } from './serviceWorkerRegistration';
 import { installBrowserDownloadAudit } from './services/fileTransferAuditService';
+import { isDevPreviewFrame } from './utils/devPreviewRuntime';
 
 setupChunkLoadRecovery();
-setupPwaInstallPromptCapture();
-setupDeferredSentry();
-installBrowserDownloadAudit();
+if (!isDevPreviewFrame) {
+  setupPwaInstallPromptCapture();
+  setupDeferredSentry();
+  installBrowserDownloadAudit();
+}
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
@@ -27,4 +30,4 @@ root.render(
   </React.StrictMode>
 );
 
-registerServiceWorker();
+if (!isDevPreviewFrame) registerServiceWorker();

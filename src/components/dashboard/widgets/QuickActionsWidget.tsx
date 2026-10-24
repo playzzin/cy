@@ -8,11 +8,13 @@ import { useQuickMenuActionSettings } from '../useQuickMenuActions';
 import { QuickActionTile } from './QuickActionTile';
 import { useRouteAction } from '../../../hooks/useRouteAction';
 
-const WidgetContainer = styled.div`
+const WidgetContainer = styled.section<{ $accent: string; $softBg: string }>`
+    --quick-action-accent: ${(props) => props.$accent};
+    --quick-action-soft-bg: ${(props) => props.$softBg};
     background: #ffffff;
-    border-radius: 14px;
-    padding: 24px;
-    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06);
+    border-radius: 18px;
+    padding: clamp(16px, 2vw, 24px);
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.07);
     border: 1px solid #e2e8f0;
 `;
 
@@ -20,42 +22,68 @@ const Header = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
     gap: 12px;
     flex-wrap: wrap;
 `;
 
-const Title = styled.h3`
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: #1a1a1a;
+const HeadingGroup = styled.div`
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+    min-width: 0;
+`;
 
-    svg {
-        color: #f59e0b;
-    }
+const HeadingIcon = styled.span`
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    border-radius: 12px;
+    background: var(--quick-action-soft-bg);
+    color: var(--quick-action-accent);
+`;
+
+const Title = styled.h2`
+    margin: 0;
+    font-size: clamp(1rem, 1.6vw, 1.1rem);
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.4;
+`;
+
+const Subtitle = styled.p`
+    margin: 3px 0 0;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: #64748b;
 `;
 
 const SettingsButton = styled.button`
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    min-height: 36px;
+    min-height: 40px;
+    flex-shrink: 0;
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: 10px;
     border: 1px solid #e2e8f0;
     background: #ffffff;
     color: #475569;
     font-size: 0.82rem;
     font-weight: 800;
-    transition: all 0.2s ease;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 
     &:hover {
-        border-color: #c7d2fe;
-        background: #eef2ff;
-        color: #4338ca;
+        border-color: var(--quick-action-accent);
+        background: var(--quick-action-soft-bg);
+        color: var(--quick-action-accent);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--quick-action-accent);
+        outline-offset: 3px;
     }
 
     &:disabled {
@@ -66,11 +94,12 @@ const SettingsButton = styled.button`
 
 const Grid = styled.div`
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
     gap: 12px;
 
     @media (max-width: 520px) {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
     }
 `;
 
@@ -99,14 +128,24 @@ export const QuickActionsWidget = React.memo<QuickActionsWidgetProps>(({ modeCon
     }, [runRouteAction]);
 
     return (
-        <WidgetContainer>
+        <WidgetContainer
+            aria-label={`${modeConfig.shortLabel} 빠른 실행`}
+            $accent={modeConfig.accent}
+            $softBg={modeConfig.softBg}
+        >
             <Header>
-                <Title>
-                    <FontAwesomeIcon icon={faBolt} />
-                    {modeConfig.shortLabel} 빠른 실행
-                </Title>
+                <HeadingGroup>
+                    <HeadingIcon aria-hidden="true">
+                        <FontAwesomeIcon icon={faBolt} />
+                    </HeadingIcon>
+                    <div>
+                        <Title>{modeConfig.shortLabel} 빠른 실행</Title>
+                        <Subtitle>자주 쓰는 업무를 한곳에서</Subtitle>
+                    </div>
+                </HeadingGroup>
                 <SettingsButton
                     type="button"
+                    aria-label="빠른 실행 메뉴 설정"
                     onClick={() => setIsSettingsOpen(true)}
                     disabled={quickMenu.loading}
                 >

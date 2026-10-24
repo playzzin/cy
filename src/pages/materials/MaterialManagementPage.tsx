@@ -1,6 +1,9 @@
+import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useSiteMode } from '../../contexts/SiteModeContext';
+import { matchesMenuPosition } from '../../utils/menuPosition';
 import {
     faArrowDown,
     faArrowUp,
@@ -36,35 +39,47 @@ const materialTabs = [
         label: '입출고 내역',
         icon: faClipboardList,
         description: '조회/수정',
+        officeOnly: true,
     },
     {
         to: '/materials/transactions-by-site-date',
         label: '현장·일자',
         icon: faCalendar,
         description: '입출고 묶음',
+        officeOnly: true,
     },
     {
         to: '/materials/inventory',
         label: '재고 현황',
         icon: faBoxes,
         description: '전체 재고',
+        officeOnly: true,
     },
     {
         to: '/materials/inventory-by-site',
         label: '현장별 재고',
         icon: faBuilding,
         description: '현장 집계',
+        officeOnly: true,
     },
     {
         to: '/materials/logs',
         label: '자재 로그',
         icon: faHistory,
         description: '변경 이력',
+        officeOnly: true,
     },
 ];
 
 const MaterialManagementPage: React.FC = () => {
     const location = useLocation();
+    const canManage = useMaterialAdministration();
+    const { currentPosition, currentPositionData } = useSiteMode();
+    const showOfficeTabs = currentPosition === 'full'
+        || matchesMenuPosition('office', '사무실', currentPosition)
+        || matchesMenuPosition('office', '사무실', currentPositionData?.name);
+    const visibleTabs = materialTabs.filter((tab) => (showOfficeTabs || !tab.officeOnly)
+        && (canManage || ['/materials/master', '/materials/inbound', '/materials/outbound'].includes(tab.to)));
     const normalizedPath = location.pathname.replace(/\/+$/, '');
     const isFieldGoodsPage = normalizedPath === '/materials/field-goods';
 
@@ -86,8 +101,8 @@ const MaterialManagementPage: React.FC = () => {
                             </h1>
                         </div>
 
-                        <nav className="grid grid-cols-4 gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0" aria-label="자재관리 메뉴">
-                            {materialTabs.map((tab, index) => (
+                        <nav className={`grid ${showOfficeTabs && canManage ? 'grid-cols-4' : 'grid-cols-3'} gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0`} aria-label="자재관리 메뉴">
+                            {visibleTabs.map((tab, index) => (
                                 <NavLink
                                     key={tab.to}
                                     to={tab.to}
@@ -95,7 +110,8 @@ const MaterialManagementPage: React.FC = () => {
                                     className={({ isActive }) =>
                                         [
                                             index > 3 ? 'hidden sm:flex' : 'flex',
-                                            'group min-w-0 items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-center transition sm:min-w-[132px] sm:justify-start sm:gap-3 sm:px-3 sm:py-2 sm:text-left',
+                                            showOfficeTabs ? 'px-2' : 'flex-col px-1 sm:flex-row',
+                                            'group min-w-0 items-center justify-center gap-1.5 rounded-lg border py-1.5 text-center transition sm:min-w-[132px] sm:justify-start sm:gap-3 sm:px-3 sm:py-2 sm:text-left',
                                             isActive
                                                 ? 'active border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
                                                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',

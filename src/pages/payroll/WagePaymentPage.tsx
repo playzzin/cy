@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import DailyWagePaymentPage from './DailyWagePaymentPage';
 import MonthlyWagePaymentPage from './MonthlyWagePaymentPage';
 import { useSearchParams } from 'react-router-dom';
@@ -8,15 +8,13 @@ import { faMoneyBillWave, faCalendarDay, faCalendarAlt } from '@fortawesome/free
 type TabType = 'daily' | 'monthly';
 
 const WagePaymentPage: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<TabType>('daily');
-    const [searchParams] = useSearchParams();
-
-    useEffect(() => {
-        const tab = searchParams.get('tab');
-        if (tab === 'daily' || tab === 'monthly') {
-            setActiveTab(tab as TabType);
-        }
-    }, [searchParams]);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const activeTab: TabType = searchParams.get('tab') === 'monthly' ? 'monthly' : 'daily';
+    const setActiveTab = (tab: TabType) => {
+        const next = new URLSearchParams(searchParams);
+        next.set('tab', tab);
+        setSearchParams(next);
+    };
 
     const renderContent = () => {
         switch (activeTab) {
@@ -49,6 +47,7 @@ const WagePaymentPage: React.FC = () => {
                 <div className="flex gap-1 overflow-x-auto pb-1">
                     <button
                         onClick={() => setActiveTab('daily')}
+                        aria-pressed={activeTab === 'daily'}
                         className={`
                             px-4 py-2 rounded-t-lg text-sm font-bold transition-colors flex items-center gap-2 whitespace-nowrap
                             ${activeTab === 'daily'
@@ -63,6 +62,7 @@ const WagePaymentPage: React.FC = () => {
 
                     <button
                         onClick={() => setActiveTab('monthly')}
+                        aria-pressed={activeTab === 'monthly'}
                         className={`
                             px-4 py-2 rounded-t-lg text-sm font-bold transition-colors flex items-center gap-2 whitespace-nowrap
                             ${activeTab === 'monthly'

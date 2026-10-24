@@ -1,3 +1,6 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { createHash } from 'crypto';
@@ -485,19 +488,20 @@ const requestPlateFocusReadings = async (
     endpoint: string,
     files: FineFileInput[],
     vehiclePlateHints: string[],
+    model: string,
 ): Promise<Map<number, Record<string, unknown>>> => {
     const parts: Array<Record<string, unknown>> = [{ text: buildPlateFocusPrompt(files, vehiclePlateHints) }];
     files.forEach((file) => {
         parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
         parts.push({ inlineData: { mimeType: file.mimeType, data: file.base64 } });
     });
-    const response = await fetch(endpoint, {
+    const response = await trackedGeminiFetch('vehicle-fines')(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             contents: [{ role: 'user', parts }],
             generationConfig: {
-                temperature: 0,
+                ...geminiTextGenerationOptions(model, 0),
                 responseMimeType: 'application/json',
                 responseJsonSchema: PLATE_FOCUS_SCHEMA,
             },
@@ -539,7 +543,7 @@ const toHttpsError = (error: unknown, fallback: string): functions.https.HttpsEr
 export const analyzeVehicleFineNotices = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: { files?: unknown[]; vehiclePlates?: unknown[] }, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: { files?: unknown[]; vehiclePlates?: unknown[] }, context) => {
         try {
             await requireVehicleFineAccess(context);
             const rawFiles = Array.isArray(data?.files) ? data.files : [];
@@ -560,7 +564,7 @@ export const analyzeVehicleFineNotices = functions
             if (!apiKey) {
                 throw new functions.https.HttpsError('failed-precondition', '/settings/ai에서 서버 Gemini API Key를 먼저 설정해 주세요.');
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{ text: buildPrompt(files, vehiclePlateHints) }];
             files.forEach((file) => {
                 parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
@@ -568,13 +572,13 @@ export const analyzeVehicleFineNotices = functions
             });
 
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('vehicle-fines')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: FINE_NOTICE_SCHEMA,
                     },
@@ -605,7 +609,7 @@ export const analyzeVehicleFineNotices = functions
             }, file));
 
             try {
-                const focusedByIndex = await requestPlateFocusReadings(endpoint, files, vehiclePlateHints);
+                const focusedByIndex = await requestPlateFocusReadings(endpoint, files, vehiclePlateHints, model);
                 notices = files.map((file, index) => {
                     const focused = focusedByIndex.get(file.fileIndex);
                     if (!focused) return notices[index];
@@ -727,7 +731,7 @@ export const analyzeVehicleFineNotices = functions
         } catch (error) {
             throw toHttpsError(error, '차량 과태료 고지서 분석에 실패했습니다.');
         }
-    });
+    }));
 
 const sanitizeCommitItem = (value: unknown): CommitFineItem => {
     const source = (value || {}) as Record<string, unknown>;
@@ -773,7 +777,7 @@ const buildFineNote = (item: CommitFineItem): string => [
 export const commitVehicleFineImports = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(async (data: { operationId?: unknown; items?: unknown[] }, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: { operationId?: unknown; items?: unknown[] }, context) => {
         const auth = await requireVehicleFineAccess(context);
         const operationId = asString(data?.operationId).slice(0, 220);
         const rawItems = Array.isArray(data?.items) ? data.items : [];
@@ -1003,4 +1007,4 @@ export const commitVehicleFineImports = functions
             }
             throw toHttpsError(error, '차량 과태료 등록에 실패했습니다.');
         }
-    });
+    }));

@@ -1,0 +1,149 @@
+.business-page .cy-motion-intro {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid #183250;
+    border-radius: 16px;
+    padding: 28px 36px 20px;
+    background: radial-gradient(ellipse at 72% 24%, #0c2c55 0, transparent 54%), #030b18;
+    color: #ecf5ff;
+    box-shadow: 0 24px 64px #02112b24;
+}
+.cy-motion-intro .cy-motion-grid { position: absolute; inset: 0; z-index: -1; pointer-events: none; background-image: linear-gradient(#5db9e70a 1px, transparent 1px), linear-gradient(90deg, #5db9e70a 1px, transparent 1px); background-size: 48px 48px; mask-image: linear-gradient(180deg, #0008, #000, transparent); }
+.cy-motion-intro .cy-motion-topline { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #92a8c2; letter-spacing: .18em; font-size: 10px; font-weight: 600; }
+.cy-motion-topline > span:first-child { display: flex; align-items: center; gap: 10px; color: #d2e6fa; }
+.cy-motion-status-dot { width: 6px; height: 6px; border-radius: 50%; background: #7ae3f5; box-shadow: 0 0 16px #2dc9f3; }
+.cy-motion-stage { display: grid; grid-template-columns: 1fr 1.05fr; align-items: center; gap: 16px; min-height: 470px; }
+.cy-motion-copy { position: relative; z-index: 1; padding: 28px 0; animation: cy-copy-in 1s .15s both; }
+.business-page .cy-motion-eyebrow { color: #7fcce8; font-size: 10px; font-weight: 600; letter-spacing: .13em; }
+.business-page .cy-motion-copy h1 { margin: 22px 0; color: #f4f7fc; font-size: clamp(30px, 3.6vw, 50px); font-weight: 750; letter-spacing: -.055em; line-height: 1.35; }
+.business-page .cy-motion-copy h1 em { font-style: normal; background: linear-gradient(110deg, #f2f8ff 10%, #91dcf3 65%, #4690fa); background-clip: text; -webkit-background-clip: text; color: transparent; }
+.business-page .cy-motion-description { color: #a4b5cd; font-size: 14px; line-height: 1.95; }
+.cy-motion-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 22px; margin-top: 28px; }
+.business-page .cy-motion-actions button { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 13px 18px; min-height: 46px; border: 1px solid #8edbf0; border-radius: 6px; background: #c0f0ff; color: #092642; font-size: 12px; font-weight: 800; transition: background .2s, transform .2s; }
+.business-page .cy-motion-actions button:hover { background: #e8faff; transform: translateY(-2px); }
+.business-page .cy-motion-actions a { display: flex; gap: 18px; align-items: center; font-size: 12px; color: #cfdeef; min-height: 44px; }
+.cy-motion-actions a:hover { color: #85e2ff; }
+.cy-motion-principles { display: flex; gap: 24px; margin-top: 34px; }
+.cy-motion-principles > span { font-size: 9px; letter-spacing: .14em; color: #7293b7; }
+.cy-motion-principles > span > span { display: block; margin-top: 6px; font-size: 11px; letter-spacing: 0; color: #b2c6df; }
+.cy-motion-artwork { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 18px 0 8px; }
+.cy-motion-artwork-label { align-self: flex-end; font: 8px/1.5 monospace; letter-spacing: .18em; color: #6487af; margin: 6px 12px 0; }
+.cy-motion-orbit { position: absolute; inset: 17% 3% 12%; border: 1px solid #3375b024; border-radius: 50%; box-shadow: 0 0 70px #0277d31a, inset 0 0 50px #0277d31a; }
+.cy-motion-orbit::before, .cy-motion-orbit::after { content: ''; position: absolute; width: 8px; height: 8px; border: 1px solid #83d9ef66; }
+.cy-motion-orbit::before { top: 12%; left: 8%; border-right: 0; border-bottom: 0; }
+.cy-motion-orbit::after { right: 8%; bottom: 12%; border-left: 0; border-top: 0; }
+.cy-motion-logo { display: block; position: relative; width: min(100%, 454px); height: auto; aspect-ratio: 1; border-radius: 24%; overflow: hidden; }
+.cy-motion-logo-complete { animation: cy-artwork-resolve 1.3s 2.1s both; }
+.cy-motion-layer { animation: cy-layer-assemble 1.5s cubic-bezier(.16, 1, .3, 1) both; transform-box: fill-box; transform-origin: center; }
+.cy-motion-building-left { animation-delay: .15s; }
+.cy-motion-building-right { animation-delay: .4s; }
+.cy-motion-crane { animation-name: cy-crane-assemble; animation-delay: .55s; transform-origin: 85% 80%; }
+.cy-motion-silver-c { animation-delay: .9s; }
+.cy-motion-silver-y { animation-delay: 1.15s; }
+.cy-motion-blue-wing { animation-delay: 1.4s; }
+.cy-motion-wordmark { animation-delay: 1.8s; }
+.cy-motion-wireframe polygon { stroke-dasharray: 1; animation: cy-logo-trace 2.5s .45s both; }
+.cy-motion-shine { animation: cy-metal-shine 1.6s 2.7s both; mix-blend-mode: screen; }
+.cy-motion-artwork-caption { position: relative; font-size: 10px; color: #95b6d6; letter-spacing: .06em; margin-top: -4px; animation: cy-copy-in 1s 2s both; }
+.cy-motion-bridge { position: relative; height: 75px; margin-top: 4px; }
+.cy-motion-source { position: absolute; z-index: 1; left: 50%; top: -15px; transform: translateX(-50%); display: grid; place-items: center; width: 34px; height: 30px; border: 1px solid #3f83af; border-radius: 5px; background: #0b2138; box-shadow: 0 0 22px #2999c733; color: #a9eaff; font-size: 11px; font-weight: 800; }
+.cy-motion-bridge > svg { display: block; width: 100%; height: 100%; overflow: visible; fill: none; }
+.cy-motion-route { stroke: #234361; stroke-width: 1; vector-effect: non-scaling-stroke; stroke-dasharray: 1; animation: cy-connect 1.5s 2.5s both; transition: stroke .3s; }
+.is-active .cy-motion-route { stroke: #6bd8f2; stroke-width: 1.5; }
+.cy-motion-signal { stroke: #66d5fa; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-dasharray: .08 .92; animation: cy-signal-travel 3.5s linear infinite; opacity: .45; }
+.is-active .cy-motion-signal { opacity: 1; filter: drop-shadow(0 0 3px #5fcfff); }
+.cy-motion-network { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.cy-motion-network .cy-motion-node { display: flex; flex-direction: column; }
+.cy-motion-node .cy-motion-thumbnail { width: 100%; flex-shrink: 0; }
+.business-page .cy-motion-node { position: relative; isolation: isolate; overflow: visible; min-width: 0; padding: 0; border: 1px solid #24374d; border-radius: 7px; text-align: left; background: #07111f; color: #eff7ff; animation: cy-node-in .8s calc(2.8s + var(--node-order) * .12s) both; transition: border-color .25s, box-shadow .25s, transform .25s; }
+.business-page .cy-motion-node:hover, .business-page .cy-motion-node.is-preview { border-color: #71cbe8; box-shadow: 0 0 26px #3aa9f51a; transform: translateY(-4px); }
+.business-page .cy-motion-node:focus-visible, .business-page .cy-motion-controls button:focus-visible, .business-page .cy-motion-actions :focus-visible { outline: 2px solid #a2ecff; outline-offset: 4px; }
+.cy-motion-node-port { position: absolute; z-index: 2; left: calc(50% - 3px); top: -4px; width: 6px; height: 6px; border-radius: 50%; background: #507296; box-shadow: 0 0 0 4px #071321; transition: background .25s; }
+.is-preview .cy-motion-node-port { background: #a6f3ff; box-shadow: 0 0 0 4px #071321, 0 0 18px #56ceff; }
+.cy-motion-thumbnail { position: relative; display: block; overflow: hidden; height: 94px; border-radius: 6px 6px 0 0; background: #132b42; }
+.cy-motion-thumbnail img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; opacity: .62; filter: saturate(.5); transition: opacity .4s, filter .4s, transform .6s; }
+.is-preview .cy-motion-thumbnail img { opacity: .95; filter: saturate(.85); transform: scale(1.06); }
+.cy-motion-thumbnail-fallback { display: grid; place-items: center; height: 100%; font-size: 28px; color: #87bedc; background: linear-gradient(135deg, #143350, #0c182c); }
+.cy-motion-node-content { display: block; padding: 13px 12px 16px; }
+.cy-motion-node-meta { display: flex; gap: 8px; justify-content: space-between; color: #7498bb; font: 9px/1.5 monospace; text-transform: uppercase; }
+.cy-motion-node-title { display: flex; align-items: center; gap: 7px; margin-top: 9px; font-size: 15px; font-weight: 700; }
+.cy-motion-node-title > svg { font-size: 12px; color: #82cfe7; }
+.cy-motion-node-title > span { margin-left: auto; font-size: 12px; color: #85a4c0; }
+.cy-motion-node-description { display: block; font-size: 10px; margin-top: 7px; color: #9bb2c9; }
+.cy-motion-bottomline { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 24px; padding-top: 17px; border-top: 1px solid #24354a; }
+.cy-motion-preview { display: flex; align-items: center; gap: 12px; min-width: 0; font-size: 11px; color: #8ab5d2; }
+.cy-motion-preview > span:first-child { font: 10px/1.5 monospace; color: #81cfe9; white-space: nowrap; }
+.cy-motion-preview strong { color: #d7e7f6; font-size: 12px; font-weight: 600; }
+.cy-motion-preview > span:last-child { color: #8197b2; font-size: 10px; }
+.cy-motion-controls { display: flex; gap: 8px; flex-shrink: 0; }
+.business-page .cy-motion-controls button { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 6px 10px; color: #bfd2e8; border: 1px solid #2b415d; border-radius: 5px; background: #0c1a2c; font-size: 10px; }
+.business-page .cy-motion-controls button:hover { border-color: #71cbe8; color: #e5f7ff; }
+.business-page .cy-motion-controls button:disabled { opacity: .45; cursor: default; }
+.business-page .cy-motion-footnote { display: flex; justify-content: space-between; gap: 12px; margin-top: 15px; color: #7c94b0; font-size: 9px; }
+.cy-motion-intro[data-paused=true] *, .cy-motion-intro[data-paused=true] *::before, .cy-motion-intro[data-paused=true] *::after { animation-play-state: paused !important; }
+/* Reduced motion must expose the finished state, including all navigation. */
+.cy-motion-intro[data-reduced-motion=true] * { animation: none !important; transition: none !important; }
+.cy-motion-intro[data-reduced-motion=true] .cy-motion-wireframe, .cy-motion-intro[data-reduced-motion=true] .cy-motion-shine, .cy-motion-intro[data-reduced-motion=true] .cy-motion-signal { display: none; }
+@keyframes cy-copy-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes cy-layer-assemble { from { opacity: 0; transform: translateY(90px); } to { opacity: 1; transform: none; } }
+@keyframes cy-crane-assemble { from { opacity: 0; transform: translateY(-35px) rotate(-8deg); } to { opacity: 1; transform: none; } }
+@keyframes cy-artwork-resolve { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cy-logo-trace { 0% { stroke-dashoffset: 1; opacity: 0; } 15% { opacity: .85; } 70% { stroke-dashoffset: 0; opacity: .85; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+@keyframes cy-metal-shine { from { transform: translateX(0) skewX(-18deg); } to { transform: translateX(2000px) skewX(-18deg); } }
+@keyframes cy-connect { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes cy-signal-travel { 0% { stroke-dashoffset: 1; } 100% { stroke-dashoffset: 0; } }
+@keyframes cy-node-in { from { opacity: 0; translate: 0 14px; } to { opacity: 1; translate: 0 0; } }
+@media (max-width: 1100px) {
+    .business-page .cy-motion-intro { padding: 24px; }
+    .cy-motion-stage { min-height: 400px; }
+    .cy-motion-network { gap: 8px; }
+    .cy-motion-node-meta > span { display: none; }
+    .cy-motion-node-title { font-size: 13px; }
+    .cy-motion-node-description { font-size: 9px; }
+    .cy-motion-preview > span:last-child, .cy-motion-preview > svg { display: none; }
+}
+@media (max-width: 760px) {
+    .business-page .cy-motion-intro { padding: 22px 18px 18px; border-radius: 12px; }
+    .cy-motion-topline > span:last-child { display: none; }
+    .cy-motion-stage { grid-template-columns: 1fr; gap: 0; }
+    .cy-motion-copy { padding: 30px 0 0; }
+    .business-page .cy-motion-copy h1 { font-size: clamp(29px, 6.5vw, 44px); margin: 16px 0; }
+    .business-page .cy-motion-description { font-size: 12px; }
+    .cy-motion-actions { gap: 18px; margin-top: 22px; }
+    .cy-motion-principles { display: none; }
+    .cy-motion-artwork { padding: 14px 0 12px; }
+    .cy-motion-logo { width: min(100%, 350px); }
+    .cy-motion-artwork-label { display: none; }
+    .cy-motion-artwork-caption { font-size: 9px; }
+    .cy-motion-bridge { height: 45px; margin-top: 10px; }
+    .cy-motion-bridge > svg { display: none; }
+    .cy-motion-bridge::after { content: ''; position: absolute; width: 1px; left: 50%; top: 10px; bottom: 0; background: #6bd8f2; }
+    .cy-motion-network { position: relative; grid-template-columns: 1fr; gap: 12px; padding-left: 15px; }
+    .cy-motion-network::before { content: ''; position: absolute; left: 0; top: 0; bottom: 48px; width: 1px; background: linear-gradient(#6bd8f2, #214463); }
+    .cy-motion-network::after { content: ''; position: absolute; left: 0; top: 0; width: 50%; height: 1px; background: #6bd8f2; }
+    .business-page .cy-motion-node { display: grid; grid-template-columns: 100px 1fr; }
+    .cy-motion-node::before { content: ''; position: absolute; width: 15px; height: 1px; background: #365c7e; left: -16px; top: 50%; }
+    .cy-motion-node-port { left: -19px; top: calc(50% - 3px); }
+    .cy-motion-thumbnail { height: 100%; min-height: 100px; border-radius: 6px 0 0 6px; }
+    .cy-motion-node-content { padding: 12px 14px; }
+    .cy-motion-node-title { font-size: 14px; margin-top: 5px; }
+    .cy-motion-node-meta > span { display: inline; }
+    .cy-motion-node-description { font-size: 10px; }
+    .business-page .cy-motion-node:hover, .business-page .cy-motion-node.is-preview { transform: translateX(3px); }
+    .cy-motion-bottomline { align-items: flex-start; flex-direction: column; gap: 14px; margin-top: 20px; }
+    .cy-motion-controls { align-self: flex-end; }
+    .business-page .cy-motion-controls button { min-height: 44px; font-size: 11px; padding: 8px 13px; }
+    .business-page .cy-motion-footnote { flex-direction: column; gap: 5px; }
+}
+@media (max-width: 380px) {
+    .business-page .cy-motion-intro { padding: 20px 14px 16px; }
+    .cy-motion-actions { gap: 12px; }
+    .business-page .cy-motion-actions button { gap: 10px; padding: 12px; font-size: 11px; }
+    .business-page .cy-motion-actions a { font-size: 11px; gap: 6px; }
+    .business-page .cy-motion-node { grid-template-columns: 80px 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .cy-motion-intro *, .cy-motion-intro *::before, .cy-motion-intro *::after { animation: none !important; transition: none !important; }
+    .cy-motion-wireframe, .cy-motion-shine, .cy-motion-signal { display: none; }
+}

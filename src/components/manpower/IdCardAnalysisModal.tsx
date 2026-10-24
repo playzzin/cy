@@ -5,7 +5,9 @@ import {
     faExclamationTriangle, faPlus, faSync, faUserPlus, faEdit
 } from '@fortawesome/free-solid-svg-icons';
 import { geminiService, AnalyzedIdCard } from '../../services/geminiService';
+import { GEMINI_BILLING_SKIPPED_MESSAGE, isGeminiBillingError } from '../../services/geminiGatewayClient';
 import { Worker } from '../../services/manpowerService';
+import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 
 interface IdCardAnalysisModalProps {
     isOpen: boolean;
@@ -67,6 +69,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
                 matchType: 'pending' as const
             }));
             setResults(prev => [...prev, ...newFiles]);
+            void recordIdentityDocumentLog({ action: 'files_added', status: 'success', fileNames: newFiles.map(({ file }) => file.name), fileCount: newFiles.length });
         }
     };
 
@@ -91,6 +94,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
                 matchType: 'pending' as const
             }));
             setResults(prev => [...prev, ...newFiles]);
+            void recordIdentityDocumentLog({ action: 'files_added', status: 'success', fileNames: newFiles.map(({ file }) => file.name), fileCount: newFiles.length });
         }
     };
 
@@ -154,11 +158,8 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
     };
 
     const runAnalysis = async () => {
-        const apiKey = geminiService.getKey();
-        if (!apiKey) {
-            alert('API 키가 설정되지 않았습니다. /settings/ai 에서 Gemini API 키를 등록하거나 .env.local의 REACT_APP_GOOGLE_API_KEY를 설정해주세요.');
-            return;
-        }
+        
+        
 
         setIsAnalyzing(true);
         const newResults = [...results];
@@ -185,12 +186,15 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
                 newResults[i].matchType = matchResult.matchType;
                 newResults[i].matchedWorker = matchResult.matchedWorker;
                 newResults[i].changes = matchResult.changes;
+                void recordIdentityDocumentLog({ action: 'document_analysis', status: 'success', fileNames: [newResults[i].file.name],
+                    fileCount: 1, personNames: [data.name || ''], workerId: matchResult.matchedWorker?.id });
 
                 // Rate limit 방지 지연
                 await new Promise(resolve => setTimeout(resolve, 2000));
 
             } catch (error: any) {
                 newResults[i].status = 'error';
+                void recordIdentityDocumentLog({ action: 'document_analysis', status: 'failure', fileNames: [newResults[i].file.name], fileCount: 1, reason: 'processing_failed' });
                 const message = error?.message || '인식 실패';
                 if (/API Key Missing|API key not valid|403|PERMISSION_DENIED|referer|blocked/i.test(message)) {
                     newResults[i].error = `${message} (/settings/ai 또는 .env.local 확인)`;
@@ -198,6 +202,15 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
                     newResults[i].error = message;
                 }
                 newResults[i].matchType = 'pending';
+                if (isGeminiBillingError(error)) {
+                    for (let remaining = i + 1; remaining < newResults.length; remaining += 1) {
+                        if (newResults[remaining].status === 'success') continue;
+                        newResults[remaining] = { ...newResults[remaining], status: 'error',
+                            error: GEMINI_BILLING_SKIPPED_MESSAGE, matchType: 'pending' };
+                    }
+                    setResults([...newResults]);
+                    break;
+                }
             }
             setResults([...newResults]);
         }
@@ -254,6 +267,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
     };
 
     const handleRemoveResult = (index: number) => {
+        void recordIdentityDocumentLog({ action: 'files_removed', status: 'success', fileNames: [results[index].file.name], fileCount: 1 });
         setResults(prev => prev.filter((_, i) => i !== index));
     };
 
@@ -348,6 +362,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
 
                     <input
                         type="file"
+                        aria-label="대량 등록 신분증 사진 선택"
                         ref={fileInputRef}
                         className="hidden"
                         multiple

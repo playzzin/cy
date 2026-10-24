@@ -25,6 +25,8 @@ export const WorkerSchema = z.object({
     accountNumber: z.string().optional().nullable(),
     accountHolder: z.string().optional().nullable(),
     fileNameSaved: z.string().optional().nullable(),
+    bankPhotoId: z.string().optional().nullable(),
+    bankPhotoUpdatedAt: z.any().optional(),
     needsApproval: z.boolean().optional().default(false),
     totalManDay: z.number().optional().default(0),
     employmentType: z.string().optional().nullable(),

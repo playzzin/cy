@@ -1,6 +1,7 @@
 import { GoogleAuthProvider, signInWithPopup, User, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { manpowerService, Worker } from './manpowerService';
+import { loginAccessTracker, writeAuthLog, writeLogoutLog } from './loginAccessTracker';
 
 export interface AuthResult {
   user: User | null;
@@ -16,10 +17,15 @@ provider.addScope('profile');
 export const authService = {
   // Google 로그인 및 Worker 매칭
   signInWithGoogle: async (): Promise<AuthResult> => {
+    const finishAccess = loginAccessTracker.beginInteractiveLogin();
+    let authenticated = false;
     try {
       // 1. Google 로그인
       const result = await signInWithPopup(auth, provider);
       const { user } = result;
+      finishAccess(user);
+      authenticated = true;
+      void writeAuthLog({ action: 'login_success', provider: 'google', method: 'popup', user, email: user.email });
 
       if (!user.email) {
         throw new Error('이메일 정보를 가져올 수 없습니다.');
@@ -61,15 +67,6 @@ export const authService = {
         worker.uid = user.uid;
       }
 
-      const { loginLogService } = await import('./loginLogService');
-      await loginLogService.safeCreateLog({
-        action: 'login_success',
-        provider: 'google',
-        method: 'popup',
-        user,
-        email: user.email,
-      });
-
       return {
         user,
         worker,
@@ -77,8 +74,7 @@ export const authService = {
         needsApproval: needsApproval || (worker?.needsApproval ?? false)
       };
     } catch (error) {
-      const { loginLogService } = await import('./loginLogService');
-      await loginLogService.safeCreateLog({
+      if (!authenticated) void writeAuthLog({
         action: 'login_failed',
         provider: 'google',
         method: 'popup',
@@ -87,6 +83,8 @@ export const authService = {
       });
       console.error('로그인 실패:', error);
       throw error;
+    } finally {
+      finishAccess();
     }
   },
 
@@ -94,8 +92,7 @@ export const authService = {
   signOut: async (): Promise<void> => {
     try {
       const user = auth.currentUser;
-      const { loginLogService } = await import('./loginLogService');
-      await loginLogService.safeCreateLog({
+      await writeLogoutLog({
         action: 'logout',
         provider: 'firebase',
         method: 'manual',
@@ -103,6 +100,7 @@ export const authService = {
         email: user?.email || null,
       });
       await firebaseSignOut(auth);
+      loginAccessTracker.observe(null);
     } catch (error) {
       console.error('로그아웃 실패:', error);
       throw error;

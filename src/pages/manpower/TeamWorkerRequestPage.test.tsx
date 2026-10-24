@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import TeamWorkerRequestPage from './TeamWorkerRequestPage';
 import { teamWorkerRequestService } from '../../services/teamWorkerRequestService';
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'leader' } }) }));
@@ -80,6 +80,15 @@ test('조회 월을 변경해도 작성 중인 입력은 유지한다', async ()
   expect(screen.getByLabelText('이름 *')).toHaveValue('작성 중인 이름');
 });
 
+test('새로고침은 서버에서 최신 목록을 요청하면서 작성 중인 입력을 유지한다', async () => {
+  render(<TeamWorkerRequestPage />);
+  await screen.findByLabelText('이름 *');
+  fireEvent.change(screen.getByLabelText('이름 *'), { target: { value: '작성 중인 이름' } });
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+  await waitFor(() => expect(service.list).toHaveBeenLastCalledWith(expect.any(String), undefined, { forceReload: true }));
+  expect(screen.getByLabelText('이름 *')).toHaveValue('작성 중인 이름');
+});
+
 test('최종 확인 중에는 배경 입력과 첨부를 잠근다', async () => {
   render(<TeamWorkerRequestPage />); await fill();
   fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
@@ -107,4 +116,42 @@ test('추가 조회에서 승인 권한이 줄면 이전 타인 신청을 제거
   await screen.findByText('타인 신청');
   fireEvent.click(screen.getByRole('button', { name: '다음 100건 더 보기' }));
   await waitFor(() => expect(screen.queryByText('타인 신청')).not.toBeInTheDocument());
+});
+
+test('최초 조회 중에는 로딩 상태를 알리고 재조회 중에는 작성 화면을 유지한다', async () => {
+  let finishInitial!: (value: typeof data) => void;
+  let finishRefresh!: (value: typeof data) => void;
+  service.list.mockReturnValueOnce(new Promise(resolve => { finishInitial = resolve; }))
+    .mockReturnValueOnce(new Promise(resolve => { finishRefresh = resolve; }));
+  render(<TeamWorkerRequestPage />);
+  expect(screen.getByRole('status')).toHaveTextContent('소속팀과 신청 내역을 불러오고 있습니다');
+  expect(screen.getByRole('region', { name: '불러온 신청 현황' })).toHaveAttribute('aria-busy', 'true');
+  expect(screen.queryByLabelText('이름 *')).not.toBeInTheDocument();
+  await act(async () => { finishInitial(data); });
+  fireEvent.change(screen.getByLabelText('이름 *'), { target: { value: '계속 작성 중' } });
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+  expect(screen.getByRole('status')).toHaveTextContent('신청 내역을 새로 확인하고 있습니다');
+  expect(screen.getByLabelText('이름 *')).toHaveValue('계속 작성 중');
+  expect(screen.getByRole('button', { name: '등록 전 미리보기' })).toBeDisabled();
+  await act(async () => { finishRefresh(data); });
+  expect(screen.getByLabelText('이름 *')).toHaveValue('계속 작성 중');
+  expect(screen.getByRole('region', { name: '불러온 신청 현황' })).toHaveAttribute('aria-busy', 'false');
+});
+
+test('상태 필터를 바꿔도 요약은 불러온 신청 전체를 기준으로 유지한다', async () => {
+  const row: any = { ownerUid: 'leader', teamName: 'A팀', submittedAt: '2026-09-20T00:00:00Z', attachments: [] };
+  service.list.mockResolvedValueOnce({ ...data, requests: [
+    { ...row, id: 'pending', name: '대기 작업자', status: 'pending' },
+    { ...row, id: 'approved', name: '승인 작업자', status: 'approved' },
+    { ...row, id: 'rejected', name: '반려 작업자', status: 'rejected' }
+  ] });
+  render(<TeamWorkerRequestPage />);
+  await screen.findByText('대기 작업자');
+  const summary = screen.getByRole('region', { name: '불러온 신청 현황' });
+  expect(summary).toHaveTextContent(/조회한 신청\s*3\s*건/);
+  fireEvent.change(screen.getByLabelText('처리 상태'), { target: { value: 'pending' } });
+  expect(screen.getByText('대기 작업자')).toBeInTheDocument();
+  expect(screen.queryByText('승인 작업자')).not.toBeInTheDocument();
+  expect(summary).toHaveTextContent(/조회한 신청\s*3\s*건/);
+  expect(summary).toHaveTextContent(/등록 완료\s*1\s*건/);
 });

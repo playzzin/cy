@@ -1,0 +1,95 @@
+.mobile-list-return {
+    display: none;
+}
+
+@media screen and (max-width: 768px) {
+    .mobile-list-return {
+        --return-start: #1d4ed8;
+        --return-end: #1e40af;
+        --return-shadow: 37, 99, 235;
+        position: relative;
+        isolation: isolate;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        min-height: 56px;
+        margin: 0 0 14px;
+        padding: 10px 14px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 14px;
+        background: linear-gradient(115deg, var(--return-start), var(--return-end));
+        box-shadow: 0 6px 16px rgba(var(--return-shadow), 0.22);
+        color: #fff;
+        font: inherit;
+        font-size: 15px;
+        font-weight: 800;
+        line-height: 1.4;
+        text-align: left;
+        cursor: pointer;
+        touch-action: manipulation;
+        animation: mobile-list-return-enter 360ms ease-out backwards;
+        transition: transform 120ms ease, box-shadow 160ms ease;
+    }
+
+    .mobile-list-return--worker {
+        --return-start: #6d28d9;
+        --return-end: #4338ca;
+        --return-shadow: 109, 40, 217;
+    }
+
+    /* The entry sheen is brief; the arrow keeps guiding users back to the list. */
+    .mobile-list-return::after {
+        content: '';
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 35%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.24), transparent);
+        transform: translateX(-160%) skewX(-18deg);
+        pointer-events: none;
+        animation: mobile-list-return-sheen 1600ms ease-in-out 180ms 2;
+    }
+
+    .mobile-list-return__arrow {
+        display: grid;
+        place-items: center;
+        flex: 0 0 34px;
+        height: 34px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.16);
+    }
+
+    .mobile-list-return__arrow svg {
+        animation: mobile-list-return-point 1200ms ease-in-out infinite;
+    }
+
+    .mobile-list-return__label { flex: 1; }
+    .mobile-list-return__list { flex-shrink: 0; opacity: 0.8; }
+    .mobile-list-return:active { transform: scale(0.985); box-shadow: 0 2px 6px rgba(var(--return-shadow), 0.2); }
+    .mobile-list-return:focus-visible { outline: 3px solid #38bdf8; outline-offset: 3px; }
+}
+
+@keyframes mobile-list-return-enter {
+    from { opacity: 0.65; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes mobile-list-return-sheen {
+    0%, 15% { transform: translateX(-160%) skewX(-18deg); }
+    65%, 100% { transform: translateX(420%) skewX(-18deg); }
+}
+
+@keyframes mobile-list-return-point {
+    0%, 100% { transform: translateX(2px); }
+    50% { transform: translateX(-4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mobile-list-return,
+    .mobile-list-return::after,
+    .mobile-list-return__arrow svg { animation: none; transition: none; }
+    .mobile-list-return::after { display: none; }
+    .mobile-list-return:active { transform: none; }
+}

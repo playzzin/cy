@@ -6,6 +6,8 @@ import { positionService, Position } from '../services/positionService';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { devPositions } from '../utils/devAdminFixtures';
 import { invalidateTeamScopedCache } from '../services/teamScopedReadService';
+import { getDataLoadErrorMessage } from '../utils/dataLoadError';
+import { subscribeResourceStatusChange } from '../utils/resourceStatusChange';
 
 export interface PositionStyle {
     color: string;
@@ -21,6 +23,7 @@ interface MasterDataContextType {
 
     // 로딩 상태
     loading: boolean;
+    loadErrors: Partial<Record<'companies' | 'teams' | 'sites' | 'positions', string>>;
 
     // 새로고침 함수
     refreshCompanies: () => Promise<void>;
@@ -46,12 +49,26 @@ export function useMasterData() {
     return context;
 }
 
-export function MasterDataProvider({ children }: { children: React.ReactNode }) {
+export function MasterDataProvider({ children, autoLoad = true }: { children: React.ReactNode; autoLoad?: boolean }) {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
+    useEffect(() => subscribeResourceStatusChange(change => {
+        if (change.kind === 'site') {
+            setSites(previous => previous.map(site => site.id === change.id ? { ...site, status: change.status } : site));
+        }
+    }), []);
     const [positions, setPositions] = useState<Position[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(autoLoad);
+    const [loadErrors, setLoadErrors] = useState<MasterDataContextType['loadErrors']>({});
+    const recordLoadResult = useCallback((key: keyof MasterDataContextType['loadErrors'], error?: unknown) => {
+        setLoadErrors(previous => {
+            const next = { ...previous };
+            if (error) next[key] = getDataLoadErrorMessage(error);
+            else delete next[key];
+            return next;
+        });
+    }, []);
 
     // 회사 로드
     const refreshCompanies = useCallback(async () => {
@@ -63,7 +80,10 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
         try {
             const data = await companyService.getCompanies();
             setCompanies(data);
+            recordLoadResult('companies');
         } catch (error) {
+            setCompanies([]);
+            recordLoadResult('companies', error);
             console.error('회사 데이터 로드 실패:', error);
         }
     }, []);
@@ -78,7 +98,10 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
         try {
             const data = await teamService.getTeams();
             setTeams(data);
+            recordLoadResult('teams');
         } catch (error) {
+            setTeams([]);
+            recordLoadResult('teams', error);
             console.error('팀 데이터 로드 실패:', error);
         }
     }, []);
@@ -93,7 +116,10 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
         try {
             const data = await siteService.getSites();
             setSites(data);
+            recordLoadResult('sites');
         } catch (error) {
+            setSites([]);
+            recordLoadResult('sites', error);
             console.error('현장 데이터 로드 실패:', error);
         }
     }, []);
@@ -108,7 +134,10 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
         try {
             const data = await positionService.getPositions();
             setPositions(data);
+            recordLoadResult('positions');
         } catch (error) {
+            setPositions([]);
+            recordLoadResult('positions', error);
             console.error('직책 데이터 로드 실패:', error);
         }
     }, []);
@@ -129,10 +158,10 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
         }
     }, [refreshCompanies, refreshTeams, refreshSites, refreshPositions]);
 
-    // 앱 시작 시 데이터 로드
+    // 자체 조회를 사용하는 화면에서는 필요 없는 마스터 조회를 미룹니다.
     useEffect(() => {
-        refreshAll();
-    }, [refreshAll]);
+        if (autoLoad) void refreshAll();
+    }, [autoLoad, refreshAll]);
 
     // 시공사/협력사만 필터링
     const validCompanies = companies.filter(
@@ -158,6 +187,7 @@ export function MasterDataProvider({ children }: { children: React.ReactNode }) 
         sites,
         positions,
         loading,
+        loadErrors,
         refreshCompanies,
         refreshTeams,
         refreshSites,

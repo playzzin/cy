@@ -1,3 +1,7 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
+import { GEMINI_BILLING_SKIPPED_MESSAGE, isGeminiBillingError } from './geminiGatewayClient';
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 
 export type TaxInvoiceTransactionType = '매입' | '매출' | '';
@@ -30,6 +34,7 @@ export interface TaxInvoiceAnalysisError {
     sourceFileName: string;
     sourceFileIndex: number;
     message: string;
+    skipped?: boolean;
 }
 
 export interface TaxInvoiceAnalysisBatch {
@@ -384,7 +389,6 @@ const analyzeSingleFile = async (
     file: File,
     sourceFileIndex: number,
     companyLabel: string,
-    apiKey: string,
     model: string,
     parentSignal?: AbortSignal,
 ): Promise<TaxInvoiceExtractedCandidate[]> => {
@@ -395,13 +399,12 @@ const analyzeSingleFile = async (
     parentSignal?.addEventListener('abort', abortFromParent, { once: true });
 
     try {
-        const response = await fetch(
+        const response = await trackedGeminiFetch('tax-invoice-import')(
             `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
             {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-goog-api-key': apiKey,
                 },
                 signal: controller.signal,
                 body: JSON.stringify({
@@ -413,7 +416,7 @@ const analyzeSingleFile = async (
                         ],
                     }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: TAX_INVOICE_RESPONSE_SCHEMA,
                     },
@@ -464,19 +467,18 @@ export const analyzeTaxInvoiceFiles = async (
     if (fileErrors.length > 0) throw new Error(fileErrors.join('\n'));
 
     aiSettingsService.assertCurrentPageEnabled('세금계산서 AI 분석');
-    const apiKey = aiSettingsService.getApiKey();
-    if (!apiKey) {
-        throw new Error('Gemini API 키가 없습니다. /settings/ai에서 Gemini API Key를 먼저 저장하세요.');
-    }
+    
+    
 
-    const model = normalizeGeminiModelName(aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
+    const model = normalizeGeminiModelName(aiSettingsService.getModels().textModel, DEFAULT_GEMINI_TEXT_MODEL);
     const batch: TaxInvoiceAnalysisBatch = { candidates: [], errors: [] };
     let nextFileIndex = 0;
     let completedFiles = 0;
+    let billingStopped = false;
 
     const worker = async () => {
         while (nextFileIndex < files.length) {
-            if (options.signal?.aborted) return;
+            if (options.signal?.aborted || billingStopped) return;
             const fileIndex = nextFileIndex;
             nextFileIndex += 1;
             const file = files[fileIndex];
@@ -486,12 +488,12 @@ export const analyzeTaxInvoiceFiles = async (
                     file,
                     fileIndex,
                     options.companyLabel,
-                    apiKey,
                     model,
                     options.signal,
                 );
                 batch.candidates.push(...candidates);
             } catch (error) {
+                if (isGeminiBillingError(error)) billingStopped = true;
                 batch.errors.push({
                     sourceFileName: file.name,
                     sourceFileIndex: fileIndex,
@@ -512,6 +514,18 @@ export const analyzeTaxInvoiceFiles = async (
         { length: Math.min(ANALYSIS_CONCURRENCY, files.length) },
         () => worker(),
     ));
+
+    // A second worker may already be in flight. Preserve its result, but do not dispatch more files.
+    if (billingStopped) {
+        for (; nextFileIndex < files.length; nextFileIndex += 1) {
+            batch.errors.push({
+                sourceFileName: files[nextFileIndex].name,
+                sourceFileIndex: nextFileIndex,
+                message: GEMINI_BILLING_SKIPPED_MESSAGE,
+                skipped: true,
+            });
+        }
+    }
 
     batch.candidates.sort((left, right) => (
         left.sourceFileIndex - right.sourceFileIndex ||

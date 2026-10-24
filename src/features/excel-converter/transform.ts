@@ -164,11 +164,12 @@ export function buildTraces(plan: ConversionPlan, rows: DataRow[], sheetName: st
     const traces: CellTrace[] = [];
     const issues: Issue[] = [];
     const add = (mapping: Mapping, row: DataRow, address: string, fixed = false) => { try {
-        const override = !fixed && plan.overrides?.find(o => o.originsKey === row.origins.join('\n') && o.targetColumn === mapping.targetColumn && (o.rowOffset || 0) === (mapping.rowOffset || 0));
+        const override = plan.overrides?.find(o => o.originsKey === row.origins.join('\n') && (fixed ? o.fixedAddress === address : !o.fixedAddress && o.targetColumn === mapping.targetColumn && (o.rowOffset || 0) === (mapping.rowOffset || 0)));
+        if (fixed && override && rows.length !== 1) throw new Error('직접 수정한 개인별 항목이 여러 사람의 공통 칸으로 바뀌었습니다. 직접 수정을 해제하거나 개인별 파일로 분리해 주세요.');
         const result = override ? { value: override.value, kind: override.kind } : mapValue(mapping, row);
         if (mapping.required && (result.value === null || result.value === ''))
             throw new Error(`${mapping.label}: 필수값을 빈칸으로 수정할 수 없습니다.`);
-        traces.push({ sheet: sheetName, address, label: mapping.label, ...result, origins: mapping.mode === 'constant' ? ['사용자 고정값'] : row.origins, rule: override ? '사용자 직접 수정' : `${mapping.mode}${mapping.scale !== 1 ? ` × ${mapping.scale}` : ''}${mapping.decimals !== null ? ` / 소수 ${mapping.decimals}자리 ${mapping.rounding}` : ''}` });
+        traces.push({ sheet: sheetName, address, label: mapping.label, ...result, recordKey: row.origins.join('\n'), mappingKey: fixed ? `fixed:${address}` : `column:${mapping.targetColumn}:${mapping.rowOffset || 0}`, origins: mapping.mode === 'constant' ? ['사용자 고정값'] : row.origins, rule: override ? '사용자 직접 수정' : `${mapping.mode}${mapping.scale !== 1 ? ` × ${mapping.scale}` : ''}${mapping.decimals !== null ? ` / 소수 ${mapping.decimals}자리 ${mapping.rounding}` : ''}` });
     }
     catch (error) {
         issues.push({ level: 'error', code: 'value', message: (error as Error).message, location: `${sheetName}!${address}` });

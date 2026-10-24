@@ -1,0 +1,49 @@
+.cy-erp-scene { --erp-duration: var(--film-duration,9000ms); }
+.cy-erp-phase-1 { animation: cy-erp-phase-1 var(--erp-duration) ease-out both; }
+.cy-erp-phase-2 { animation: cy-erp-phase-2 var(--erp-duration) ease-out both; }
+.cy-erp-phase-3 { animation: cy-erp-phase-3 var(--erp-duration) ease-out both; }
+.cy-erp-route { animation: cy-erp-route var(--erp-duration) ease-out both; }
+.cy-erp-sync-ring { animation: cy-erp-sync-ring var(--erp-duration) linear both; }
+.cy-erp-camera-flash { opacity: 0; animation: cy-erp-camera-flash var(--erp-duration) linear both; }
+.cy-erp-report-packet { opacity: 0; animation: cy-erp-report-packet var(--erp-duration) ease-in-out both; }
+.cy-erp-receipt-scan { opacity: 0; animation: cy-erp-receipt-scan var(--erp-duration) linear both; }
+.cy-erp-document-assemble { animation: cy-erp-document-assemble var(--erp-duration) ease-out both; }
+.cy-erp-review-warning { opacity: 0; animation: cy-erp-review-warning var(--erp-duration) linear both; }
+.cy-erp-approval-stamp { transform-box: fill-box; transform-origin: center; animation: cy-erp-approval var(--erp-duration) ease-out both; }
+.cy-erp-payment-token { opacity: 0; animation: cy-erp-payment var(--erp-duration) ease-in-out both; animation-delay: calc(var(--token-order) * 100ms); }
+.cy-erp-chart-bar { transform-box: view-box; transform-origin: 0 300px; animation: cy-erp-chart-bar var(--erp-duration) ease-out both; animation-delay: calc(var(--bar-order) * 100ms); }
+.cy-erp-chart-trend { animation: cy-erp-chart-trend var(--erp-duration) linear both; }
+.cy-erp-alert-pulse { animation: cy-erp-alert-pulse var(--erp-duration) linear both; }
+.cy-erp-archive-source { animation: cy-erp-archive-source var(--erp-duration) ease-out both; animation-delay: calc(var(--archive-order) * 140ms); }
+@keyframes cy-erp-phase-1 { 0%,6% { opacity: 0; } 25%,100% { opacity: 1; } }
+@keyframes cy-erp-phase-2 { 0%,32% { opacity: 0; } 56%,100% { opacity: 1; } }
+@keyframes cy-erp-phase-3 { 0%,66% { opacity: 0; } 85%,100% { opacity: 1; } }
+@keyframes cy-erp-route { 0%,15% { stroke-dashoffset: 1; opacity: .2; } 65%,100% { stroke-dashoffset: 0; opacity: 1; } }
+@keyframes cy-erp-sync-ring { 0% { opacity: .2; stroke-dashoffset: 0; } 30%,60%,100% { opacity: .9; } 45%,75% { opacity: .3; } 100% { stroke-dashoffset: -120; } }
+@keyframes cy-erp-camera-flash { 0%,7% { opacity: 0; } 10% { opacity: .85; } 16%,100% { opacity: 0; } }
+@keyframes cy-erp-report-packet { 0%,26% { opacity: 0; transform: none; } 32% { opacity: 1; transform: none; } 59% { opacity: 1; transform: translateX(219px); } 66%,100% { opacity: 0; transform: translateX(219px); } }
+@keyframes cy-erp-receipt-scan { 0%,17% { opacity: 0; transform: none; } 23% { opacity: 1; transform: none; } 55% { opacity: 1; transform: translateY(48px); } 62%,100% { opacity: 0; transform: translateY(48px); } }
+@keyframes cy-erp-document-assemble { 0%,10% { opacity: .3; transform: translateY(23px); } 35%,100% { opacity: 1; transform: none; } }
+@keyframes cy-erp-review-warning { 0%,6% { opacity: 0; } 15%,40% { opacity: 1; } 57%,100% { opacity: 0; } }
+@keyframes cy-erp-approval { 0%,70% { opacity: 0; transform: scale(1.2) rotate(-7deg); } 86%,100% { opacity: 1; transform: none; } }
+@keyframes cy-erp-payment { 0%,28% { opacity: 0; transform: translate(-409px,var(--payment-y)); } 35% { opacity: 1; transform: translate(-409px,var(--payment-y)); } 72% { opacity: 1; transform: none; } 80%,100% { opacity: 0; transform: none; } }
+@keyframes cy-erp-chart-bar { 0%,15% { transform: scaleY(.04); opacity: .3; } 64%,100% { transform: none; opacity: 1; } }
+@keyframes cy-erp-chart-trend { 0%,40% { stroke-dashoffset: 1; } 82%,100% { stroke-dashoffset: 0; } }
+@keyframes cy-erp-alert-pulse { 0%,8% { opacity: .15; } 17%,32%,100% { opacity: 1; } 24% { opacity: .35; } }
+@keyframes cy-erp-archive-source { 0% { opacity: .1; transform: translateX(-18px); } 28%,100% { opacity: 1; transform: none; } }
+.cy-erp-details { margin-top: 16px; }
+.business-page .cy-erp-details ul { display: grid; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.cy-erp-details li { display: flex; gap: 10px; align-items: center; color: #b6d2e2; background: #112d41; border-radius: 5px; padding: 9px 12px; font-size: 12px; }
+.cy-erp-details li > span { color: #73afd0; font: 10px monospace; }
+.cy-erp-document-picker { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+.business-page .cy-erp-document-picker button { min-height: 39px; padding: 8px; border: 1px solid #375e79; border-radius: 5px; color: #a9c9dd; background: #102b40; font: inherit; font-size: 11px; line-height: 1.5; text-align: left; }
+.business-page .cy-erp-document-picker button[aria-pressed=true] { color: #dcf6ff; border-color: #8ccadd; background: #1d4c60; }
+.cy-story .cy-erp-document-note { margin: 12px 0 6px; color: #a9d1e0; }
+.cy-erp-details > span { font-size: 10px; color: #739db9; line-height: 1.7; }
+.cy-story .cy-story-timeline.is-extended { display: flex; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #416c89 #0a192a; }
+.cy-story .cy-story-timeline.is-extended > li { flex: 1 0 128px; min-width: 128px; }
+@media (max-width: 600px) { .cy-story .cy-story-timeline.is-extended > li { flex-basis: 111px; min-width: 111px; } }
+@media (prefers-reduced-motion: reduce) {
+    .cy-erp-scene * { animation: none !important; }
+    .cy-erp-camera-flash, .cy-erp-report-packet, .cy-erp-receipt-scan, .cy-erp-review-warning, .cy-erp-payment-token { display: none; }
+}

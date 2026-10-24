@@ -19,6 +19,8 @@ import {
 
 import { accommodationService } from '../../services/accommodationService';
 import MonthNavigator from '../../components/common/MonthNavigator';
+import CardStatementFilesDialog from '../../components/card/CardStatementFilesDialog';
+import CardStatementUsageDialog from '../../components/card/CardStatementUsageDialog';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import { cardService } from '../../services/cardService';
 import { vehicleService } from '../../services/vehicleService';
@@ -26,7 +28,8 @@ import type { Accommodation } from '../../types/accommodation';
 import type { AccommodationAssignment } from '../../types/accommodationAssignment';
 import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
 import { getAccommodationExpenseBucket } from '../../utils/accommodationExpenseClassification';
-import type { Card, CardAssignmentRecord } from '../../types/card';
+import type { Card, CardAssignmentRecord, CardTransaction } from '../../types/card';
+import { dedupeStatementPaths } from '../../utils/cardStatementDeduplication';
 import type { CardBillingDocument } from '../../types/cardBilling';
 import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
 import type { Vehicle, VehicleAssignmentRecord } from '../../types/vehicle';
@@ -82,8 +85,27 @@ interface ResourceCostLine {
     memo?: string;
 }
 
+interface CardResource {
+    key: string;
+    cardId: string;
+    cardLabel: string;
+    card: Card | null;
+    assignments: CardAssignmentRecord[];
+    monthlyBilling: number;
+    statementPaths: string[];
+}
+
 const EMPTY_TEXT = '-';
 const DEFAULT_COLOR = '#2563eb';
+const CARD_STATUS_LABELS: Record<Card['status'], string> = {
+    ASSIGNED: '배정됨',
+    AVAILABLE: '보관중',
+    SUSPENDED: '분실/정지',
+    CLOSED: '해지됨',
+};
+
+const getCardStatusLabel = (status?: Card['status']) =>
+    status ? CARD_STATUS_LABELS[status] || '상태 미확인' : EMPTY_TEXT;
 
 const getCurrentMonth = () => {
     const now = new Date();
@@ -299,7 +321,8 @@ const DetailField: React.FC<{ label: string; value?: React.ReactNode; wide?: boo
 
 const TeamResourceDetailPage: React.FC = () => {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
-    const [selectedTeamId, setSelectedTeamId] = useState('');
+    const isCurrentSelectedMonth = selectedMonth === getCurrentMonth();
+    const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
     const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list');
     const [isTeamPickerOpen, setIsTeamPickerOpen] = useState(false);
     const [isMobileTeamPickerOpen, setIsMobileTeamPickerOpen] = useState(false);
@@ -315,6 +338,9 @@ const TeamResourceDetailPage: React.FC = () => {
     const [vehicleAssignments, setVehicleAssignments] = useState<VehicleAssignmentRecord[]>([]);
     const [cards, setCards] = useState<Card[]>([]);
     const [cardAssignments, setCardAssignments] = useState<CardAssignmentRecord[]>([]);
+    const [cardTransactions, setCardTransactions] = useState<{ month: string; rows: CardTransaction[] }>({ month: '', rows: [] });
+    const [statementRevision, setStatementRevision] = useState(0);
+    const [statementSelection, setStatementSelection] = useState<{ scope: string; key: string; view: 'original' | 'details' } | null>(null);
     const [workers, setWorkers] = useState<Worker[]>([]);
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
@@ -330,6 +356,22 @@ const TeamResourceDetailPage: React.FC = () => {
     } = useExpenseLedgerData(selectedMonth, 'all', billingScope);
     const accessScope = useWorkerAccessScope(workers, teamOptions);
     const canViewWholeTeam = workerAccessCanViewWholeTeam(accessScope);
+    const statementScope = JSON.stringify([selectedMonth, selectedTeamId, billingScope, detailView, accessScope.mode, accessScope.loading, accessScope.workerIds, accessScope.teamIds]);
+
+    useEffect(() => {
+        setStatementSelection(null);
+    }, [statementScope]);
+
+    useEffect(() => {
+        let active = true;
+        setCardTransactions({ month: selectedMonth, rows: [] });
+        cardService.getTransactionsByMonth(selectedMonth).then(rows => {
+            if (active) setCardTransactions({ month: selectedMonth, rows });
+        }).catch(() => {
+            if (active) toast.error('카드 사용내역서 연결 정보를 불러오지 못했습니다. 새로고침해 주세요.');
+        });
+        return () => { active = false; };
+    }, [selectedMonth, statementRevision]);
 
     const loadResourceData = useCallback(async () => {
         setLoadingResources(true);
@@ -499,10 +541,11 @@ const TeamResourceDetailPage: React.FC = () => {
 
     const selectedCardDocs = useMemo(
         () => rawDocs.cardDocs.filter(doc =>
+            doc.yearMonth === selectedMonth &&
             matchesSelectedTeam(doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName) &&
             matchesBillingTarget(doc.issuedToType, doc.issuedToWorkerId, doc.issuedToWorkerName)
         ),
-        [matchesBillingTarget, matchesSelectedTeam, rawDocs.cardDocs]
+        [matchesBillingTarget, matchesSelectedTeam, rawDocs.cardDocs, selectedMonth]
     );
 
     const selectedClaims = useMemo(
@@ -539,8 +582,10 @@ const TeamResourceDetailPage: React.FC = () => {
     const selectedAccommodationAssignments = useMemo(() => {
         if (!selectedTeam) return [];
         return accommodationAssignments
-            .filter(assignment => assignment.status !== 'ended')
-            .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
+            .filter(assignment => {
+                if (assignment.status === 'ended' && !assignment.endDate) return false;
+                return overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate);
+            })
             .filter(assignment => canViewWholeTeam
                 ? matchesSelectedTeam(assignment.teamId, assignment.teamName)
                 : matchesCurrentWorker(assignment.workerId, assignment.workerName)
@@ -584,15 +629,17 @@ const TeamResourceDetailPage: React.FC = () => {
             monthlyBilling: number;
         }>();
 
-        vehicles
-            .filter(vehicle => matchesResourceAssignee(vehicle.currentAssigneeType, vehicle.currentAssigneeId, vehicle.currentAssigneeName))
-            .forEach(vehicle => {
-                map.set(vehicle.id, {
-                    vehicle,
-                    assignments: [],
-                    monthlyBilling: 0,
+        if (isCurrentSelectedMonth) {
+            vehicles
+                .filter(vehicle => matchesResourceAssignee(vehicle.currentAssigneeType, vehicle.currentAssigneeId, vehicle.currentAssigneeName))
+                .forEach(vehicle => {
+                    map.set(vehicle.id, {
+                        vehicle,
+                        assignments: [],
+                        monthlyBilling: 0,
+                    });
                 });
-            });
+        }
 
         vehicleAssignments
             .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
@@ -621,24 +668,21 @@ const TeamResourceDetailPage: React.FC = () => {
 
         return Array.from(map.values())
             .sort((left, right) => String(left.vehicle?.licensePlate ?? '').localeCompare(String(right.vehicle?.licensePlate ?? ''), 'ko-KR'));
-    }, [endDate, matchesResourceAssignee, selectedVehicleDocs, startDate, vehicleAssignments, vehicleByKey, vehicles]);
+    }, [endDate, isCurrentSelectedMonth, matchesResourceAssignee, selectedVehicleDocs, startDate, vehicleAssignments, vehicleByKey, vehicles]);
 
     const selectedCardResources = useMemo(() => {
-        const map = new Map<string, {
-            card: Card | null;
-            assignments: CardAssignmentRecord[];
-            monthlyBilling: number;
-        }>();
+        const map = new Map<string, CardResource>();
+        const createResource = (key: string, cardId: string, cardLabel: string, card: Card | null): CardResource => ({
+            key, cardId, cardLabel, card, assignments: [], monthlyBilling: 0, statementPaths: [],
+        });
 
-        cards
-            .filter(card => matchesResourceAssignee(card.currentAssigneeType, card.currentAssigneeId, card.currentAssigneeName))
-            .forEach(card => {
-                map.set(card.id, {
-                    card,
-                    assignments: [],
-                    monthlyBilling: 0,
+        if (isCurrentSelectedMonth) {
+            cards
+                .filter(card => matchesResourceAssignee(card.currentAssigneeType, card.currentAssigneeId, card.currentAssigneeName))
+                .forEach(card => {
+                    map.set(card.id, createResource(card.id, card.id, card.name, card));
                 });
-            });
+        }
 
         cardAssignments
             .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
@@ -648,7 +692,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 const card = cardByKey.get(String(assignment.cardId ?? '').trim())
                     ?? cardByKey.get(String(assignment.cardLabel ?? '').trim())
                     ?? null;
-                const current = map.get(key) ?? { card, assignments: [], monthlyBilling: 0 };
+                const current = map.get(key) ?? createResource(key, assignment.cardId, assignment.cardLabel, card);
                 if (!current.card && card) current.card = card;
                 current.assignments.push(assignment);
                 map.set(key, current);
@@ -659,15 +703,39 @@ const TeamResourceDetailPage: React.FC = () => {
             const card = cardByKey.get(String(doc.cardId ?? '').trim())
                 ?? cardByKey.get(String(doc.cardLabel ?? '').trim())
                 ?? null;
-            const current = map.get(key) ?? { card, assignments: [], monthlyBilling: 0 };
+            const current = map.get(key) ?? createResource(key, doc.cardId, doc.cardLabel, card);
             if (!current.card && card) current.card = card;
             current.monthlyBilling += asNumber(doc.totalAmount);
+            current.statementPaths.push(...(doc.statementAttachmentPaths ?? []));
             map.set(key, current);
         });
 
+        if (cardTransactions.month === selectedMonth) {
+            cardTransactions.rows.forEach(transaction => {
+                if (transaction.yearMonth !== selectedMonth || transaction.status === 'CANCELLED' || transaction.cancelledAt) return;
+                const resource = map.get(transaction.cardId);
+                if (!resource) return;
+                // Only use transaction attachments from this team's/person's assignment period.
+                const assignedOnDate = resource.assignments.some(assignment =>
+                    overlapsMonth(assignment.startDate, assignment.endDate, transaction.date, transaction.date)
+                );
+                const hasAssignmentHistory = cardAssignments.some(assignment => assignment.cardId === transaction.cardId);
+                const currentAssigneeMatches = !hasAssignmentHistory && isCurrentSelectedMonth && resource.card &&
+                    matchesResourceAssignee(resource.card.currentAssigneeType, resource.card.currentAssigneeId, resource.card.currentAssigneeName);
+                if (assignedOnDate || currentAssigneeMatches) {
+                    resource.statementPaths.push(...dedupeStatementPaths([transaction.evidenceUrl, ...(transaction.statementAttachmentPaths ?? [])]));
+                }
+            });
+        }
+
         return Array.from(map.values())
+            .map(resource => ({ ...resource, statementPaths: dedupeStatementPaths(resource.statementPaths) }))
             .sort((left, right) => String(left.card?.name ?? '').localeCompare(String(right.card?.name ?? ''), 'ko-KR'));
-    }, [cardAssignments, cardByKey, cards, endDate, matchesResourceAssignee, selectedCardDocs, startDate]);
+    }, [cardAssignments, cardByKey, cards, cardTransactions, endDate, isCurrentSelectedMonth, matchesResourceAssignee, selectedCardDocs, selectedMonth, startDate]);
+
+    const statementResource = statementSelection?.scope === statementScope && !loading && !accessScope.loading
+        ? selectedCardResources.find(resource => resource.key === statementSelection.key && resource.statementPaths.length > 0)
+        : undefined;
 
     const selectedCostLines = useMemo<ResourceCostLine[]>(() => {
         const accommodationLines: ResourceCostLine[] = selectedAccommodationDocs.flatMap(doc =>
@@ -752,8 +820,10 @@ const TeamResourceDetailPage: React.FC = () => {
                 });
 
             const accommodationCount = accommodationAssignments
-                .filter(assignment => assignment.status !== 'ended')
-                .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
+                .filter(assignment => {
+                    if (assignment.status === 'ended' && !assignment.endDate) return false;
+                    return overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate);
+                })
                 .filter(assignment => canViewWholeTeam
                     ? valueMatchesTeam(team, assignment.teamId, assignment.teamName)
                     : matchesCurrentWorker(assignment.workerId, assignment.workerName)
@@ -762,12 +832,14 @@ const TeamResourceDetailPage: React.FC = () => {
                 .size;
 
             const vehicleKeys = new Set<string>();
-            vehicles
-                .filter(vehicle => canViewWholeTeam
-                    ? vehicle.currentAssigneeType === 'TEAM' && valueMatchesTeam(team, vehicle.currentAssigneeId, vehicle.currentAssigneeName)
-                    : vehicle.currentAssigneeType === 'WORKER' && matchesCurrentWorker(vehicle.currentAssigneeId, vehicle.currentAssigneeName)
-                )
-                .forEach(vehicle => vehicleKeys.add(vehicle.id));
+            if (isCurrentSelectedMonth) {
+                vehicles
+                    .filter(vehicle => canViewWholeTeam
+                        ? vehicle.currentAssigneeType === 'TEAM' && valueMatchesTeam(team, vehicle.currentAssigneeId, vehicle.currentAssigneeName)
+                        : vehicle.currentAssigneeType === 'WORKER' && matchesCurrentWorker(vehicle.currentAssigneeId, vehicle.currentAssigneeName)
+                    )
+                    .forEach(vehicle => vehicleKeys.add(vehicle.id));
+            }
             vehicleAssignments
                 .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
                 .filter(assignment => canViewWholeTeam
@@ -777,12 +849,14 @@ const TeamResourceDetailPage: React.FC = () => {
                 .forEach(assignment => vehicleKeys.add(String(assignment.vehicleId || assignment.vehiclePlate || assignment.id)));
 
             const cardKeys = new Set<string>();
-            cards
-                .filter(card => canViewWholeTeam
-                    ? card.currentAssigneeType === 'TEAM' && valueMatchesTeam(team, card.currentAssigneeId, card.currentAssigneeName)
-                    : card.currentAssigneeType === 'WORKER' && matchesCurrentWorker(card.currentAssigneeId, card.currentAssigneeName)
-                )
-                .forEach(card => cardKeys.add(card.id));
+            if (isCurrentSelectedMonth) {
+                cards
+                    .filter(card => canViewWholeTeam
+                        ? card.currentAssigneeType === 'TEAM' && valueMatchesTeam(team, card.currentAssigneeId, card.currentAssigneeName)
+                        : card.currentAssigneeType === 'WORKER' && matchesCurrentWorker(card.currentAssigneeId, card.currentAssigneeName)
+                    )
+                    .forEach(card => cardKeys.add(card.id));
+            }
             cardAssignments
                 .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
                 .filter(assignment => canViewWholeTeam
@@ -819,6 +893,7 @@ const TeamResourceDetailPage: React.FC = () => {
         matchesCurrentWorker,
         rawDocs.claims,
         rawDocs.accommodationDocs,
+        isCurrentSelectedMonth,
         rawDocs.cardDocs,
         rawDocs.vehicleDocs,
         startDate,
@@ -889,6 +964,7 @@ const TeamResourceDetailPage: React.FC = () => {
     };
 
     const handleRefresh = async () => {
+        setStatementRevision(value => value + 1);
         await Promise.all([loadData(), loadResourceData()]);
         toast.success('팀별 지원/경비 데이터를 새로고침했습니다.');
     };
@@ -934,7 +1010,7 @@ const TeamResourceDetailPage: React.FC = () => {
                     팀: teamName,
                     자원: card?.name || firstAssignment?.cardLabel || '',
                     항목: card?.maskedNumber || (card?.last4 ? `**** ${card.last4}` : ''),
-                    상태: card?.status || '',
+                    상태: getCardStatusLabel(card?.status),
                     금액: resource.monthlyBilling,
                     메모: card?.issuer || '',
                 };
@@ -1557,25 +1633,41 @@ const TeamResourceDetailPage: React.FC = () => {
                                                         <th>배정기간</th>
                                                         <th>상태</th>
                                                         <th className="tw-number">월 사용액</th>
+                                                        <th>사용내역서</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {selectedCardResources.length === 0 ? (
                                                         <tr>
-                                                            <td colSpan={6} className="tw-table-empty">배정된 카드가 없습니다.</td>
+                                                            <td colSpan={7} className="tw-table-empty">배정된 카드가 없습니다.</td>
                                                         </tr>
                                                     ) : (
                                                         selectedCardResources.map(resource => {
                                                             const card = resource.card;
                                                             const firstAssignment = resource.assignments[0];
                                                             return (
-                                                                <tr key={card?.id || firstAssignment?.cardId || firstAssignment?.id}>
-                                                                    <td data-label="카드명"><strong>{card?.name || firstAssignment?.cardLabel || EMPTY_TEXT}</strong></td>
+                                                                <tr key={resource.key}>
+                                                                    <td data-label="카드명"><strong>{card?.name || resource.cardLabel || EMPTY_TEXT}</strong></td>
                                                                     <td data-label="카드번호">{card?.maskedNumber || (card?.last4 ? `**** ${card.last4}` : EMPTY_TEXT)}</td>
                                                                     <td data-label="발급사">{card?.issuer || EMPTY_TEXT}</td>
                                                                     <td data-label="배정기간">{firstAssignment?.startDate || EMPTY_TEXT} ~ {firstAssignment?.endDate || '현재'}</td>
-                                                                    <td data-label="상태">{card?.status || EMPTY_TEXT}</td>
+                                                                    <td data-label="상태">{getCardStatusLabel(card?.status)}</td>
                                                                     <td data-label="월 사용액" className="tw-number">{formatCurrency(resource.monthlyBilling)}</td>
+                                                                    <td data-label="사용내역서" className="trd-statement-cell">
+                                                                        <div className="trd-statement-actions">
+                                                                            <div className="trd-statement-actions__buttons">
+                                                                                <button type="button" disabled={!resource.statementPaths.length || isBusy}
+                                                                                    onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, view: 'original' })}>
+                                                                                    원본 보기
+                                                                                </button>
+                                                                                <button type="button" disabled={!resource.statementPaths.length || !resource.cardId || isBusy}
+                                                                                    onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, view: 'details' })}>
+                                                                                    상세내역
+                                                                                </button>
+                                                                            </div>
+                                                                            <small>{resource.statementPaths.length ? `${resource.statementPaths.length}개 파일` : '등록된 파일 없음'}</small>
+                                                                        </div>
+                                                                    </td>
                                                                 </tr>
                                                             );
                                                         })
@@ -1655,6 +1747,24 @@ const TeamResourceDetailPage: React.FC = () => {
                     )}
                 </section>
             </main>
+            {statementResource && (statementSelection?.view === 'original' ? (
+                <CardStatementFilesDialog
+                    key={`${statementScope}:${statementResource.key}:original`}
+                    paths={statementResource.statementPaths}
+                    title={`${statementResource.card?.name || statementResource.cardLabel} 사용내역서 원본`}
+                    onClose={() => setStatementSelection(null)}
+                />
+            ) : (
+                <CardStatementUsageDialog
+                    key={`${statementScope}:${statementResource.key}:details`}
+                    yearMonth={selectedMonth}
+                    cardId={statementResource.cardId}
+                    cardLast4={statementResource.card?.last4 || ''}
+                    cardName={statementResource.card?.name || statementResource.cardLabel}
+                    paths={statementResource.statementPaths}
+                    onClose={() => setStatementSelection(null)}
+                />
+            ))}
         </div>
     );
 };

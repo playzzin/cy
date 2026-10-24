@@ -3,6 +3,8 @@ import { createDeterministicManpowerDbExplanation } from './manpowerDbResultExpl
 import { searchManpowerDbSnapshot } from './manpowerDbAiSearch';
 import { createManpowerDbSearchFixture, MANPOWER_DB_TEST_TODAY } from './manpowerDbTestFixtures';
 
+jest.mock('../../services/geminiGatewayClient', () => ({ requestGeminiContent: jest.fn().mockRejectedValue(new Error('network down')) }));
+
 describe('manpowerDbAiSearch integration', () => {
     it('keeps advanced structured metadata for complex searches', () => {
         const result = searchManpowerDbSnapshot('과천 현장 최근 30일 계좌 없는 작업자', createManpowerDbSearchFixture(), MANPOWER_DB_TEST_TODAY);
@@ -39,8 +41,7 @@ describe('manpowerDbAiSearch integration', () => {
 
     it('falls back to rule parser when Gemini parsing fails', async () => {
         const parsed = await parseManpowerDbQuestionHybrid('계좌 없는 작업자', MANPOWER_DB_TEST_TODAY, {
-            apiKey: 'test-key',
-            fetchImpl: (() => Promise.reject(new Error('network down'))) as any,
+            useAi: true,
         });
 
         expect(parsed.source).toBe('rule');

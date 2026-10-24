@@ -192,7 +192,7 @@ export const accommodationBillingTargetService = {
                 });
         } catch (error) {
             console.error('Error fetching accommodation billing targets:', error);
-            return [];
+            throw error;
         }
     },
 
@@ -225,7 +225,7 @@ export const accommodationBillingTargetService = {
             return uniqTargets(targets).sort(compareTargetLatestFirst);
         } catch (error) {
             console.error('Error fetching accommodation billing target list:', error);
-            return [];
+            throw error;
         }
     },
 
@@ -243,7 +243,7 @@ export const accommodationBillingTargetService = {
             }) ?? null;
         } catch (error) {
             console.error('Error fetching accommodation billing target:', error);
-            return null;
+            throw error;
         }
     },
 

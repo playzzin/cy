@@ -21,6 +21,7 @@ import {
 } from '../../components/estimate/EstimateSharedComponents';
 import { TransactionTable } from '../../components/estimate/TransactionTable';
 import { RentalTransactionTable } from '../../components/estimate/RentalTransactionTable';
+import { SupplierInfoPanel } from '../../components/estimate/SupplierInfoPanel';
 import { downloadEstimateExcel } from '../../utils/estimateExcelUtils';
 import {
     calculateRentalLineAmount,
@@ -395,7 +396,7 @@ const TransactionManagePage: React.FC = () => {
         <div className="flex flex-col h-screen overflow-hidden bg-slate-50 font-sans text-slate-900" style={{ '--estimate-font-size-offset': '2pt', '--estimate-table-padding-offset': '1px', '--estimate-table-row-offset': '4px' } as React.CSSProperties}>
             <style>{PRINT_STYLES}</style>
             
-            <header className="flex flex-none items-center justify-between border-b bg-white px-6 py-4 shadow-sm z-30 print:hidden">
+            <header className="flex flex-wrap gap-3 flex-none items-center justify-between border-b bg-white px-6 py-4 shadow-sm z-30 print:hidden">
                 <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl shadow-lg bg-teal-600">
                         <FontAwesomeIcon icon={faClipboardList} className="text-lg text-white" />
@@ -406,8 +407,8 @@ const TransactionManagePage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex flex-wrap items-center gap-2">
                         <div className="flex overflow-hidden rounded-xl border-2 border-slate-200 bg-white">
                             <button onClick={() => setTransactionMode('standard')} className={`px-3 py-2.5 text-[15px] font-black transition-all ${!isRentalTransaction ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>
                                 일반
@@ -431,6 +432,8 @@ const TransactionManagePage: React.FC = () => {
                     </div>
                 </div>
             </header>
+
+            <SupplierInfoPanel draft={draft} updateDraft={updateDraft} disabled={loading || saving} />
 
             <div className="flex flex-1 overflow-hidden">
                 <aside className="w-[340px] flex-none bg-white border-r flex flex-col print:hidden shadow-[4px_0_10px_rgba(0,0,0,0.02)]">

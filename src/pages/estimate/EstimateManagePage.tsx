@@ -20,6 +20,7 @@ import {
     TitleComponent, InfoTableComponent, AmountBarComponent 
 } from '../../components/estimate/EstimateSharedComponents';
 import { EstimateTable } from '../../components/estimate/EstimateTable';
+import { SupplierInfoPanel } from '../../components/estimate/SupplierInfoPanel';
 import { downloadEstimateExcel } from '../../utils/estimateExcelUtils';
 
 // 상태별 설정
@@ -263,7 +264,7 @@ const EstimateManagePage: React.FC = () => {
         <div className="flex flex-col h-screen overflow-hidden bg-slate-50 font-sans text-slate-900" style={{ '--estimate-font-size-offset': '2pt', '--estimate-table-padding-offset': '1px', '--estimate-table-row-offset': '4px' } as React.CSSProperties}>
             <style>{PRINT_STYLES}</style>
             
-            <header className="flex flex-none items-center justify-between border-b bg-white px-6 py-4 shadow-sm z-30 print:hidden">
+            <header className="flex flex-wrap gap-3 flex-none items-center justify-between border-b bg-white px-6 py-4 shadow-sm z-30 print:hidden">
                 <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl shadow-lg bg-indigo-600">
                         <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-lg text-white" />
@@ -274,7 +275,7 @@ const EstimateManagePage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-4">
                     <div className="flex p-0.5 bg-slate-100 rounded-xl border border-slate-200">
                         <button 
                             onClick={() => updateDraft('estimateMode', 'standard')} 
@@ -298,7 +299,7 @@ const EstimateManagePage: React.FC = () => {
                         <span className="text-[14px] font-bold text-slate-500">% / {100 - (draft.installRatio || 0)}%</span>
                     </div>
                     <div className="h-8 w-px bg-slate-200" />
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <button onClick={resetPage} className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-2.5 text-[15px] font-black text-slate-600 hover:border-indigo-500 hover:text-indigo-600 transition-all hover:shadow-md">
                             <FontAwesomeIcon icon={faPlus} /> 새 견적서
                         </button>
@@ -311,6 +312,8 @@ const EstimateManagePage: React.FC = () => {
                     </div>
                 </div>
             </header>
+
+            <SupplierInfoPanel draft={draft} updateDraft={updateDraft} disabled={loading || saving} />
 
             <div className="flex flex-1 overflow-hidden">
                 <aside className="w-[340px] flex-none bg-white border-r flex flex-col print:hidden shadow-[4px_0_10px_rgba(0,0,0,0.02)]">

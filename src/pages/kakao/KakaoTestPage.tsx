@@ -49,10 +49,11 @@ const SectionTitle = styled.h2`
 
 const FormRow = styled.div`
     display: grid;
-    grid-template-columns: 150px 1fr;
+    grid-template-columns: 150px minmax(0, 1fr);
     gap: 16px;
     align-items: center;
     margin-bottom: 16px;
+    @media (max-width: 640px) { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 `;
 
 const Label = styled.label`
@@ -62,6 +63,8 @@ const Label = styled.label`
 `;
 
 const Input = styled.input`
+    min-width: 0;
+    max-width: 100%;
     padding: 10px 12px;
     border: 1px solid #ddd;
     border-radius: 6px;
@@ -74,6 +77,8 @@ const Input = styled.input`
 `;
 
 const Select = styled.select`
+    min-width: 0;
+    max-width: 100%;
     padding: 10px 12px;
     border: 1px solid #ddd;
     border-radius: 6px;

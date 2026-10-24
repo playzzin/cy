@@ -1,5 +1,6 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { assertPreviewClaims, isPreviewIdentity } from './devPreviewPolicy';
 
 export const protectedRegion = functions
     .runWith({
@@ -12,6 +13,10 @@ export const protectedRegion = functions
 export function requireCallableAuth(context: functions.https.CallableContext): functions.https.CallableContext['auth'] {
     if (!context.auth) {
         throw new functions.https.HttpsError('unauthenticated', 'Authentication is required.');
+    }
+    if (isPreviewIdentity(context.auth.uid, context.auth.token)) {
+        assertPreviewClaims(context.auth.uid, context.auth.token);
+        return { ...context.auth, uid: context.auth.token.previewTargetUid };
     }
     return context.auth;
 }
@@ -84,7 +89,12 @@ export async function requireHttpAuth(req: any, res: any): Promise<admin.auth.De
     }
 
     try {
-        return await admin.auth().verifyIdToken(match[1]);
+        const token = await admin.auth().verifyIdToken(match[1]);
+        if (isPreviewIdentity(token.uid, token)) {
+            res.status(403).json({ success: false, error: '조회 미리보기에서는 이 작업을 실행할 수 없습니다.' });
+            return null;
+        }
+        return token;
     } catch (error) {
         functions.logger.warn('Invalid Firebase ID token.', error);
         res.status(401).json({ success: false, error: 'Invalid authentication token.' });

@@ -54,6 +54,7 @@ export interface TaxInvoiceIssue {
 }
 
 export interface SiteWorkSummary {
+    sourceKey?: string;        // 집계 원본 식별자 (이름이 같은 팀도 구분)
     siteId: string;            // 현장 ID
     siteName: string;          // 현장명
     manDays: number;           // 공수

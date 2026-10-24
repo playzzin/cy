@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import {
     XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -2199,6 +2200,7 @@ const DailyReportStatisticsPage: React.FC = () => {
                         <p className="text-slate-400">
                             기간별 인력, 비용 및 프로젝트 성과에 대한 종합적인 인사이트를 제공합니다.
                         </p>
+                        <Link to="/reports/ai-workspace" className="mt-3 inline-flex rounded-lg border border-cyan-600 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-950">AI 업무 도우미 · 대화와 보고서</Link>
                     </div>
 
                     <div className="flex items-center gap-2 bg-slate-800/50 p-2 rounded-2xl border border-slate-700/50 backdrop-blur-md">

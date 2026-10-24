@@ -136,20 +136,20 @@ const WorkerBulkRegistrationPage: React.FC = () => {
 
     // Kakao/Text Parsing Logic
     const handlePasteSpecial = async () => {
-        const apiKey = geminiService.getKey();
+        
         const { value: formValues } = await Swal.fire({
             title: '카톡/텍스트 붙여넣기',
             html: `
                 <textarea id="swal-input-text" class="swal2-textarea" placeholder="카톡 내용, 엑셀 텍스트, 또는 문장형 데이터를 붙여넣으세요..." style="height: 200px; width: 90%;"></textarea>
                 <div style="margin-top: 15px; text-align: left; padding: 0 20px;">
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" id="swal-input-use-ai" ${apiKey ? 'checked' : ''}>
+                        <input type="checkbox" id="swal-input-use-ai" checked>
                         <span style="font-weight: bold; color: #4f46e5;">Google Gemini AI 분석 사용 (추천)</span>
                     </label>
                     <p style="font-size: 0.85em; color: #64748b; margin-top: 4px; margin-left: 24px;">
                         AI를 사용하면 문맥을 파악하여 훨씬 정확하게 데이터를 추출합니다.
                     </p>
-                    ${!apiKey ? '<p style="color: red; font-size: 0.8em; margin-top: 5px; margin-left: 24px;">⚠ API Key가 설정되지 않았습니다. /settings/ai 에서 키를 입력해주세요.</p>' : ''}
+                    
                 </div>
             `,
             focusConfirm: false,
@@ -167,11 +167,7 @@ const WorkerBulkRegistrationPage: React.FC = () => {
 
         if (formValues && formValues.text) {
             if (formValues.useAI) {
-                if (!apiKey) {
-                    Swal.fire('API Key 없음', 'Gemini API Key가 설정되지 않았습니다. 단순 패턴 분석으로 진행합니다.', 'warning');
-                    parseAndPopulateRegex(formValues.text);
-                    return;
-                }
+                
 
                 setLoading(true);
                 try {

@@ -1,11 +1,10 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState, useRef, useCallback } from 'react';
 import styled from 'styled-components';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFileInvoiceDollar, faArrowLeft, faDownload } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 
-// Import shared components from Tax Affairs
 // Import shared components from Tax Affairs
 import { TransactionTable, TaxAffairsRecord } from '../tax/components/TransactionTable';
 import { TransactionSummaryCards } from '../tax/components/TransactionSummaryCards';
@@ -115,52 +114,53 @@ const TaxInvoiceLedgerPage: React.FC = () => {
     );
 
     const [teams, setTeams] = useState<Team[]>([]);
-    const [teamsLoading, setTeamsLoading] = useState<boolean>(false);
 
     const [records, setRecords] = useState<TaxAffairsRecord[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
+    const [exporting, setExporting] = useState(false);
     const [transactionType, setTransactionType] = useState<'전체' | '매출' | '매입'>('전체'); // For filter bar compatibility
     const [searchQuery, setSearchQuery] = useState<string>('');
+    const requestId = useRef(0);
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
     // Fetch from Firestore
-    const fetchLedgerData = async () => {
+    const fetchLedgerData = useCallback(async () => {
+        const currentRequest = ++requestId.current;
+        setRecords([]);
+        setSelectedIds([]);
         try {
             setLoading(true);
             const data = await taxLedgerService.fetchRecords(startDate, endDate);
+            if (currentRequest !== requestId.current) return;
             setRecords(data);
         } catch (error) {
+            if (currentRequest !== requestId.current) return;
             console.error(error);
             Swal.fire('오류', '장부 데이터를 불러오지 못했습니다.', 'error');
         } finally {
-            setLoading(false);
+            if (currentRequest === requestId.current) setLoading(false);
         }
-    };
-
-    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    }, [startDate, endDate]);
 
     useEffect(() => {
         fetchLedgerData();
-    }, [startDate, endDate]);
+        return () => { requestId.current += 1; };
+    }, [fetchLedgerData]);
 
     // Fetch Construction Teams (시공팀/시공사팀)
     useEffect(() => {
         const fetchTeams = async () => {
             try {
-                setTeamsLoading(true);
                 const allTeams = await teamService.getTeams();
-                console.log('All fetched teams:', allTeams);
                 // Filter for '시공팀', '시공사팀', or teams belonging to '청연' (Cheongyeon) - Case insensitive
                 const constructionTeams = allTeams.filter(t =>
                     t.type === '시공팀' ||
                     t.type === '시공사팀' ||
                     (t.companyName && (t.companyName.includes('청연') || t.companyName.toLowerCase().includes('cheongyeon')))
                 );
-                console.log('Filtered construction teams:', constructionTeams);
                 setTeams(constructionTeams);
             } catch (error) {
                 console.error('Failed to fetch teams:', error);
-            } finally {
-                setTeamsLoading(false);
             }
         };
 
@@ -209,6 +209,7 @@ const TaxInvoiceLedgerPage: React.FC = () => {
     }, [filteredRecords]);
 
     const handleUpdateRecord = async (id: string, field: keyof TaxAffairsRecord, value: string) => {
+        const previous = records.find(record => record.id === id)?.[field];
         // Optimistic Update
         setRecords(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
 
@@ -216,6 +217,8 @@ const TaxInvoiceLedgerPage: React.FC = () => {
         try {
             await taxLedgerService.updateField(id, field as string, value);
         } catch (error) {
+            setRecords(current => current.map(record => record.id === id && record[field] === value
+                ? { ...record, [field]: previous } : record));
             console.error('Update failed:', error);
             const Toast = Swal.mixin({
                 toast: true,
@@ -231,8 +234,15 @@ const TaxInvoiceLedgerPage: React.FC = () => {
         navigate('/payroll/tax-affairs');
     };
 
-    const handleExcelDownload = () => {
-        Swal.fire('알림', 'Excel 다운로드 기능 준비 중입니다.', 'info');
+    const handleExcelDownload = async () => {
+        if (loading || exporting || !filteredRecords.length) return;
+        setExporting(true);
+        try {
+            const { downloadTaxInvoiceLedger } = await import('./utils/taxInvoiceLedgerExport');
+            await downloadTaxInvoiceLedger(filteredRecords, startDate, endDate);
+        } catch {
+            await Swal.fire('다운로드 실패', '원장 파일을 만들지 못했습니다. 금액을 확인한 뒤 다시 시도해 주세요.', 'error');
+        } finally { setExporting(false); }
     };
 
     const handleRegisterReceivables = async () => {
@@ -310,9 +320,9 @@ const TaxInvoiceLedgerPage: React.FC = () => {
                         <ActionButton onClick={handleGoToReceivables} style={{ backgroundColor: '#2563eb' }}>
                             미수금 관리 이동
                         </ActionButton>
-                        <ActionButton onClick={handleExcelDownload}>
+                        <ActionButton onClick={handleExcelDownload} disabled={loading || exporting || !filteredRecords.length}>
                             <FontAwesomeIcon icon={faDownload} />
-                            Excel 다운로드
+                            {exporting ? '파일 만드는 중' : '조회 결과 Excel 다운로드'}
                         </ActionButton>
                     </div>
                 </HeaderContent>

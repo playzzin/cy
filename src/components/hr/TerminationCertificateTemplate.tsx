@@ -1,9 +1,9 @@
-import React, { forwardRef, useEffect, useMemo, useState } from 'react';
+import React, { forwardRef, useMemo } from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import { format } from 'date-fns';
 import { Company } from '../../services/companyService';
 import { Worker } from '../../services/manpowerService';
-import { storageService } from '../../services/storageService';
+import { useDocumentStamp } from '../../hooks/useDocumentStamp';
 import { CERTIFICATE_FONT_FAMILY } from './certificateTypography';
 
 interface TerminationCertificateTemplateProps {
@@ -14,6 +14,7 @@ interface TerminationCertificateTemplateProps {
   serviceEndDate: Date | null;
   serviceDescription: string;
   purpose: string;
+  includeStamp?: boolean;
 }
 
 const A4_WIDTH_MM = 210;
@@ -338,12 +339,6 @@ const formatDate = (date?: Date | string | null, formatStr = 'yyyy년 MM월 dd�
   }
 };
 
-const getOfficialSealCandidates = (companyName?: string | null) => {
-  const name = String(companyName || '');
-  if (name.includes('청연')) return ['청연도장.jpg'];
-  if (name.includes('다원')) return ['다원도장.png'];
-  return [];
-};
 
 const getSealText = (companyName?: string | null) => {
   if (!companyName) return '회사\n인';
@@ -357,32 +352,9 @@ const formatWorkerName = (worker?: Worker | null) => String(worker?.name || '').
 const getCompanyDisplayName = (company?: Company | null) => company?.name || '주식회사 청연이엔지';
 
 export const TerminationCertificateTemplate = forwardRef<HTMLDivElement, TerminationCertificateTemplateProps>(
-  ({ company, worker, issueDate, serviceStartDate, serviceEndDate, serviceDescription, purpose }, ref) => {
-    const [sealUrl, setSealUrl] = useState<string | null>(null);
+  ({ company, worker, issueDate, serviceStartDate, serviceEndDate, serviceDescription, purpose, includeStamp = true }, ref) => {
+    const sealUrl = useDocumentStamp('termination', company?.name);
 
-    useEffect(() => {
-      const fetchSeal = async () => {
-        const candidates = getOfficialSealCandidates(company?.name);
-        if (candidates.length === 0) {
-          setSealUrl(null);
-          return;
-        }
-
-        for (const fileName of candidates) {
-          try {
-            const url = await storageService.getDownloadUrl(fileName);
-            setSealUrl(url);
-            return;
-          } catch {
-            continue;
-          }
-        }
-
-        setSealUrl(null);
-      };
-
-      void fetchSeal();
-    }, [company?.name]);
 
     const workerDisplayName = formatWorkerName(worker);
     const formattedIssueDate = formatDate(issueDate);
@@ -466,13 +438,13 @@ export const TerminationCertificateTemplate = forwardRef<HTMLDivElement, Termina
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <CeoText>대표이사 {company?.ceoName || 'OOO'} (인)</CeoText>
                   <OfficialSeal>
-                    {sealUrl ? (
+                    {includeStamp && (sealUrl ? (
                       <img src={sealUrl} alt="직인" />
                     ) : (
                       getSealText(company?.name).split('\n').map((line, index) => (
                         <div key={index}>{line}</div>
                       ))
-                    )}
+                    ))}
                   </OfficialSeal>
                 </div>
               </SignatureArea>

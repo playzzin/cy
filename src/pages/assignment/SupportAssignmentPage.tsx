@@ -299,7 +299,7 @@ const SupportAssignmentPage: React.FC = () => {
 
     return (
         <div className="p-6 h-full flex flex-col max-w-[1800px] mx-auto">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex flex-wrap gap-3 justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faExchangeAlt} className="text-blue-600" />
@@ -309,7 +309,7 @@ const SupportAssignmentPage: React.FC = () => {
                         내 팀의 공수를 다른 팀으로 지원 보낼 수 있습니다.
                     </p>
                 </div>
-                <div className="flex gap-4">
+                <div className="flex flex-wrap gap-4">
                     <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200">
                         <FontAwesomeIcon icon={faCalendarAlt} className="text-slate-400" />
                         <input

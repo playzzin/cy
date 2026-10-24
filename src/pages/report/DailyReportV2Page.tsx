@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
@@ -10,6 +10,9 @@ import { geminiService } from '../../services/geminiService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSave, faCalendarAlt, faSpinner, faComment } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
+import { getOpenSites } from '../../utils/siteStatus';
+import { isActiveWorker } from '../../utils/workerStatus';
+import { subscribeResourceStatusChange } from '../../utils/resourceStatusChange';
 
 // Register Handsontable modules
 registerAllModules();
@@ -27,8 +30,18 @@ const DailyReportV2Page: React.FC = () => {
 
     // Dropdown Sources
     const [teamNames, setTeamNames] = useState<string[]>([]);
-    const [siteNames, setSiteNames] = useState<string[]>([]);
-    const [workerNames, setWorkerNames] = useState<string[]>([]);
+    const siteNames = useMemo(() => getOpenSites(sites).map(site => site.name), [sites]);
+    const workerNames = useMemo(() => workers.filter(isActiveWorker).map(worker => worker.name), [workers]);
+
+    useEffect(() => subscribeResourceStatusChange(change => {
+        if (change.kind === 'site') {
+            setSites(previous => previous.map(site => site.id === change.id ? { ...site, status: change.status } : site));
+        } else {
+            setWorkers(previous => previous.map(worker => worker.id === change.id
+                ? { ...worker, status: change.status, isActive: change.isActive ?? change.status === '재직' }
+                : worker));
+        }
+    }), []);
 
     useEffect(() => {
         fetchInitialData();
@@ -51,8 +64,6 @@ const DailyReportV2Page: React.FC = () => {
             setWorkers(fetchedWorkers);
 
             setTeamNames(fetchedTeams.map(t => t.name));
-            setSiteNames(fetchedSites.map(s => s.name));
-            setWorkerNames(fetchedWorkers.map(w => w.name));
 
         } catch (error) {
             console.error("Error fetching initial data:", error);
@@ -212,11 +223,8 @@ const DailyReportV2Page: React.FC = () => {
             return;
         }
 
-        const apiKey = geminiService.getKey();
-        if (!apiKey) {
-            Swal.fire('Info', 'API 키 설정이 필요합니다. (/settings/ai)', 'info');
-            return;
-        }
+        
+        
 
         setLoading(true);
         try {
@@ -286,7 +294,7 @@ const DailyReportV2Page: React.FC = () => {
         colHeaders: ['팀', '현장', '성명', '공종', '공수', '단가', '금액', '비고'],
         columns: [
             { data: 'team', type: 'dropdown', source: teamNames },
-            { data: 'site', type: 'dropdown', source: siteNames },
+            { data: 'site', type: 'autocomplete', source: siteNames, strict: false },
             { data: 'name', type: 'autocomplete', source: workerNames, strict: false },
             { data: 'role', type: 'text' },
             { data: 'manDay', type: 'numeric', numericFormat: { pattern: '0.0' } },
@@ -347,8 +355,8 @@ const DailyReportV2Page: React.FC = () => {
             )}
 
             {/* Header Toolbar */}
-            <div className="bg-white px-6 py-4 border-b border-slate-200 flex items-center justify-between shadow-sm">
-                <div className="flex items-center gap-4">
+            <div className="bg-white px-6 py-4 border-b border-slate-200 flex flex-wrap gap-3 items-center justify-between shadow-sm">
+                <div className="flex flex-wrap items-center gap-4">
                     <h1 className="text-lg font-bold text-slate-800">일보 등록 (Spreadsheet)</h1>
                     <div className="flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-2">
                         <FontAwesomeIcon icon={faCalendarAlt} className="text-slate-500" />

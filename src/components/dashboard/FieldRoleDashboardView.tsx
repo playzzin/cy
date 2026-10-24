@@ -19,6 +19,7 @@ import {
 import { dailyReportService, type DailyReport } from '../../services/dailyReportService';
 import type { Worker } from '../../services/manpowerService';
 import { useRouteAction } from '../../hooks/useRouteAction';
+import { getDataLoadErrorMessage } from '../../utils/dataLoadError';
 
 export type FieldDashboardRole = 'teamLead' | 'foreman' | 'worker';
 
@@ -165,6 +166,7 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
     const [reports, setReports] = useState<DailyReport[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [retryKey, setRetryKey] = useState(0);
     const config = ROLE_COPY[role];
     const today = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
     const period = useMemo(() => ({ start: format(subDays(new Date(), 30), 'yyyy-MM-dd'), end: today }), [today]);
@@ -183,7 +185,10 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
                 if (active) setReports(nextReports);
             } catch (loadError) {
                 console.error('[FieldRoleDashboardView] Failed to load reports:', loadError);
-                if (active) setError('출역 기록을 불러오지 못했습니다. 잠시 후 다시 확인해주세요.');
+                if (active) {
+                    setReports([]);
+                    setError(getDataLoadErrorMessage(loadError));
+                }
             } finally {
                 if (active) setLoading(false);
             }
@@ -191,7 +196,7 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
 
         void loadReports();
         return () => { active = false; };
-    }, [period.end, period.start]);
+    }, [period.end, period.start, retryKey]);
 
     const scopedReports = useMemo<ScopedReport[]>(() => reports
         .filter((report) => role === 'worker'
@@ -252,20 +257,20 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
     const metrics = role === 'teamLead'
         ? [
             { label: '오늘 팀 공수', value: `${formatManDay(todayManDay)} 공수`, description: todayStatus, icon: faUsers, tone: 'bg-cyan-50 text-cyan-700' },
-            { label: '이번 달 누적', value: `${formatManDay(monthManDay)} 공수`, description: '최근 30일 팀 작업 기준', icon: faChartLine, tone: 'bg-indigo-50 text-indigo-700' },
+            { label: '최근 30일 누적', value: `${formatManDay(monthManDay)} 공수`, description: '최근 30일 팀 작업 기준', icon: faChartLine, tone: 'bg-indigo-50 text-indigo-700' },
             { label: '확인된 팀원', value: `${uniqueWorkers.size}명`, description: '최근 출역 기록 기준', icon: faUserCheck, tone: 'bg-emerald-50 text-emerald-700' },
             { label: '투입 현장', value: `${uniqueSites.size}곳`, description: '최근 30일 출역 현장', icon: faLocationDot, tone: 'bg-amber-50 text-amber-700' },
         ]
         : role === 'foreman'
             ? [
                 { label: '오늘 현장 공수', value: `${formatManDay(todayManDay)} 공수`, description: todayStatus, icon: faHardHat, tone: 'bg-emerald-50 text-emerald-700' },
-                { label: '이번 달 누적', value: `${formatManDay(monthManDay)} 공수`, description: '최근 30일 작업 기준', icon: faChartLine, tone: 'bg-teal-50 text-teal-700' },
+                { label: '최근 30일 누적', value: `${formatManDay(monthManDay)} 공수`, description: '최근 30일 작업 기준', icon: faChartLine, tone: 'bg-teal-50 text-teal-700' },
                 { label: '작업 현장', value: `${uniqueSites.size}곳`, description: '최근 출역 기록 기준', icon: faLocationDot, tone: 'bg-sky-50 text-sky-700' },
                 { label: '최근 일보', value: latestReport ? latestReport.date.replace(/-/g, '.') : '-', description: latestReport ? '마지막 기록 일자' : '작성된 일보 없음', icon: faClipboardList, tone: 'bg-amber-50 text-amber-700' },
             ]
             : [
                 { label: '오늘 내 공수', value: `${formatManDay(todayManDay)} 공수`, description: todayStatus, icon: faUserCheck, tone: 'bg-teal-50 text-teal-700' },
-                { label: '이번 달 누적', value: `${formatManDay(monthManDay)} 공수`, description: '최근 30일 내 출역 기준', icon: faChartLine, tone: 'bg-cyan-50 text-cyan-700' },
+                { label: '최근 30일 누적', value: `${formatManDay(monthManDay)} 공수`, description: '최근 30일 내 출역 기준', icon: faChartLine, tone: 'bg-cyan-50 text-cyan-700' },
                 { label: '출역 현장', value: `${uniqueSites.size}곳`, description: '최근 출역 기록 기준', icon: faLocationDot, tone: 'bg-indigo-50 text-indigo-700' },
                 { label: '최근 출역', value: latestReport ? latestReport.date.replace(/-/g, '.') : '-', description: latestReport ? '마지막 확인 일자' : '출역 기록 없음', icon: faClock, tone: 'bg-amber-50 text-amber-700' },
             ];
@@ -278,9 +283,20 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
         );
     }
 
+    if (error) {
+        return (
+            <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
+                <p className="font-bold">출역 기록을 불러오지 못했습니다</p>
+                <p className="mt-2 leading-6">{error}</p>
+                <button type="button" onClick={() => setRetryKey(key => key + 1)} className="mt-4 rounded-lg border border-amber-300 bg-white px-4 py-2 font-bold">
+                    다시 불러오기
+                </button>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6">
-            {error && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">{error}</div>}
             {!profileReady && <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-medium leading-6 text-sky-800">작업자 프로필을 연결하면 내 팀과 개인 출역 기록을 기준으로 정확한 대시보드를 확인할 수 있습니다.</div>}
 
             <section className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">

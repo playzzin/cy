@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { dailyReportService } from '../../../services/dailyReportService';
 import { manpowerService, Worker } from '../../../services/manpowerService';
 import { siteService, Site } from '../../../services/siteService';
@@ -211,6 +211,9 @@ const buildDeductionBreakdownFromRecords = (
   };
 };
 
+const EMPTY_PAYMENTS: PaymentData[] = [];
+const EMPTY_LEDGER_ROWS: MonthlyAdvanceLedgerRow[] = [];
+
 export const usePayrollData = (
   startMonth: string,
   endMonth: string,
@@ -220,11 +223,15 @@ export const usePayrollData = (
   } = {}
 ) => {
   const { selectedTeamId, selectedWorkerId } = options;
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const scopeKey = JSON.stringify([startMonth, endMonth, selectedTeamId, selectedWorkerId]);
+  const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
   const [paymentData, setPaymentData] = useState<PaymentData[]>([]);
   const [basePaymentData, setBasePaymentData] = useState<PaymentData[]>([]);
   const [ledgerRowsData, setLedgerRowsData] = useState<MonthlyAdvanceLedgerRow[]>([]);
   const [errorCount, setErrorCount] = useState(0);
+  const fetchSequenceRef = useRef(0);
 
   const validateItem = useCallback((item: Partial<PaymentData>): { isValid: boolean, errors: Record<string, boolean> } => {
     const errors: Record<string, boolean> = {};
@@ -253,12 +260,21 @@ export const usePayrollData = (
   }, []);
 
   const fetchData = useCallback(async () => {
-    if (!startMonth || !endMonth) return;
-
+    const sequence = ++fetchSequenceRef.current;
     const months = buildMonthRange(startMonth, endMonth);
-    if (months.length === 0) return;
+    if (months.length === 0) {
+      setPaymentData([]);
+      setBasePaymentData([]);
+      setLedgerRowsData([]);
+      setErrorCount(0);
+      setLoadError('조회할 급여 기간을 선택해 주세요.');
+      setLoadedScopeKey(scopeKey);
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
+    setLoadError(null);
     try {
       // 1. 기초 데이터 페칭
       const [allWorkers, allSites, allTeams, config] = await Promise.all([
@@ -267,6 +283,7 @@ export const usePayrollData = (
         teamService.getTeams(),
         payrollConfigService.getConfig()
       ]);
+      if (sequence !== fetchSequenceRef.current) return;
       const deductionLabelMap = buildDeductionLabelMap(config);
 
       const workerMap = new Map<string, Worker>();
@@ -704,28 +721,41 @@ export const usePayrollData = (
         };
       });
 
+      // 월/팀 변경과 연속 조회가 겹쳐도 마지막 요청만 화면 상태를 갱신한다.
+      if (sequence !== fetchSequenceRef.current) return;
       setPaymentData(processedPaymentData);
       setBasePaymentData(processedPaymentData);
       setLedgerRowsData(processedLedgerRows);
       setErrorCount(errs);
+      setLoadedScopeKey(scopeKey);
       console.log('Data fetched successfully');
     } catch (error) {
-      console.error('Error fetching payroll data:', error);
+      if (sequence === fetchSequenceRef.current) {
+        console.error('Error fetching payroll data:', error);
+        setPaymentData([]);
+        setBasePaymentData([]);
+        setLedgerRowsData([]);
+        setErrorCount(0);
+        setLoadedScopeKey(scopeKey);
+        setLoadError('급여 자료를 불러오지 못했습니다. 다시 조회해 주세요.');
+      }
     } finally {
-      setLoading(false);
+      if (sequence === fetchSequenceRef.current) setLoading(false);
     }
-  }, [startMonth, endMonth, selectedTeamId, selectedWorkerId, validateItem]);
+  }, [startMonth, endMonth, selectedTeamId, selectedWorkerId, scopeKey, validateItem]);
 
   useEffect(() => {
     fetchData();
+    return () => { fetchSequenceRef.current += 1; };
   }, [fetchData]);
 
   return {
-    loading,
-    paymentData,
-    basePaymentData,
+    loading: loading || loadedScopeKey !== scopeKey,
+    loadError: loadedScopeKey === scopeKey ? loadError : null,
+    paymentData: loadedScopeKey === scopeKey ? paymentData : EMPTY_PAYMENTS,
+    basePaymentData: loadedScopeKey === scopeKey ? basePaymentData : EMPTY_PAYMENTS,
     setPaymentData,
-    ledgerRowsData,
+    ledgerRowsData: loadedScopeKey === scopeKey ? ledgerRowsData : EMPTY_LEDGER_ROWS,
     errorCount,
     refetch: fetchData
   };

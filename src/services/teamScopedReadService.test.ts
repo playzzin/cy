@@ -24,6 +24,11 @@ it('관리자 조회 경로는 유지한다', async () => {
     expect(await getTeamScopedRows('workers')).toBeNull();
     expect(call).not.toHaveBeenCalled();
 });
+it('작업자 계정도 전체 목록 조회 대신 서버의 본인 범위 조회를 사용한다', async () => {
+    (getDoc as jest.Mock).mockResolvedValue({ data: () => ({ role: 'user', accountType: 'worker', position: '작업자', status: 'active' }) });
+    await getTeamScopedRows('workers');
+    expect(httpsCallable).toHaveBeenCalledWith({}, 'getTeamScopedData');
+});
 it('가불과 신청 내역도 팀 전용 서버로 조회한다', async () => {
     await Promise.all(['advance_payments', 'advance_requests'].map(collection => getTeamScopedRows(collection)));
     expect(call).toHaveBeenCalledWith(expect.objectContaining({ requests: [
@@ -46,6 +51,11 @@ it('월 조회 조건을 서버에 전달한다', async () => {
     expect(call).toHaveBeenCalledWith(expect.objectContaining({ requests: [{ collection: 'cardTransactions', filters: { yearMonth: '2026-09' } }] }));
 });
 
+it('지원 온 팀 조회는 선택 월과 팀을 서버에 전달한다', async () => {
+    await getTeamScopedRows('team_settlement_incoming', { yearMonth: '2026-09', teamId: 'own-team' });
+    expect(call).toHaveBeenCalledWith(expect.objectContaining({ requests: [{ collection: 'team_settlement_incoming', filters: { yearMonth: '2026-09', teamId: 'own-team' } }] }));
+});
+
 it('동일 계정의 중복 조회를 합치고 완료 후에는 새로 조회한다', async () => {
     const results = await Promise.all(Array.from({ length: 12 }, () => getTeamScopedRows('workers')));
     expect(call).toHaveBeenCalledTimes(1);
@@ -55,6 +65,24 @@ it('동일 계정의 중복 조회를 합치고 완료 후에는 새로 조회�
     await getTeamScopedRows('workers');
     expect(call).toHaveBeenCalledTimes(2);
     expect(getDoc).toHaveBeenCalledTimes(1);
+});
+
+it('이전 페이지의 느린 월간 일보와 겹쳐도 팀·작업자 목록은 먼저 응답한다', async () => {
+    let finishReport!: (value: unknown) => void;
+    const reportResponse = new Promise(resolve => { finishReport = resolve; });
+    call.mockImplementation(({ requests }: { requests: Array<{ collection: string }> }) =>
+        requests.some(request => request.collection === 'daily_reports') ? reportResponse
+            : Promise.resolve({ data: { results: requests.map(request => ({ rows: [{ id: request.collection }] })) } }));
+    let reportFinished = false;
+    const reportRead = getTeamScopedRows('daily_reports', { startDate: '2026-10-01', endDate: '2026-10-31' })
+        .then(rows => { reportFinished = true; return rows; });
+    expect(await Promise.all([getTeamScopedRows('workers'), getTeamScopedRows('teams')]))
+        .toEqual([[{ id: 'workers' }], [{ id: 'teams' }]]);
+    expect(reportFinished).toBe(false);
+    expect(call).toHaveBeenCalledTimes(2);
+    expect(call.mock.calls[0][0].requests.map((request: { collection: string }) => request.collection)).toEqual(['workers', 'teams']);
+    finishReport({ data: { results: [{ rows: [{ id: 'month-report' }] }] } });
+    expect(await reportRead).toEqual([{ id: 'month-report' }]);
 });
 
 it('팀장 경로만 10초간 재사용하고 만료 후 직책을 다시 확인한다', async () => {

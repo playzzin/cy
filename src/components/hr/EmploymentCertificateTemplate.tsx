@@ -1,9 +1,9 @@
 
-import React, { forwardRef, useEffect, useState } from 'react';
+import React, { forwardRef } from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import { Company } from '../../services/companyService';
 import { Worker } from '../../services/manpowerService';
-import { storageService } from '../../services/storageService';
+import { useDocumentStamp } from '../../hooks/useDocumentStamp';
 import { format } from 'date-fns';
 import { CERTIFICATE_FONT_FAMILY } from './certificateTypography';
 
@@ -17,6 +17,7 @@ interface EmploymentCertificateTemplateProps {
     joinDate: Date | null;
     endDate: Date | null;
     isServing: boolean;
+    includeStamp?: boolean;
 }
 
 const A4_WIDTH_MM = 210;
@@ -335,38 +336,10 @@ const WarningText = styled.p`
 `;
 
 export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, EmploymentCertificateTemplateProps>(
-    ({ company, worker, purpose, issueDate, position, duties, joinDate, endDate, isServing }, ref) => {
-        const [sealUrl, setSealUrl] = useState<string | null>(null);
+    ({ company, worker, purpose, issueDate, position, duties, joinDate, endDate, isServing, includeStamp = true }, ref) => {
+        const sealUrl = useDocumentStamp('employment', company?.name);
         const workerDisplayName = String(worker?.name || '').replace(/\d+/g, '').trim();
 
-        useEffect(() => {
-            const fetchSeal = async () => {
-                if (!company?.name) {
-                    setSealUrl(null);
-                    return;
-                }
-
-                let filename = '';
-                if (company.name.includes('청연')) {
-                    filename = '청연도장.jpg';
-                } else if (company.name.includes('다원')) {
-                    filename = '다원도장.png';
-                }
-
-                if (filename) {
-                    try {
-                        const url = await storageService.getDownloadUrl(filename);
-                        setSealUrl(url);
-                    } catch (e) {
-                        console.error("Seal image not found:", filename);
-                        setSealUrl(null);
-                    }
-                } else {
-                    setSealUrl(null);
-                }
-            };
-            fetchSeal();
-        }, [company?.name]);
 
         // Formatting helpers
         const formatDate = (date?: Date | string | null, formatStr: string = 'yyyy년 MM월 dd일') => {
@@ -468,13 +441,13 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 <CeoText>대표이사 {company?.ceoName || 'OOO'} (인)</CeoText>
                                 <OfficialSeal>
-                                    {sealUrl ? (
+                                    {includeStamp && (sealUrl ? (
                                         <img src={sealUrl} alt="직인" />
                                     ) : (
                                         getSealText(company?.name).split('\n').map((line, i) => (
                                             <div key={i}>{line}</div>
                                         ))
-                                    )}
+                                    ))}
                                 </OfficialSeal>
                             </div>
                         </SignatureArea>

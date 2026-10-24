@@ -1,7 +1,9 @@
 import { saveVehicleMonthlyLedgerWithBilling } from '../../services/vehicleMonthlyLedgerSaveCoordinator';
+import { useSupportBillingClosingGuard } from '../support/SupportBillingClosingGuard';
 import { SupportLedgerReview } from '../support/SupportLedgerReview';
 import { vehicleReviewBill } from '../../utils/supportLedgerReviewAdapters';
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
+import { SupportLedgerMemo } from '../support/SupportLedgerMemo';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBuilding, faCar, faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
 import { Route, Sparkles, TriangleAlert } from 'lucide-react';
@@ -31,6 +33,7 @@ import {
 import { normalizeVehicleExpenseType } from '../../utils/vehicleExpenseType';
 import { SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../../utils/supportWriteErrorReporting';
 import { formatNumberForDisplay } from '../../utils/zeroDisplay';
+import { SupportExcelDownloadButton } from '../support/SupportExcelDownloadButton';
 
 // ── 독립 EditableCell 컴포넌트 ──
 interface EditableCellProps {
@@ -346,6 +349,11 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 }) => {
     const [currentDate, setCurrentDate] = useState(getSupportManagementMonthDate);
     const [yearMonth, setYearMonth] = useState('');
+    const requestedYearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+    const exportScopeRef = useRef({ yearMonth: requestedYearMonth, vehicles });
+    exportScopeRef.current = { yearMonth: requestedYearMonth, vehicles };
+    const loadRequestIdRef = useRef(0);
+    const [loadedExportScope, setLoadedExportScope] = useState<{ yearMonth: string; vehicles: Vehicle[] } | null>(null);
     const [loading, setLoading] = useState(false);
     const [reviewLoadError, setReviewLoadError] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -363,6 +371,9 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     const [fineDriverEditor, setFineDriverEditor] = useState<FineDriverEditorState | null>(null);
     const [dirtyRowIds, setDirtyRowIds] = useState<Set<string>>(() => new Set());
     const [billingRetryRowIds, setBillingRetryRowIds] = useState<Set<string>>(() => new Set());
+    useSupportBillingClosingGuard('vehicle', saving || loading || loadingVehicles || Boolean(billingProcessingId) || fineImportOpen || tollImportOpen
+        ? '차량 자료를 처리 중입니다. 완료 후 청구 마감을 열어 주세요.'
+        : isDirty ? '수정한 차량 대장을 먼저 저장한 뒤 청구 마감을 열어 주세요.' : null);
     const originalExpensesRef = useRef<VehicleExpenseRecord[]>([]);
 
     const teamByAnyId = useMemo(() => {
@@ -790,7 +801,11 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     }, []);
 
     const loadData = useCallback(async () => {
-        if (!yearMonth) return;
+        if (!yearMonth || yearMonth !== exportScopeRef.current.yearMonth) return;
+        const requestId = ++loadRequestIdRef.current;
+        const isCurrentRequest = () => requestId === loadRequestIdRef.current
+            && yearMonth === exportScopeRef.current.yearMonth && vehicles === exportScopeRef.current.vehicles;
+        setLoadedExportScope(null);
         setLoading(true);
         setReviewLoadError(false);
         try {
@@ -800,6 +815,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                 vehicleService.listAllVehicleBillingTargets(),
                 vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true })
             ]);
+            if (!isCurrentRequest()) return;
             originalExpensesRef.current = expenses;
             setBillingDocuments(billings);
 
@@ -866,14 +882,16 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             // 렌트(RENT) 위쪽, 리스(LEASE) 아래쪽, 그 다음 자가(OWNED)
             newRows.sort(compareVehicleLedgerRowsByBillingTarget);
             setRows(newRows);
+            setLoadedExportScope({ yearMonth, vehicles });
             setIsDirty(false);
             setDirtyRowIds(new Set());
         } catch (e) {
+            if (!isCurrentRequest()) return;
             console.error(e);
             setRows([]);
             setReviewLoadError(true);
         } finally {
-            setLoading(false);
+            if (isCurrentRequest()) setLoading(false);
         }
     }, [yearMonth, vehicles, monthRange, buildSegmentsForVehicle]);
 
@@ -1403,6 +1421,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 
     useEffect(() => {
         if (yearMonth) loadData();
+        return () => { loadRequestIdRef.current += 1; };
     }, [yearMonth, loadData]);
 
     const handleMonthChange = (delta: number) => {
@@ -1995,6 +2014,27 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         }
     };
 
+    const canExportLedger = !loadingVehicles && !loading && !saving && !reviewLoadError && !billingProcessingId
+        && !fineImportOpen && !tollImportOpen && loadedExportScope?.yearMonth === requestedYearMonth
+        && loadedExportScope?.vehicles === vehicles && visibleLedgerRows.length > 0;
+    const handleExcelDownload = async () => {
+        if (!canExportLedger) return;
+        const context = { yearMonth, searchText, hasUnsavedChanges: isDirty,
+            teamName: teamFilterId ? teamByAnyId.get(teamFilterId)?.name || teamFilterId : '전체' };
+        const exportRows = visibleLedgerRows.map(({ row }) => {
+            const summary = getAssignmentSummary(row);
+            return { ...row,
+                assignedTeams: summary.assignedTeams.map(team => team.name),
+                assignedWorkers: summary.assignedWorkers,
+                billingTargets: summary.billingTeams.map(team => team.name),
+                fineTarget: row.fineChargeTarget === 'DRIVER'
+                    ? `운전자 · ${row.fineDriverBillingTarget?.workerName || row.segment.assigneeName || '미지정'}` : '청구대상',
+            };
+        });
+        const { buildVehicleLedgerWorkbook, downloadSupportResourceWorkbook } = await import('../../utils/supportResourceExcelExport');
+        await downloadSupportResourceWorkbook(buildVehicleLedgerWorkbook(context, exportRows), `차량_통합관리대장_${yearMonth}.xlsx`);
+    };
+
     const totals = useMemo(() => {
         const acc = {
             rentFee: 0,
@@ -2112,6 +2152,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                         />
                         <span className="text-sm font-bold text-slate-600">목록 고정</span>
                     </label>
+                    <SupportExcelDownloadButton disabled={!canExportLedger} hasUnsavedChanges={isDirty} onDownload={handleExcelDownload} />
                     <button
                         onClick={handleSave}
                         disabled={saving}
@@ -2157,6 +2198,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                 ))}
                                 <col style={{ width: '5.5%' }} />
                                 <col style={{ width: '7%' }} />
+                                <col style={{ width: '20%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -2174,6 +2216,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     ))}
                                     <th className="px-2 py-4 text-center w-32 border-l border-indigo-400 bg-indigo-500">합계</th>
                                     <th className="px-2 py-4 text-center w-36 border-l border-indigo-500">과태료 대상</th>
+                                    <th className="px-2 py-4 text-left border-l border-indigo-500">비고</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
@@ -2341,13 +2384,16 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                                 )}
                                             </div>
                                         </td>
-
+                                        <td className="p-2 align-top bg-white border-l border-indigo-50">
+                                            <SupportLedgerMemo key={`${yearMonth}:${row.id}`} memoKey={`vehicle:${yearMonth}:${row.id}`}
+                                                label={row.vehicle.licensePlate} initialMemo={row.note} disabled={saving} />
+                                        </td>
                                     </tr>
                                     );
                                 })}
                                 {visibleLedgerRows.length === 0 && (
                                     <tr>
-                                        <td colSpan={EXPENSE_TYPES.length + 9} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={EXPENSE_TYPES.length + 10} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faCar} className="text-4xl text-slate-300" />
                                                 <p>조건에 맞는 차량 대장 행이 없습니다.</p>
@@ -2369,6 +2415,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300 text-lg">
                                         {formatNumberForDisplay(totals.total)}
                                     </td>
+                                    <td className="bg-slate-900 border-l border-slate-700"></td>
                                     <td className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>

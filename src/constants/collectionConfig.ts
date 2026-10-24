@@ -38,6 +38,7 @@ export const SYSTEM_COLLECTIONS: SystemCollectionConfig[] = [
     { id: 'receivables', label: '미수금 (Receivables)', description: '미수금 추적 관리', source: 'firestore' },
     { id: 'advance_payments', label: '가불 공제 (Advance Pay)', description: '작업자 가불 및 공제 내역', source: 'firestore' },
     { id: 'monthly_payroll_settlements', label: '월 급여 정산 저장본', description: '월·팀별 신고방식, 작업자 정산 입력값, 사업소득 적용금액', source: 'firestore' },
+    { id: 'delegated_receipt_claims', label: '노무 입금 확인', description: '월·현장·작업자별 노무비 예정액과 분할 입금 확인 이력', source: 'firestore' },
     { id: 'daily_advance_statement_recruiter_fees', label: '대납 청구서 인력소개비', description: '대납출력부 청구서 화면에서 입력한 작업자별 인력소개비 공유 저장값', source: 'firestore' },
     { id: 'vehicles', label: '차량 (Vehicles)', description: '보유 차량 관리', source: 'firestore' },
     { id: 'vehicle_assignments', label: '차량 배정 (V-Assign)', description: '차량 운행 및 배정 기록', source: 'firestore' },

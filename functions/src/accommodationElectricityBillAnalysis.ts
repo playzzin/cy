@@ -1,3 +1,6 @@
+import { trackedGeminiFetch, withGeminiUsageContext } from './geminiUsageLogging';
+import { geminiTextGenerationOptions } from './geminiModelPolicy';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { createHash } from 'crypto';
@@ -545,7 +548,7 @@ const toWaterHttpsError = (error: unknown): functions.https.HttpsError => toUtil
 export const analyzeAccommodationElectricityBills = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeElectricityBillsRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeElectricityBillsRequest, context) => {
         try {
             await requireAccommodationBillingAccess(context);
             const yearMonth = normalizeYearMonth(data?.yearMonth);
@@ -575,7 +578,7 @@ export const analyzeAccommodationElectricityBills = functions
                     '/settings/ai에서 서버용 Gemini API Key를 먼저 설정해 주세요.',
                 );
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{ text: buildPrompt(yearMonth, files) }];
             files.forEach((file) => {
                 parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
@@ -583,13 +586,13 @@ export const analyzeAccommodationElectricityBills = functions
             });
 
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('accommodation-bills')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: ELECTRICITY_BILL_SCHEMA,
                     },
@@ -653,12 +656,12 @@ export const analyzeAccommodationElectricityBills = functions
         } catch (error) {
             throw toHttpsError(error);
         }
-    });
+    }));
 
 export const analyzeAccommodationGasBills = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeElectricityBillsRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeElectricityBillsRequest, context) => {
         try {
             await requireAccommodationBillingAccess(context);
             const yearMonth = normalizeYearMonth(data?.yearMonth);
@@ -688,7 +691,7 @@ export const analyzeAccommodationGasBills = functions
                     '/settings/ai에서 서버 Gemini API Key를 먼저 설정해 주세요.',
                 );
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{ text: buildGasPrompt(yearMonth, files) }];
             files.forEach((file) => {
                 parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
@@ -696,13 +699,13 @@ export const analyzeAccommodationGasBills = functions
             });
 
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('accommodation-bills')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: GAS_BILL_SCHEMA,
                     },
@@ -766,12 +769,12 @@ export const analyzeAccommodationGasBills = functions
         } catch (error) {
             throw toGasHttpsError(error);
         }
-    });
+    }));
 
 export const analyzeAccommodationWaterBills = functions
     .runWith({ timeoutSeconds: 300, memory: '1GB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: AnalyzeElectricityBillsRequest, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: AnalyzeElectricityBillsRequest, context) => {
         try {
             await requireAccommodationBillingAccess(context);
             const yearMonth = normalizeYearMonth(data?.yearMonth);
@@ -801,7 +804,7 @@ export const analyzeAccommodationWaterBills = functions
                     '/settings/ai에서 서버 Gemini API Key를 먼저 설정해 주세요.',
                 );
             }
-            const model = asString(settings.documentModel) || asString(settings.model) || 'gemini-2.5-flash';
+            const model = asString(settings.documentModel) || asString(settings.model) || DEFAULT_GEMINI_TEXT_MODEL;
             const parts: Array<Record<string, unknown>> = [{ text: buildWaterPrompt(yearMonth, files) }];
             files.forEach((file) => {
                 parts.push({ text: `FILE_INDEX=${file.fileIndex}\nFILE_NAME=${file.originalFileName}` });
@@ -809,13 +812,13 @@ export const analyzeAccommodationWaterBills = functions
             });
 
             const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-            const response = await fetch(endpoint, {
+            const response = await trackedGeminiFetch('accommodation-bills')(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
-                        temperature: 0.05,
+                        ...geminiTextGenerationOptions(model, 0.05),
                         responseMimeType: 'application/json',
                         responseJsonSchema: WATER_BILL_SCHEMA,
                     },
@@ -879,4 +882,4 @@ export const analyzeAccommodationWaterBills = functions
         } catch (error) {
             throw toWaterHttpsError(error);
         }
-    });
+    }));

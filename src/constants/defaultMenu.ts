@@ -9,6 +9,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "청연ENG ERP",
         icon: "fa-shield-halved",
         menu: [
+            { text: '도장 이미지 관리', icon: 'fa-stamp', path: '/settings/stamps', roles: ['admin'] },
             { text: '엑셀 양식 변환', icon: 'fa-file-excel', path: '/tools/excel-converter' },
             {
                 text: "대시보드",
@@ -80,9 +81,10 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                     "기성청구서",
                     "바이백 정리",
                     "팀정산 관리",
+                    "노무 입금 확인",
                     "팀정산 통계",
                     "팀별 연간 통계",
-                    { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }
+                    { text: "가불관리", sub: ["가불신청", "가불등록", "팀별 가불내역", "세금/가불"] }
                 ]
             },
             {
@@ -111,6 +113,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                         icon: "fa-clock-rotate-left",
                         sub: [
                             "로그인 로그",
+                            "Gemini 사용량·비용 로그",
                             "권한 변경 로그",
                             "엑셀 업로드·다운로드 로그",
                             "PDF 업로드·다운로드 로그",
@@ -155,7 +158,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         ],
         positionConfig: [
             { id: 'full', name: '전체 메뉴', icon: 'fa-shield-halved', color: 'from-red-600 to-red-400', order: 0 },
-            { id: 'ceo', name: '대표', icon: 'fa-crown', color: 'from-amber-500 to-yellow-400', order: 1 },
+            { id: 'ceo', name: 'CEO', icon: 'fa-crown', color: 'from-amber-500 to-yellow-400', order: 1 },
             { id: 'manager1', name: '메니저1', icon: 'fa-user-tie', color: 'from-blue-600 to-blue-400', order: 2 },
             { id: 'manager2', name: '메니저2', icon: 'fa-user-tie', color: 'from-indigo-600 to-indigo-400', order: 3 },
             { id: 'manager3', name: '메니저3', icon: 'fa-user-tie', color: 'from-purple-600 to-purple-400', order: 4 },
@@ -175,7 +178,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "숙소관리",
                 icon: "fa-home",
-                sub: ["숙소 관리", "가불 및 공제"]
+                sub: ["숙소 관리", "가불 및 공제", "팀별 가불내역"]
             },
             {
                 text: "자재관리",
@@ -207,9 +210,10 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
     },
     // === 직책별 메뉴 (Position Mode) ===
     pos_ceo: {
-        name: "대표",
+        name: "CEO",
         icon: "fa-crown",
         menu: [
+            { text: "로그관리", icon: "fa-clock-rotate-left", sub: ["로그인 로그", "신분증 로그", "Gemini 사용량·비용 로그"] },
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "시공계획서", icon: "fa-file-circle-check", path: "/construction-plans" },

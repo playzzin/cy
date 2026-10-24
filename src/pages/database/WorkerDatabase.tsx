@@ -24,6 +24,7 @@ import BulkProgressModal from '../../components/manpower/BulkProgressModal';
 import BulkEditWorkerModal from '../../components/manpower/BulkEditWorkerModal';
 import BankBookAnalysisModal from '../../components/manpower/BankBookAnalysisModal';
 import IdCardAnalysisModal from '../../components/manpower/IdCardAnalysisModal';
+import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import WorkerModal from '../manpower/WorkerModal';
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
@@ -68,6 +69,7 @@ const WORKER_COLUMNS = [
 
 const QUICK_VIEW_PERSONAL_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'idNumber', 'contact', 'address', 'unitPrice', 'bankName', 'accountNumber', 'accountHolder'];
 const QUICK_VIEW_WORK_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'role', 'salaryModel', 'teamName', 'companyName', 'status', 'totalManDay'];
+const QUICK_VIEW_ACCOUNT_COLUMNS = ['name', 'teamName', 'bankName', 'accountNumber', 'accountHolder'];
 const UNASSIGNED_TEAM_FILTER_ID = '__unassigned_team__';
 const UNASSIGNED_COMPANY_FILTER_ID = '__unassigned_company__';
 const COMPANY_NAME_FILTER_PREFIX = '__company_name__:';
@@ -141,17 +143,17 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         { key: 'totalManDay', label: '누적공수' },
     ]);
 
-    const [quickColumnView, setQuickColumnView] = useState<'personal' | 'work' | ''>('');
+    const [quickColumnView, setQuickColumnView] = useState<'personal' | 'work' | 'accounts' | ''>('');
 
     const orderedVisibleColumnKeys = moveFixedWorkerColumns(columnOrder.filter((key) => visibleColumns.includes(key)));
     const effectiveVisibleColumnKeys = quickColumnView === 'personal'
         ? moveFixedWorkerColumns(columnOrder.filter((key) => QUICK_VIEW_PERSONAL_COLUMNS.includes(key)))
         : (quickColumnView === 'work'
             ? moveFixedWorkerColumns(columnOrder.filter((key) => QUICK_VIEW_WORK_COLUMNS.includes(key)))
-            : orderedVisibleColumnKeys);
+            : (quickColumnView === 'accounts' ? QUICK_VIEW_ACCOUNT_COLUMNS : orderedVisibleColumnKeys));
     const tableColSpan = effectiveVisibleColumnKeys.length + 2;
 
-    const applyQuickView = (next: 'personal' | 'work') => {
+    const applyQuickView = (next: 'personal' | 'work' | 'accounts') => {
         setShowColumnSettings(false);
         setQuickColumnView((prev) => (prev === next ? '' : next));
     };
@@ -164,6 +166,11 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, success: 0, fail: 0 });
     const [bulkLogs, setBulkLogs] = useState<string[]>([]);
     const [isBankBookModalOpen, setIsBankBookModalOpen] = useState(false);
+    const [bankBookWorkerId, setBankBookWorkerId] = useState<string | undefined>();
+    const openBankBookModal = (workerId?: string) => {
+        setBankBookWorkerId(workerId);
+        setIsBankBookModalOpen(true);
+    };
     const [isIdCardAnalysisModalOpen, setIsIdCardAnalysisModalOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentWorker, setCurrentWorker] = useState<Worker | null>(null);
@@ -787,13 +794,20 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             try {
                 const content = await zip.generateAsync({ type: "blob" });
                 saveAs(content, `신분증_모음_${new Date().toISOString().slice(0, 10)}.zip`);
+                void recordIdentityDocumentLog({ action: 'download_zip', status: failCount > 0 ? 'partial' : 'success',
+                    personNames: workersToDownload.map((worker) => worker.name), personCount: workersToDownload.length, fileCount: successCount,
+                    ...(failCount > 0 ? { reason: 'processing_failed' as const } : {}) });
                 setBulkLogs(prev => [`[완료] 다운로드 시작`, ...prev]);
             } catch (zipError) {
+                void recordIdentityDocumentLog({ action: 'download_zip', status: 'failure', personNames: workersToDownload.map((worker) => worker.name),
+                    personCount: workersToDownload.length, fileCount: 0, reason: 'processing_failed' });
                 console.error("Zip generation failed:", zipError);
                 setBulkLogs(prev => [`[오류] 압축 파일 생성 실패`, ...prev]);
             }
         } else {
             setBulkLogs(prev => [`[알림] 다운로드 가능한 파일이 없습니다.`, ...prev]);
+            void recordIdentityDocumentLog({ action: 'download_zip', status: 'failure', personNames: workersToDownload.map((worker) => worker.name),
+                personCount: workersToDownload.length, fileCount: 0, reason: 'processing_failed' });
         }
     };
 
@@ -827,8 +841,10 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             document.body.appendChild(anchor);
             anchor.click();
             anchor.remove();
+            void recordIdentityDocumentLog({ action: 'download_image', status: 'success', workerId: worker.id, personNames: [worker.name], fileCount: 1 });
         } catch (error: unknown) {
             console.error("Download failed:", error);
+            void recordIdentityDocumentLog({ action: 'download_image', status: 'failure', workerId: worker.id, personNames: [worker.name], fileCount: 1, reason: 'processing_failed' });
             alert("파일을 찾을 수 없거나 접근 권한이 없습니다.");
         }
     };
@@ -856,6 +872,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             setIsModalOpen(false);
         } catch (error) {
             console.error("Failed to save worker", error);
+            if (workerData.fileNameSaved) void recordIdentityDocumentLog({ action: currentWorker?.id ? 'worker_updated' : 'worker_created',
+                status: 'failure', workerId: currentWorker?.id, personNames: [workerData.name || ''], fileCount: 1, reason: 'processing_failed' });
             const message = error instanceof Error ? error.message : (typeof error === 'string' ? error : '저장에 실패했습니다.');
             alert(message);
         }
@@ -871,11 +889,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     accountHolder: update.accountHolder
                 })
             ));
-            alert(`${updates.length}명의 계좌정보가 업데이트되었습니다.`);
             await fetchData(); // 데이터 새로고침
-        } catch (error) {
-            console.error("Batch update failed", error);
-            alert("일부 업데이트에 실패했습니다.");
         } finally {
             setLoading(false);
         }
@@ -948,9 +962,12 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                 } else {
                     failCount++;
                     const reason = !worker.matchedWorkerId ? '매칭된 작업자 ID 없음' : '알 수 없는 유형';
+                    void recordIdentityDocumentLog({ action: 'worker_updated', status: 'failure', personNames: [worker.name], fileNames: [worker.file.name], fileCount: 1, reason: 'processing_failed' });
                     setBulkLogs(prev => [`[실패] ${worker.name}: 처리되지 않음 (${worker.matchType}, ${reason})`, ...prev]);
                 }
             } catch (error: any) {
+                void recordIdentityDocumentLog({ action: worker.matchType === 'new' ? 'worker_created' : 'worker_updated', status: 'failure',
+                    workerId: worker.matchedWorkerId, personNames: [worker.name], fileNames: [worker.file.name], fileCount: 1, reason: 'processing_failed' });
                 console.error(error);
                 failCount++;
                 // Try to provide a helpful error message
@@ -1087,6 +1104,19 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                         <span className="hidden sm:inline">소속/상태</span>
                     </button>
 
+                    <button
+                        type="button"
+                        aria-pressed={quickColumnView === 'accounts'}
+                        onClick={() => applyQuickView('accounts')}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all shadow-sm whitespace-nowrap ${quickColumnView === 'accounts'
+                            ? 'bg-orange-100 text-orange-700 border border-orange-200'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                    >
+                        <FontAwesomeIcon icon={faMoneyCheck} />
+                        <span>계좌만 보기</span>
+                    </button>
+
                     {/* 계정 연결 */}
                     <button
                         onClick={() => setShowLinkingModal(true)}
@@ -1109,6 +1139,16 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     </button>
 
                     {/* 수정모드 */}
+                    <button
+                        type="button"
+                        onClick={() => openBankBookModal()}
+                        title="사진에서 은행·계좌번호·예금주를 읽어 계좌정보 등록"
+                        className="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 rounded-lg hover:bg-orange-100 transition-colors shadow-sm whitespace-nowrap"
+                    >
+                        <FontAwesomeIcon icon={faMoneyCheck} />
+                        <span>계좌번호 등록 (사진 분석)</span>
+                    </button>
+
                     <button
                         onClick={() => setIsEditMode(!isEditMode)}
                         className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-all shadow-sm whitespace-nowrap ${isEditMode
@@ -1746,16 +1786,28 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                         case 'accountNumber':
                                                             return (
                                                                 <td key={key} className="px-4 py-3 text-gray-600 border border-slate-200">
-                                                                    <InputPopover
-                                                                        value={worker.accountNumber || ''}
-                                                                        placeholder="계좌번호"
-                                                                        onChange={(val) => {
-                                                                            handleWorkerChange(worker.id!, 'accountNumber', String(val));
-                                                                            handleWorkerBlur(worker.id!, 'accountNumber', String(val));
-                                                                        }}
-                                                                        minimal={!isEditMode}
-                                                                        formatDisplay={(val) => <span className="text-xs">{val || '-'}</span>}
-                                                                    />
+                                                                    <div className="flex flex-col items-start gap-1.5">
+                                                                        <InputPopover
+                                                                            value={worker.accountNumber || ''}
+                                                                            placeholder="계좌번호"
+                                                                            onChange={(val) => {
+                                                                                handleWorkerChange(worker.id!, 'accountNumber', String(val));
+                                                                                handleWorkerBlur(worker.id!, 'accountNumber', String(val));
+                                                                            }}
+                                                                            minimal={!isEditMode}
+                                                                            formatDisplay={(val) => <span className="text-xs">{val || '-'}</span>}
+                                                                        />
+                                                                        <button
+                                                                            type="button"
+                                                                            aria-label={`${worker.name} 계좌번호 등록 (사진 분석)`}
+                                                                            onClick={() => openBankBookModal(worker.id)}
+                                                                            disabled={!worker.id || loading}
+                                                                            className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 whitespace-nowrap"
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faImages} />
+                                                                            계좌번호 등록 (사진 분석)
+                                                                        </button>
+                                                                    </div>
                                                                 </td>
                                                             );
                                                         case 'accountHolder':
@@ -1898,6 +1950,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     isOpen={isBankBookModalOpen}
                     onClose={() => setIsBankBookModalOpen(false)}
                     workers={filteredWorkers}
+                    initialWorkerId={bankBookWorkerId}
                     onUpdateWorkers={handleBankBookUpdate}
                 />
             )}

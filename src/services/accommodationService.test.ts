@@ -12,6 +12,7 @@ jest.mock('./accommodationFirestoreService', () => ({
         deleteAccommodation: jest.fn(),
         getAccommodation: jest.fn(),
         saveUtilityRecord: jest.fn(),
+        saveUtilityRecords: jest.fn(),
         replaceUtilityRecord: jest.fn(),
         deleteUtilityRecord: jest.fn(),
         getLatestUtilityRecord: jest.fn(),
@@ -74,6 +75,28 @@ describe('accommodationService saved utility ledger boundary', () => {
         jest.clearAllMocks();
         mockedSaveUtilityRecord.mockResolvedValue(undefined);
         mockedListBillingTargets.mockResolvedValue([]);
+    });
+
+    it('does not invent ledger rows when billing target loading fails', async () => {
+        mockedListAccommodations.mockResolvedValue([]);
+        mockedListUtilityRecords.mockResolvedValue([]);
+        mockedListBillingTargets.mockRejectedValueOnce(new Error('target read failed'));
+        await expect(accommodationService.getMonthlyLedger('2026-06')).rejects.toThrow('target read failed');
+    });
+
+    it('validates every row before submitting one atomic save', async () => {
+        await expect(accommodationService.saveUtilityRecords([buildRecord(), buildRecord({ accommodationId: 'other', yearMonth: '2026-13' })])).rejects.toThrow('월');
+        expect(accommodationFirestoreService.saveUtilityRecords).not.toHaveBeenCalled();
+        expect(mockedSaveUtilityRecord).not.toHaveBeenCalled();
+        await accommodationService.saveUtilityRecords([buildRecord({ billingSyncPending: true }), buildRecord({ id: 'other', accommodationId: 'other' })]);
+        expect(accommodationFirestoreService.saveUtilityRecords).toHaveBeenCalledTimes(1);
+        expect(accommodationFirestoreService.saveUtilityRecords).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ billingSyncPending: true })]));
+    });
+
+    it('propagates batch failure without retrying individual writes', async () => {
+        (accommodationFirestoreService.saveUtilityRecords as jest.Mock).mockRejectedValueOnce(new Error('batch rejected'));
+        await expect(accommodationService.saveUtilityRecords([buildRecord()])).rejects.toThrow('batch rejected');
+        expect(mockedSaveUtilityRecord).not.toHaveBeenCalled();
     });
 
     it('returns only an actually stored record and prefers the newest duplicate', async () => {

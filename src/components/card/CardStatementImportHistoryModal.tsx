@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { cardStatementImportService } from '../../services/cardStatementImportService';
 import type { CardStatementImportFile } from '../../types/cardStatementImport';
+import CardStatementFilesDialog from './CardStatementFilesDialog';
 
 interface Props {
   isOpen: boolean;
@@ -13,7 +14,7 @@ const statusLabels: Record<string, string> = {
   uploading: '업로드 중', uploaded: '업로드됨', analyzing: '분석 중', completed: '분석 완료', failed: '처리 실패', cancelled: '취소됨',
 };
 
-const canSelect = (file: CardStatementImportFile) => !['cancelled', 'uploading', 'analyzing'].includes(file.status);
+const canSelect = (file: CardStatementImportFile) => Boolean(file.jobId) && !['cancelled', 'uploading', 'analyzing'].includes(file.status);
 
 export const CardStatementImportHistoryModal: React.FC<Props> = ({ isOpen, yearMonth, onClose, onCancelled }) => {
   const [files, setFiles] = useState<CardStatementImportFile[]>([]);
@@ -26,6 +27,7 @@ export const CardStatementImportHistoryModal: React.FC<Props> = ({ isOpen, yearM
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [showCancelled, setShowCancelled] = useState(false);
+  const [viewingFile, setViewingFile] = useState<CardStatementImportFile | null>(null);
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -41,6 +43,7 @@ export const CardStatementImportHistoryModal: React.FC<Props> = ({ isOpen, yearM
     setFiles([]);
     setSelectedIds([]);
     setConfirmation([]);
+    setViewingFile(null);
     setError('');
     setMessage('');
     setLoading(true);
@@ -134,20 +137,28 @@ export const CardStatementImportHistoryModal: React.FC<Props> = ({ isOpen, yearM
             <ul className="divide-y rounded-xl border">
               {visible.map((file) => (
                 <li key={file.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
-                  {file.status !== 'cancelled' && <input type="checkbox" aria-label={`${file.originalFileName} 선택`} checked={selectedIds.includes(file.id)} disabled={!canSelect(file) || !!busyId || confirmation.length > 0} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...ids, file.id] : ids.filter((id) => id !== file.id))} />}
+                  {file.jobId && file.status !== 'cancelled' && <input type="checkbox" aria-label={`${file.originalFileName} 선택`} checked={selectedIds.includes(file.id)} disabled={!canSelect(file) || !!busyId || confirmation.length > 0} onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...ids, file.id] : ids.filter((id) => id !== file.id))} />}
                   <div className="min-w-0 flex-1">
                     <div className="break-all text-sm font-bold text-slate-800">{file.originalFileName}</div>
                     <div className="mt-1 text-xs text-slate-500">
                       {file.createdAt?.seconds ? new Date(file.createdAt.seconds * 1000).toLocaleString('ko-KR') : '등록일 미확인'} · {statusLabels[file.status] || file.status}
                     </div>
                   </div>
-                  {file.status !== 'cancelled' && <button type="button" aria-label={`${file.originalFileName} 업로드 취소`} onClick={() => openConfirmation([file])} disabled={!!busyId || confirmation.length > 0 || !canSelect(file)} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700 disabled:opacity-40">업로드 취소</button>}
+                  <div className="flex gap-2">
+                    <a href={`/support/cards/statements?month=${encodeURIComponent(yearMonth)}&fileId=${encodeURIComponent(file.id)}`}
+                      aria-label={`${file.originalFileName} 상세내역`} onClick={event => { if (busyId || confirmation.length) event.preventDefault(); }}
+                      aria-disabled={!!busyId || confirmation.length > 0}
+                      className="rounded-lg border border-indigo-200 px-3 py-2 text-sm font-bold text-indigo-700 hover:bg-indigo-50">상세내역</a>
+                    <button type="button" aria-label={`${file.originalFileName} 원본 열기`} onClick={() => setViewingFile(file)} disabled={!file.storagePath || file.status === 'uploading' || !!busyId || confirmation.length > 0} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold text-slate-700 disabled:opacity-40">원본 열기</button>
+                    {file.jobId && file.status !== 'cancelled' && <button type="button" aria-label={`${file.originalFileName} 업로드 취소`} onClick={() => openConfirmation([file])} disabled={!!busyId || confirmation.length > 0 || !canSelect(file)} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700 disabled:opacity-40">업로드 취소</button>}
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </div>
       </section>
+      {viewingFile && <CardStatementFilesDialog paths={[viewingFile.storagePath]} fileNames={{ [viewingFile.storagePath]: viewingFile.originalFileName }} onClose={() => setViewingFile(null)} />}
     </div>
   );
 };

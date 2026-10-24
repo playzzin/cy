@@ -1,5 +1,9 @@
 import { saveCardMonthlyLedger } from '../../services/cardMonthlyLedgerSaveCoordinator';
+import { useSupportBillingClosingGuard } from '../support/SupportBillingClosingGuard';
+import { SupportExcelDownloadButton } from '../support/SupportExcelDownloadButton';
+import type { SupportExportContext } from '../../utils/supportResourceExcelExport';
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
+import { SupportLedgerMemo } from '../support/SupportLedgerMemo';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding,
@@ -14,7 +18,9 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { FileText, Sparkles } from 'lucide-react';
 import { CardStatementImportHistoryModal } from './CardStatementImportHistoryModal';
-import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
+import { ref as storageRef, uploadBytes } from 'firebase/storage';
+import CardStatementUsageDialog from './CardStatementUsageDialog';
+import CardStatementFilesDialog from './CardStatementFilesDialog';
 import {
     Card,
     CardAssignmentRecord,
@@ -322,6 +328,7 @@ const getCardLedgerStructureFingerprint = (row: CardLedgerRow): string => JSON.s
 });
 
 interface CardMonthlyLedgerProps {
+    exportContext?: SupportExportContext;
     cards: Card[];
     teams?: Team[];
     loadingCards: boolean;
@@ -337,9 +344,14 @@ const hexToRgba = (hex: string, alpha: number) => {
     return `rgba(${r},${g},${b},${alpha})`;
 };
 
-export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, teams = [], loadingCards, onOpenSetup, onOpenBillingTarget }) => {
+export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, teams = [], loadingCards, onOpenSetup, onOpenBillingTarget, exportContext }) => {
     const [currentDate, setCurrentDate] = useState(getSupportManagementMonthDate);
     const [yearMonth, setYearMonth] = useState('');
+    const requestedYearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+    const exportScopeRef = useRef({ yearMonth: requestedYearMonth, cards });
+    exportScopeRef.current = { yearMonth: requestedYearMonth, cards };
+    const loadRequestIdRef = useRef(0);
+    const [loadedExportScope, setLoadedExportScope] = useState<{ yearMonth: string; cards: Card[] } | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
@@ -353,6 +365,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     const [statementUploadingRowId, setStatementUploadingRowId] = useState('');
     const [isStatementImportOpen, setIsStatementImportOpen] = useState(false);
     const [isStatementHistoryOpen, setIsStatementHistoryOpen] = useState(false);
+    const [statementCardId, setStatementCardId] = useState<string | null>(null);
+    const [statementView, setStatementView] = useState<'details' | 'original'>('details');
+    useEffect(() => { setStatementCardId(null); }, [requestedYearMonth, cards]);
+    useSupportBillingClosingGuard('card', saving || loading || loadingCards || Boolean(statementUploadingRowId) || isStatementImportOpen
+        ? '카드 자료를 처리 중입니다. 완료 후 청구 마감을 열어 주세요.'
+        : isDirty ? '수정한 카드 대장을 먼저 저장한 뒤 청구 마감을 열어 주세요.' : null);
     const originalTxsRef = useRef<CardTransaction[]>([]);
 
     const teamInfoMap = useMemo(() => {
@@ -746,7 +764,11 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         rows: CardLedgerRow[];
         billings: CardBillingDocument[];
     } | null> => {
-        if (!yearMonth) return null;
+        if (!yearMonth || yearMonth !== exportScopeRef.current.yearMonth) return null;
+        const requestId = ++loadRequestIdRef.current;
+        const isCurrentRequest = () => requestId === loadRequestIdRef.current
+            && yearMonth === exportScopeRef.current.yearMonth && cards === exportScopeRef.current.cards;
+        setLoadedExportScope(null);
         setLoading(true);
         try {
             const billingPromise = options?.strictBillingRead
@@ -758,6 +780,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 cardService.listAllCardBillingTargets(),
                 billingPromise
             ]);
+            if (!isCurrentRequest()) return null;
             const dedupedTransactions = dedupeImportedStatementTransactions(txs);
             // Keep every physical document for the next save/cancel pass. Only the
             // displayed totals are deduplicated; otherwise a hidden duplicate can
@@ -816,14 +839,16 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
             newRows.sort(compareCardLedgerRowsByBillingTarget);
             setRows(newRows);
+            setLoadedExportScope({ yearMonth, cards });
             setIsDirty(false);
             return { rows: newRows, billings };
         } catch (e) {
+            if (!isCurrentRequest()) return null;
             console.error('카드 월별대장 로드 실패:', e);
             if (!options?.strictBillingRead) setRows([]);
             return null;
         } finally {
-            setLoading(false);
+            if (isCurrentRequest()) setLoading(false);
         }
     }, [yearMonth, cards, buildSegmentsForCard]);
 
@@ -1235,6 +1260,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
     useEffect(() => {
         if (yearMonth) loadData();
+        return () => { loadRequestIdRef.current += 1; };
     }, [yearMonth, loadData]);
 
     const handleMonthChange = (delta: number) => {
@@ -1543,6 +1569,13 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         return dedupeStatementPaths(paths);
     };
 
+    const statementCardRows = rows.filter(row => row.card.id === statementCardId);
+    const statementCard = statementCardRows[0]?.card;
+    const statementCardPaths = dedupeStatementPaths(statementCardRows.flatMap(row => [
+        ...row.statementAttachmentPaths,
+        ...getStatementPathsForDocuments(getAllBillingDocumentsForRow(row)),
+    ]));
+
     const handleUploadStatement = async (
         row: CardLedgerRow,
         rowBillingDocuments: CardBillingDocument[],
@@ -1602,7 +1635,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             })));
 
             await loadData();
-            alert('PDF 파일이 카드 금액과 팀별 경비 자료에 연결되었습니다.');
+            setStatementView('details');
+            setStatementCardId(row.card.id);
         } catch (error) {
             console.error(error);
             alert(error instanceof Error ? error.message : '청구서 파일 등록에 실패했습니다.');
@@ -1611,15 +1645,21 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         }
     };
 
-    const handleOpenStatement = async (path: string) => {
-        if (!path) return;
-        try {
-            const url = await getDownloadURL(storageRef(storage, path));
-            window.open(url, '_blank', 'noopener,noreferrer');
-        } catch (error) {
-            console.error(error);
-            alert('청구서 파일을 열 수 없습니다.');
-        }
+    const canExportLedger = !loadingCards && !loading && !saving && !statementUploadingRowId && !isStatementImportOpen
+        && loadedExportScope?.yearMonth === requestedYearMonth && loadedExportScope?.cards === cards && rows.length > 0;
+    const handleExcelDownload = async () => {
+        if (!canExportLedger) return;
+        const context = { ...exportContext, yearMonth, hasUnsavedChanges: isDirty };
+        const exportRows = rows.map(row => {
+            const summary = getAssignmentSummary(row);
+            return { ...row,
+                assignedTeams: summary.assignedTeams.map(team => team.name),
+                assignedWorkers: summary.assignedWorkers,
+                billingTargets: summary.billingTargets.map(target => target.name),
+            };
+        });
+        const { buildCardLedgerWorkbook, downloadSupportResourceWorkbook } = await import('../../utils/supportResourceExcelExport');
+        await downloadSupportResourceWorkbook(buildCardLedgerWorkbook(context, exportRows), `카드_통합관리대장_${yearMonth}.xlsx`);
     };
 
     const totals = useMemo(() => {
@@ -1698,6 +1738,13 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             className="h-8 whitespace-nowrap rounded-md border border-slate-200 px-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40">
                             업로드 내역
                         </button>
+                        <a href={`/support/cards/statements?month=${encodeURIComponent(yearMonth)}`}
+                            aria-disabled={isDirty || saving}
+                            onClick={event => { if (isDirty || saving) event.preventDefault(); }}
+                            title={isDirty ? '변경사항을 먼저 전체 저장해 주세요.' : '저장된 명세서의 거래별 내역 조회 및 Gemini 분석'}
+                            className={`inline-flex h-8 items-center whitespace-nowrap rounded-md border border-indigo-200 px-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 ${isDirty || saving ? 'cursor-not-allowed opacity-40' : ''}`}>
+                            전체 명세서
+                        </a>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 h-[46px] shadow-sm whitespace-nowrap">
                         <input
@@ -1708,6 +1755,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         />
                         <span className="text-sm font-bold text-slate-600">목록 고정</span>
                     </label>
+                    <SupportExcelDownloadButton disabled={!canExportLedger} hasUnsavedChanges={isDirty} onDownload={handleExcelDownload} />
                     <button
                         onClick={handleSave}
                         disabled={saving}
@@ -1746,6 +1794,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                 <col style={{ width: '17%' }} />
                                 <col style={{ width: '13%' }} />
                                 <col style={{ width: '12%' }} />
+                                <col style={{ width: '15%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
@@ -1755,6 +1804,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <th className="px-4 py-4 text-left w-48 tracking-wider bg-indigo-700">카드</th>
                                     <th className="px-2 py-4 text-center w-40 border-l border-indigo-400 bg-indigo-500">총금액</th>
                                     <th className="px-2 py-4 text-center w-40 border-l border-indigo-500">사용내역서</th>
+                                    <th className="px-2 py-4 text-left border-l border-indigo-500">비고</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
@@ -1908,7 +1958,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                             />
 
                                             <td className="px-2 py-3 border-l border-indigo-50 bg-white text-center">
-                                                <div className="flex items-center justify-center gap-1">
+                                                <div className="flex flex-wrap items-center justify-center gap-1">
                                                     <label
                                                         className={`inline-flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-[11px] font-bold text-white transition-colors ${
                                                             isUploadingStatement
@@ -1934,28 +1984,40 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                     <button
                                                         type="button"
                                                         disabled={!latestStatementPath || isUploadingStatement}
-                                                        onClick={() => void handleOpenStatement(latestStatementPath)}
+                                                        onClick={() => { setStatementView('original'); setStatementCardId(row.card.id); }}
+                                                        className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300"
+                                                        title="카드 사용내역서 원본 PDF/이미지 열기"
+                                                    >
+                                                        원본 열기
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        disabled={!latestStatementPath || isUploadingStatement}
+                                                        onClick={() => { setStatementView('details'); setStatementCardId(row.card.id); }}
                                                         className={`h-8 rounded-lg border px-2 text-[11px] font-bold ${
                                                             latestStatementPath && !isUploadingStatement
                                                                 ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                                                                 : 'border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed'
                                                         }`}
-                                                        title="카드 사용내역서 파일 열기"
+                                                        title="분석한 사용내역과 카드 총액 비교"
                                                     >
-                                                        열기
+                                                        상세내역
                                                     </button>
                                                 </div>
                                                 {statementPaths.length > 0 && (
                                                     <div className="mt-1 text-[10px] font-bold text-slate-400">{statementPaths.length}개</div>
                                                 )}
                                             </td>
-
+                                            <td className="p-2 align-top bg-white border-l border-indigo-50">
+                                                <SupportLedgerMemo key={`${yearMonth}:${row.id}`} memoKey={`card:${yearMonth}:${row.id}`}
+                                                    label={`${row.card.name} ${row.card.last4}`} initialMemo={row.memo} />
+                                            </td>
                                         </tr>
                                     );
                                 })}
                                 {rows.length === 0 && (
                                     <tr>
-                                        <td colSpan={6} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={7} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faReceipt} className="text-4xl text-slate-300" />
                                                 <p>카드 대장 행이 없습니다.</p>
@@ -1970,6 +2032,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <td className="p-4 border-r border-slate-600 text-right font-sans tabular-nums text-amber-300 text-lg">
                                         {formatNumberForDisplay(totals.total)}
                                     </td>
+                                    <td className="bg-slate-900 border-l border-slate-700"></td>
                                     <td className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>
@@ -2002,6 +2065,20 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 onCompleted={() => void loadData()}
             />
             <CardStatementImportHistoryModal isOpen={isStatementHistoryOpen} yearMonth={yearMonth} onClose={() => setIsStatementHistoryOpen(false)} onCancelled={() => void loadData()} />
+            {statementCard && (statementView === 'original' ? <CardStatementFilesDialog
+                paths={statementCardPaths}
+                title={statementCard.name + ' 사용내역서 원본'}
+                onClose={() => setStatementCardId(null)}
+            /> : <CardStatementUsageDialog
+                key={`${yearMonth}:${statementCard.id}`}
+                yearMonth={yearMonth}
+                cardId={statementCard.id}
+                cardLast4={statementCard.last4}
+                cardName={statementCard.name}
+                ledgerTotal={statementCardRows.reduce((sum, row) => sum + row.total, 0)}
+                paths={statementCardPaths}
+                onClose={() => setStatementCardId(null)}
+            />)}
         </div>
     );
 };

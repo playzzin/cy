@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCalendarDays,
@@ -15,6 +15,7 @@ import {
 
 import { Team } from '../../../services/teamService';
 import { Worker } from '../../../services/manpowerService';
+import CompanyTeamSelector from '../../../components/common/CompanyTeamSelector';
 
 export interface PayrollToolbarProps {
     hideHeader: boolean;
@@ -98,6 +99,8 @@ export interface PayrollToolbarProps {
     payrollSettlementLoading: boolean;
     payrollSettlementFeedback: string;
     payrollSettlementDisabled: boolean;
+    actionsDisabled?: boolean;
+    primaryAccountSettings: React.ReactNode;
 }
 
 const ToggleButton: React.FC<{
@@ -122,6 +125,7 @@ const ToggleButton: React.FC<{
 );
 
 export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
+    hideHeader,
     rangeLabel,
     targetCount,
     monthRangeLength,
@@ -191,13 +195,27 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
     payrollSettlementLoading,
     payrollSettlementFeedback,
     payrollSettlementDisabled,
+    actionsDisabled = false,
+    primaryAccountSettings,
 }) => {
+    const workerSearchRef = useRef<HTMLInputElement>(null);
+    const [searchFocused, setSearchFocused] = useState(false);
+    const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+    const [activeSuggestion, setActiveSuggestion] = useState(-1);
     const selectedWorker = workerOptions.find((worker) => worker.id === selectedWorkerId);
     const normalizedWorkerSearch = workerSearchText.trim();
-    const showWorkerSuggestions = filterMode === 'worker'
+    const showWorkerSuggestions = searchFocused && !suggestionsDismissed && filterMode === 'worker'
         && normalizedWorkerSearch.length > 0
         && (!selectedWorker || (selectedWorker.name ?? '').trim() !== normalizedWorkerSearch);
     const workerSuggestions = showWorkerSuggestions ? workerOptions.slice(0, 8) : [];
+    const chooseWorker = (worker: Worker) => {
+        setFilterMode('worker');
+        setSelectedWorkerId(worker.id ?? '');
+        setWorkerSearchText(worker.name ?? '');
+        setSuggestionsDismissed(true);
+        setActiveSuggestion(-1);
+        workerSearchRef.current?.focus();
+    };
 
     const applyRules = (overrides: Partial<{
         applyInsurance: boolean;
@@ -224,9 +242,9 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
     ].filter(Boolean).length;
 
     return (
-        <section className="mb-1.5 flex-shrink-0 rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2 px-2.5 py-1.5">
-                <div className="flex min-w-[180px] items-center gap-2">
+        <section className="monthly-payroll-toolbar mb-1.5 flex-shrink-0 rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="monthly-payroll-toolbar-heading flex flex-wrap items-center gap-2 px-2.5 py-1.5">
+                {!hideHeader && <div className="monthly-payroll-title flex min-w-[180px] items-center gap-2">
                     <span className="flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-blue-50 text-[13px] text-blue-600">
                         <FontAwesomeIcon icon={faCalendarDays} />
                     </span>
@@ -234,12 +252,13 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                         <h1 className="whitespace-nowrap text-[16px] font-bold leading-none text-slate-900">월 급여 정산</h1>
                         <p className="hidden whitespace-nowrap text-[11px] text-slate-500 xl:block">기간과 대상을 고른 뒤 조회하세요.</p>
                     </div>
-                </div>
+                </div>}
 
-                <div className="flex items-center rounded-lg bg-slate-100 p-0.5">
+                <div className="monthly-payroll-tabs flex flex-none items-center whitespace-nowrap rounded-lg bg-slate-100 p-0.5" role="group" aria-label="급여 보기 방식">
                     <button
                         type="button"
                         onClick={() => setPageViewMode('simple')}
+                        aria-pressed={pageViewMode === 'simple'}
                         className={`h-7 rounded-md px-2.5 text-[12px] font-bold transition-colors ${
                             pageViewMode === 'simple' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                         }`}
@@ -249,6 +268,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                     <button
                         type="button"
                         onClick={() => setPageViewMode('ledger')}
+                        aria-pressed={pageViewMode === 'ledger'}
                         className={`h-7 rounded-md px-2.5 text-[12px] font-bold transition-colors ${
                             pageViewMode === 'ledger' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                         }`}
@@ -258,6 +278,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                     <button
                         type="button"
                         onClick={() => setPageViewMode('standard')}
+                        aria-pressed={pageViewMode === 'standard'}
                         className={`h-7 rounded-md px-2.5 text-[12px] font-bold transition-colors ${
                             pageViewMode === 'standard' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                         }`}
@@ -266,13 +287,13 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                     </button>
                 </div>
 
-                <div className="ml-auto flex flex-none items-center justify-end gap-1.5">
-                    <span className="whitespace-nowrap rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                <div className="monthly-payroll-actions ml-auto flex flex-wrap items-center justify-end gap-1.5">
+                    <span className="monthly-payroll-range whitespace-nowrap rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
                         {rangeLabel || '-'} · {targetCount}명
                     </span>
                     {payrollSettlementFeedback && (
                         <span
-                            className="max-w-[240px] truncate whitespace-nowrap text-[11px] font-semibold text-emerald-700"
+                            className="monthly-payroll-feedback max-w-[240px] truncate whitespace-nowrap text-[11px] font-semibold text-emerald-700"
                             title={payrollSettlementFeedback}
                             aria-live="polite"
                         >
@@ -300,6 +321,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                         type="button"
                         onClick={() => setToolbarExpanded((prev) => !prev)}
                         aria-expanded={toolbarExpanded}
+                        aria-controls="monthly-payroll-settings"
                         className={`inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 text-[12px] font-semibold transition-colors ${
                             toolbarExpanded
                                 ? 'border-blue-200 bg-blue-50 text-blue-700'
@@ -313,14 +335,15 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
             </div>
 
             <div className="border-t border-slate-100 px-2.5 py-1.5">
-                <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto">
-                    <div className="flex flex-none items-center">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <div className="monthly-payroll-period flex flex-none items-center">
                         <span className="sr-only">기간</span>
                         <div className="flex items-center gap-1">
                             <div className="flex flex-none rounded-lg bg-slate-100 p-0.5">
                                 <button
                                     type="button"
                                     onClick={() => handleMonthModeChange('single')}
+                                    aria-pressed={monthSelectionMode === 'single'}
                                     className={`h-7 rounded-md px-2.5 text-[12px] font-bold ${
                                         monthSelectionMode === 'single' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'
                                     }`}
@@ -330,6 +353,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 <button
                                     type="button"
                                     onClick={() => handleMonthModeChange('range')}
+                                    aria-pressed={monthSelectionMode === 'range'}
                                     className={`h-7 rounded-md px-2.5 text-[12px] font-bold ${
                                         monthSelectionMode === 'range' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'
                                     }`}
@@ -359,7 +383,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                         </div>
                     </div>
 
-                    <div className="flex w-[420px] flex-none items-center gap-1">
+                    <div className="monthly-payroll-months flex min-w-0 flex-1 basis-[420px] items-center gap-1">
                         <div className="flex flex-none items-center gap-0.5">
                             <span className="sr-only">월 선택</span>
                             <div className="flex items-center gap-1">
@@ -367,7 +391,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 <button type="button" onClick={handleSelectCurrentMonth} className="h-8 rounded-md px-1 text-[11px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-blue-700">이달</button>
                             </div>
                         </div>
-                        <div className="grid min-w-0 flex-1 grid-cols-12 gap-0.5">
+                        <div className="monthly-payroll-month-grid grid min-w-0 flex-1 grid-cols-12 gap-0.5">
                             {Array.from({ length: 12 }, (_, index) => index + 1).map((monthNumber) => {
                                 const year = formatYearMonthParts(yearCursor).year;
                                 const ym = `${year}-${String(monthNumber).padStart(2, '0')}`;
@@ -381,6 +405,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                         key={ym}
                                         type="button"
                                         aria-label={`${monthNumber}월`}
+                                        aria-pressed={isInRange || isActive}
                                         onClick={() => handleMonthButtonSelect(ym)}
                                         className={`h-8 min-w-0 rounded-md text-[11px] font-bold transition-colors ${
                                             isActive
@@ -397,76 +422,57 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                         </div>
                     </div>
 
-                    <div className="flex min-w-[280px] flex-1 items-center">
+                    <div className="monthly-payroll-search flex min-w-[280px] flex-1 items-center">
                         <span className="sr-only">대상</span>
                         <div className="flex min-w-0 flex-1 items-center gap-1">
-                            <div className="flex flex-none rounded-lg bg-slate-100 p-0.5">
-                                <button
-                                    type="button"
-                                    onClick={() => setFilterMode('team')}
-                                    className={`h-7 rounded-md px-2.5 text-[12px] font-bold ${filterMode === 'team' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+                                <div className="relative min-w-0 flex-1"
+                                    onFocus={() => setSearchFocused(true)}
+                                    onBlur={(event) => {
+                                        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSearchFocused(false);
+                                    }}
                                 >
-                                    팀
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setFilterMode('worker')}
-                                    className={`h-7 rounded-md px-2.5 text-[12px] font-bold ${filterMode === 'worker' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
-                                >
-                                    개인
-                                </button>
-                            </div>
-
-                            {filterMode === 'team' ? (
-                                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-0.5 custom-scrollbar">
-                                    <button
-                                        type="button"
-                                        aria-pressed={selectedTeamId === ''}
-                                        onClick={() => setSelectedTeamId('')}
-                                        className={`h-7 flex-none rounded-md px-2.5 text-[12px] font-bold transition-colors ${
-                                            selectedTeamId === ''
-                                                ? 'bg-blue-600 text-white shadow-sm'
-                                                : 'text-slate-600 hover:bg-slate-100'
-                                        }`}
-                                    >
-                                        전체
-                                    </button>
-                                    {teams
-                                        .filter((team): team is Team & { id: string } => typeof team.id === 'string' && team.id.trim().length > 0)
-                                        .map((team) => (
-                                            <button
-                                                key={team.id}
-                                                type="button"
-                                                aria-pressed={selectedTeamId === team.id}
-                                                onClick={() => setSelectedTeamId(team.id)}
-                                                className={`h-7 flex-none rounded-md px-2.5 text-[12px] font-bold transition-colors ${
-                                                    selectedTeamId === team.id
-                                                        ? 'bg-blue-600 text-white shadow-sm'
-                                                        : 'text-slate-600 hover:bg-slate-100'
-                                                }`}
-                                            >
-                                                {team.name}
-                                            </button>
-                                        ))}
-                                </div>
-                            ) : (
-                                <div className="relative min-w-[220px] flex-1">
                                     <input
+                                        ref={workerSearchRef}
                                         type="search"
                                         role="combobox"
                                         aria-label="개인 이름 검색"
                                         aria-expanded={showWorkerSuggestions}
                                         aria-controls="monthly-wage-worker-search-results"
                                         aria-autocomplete="list"
+                                        aria-activedescendant={showWorkerSuggestions && workerSuggestions[activeSuggestion]
+                                            ? `monthly-wage-worker-option-${activeSuggestion}` : undefined}
                                         value={workerSearchText}
+                                        onFocus={() => setSuggestionsDismissed(false)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Escape') {
+                                                event.preventDefault();
+                                                event.stopPropagation();
+                                                setSuggestionsDismissed(true);
+                                                setActiveSuggestion(-1);
+                                            } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                                                event.preventDefault();
+                                                setSuggestionsDismissed(false);
+                                                const count = Math.min(workerOptions.length, 8);
+                                                if (count) setActiveSuggestion(current => event.key === 'ArrowDown'
+                                                    ? (current + 1) % count : current <= 0 ? count - 1 : current - 1);
+                                            } else if (event.key === 'Enter') {
+                                                event.preventDefault();
+                                                const worker = workerSuggestions[activeSuggestion];
+                                                if (worker) chooseWorker(worker);
+                                                else { setSuggestionsDismissed(true); fetchData(); }
+                                            }
+                                        }}
                                         onChange={(event) => {
                                             const nextValue = event.target.value;
+                                            setSuggestionsDismissed(false);
+                                            setActiveSuggestion(-1);
+                                            setFilterMode(nextValue.trim() ? 'worker' : 'team');
                                             setWorkerSearchText(nextValue);
                                             if (!selectedWorker || (selectedWorker.name ?? '').trim() !== nextValue.trim()) {
                                                 setSelectedWorkerId('');
                                             }
                                         }}
-                                        placeholder="이름을 입력하세요"
+                                        placeholder="개인 이름 검색"
                                         className={`h-8 w-full rounded-lg border bg-white px-3 pr-9 text-[12px] font-semibold outline-none ${
                                             selectedWorkerId
                                                 ? 'border-emerald-400 text-emerald-800'
@@ -478,8 +484,10 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                             type="button"
                                             aria-label="개인 검색 지우기"
                                             onClick={() => {
+                                                setFilterMode('team');
                                                 setWorkerSearchText('');
                                                 setSelectedWorkerId('');
+                                                workerSearchRef.current?.focus();
                                             }}
                                             className="absolute right-2 top-1/2 h-6 w-6 -translate-y-1/2 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                                         >
@@ -488,17 +496,17 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                     )}
                                     {showWorkerSuggestions && (
                                         <div id="monthly-wage-worker-search-results" role="listbox" className="absolute left-0 right-0 z-[90] mt-1 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
-                                            {workerSuggestions.length > 0 ? workerSuggestions.map((worker) => (
+                                            {workerSuggestions.length > 0 ? workerSuggestions.map((worker, index) => (
                                                 <button
                                                     key={worker.id}
+                                                    id={`monthly-wage-worker-option-${index}`}
                                                     type="button"
                                                     role="option"
-                                                    aria-selected={selectedWorkerId === worker.id}
-                                                    onClick={() => {
-                                                        setSelectedWorkerId(worker.id ?? '');
-                                                        setWorkerSearchText(worker.name ?? '');
-                                                    }}
-                                                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700"
+                                                    tabIndex={-1}
+                                                    aria-selected={activeSuggestion === index}
+                                                    onPointerDown={(event) => event.preventDefault()}
+                                                    onClick={() => chooseWorker(worker)}
+                                                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] font-semibold hover:bg-blue-50 hover:text-blue-700 ${activeSuggestion === index ? 'bg-blue-50 text-blue-700' : 'text-slate-700'}`}
                                                 >
                                                     <span>{worker.name}</span>
                                                     <span className="text-[11px] font-normal text-slate-400">{worker.payType || ''}</span>
@@ -509,7 +517,6 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                         </div>
                                     )}
                                 </div>
-                            )}
 
                             <button
                                 type="button"
@@ -524,8 +531,26 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                 </div>
             </div>
 
+                <div className="monthly-payroll-teams px-2.5 pb-1.5">
+                    <CompanyTeamSelector
+                        internalTeams={teams
+                            .filter((team): team is Team & { id: string } => typeof team.id === 'string' && team.id.trim().length > 0)
+                            .map((team) => ({ id: team.id, name: team.name, color: team.color }))}
+                        selectedTeamId={selectedTeamId}
+                        onChange={(teamId) => {
+                            setFilterMode('team');
+                            setSelectedWorkerId('');
+                            setWorkerSearchText('');
+                            setSelectedTeamId(teamId);
+                        }}
+                        ariaLabel="월급여 팀 선택"
+                        compact
+                    />
+                </div>
+
             {toolbarExpanded && (
-                <div className="border-t border-slate-200 bg-slate-50/80 px-3 py-3">
+                <div id="monthly-payroll-settings" className="border-t border-slate-200 bg-slate-50/80 px-3 py-3">
+                    <div className="mb-3">{primaryAccountSettings}</div>
                     <div className="grid gap-3 xl:grid-cols-3">
                         <div className="rounded-xl border border-slate-200 bg-white p-3">
                             <div className="mb-2 flex items-center justify-between">
@@ -620,7 +645,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                             <div className="flex flex-wrap gap-1.5">
                                 <button
                                     type="button"
-                                    disabled={isPaymentDataEmpty}
+                                    disabled={isPaymentDataEmpty || actionsDisabled}
                                     onClick={() => setShowKBPreview(true)}
                                     className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                                 >
@@ -629,7 +654,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={isPaymentDataEmpty}
+                                    disabled={isPaymentDataEmpty || actionsDisabled}
                                     onClick={openPayslipPreview}
                                     className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                                 >
@@ -638,7 +663,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={isPaymentDataEmpty || batchDownloading}
+                                    disabled={isPaymentDataEmpty || batchDownloading || actionsDisabled}
                                     onClick={handleBatchDownload}
                                     className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                                 >
@@ -647,7 +672,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                 </button>
                                 <button
                                     type="button"
-                                    disabled={isLedgerRowsDataEmpty}
+                                    disabled={isLedgerRowsDataEmpty || actionsDisabled}
                                     onClick={() => advanceLedgerRef.current?.downloadExcel(rangeLabel || currentYearMonth)}
                                     className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                                 >

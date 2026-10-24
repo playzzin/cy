@@ -5,13 +5,41 @@ import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import type { TeamExpenseClaimAttachment } from '../types/teamExpenseLedger';
 import type { ExpenseReceiptAnalysis, SubmitTeamExpenseRequest, TeamExpenseRequestData } from '../types/teamExpenseRequest';
 
+let pendingLists = new WeakMap<object, Map<string, Promise<TeamExpenseRequestData>>>();
+const invalidateLists = () => { pendingLists = new WeakMap(); };
+const mutations = new Set(['upload', 'submit', 'review', 'discardDraft']);
+
 const call = async <T>(input: Record<string, unknown>): Promise<T> => {
   if (isDevAdminSessionEnabled()) throw new Error('개발용 샘플 계정에서는 실제 경비를 조회하거나 등록할 수 없습니다. 프로필에서 실제 팀장 또는 사무실 계정으로 로그인해 주세요.');
-  const uid = auth.currentUser?.uid;
-  if (!uid) throw new Error('로그인이 필요합니다.');
-  const result = await httpsCallable<Record<string, unknown>, T>(functions, 'teamExpenseRequests', { timeout: 120_000 })(input);
-  if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다. 다시 조회해 주세요.');
-  return result.data;
+  const account = auth.currentUser;
+  if (!account) throw new Error('로그인이 필요합니다.');
+  const mutating = mutations.has(String(input.action));
+  if (mutating) invalidateLists();
+  try {
+    const result = await httpsCallable<Record<string, unknown>, T>(functions, 'teamExpenseRequests', { timeout: 120_000 })(input);
+    if (auth.currentUser !== account || auth.currentUser.uid !== account.uid) throw new Error('로그인 계정이 변경되었습니다. 다시 조회해 주세요.');
+    return result.data;
+  } finally {
+    if (mutating) invalidateLists();
+  }
+};
+
+const list = (yearMonth: string, cursor?: string, options?: { forceReload?: boolean }) => {
+  const input = { action: 'list', yearMonth, includeBillingTeams: true, includePaymentCards: true, ...(cursor ? { cursor } : {}) };
+  const account = auth.currentUser;
+  if (!account || isDevAdminSessionEnabled()) return call<TeamExpenseRequestData>(input);
+  let requests = pendingLists.get(account);
+  if (!requests) { requests = new Map(); pendingLists.set(account, requests); }
+  const key = JSON.stringify([account.uid, yearMonth, cursor || '']);
+  const existing = requests.get(key);
+  if (existing && !options?.forceReload) return existing;
+  const request = call<TeamExpenseRequestData>(input);
+  requests.set(key, request);
+  // Only share unfinished requests (including StrictMode's effect replay).
+  // Fresh visits and refreshes still recheck server-side permissions and data.
+  const clear = () => { if (requests!.get(key) === request) requests!.delete(key); };
+  void request.then(clear, clear);
+  return request;
 };
 
 export const validateRequestReceiptFiles = (files: File[]) => {
@@ -43,7 +71,7 @@ export const teamExpenseRequestService = {
     if (!uid || auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다. 다시 조회해 주세요.');
     return call<ExpenseReceiptAnalysis>({ action: 'analyze', teamId, contentType: file.type, base64 });
   },
-  list: (yearMonth: string, cursor?: string) => call<TeamExpenseRequestData>({ action: 'list', yearMonth, includeBillingTeams: true, ...(cursor ? { cursor } : {}) }),
+  list,
   upload: async (requestId: string, teamId: string, receiptId: string, file: File) => {
     const uid = auth.currentUser?.uid;
     validateRequestReceiptFiles([file]);

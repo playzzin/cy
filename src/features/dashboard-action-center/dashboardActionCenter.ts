@@ -1,5 +1,6 @@
 import type { DashboardExecutiveStats } from '../../services/dashboardExecutiveService';
 import { buildTaskSlaBoard } from '../task-sla/taskSla';
+import { getReportCoverageLabel, isReportCoverageFinal } from '../daily-report-coverage/dailyReportCoverage';
 
 export type DashboardActionSeverity = 'critical' | 'warning' | 'info' | 'success';
 
@@ -64,14 +65,26 @@ export const createDashboardActionItems = (
   options: DashboardActionCenterOptions = {}
 ): DashboardActionItem[] => {
   const coverage = stats.dailyReportCoverage;
-  const coverageRate = coverage?.coverageRate ?? stats.operations.reportCoverageRate ?? 0;
+  const coverageRate = coverage?.coverageRate ?? 0;
   const missingSiteCount = coverage?.missingSiteCount ?? 0;
   const taskBoard = buildTaskSlaBoard(stats.recentTasks || [], normalizeToday(options.today));
   const supportBalance = Number(stats.operations.supportBalance || 0);
   const supportAbs = Math.abs(supportBalance);
   const actions: DashboardActionItem[] = [];
 
-  if (missingSiteCount > 0 || coverageRate < 90) {
+  if (coverage.status && !isReportCoverageFinal(coverage)) {
+    const collecting = coverage.status === 'collecting' || coverage.status === 'monitoring';
+    actions.push({
+      id: 'daily-report-status', title: getReportCoverageLabel(coverage),
+      description: coverage.detail || '기준일의 작업 일정과 일보를 확인하세요.',
+      metricLabel: '평가', metricValue: '보류',
+      actionLabel: collecting ? '기준일 일보 확인' : '현장 일정 확인',
+      route: collecting ? `/reports/daily?tab=list-v2&date=${encodeURIComponent(coverage.date)}` : `/assignment/field-schedule?date=${encodeURIComponent(coverage.date)}`,
+      severity: 'info', score: 45,
+    });
+  }
+
+  if (isReportCoverageFinal(coverage) && (missingSiteCount > 0 || coverageRate < 90)) {
     const topMissingSites = coverage?.missingSites?.slice(0, 2).map((site) => site.siteName).filter(Boolean) || [];
     const missingSiteText = topMissingSites.length > 0
       ? ` 우선 확인: ${topMissingSites.join(', ')}${missingSiteCount > topMissingSites.length ? ` 외 ${missingSiteCount - topMissingSites.length}개` : ''}.`
@@ -80,7 +93,7 @@ export const createDashboardActionItems = (
     actions.push({
       id: 'daily-report-coverage',
       title: '일보 누락 현장 정리',
-      description: `활성 현장 기준 오늘 일보 커버리지가 ${formatPercent(coverageRate)}입니다.${missingSiteText} 누락 현장부터 확인해 당일 마감 전에 보완해야 합니다.`,
+      description: `제출 대상 현장의 일보 작성률이 ${formatPercent(coverageRate)}입니다.${missingSiteText} 마감 후에도 미작성인 현장의 일보를 확인하세요.`,
       metricLabel: '커버리지',
       metricValue: formatPercent(coverageRate),
       actionLabel: '누락 현장 보기',
@@ -90,15 +103,15 @@ export const createDashboardActionItems = (
     });
   }
 
-  if (stats.operations.healthScore > 0 && stats.operations.healthScore < 85) {
+  if (stats.operations.healthScore !== null && stats.operations.healthScore < 85 && !actions.some((item) => item.id === 'daily-report-coverage')) {
     actions.push({
       id: 'operations-health',
       title: '운영 건강도 점검',
-      description: '일보 커버리지, 전일 대비 공수 흐름, 지원 공수 균형을 함께 확인해 오늘 병목을 먼저 해소해야 합니다.',
+      description: stats.operations.healthReason || '마감 후 일보 제출 현황과 감점 사유를 확인하세요.',
       metricLabel: '건강도',
       metricValue: `${stats.operations.healthScore}/100`,
       actionLabel: '운영 지표 보기',
-      route: '/dashboard',
+      route: `/reports/daily?tab=list-v2&date=${encodeURIComponent(coverage.date)}`,
       severity: stats.operations.healthScore < 60 ? 'critical' : 'warning',
       score: 85 + Math.max(0, 85 - stats.operations.healthScore),
     });
@@ -134,7 +147,7 @@ export const createDashboardActionItems = (
       metricValue: formatManDay(supportBalance),
       actionLabel: '지원 현황 보기',
       route: '/support/status',
-      severity: supportAbs >= 20 ? 'warning' : 'info',
+      severity: 'info',
       score: 60 + Math.min(25, supportAbs),
     });
   }

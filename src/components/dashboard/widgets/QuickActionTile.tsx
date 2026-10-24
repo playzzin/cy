@@ -29,16 +29,28 @@ const actionThemeMap: Record<string, { color: string; bg: string }> = {
 
 const ActionButton = styled.button<{ $color: string; $bg: string }>`
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 12px;
-    padding: 15px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
+    padding: 14px;
+    background: #f8fafc;
+    border: 1px solid #edf2f7;
+    border-radius: 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    min-height: 116px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    min-width: 0;
+    min-height: 84px;
     text-align: left;
+
+    @media (max-width: 520px) {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        transition: none;
+    }
 
     &:hover {
         transform: translateY(-2px);
@@ -74,7 +86,6 @@ const IconWrapper = styled.div<{ $color: string; $bg: string }>`
     align-items: center;
     justify-content: center;
     font-size: 1.2rem;
-    margin-bottom: 8px;
     transition: all 0.2s ease;
 `;
 

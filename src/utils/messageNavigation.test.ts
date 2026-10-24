@@ -1,5 +1,13 @@
 import { messageDestination } from './messageNavigation';
 
+it('opens a notice directly, including notices sent by their author', () => {
+    expect(messageDestination({ id: 'notice-message', senderId: 'author', actionUrl: '/notices?noticeId=safety%20notice&tab=notifications' })).toBe('/notices?noticeId=safety%20notice');
+});
+
+it.each(['//evil.test/notices?noticeId=a', 'https://evil.test/notices?noticeId=a', '/notices?noticeId=', '/notices?noticeId=..', '/notices?noticeId=a%2Fb', '/notices?noticeId=a%5Cb'])('rejects unsafe notice destination %s', actionUrl => {
+    expect(messageDestination({ id: 'message', senderId: 'system', actionUrl })).toBe('/messages?messageId=message');
+});
+
 it('opens the exact memo for a trusted memo reminder', () => {
     expect(messageDestination({ id: 'message', senderId: 'system:smart-memo-reminder', actionUrl: '/memos?memoId=memo%20one' })).toBe('/memos?memoId=memo%20one');
 });

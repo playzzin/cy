@@ -40,6 +40,24 @@ export interface WorkerWorkEntry {
 
 export type InsuranceAppliedReason = 'site' | 'client' | 'threshold' | 'manual' | 'all-labor';
 
+/** Read-only payroll details for transfers, without personal identifiers. */
+export interface PayrollTransferDetail {
+    restoredFromSource?: boolean;
+    salaryLabel: string;
+    amountBasis: string;
+    originalAmount: number;
+    capturedAt: string;
+    isFinalized: boolean;
+    grossAmount?: number;
+    totalDeduction?: number;
+    netAmount?: number;
+    totalManDay?: number;
+    unitPrice?: number;
+    deductions: Array<Pick<DeductionLine, 'label' | 'amount' | 'description'>>;
+    taxes: Array<Pick<DeductionLine, 'label' | 'amount' | 'description'>>;
+    workEntries: Array<Pick<WorkerWorkEntry, 'date' | 'siteName' | 'manDay' | 'unitPrice' | 'amount'>>;
+}
+
 export interface InsuranceAppliedSummary {
     thresholdManDay?: number;
     appliedManDay: number;
@@ -230,6 +248,7 @@ export interface MonthlyAdvanceLedgerRow {
     assignmentType?: 'corporate' | 'labor';
     manual?: LedgerManualInput;
     sourceManualUpdatedAt?: unknown;
+    finalizedAmounts?: { corporateNet: number; personalNet: number };
 }
 
 export type LedgerUtilityInputLike = LedgerManualInput;

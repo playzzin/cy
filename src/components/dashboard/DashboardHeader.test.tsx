@@ -35,13 +35,13 @@ describe('DashboardHeader position switcher', () => {
     });
 
     it.each(['full', 'ceo', 'worker', 'unknown'])(
-        'hides the position choices for %s even for an administrator, keeping the app installer available',
+        'hides the position choices and installation actions for %s even for an administrator',
         (currentPosition) => {
             render(<DashboardHeader {...props} currentPosition={currentPosition} />);
 
             expect(screen.queryByLabelText('대시보드 직책 모드')).toBeNull();
-            expect(screen.getByRole('button', { name: '청연ENG ERP 바탕화면에 추가' })).not.toBeNull();
-            expect(screen.getByRole('link', { name: '청연ENG ERP APK 설치' })).not.toBeNull();
+            expect(screen.queryByRole('button', { name: '청연ENG ERP 바탕화면에 추가' })).toBeNull();
+            expect(screen.queryByRole('link', { name: '청연ENG ERP APK 설치' })).toBeNull();
             expect(screen.queryByRole('link', { name: /SMS/ })).toBeNull();
         }
     );

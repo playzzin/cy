@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import {
-    ArrowLeft,
     Banknote,
     BriefcaseBusiness,
     Building2,
@@ -15,13 +14,18 @@ import {
     RefreshCw,
     Search,
     ShieldCheck,
-    SlidersHorizontal,
     Users,
     X,
 } from 'lucide-react';
 
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
 import MonthNavigator from '../../components/common/MonthNavigator';
+import MobileListReturnButton from '../../components/common/MobileListReturnButton';
+import WorkerWorkHistory from '../../components/manpower/WorkerWorkHistory';
+import SiteMonthlyManDays from '../../components/manpower/SiteMonthlyManDays';
+import TeamResourceStatusControl from '../../components/manpower/TeamResourceStatusControl';
+import { isClosedSite, normalizeSiteStatus } from '../../utils/siteStatus';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -162,7 +166,7 @@ const formatNumber = (value?: number | null) =>
 
 const formatManDay = (value?: number | null) => {
     const numeric = asNumber(value);
-    return Number.isInteger(numeric) ? numeric.toFixed(0) : numeric.toFixed(1);
+    return numeric.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 };
 
 const getReportRowAmount = (row: Pick<DailyReportWorkerRow, 'amount' | 'manDay' | 'unitPrice'>) => {
@@ -222,23 +226,23 @@ const rowMatchesSite = (row: DailyReportWorkerRow, site: Site | null) => {
     if (!site) return false;
     const rowSiteId = String(row.siteId ?? '').trim();
     const siteIds = [site.id, site.legacyId].map(value => String(value ?? '').trim()).filter(Boolean);
-    if (rowSiteId && siteIds.includes(rowSiteId)) return true;
+    if (rowSiteId && siteIds.length) return siteIds.includes(rowSiteId);
     return normalizeText(row.siteName) === normalizeText(site.name);
 };
 
 const statusLabel = (site: Site) => {
-    const normalized = normalizeText(site.status);
-    if (normalized === 'completed' || normalized === 'closed' || normalized === '마감') return '완료';
+    const normalized = normalizeSiteStatus(site.status);
+    if (isClosedSite(site)) return '종료';
     if (normalized === 'planned' || normalized === '예정') return '예정';
     return '진행중';
 };
 
 const siteStatusMatches = (site: Site, filter: SiteStatusFilter) => {
     if (filter === 'all') return true;
-    const normalized = normalizeText(site.status);
-    if (filter === 'active') return normalized === 'active' || normalized === '진행중' || !normalized;
-    if (filter === 'completed') return normalized === 'completed' || normalized === 'closed' || normalized === '마감';
-    return normalized === 'planned' || normalized === '예정';
+    const label = statusLabel(site);
+    if (filter === 'active') return label === '진행중';
+    if (filter === 'completed') return label === '종료';
+    return label === '예정';
 };
 
 const DetailField: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({ label, value, wide }) => (
@@ -272,9 +276,10 @@ const downloadCsv = (filename: string, rows: Array<Record<string, string | numbe
     URL.revokeObjectURL(url);
 };
 
-const SiteResponsibleDetailPage: React.FC = () => {
+const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }> = ({ view }) => {
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
+    const [calendarTeams, setCalendarTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [outputRows, setOutputRows] = useState<DailyReportWorkerRow[]>([]);
     const [selectedResponsibleKey, setSelectedResponsibleKey] = useState('');
@@ -282,14 +287,23 @@ const SiteResponsibleDetailPage: React.FC = () => {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [statusFilter, setStatusFilter] = useState<SiteStatusFilter>('active');
     const [searchQuery, setSearchQuery] = useState('');
-    const [detailView, setDetailView] = useState<DetailView>('siteInfo');
+    const [selectedDetailView, setDetailView] = useState<DetailView>('siteInfo');
     const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('sites');
-    const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
     const [isResponsiblePickerOpen, setIsResponsiblePickerOpen] = useState(false);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
+    const [outputError, setOutputError] = useState('');
+    const [refreshRevision, setRefreshRevision] = useState(0);
+    const restrictedTeam = useRestrictedTeamWorkflow();
+    const detailView = view ?? (restrictedTeam ? 'siteInfo' : selectedDetailView);
+    const monthlySitesOnly = restrictedTeam && detailView === 'siteInfo';
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
+    const selectedYear = selectedMonth.slice(0, 4);
+    const queryPeriod = detailView === 'siteInfo' ? selectedYear : selectedMonth;
+    const outputRanges = useMemo(() => queryPeriod.length === 4
+        ? Array.from({ length: 12 }, (_, index) => getMonthRange(`${queryPeriod}-${String(index + 1).padStart(2, '0')}`))
+        : [getMonthRange(queryPeriod)], [queryPeriod]);
     const accessScope = useWorkerAccessScope(workers, teams);
 
     useEffect(() => {
@@ -301,7 +315,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 const [nextSites, nextTeams, nextWorkers] = await Promise.all([
                     siteService.getSites(),
                     teamService.getTeams(),
-                    manpowerService.getWorkers(),
+                    manpowerService.getWorkers(refreshRevision > 0),
                 ]);
                 if (!mounted) return;
                 const cheongyeonTeams = nextTeams
@@ -311,6 +325,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                     );
                 setSites(nextSites);
                 setTeams(cheongyeonTeams);
+                setCalendarTeams(nextTeams);
                 setWorkers(nextWorkers);
             } catch (error) {
                 console.error(error);
@@ -324,20 +339,28 @@ const SiteResponsibleDetailPage: React.FC = () => {
         return () => {
             mounted = false;
         };
-    }, []);
+    }, [refreshRevision]);
 
     useEffect(() => {
         let mounted = true;
 
         const loadOutputRows = async () => {
             setLoadingOutput(true);
+            setOutputError('');
+            setOutputRows([]);
             try {
-                const rows = await dailyReportService.getWorkerRows({ startDate, endDate });
+                // The scoped attendance endpoint accepts at most one month per
+                // request. Its service batches these bounded monthly reads.
+                const months = await Promise.all(outputRanges.map(range => dailyReportService.getWorkerRows({ ...range, includeSiteSupport: restrictedTeam })));
+                const rows = months.flat();
                 if (mounted) setOutputRows(rows);
             } catch (error) {
                 console.error(error);
                 toast.error('출력일보 데이터를 불러오지 못했습니다.');
-                if (mounted) setOutputRows([]);
+                if (mounted) {
+                    setOutputRows([]);
+                    setOutputError('출력일보를 불러오지 못했습니다. 새로고침해 주세요.');
+                }
             } finally {
                 if (mounted) setLoadingOutput(false);
             }
@@ -347,7 +370,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
         return () => {
             mounted = false;
         };
-    }, [startDate, endDate]);
+    }, [outputRanges, restrictedTeam, refreshRevision]);
 
     const teamByKey = useMemo(() => {
         const map = new Map<string, Team>();
@@ -396,9 +419,16 @@ const SiteResponsibleDetailPage: React.FC = () => {
         return map;
     }, [workers]);
 
+    const scopedPeriodRows = useMemo(
+        () => outputRows.filter(row => workerAccessMatchesReportRow(accessScope, row)
+            || (restrictedTeam && accessScope.mode === 'team' && !accessScope.loading && sites.some(site =>
+                workerAccessMatchesTeamRef(accessScope, site.responsibleTeamId, site.responsibleTeamName) && rowMatchesSite(row, site)))),
+        [accessScope, outputRows, restrictedTeam, sites]
+    );
+
     const scopedOutputRows = useMemo(
-        () => outputRows.filter(row => workerAccessMatchesReportRow(accessScope, row)),
-        [accessScope, outputRows]
+        () => scopedPeriodRows.filter(row => row.date?.startsWith(`${selectedMonth}-`)),
+        [scopedPeriodRows, selectedMonth]
     );
 
     const scopedOutputSiteKeys = useMemo(
@@ -408,6 +438,14 @@ const SiteResponsibleDetailPage: React.FC = () => {
 
     const visibleSites = useMemo(() => {
         if (accessScope.loading) return [];
+        if (monthlySitesOnly) {
+            if (loadingOutput || outputError) return [];
+            // A responsible-team link is not proof of attendance this month.
+            // Match legacy IDs/names through the same resolver as site details.
+            const workedRows = scopedOutputRows.filter(row => !row.isSiteSupport
+                && asNumber(row.manDay) > 0 && workerAccessMatchesReportRow(accessScope, row));
+            return sites.filter(site => workedRows.some(row => rowMatchesSite(row, site)));
+        }
         if (accessScope.mode === 'all') return sites;
 
         if (accessScope.mode === 'team') {
@@ -418,7 +456,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
         }
 
         return sites.filter(site => scopedOutputSiteKeys.has(getSitePrimaryKey(site)));
-    }, [accessScope, scopedOutputSiteKeys, sites]);
+    }, [accessScope, loadingOutput, monthlySitesOnly, outputError, scopedOutputRows, scopedOutputSiteKeys, sites]);
 
     const responsibleGroups = useMemo<ResponsibleGroup[]>(() => {
         const groupMap = new Map<string, {
@@ -459,12 +497,15 @@ const SiteResponsibleDetailPage: React.FC = () => {
         });
 
         scopedOutputRows.forEach(row => {
+            if (monthlySitesOnly && !visibleSites.some(site => rowMatchesSite(row, site))) return;
             if (!isCheongyeonResponsible(row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName, teamByKey)) return;
             const key = rowResponsibleKey(row);
             const name = getResponsibleName(row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName, teamByKey);
             const color = getTeamColor(teamByKey, row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName);
             const group = ensureGroup(key, name, color);
-            const siteKey = makeSiteKey(row.siteId, row.siteName);
+            const rowSiteKey = makeSiteKey(row.siteId, row.siteName);
+            const matchedSite = siteByKey.get(rowSiteKey) ?? siteByKey.get(makeSiteKey(null, row.siteName));
+            const siteKey = matchedSite ? getSitePrimaryKey(matchedSite) : rowSiteKey;
             if (siteKey) group.siteKeys.add(siteKey);
             group.totalManDay += asNumber(row.manDay);
             group.totalAmount += getReportRowAmount(row);
@@ -485,7 +526,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 if (leftUnassigned !== rightUnassigned) return leftUnassigned ? 1 : -1;
                 return left.name.localeCompare(right.name, 'ko-KR');
             });
-    }, [scopedOutputRows, teamByKey, visibleSites]);
+    }, [monthlySitesOnly, scopedOutputRows, siteByKey, teamByKey, visibleSites]);
 
     useEffect(() => {
         if (responsibleGroups.length === 0) {
@@ -506,8 +547,9 @@ const SiteResponsibleDetailPage: React.FC = () => {
     );
 
     const selectedResponsibleRows = useMemo(
-        () => scopedOutputRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey),
-        [scopedOutputRows, selectedResponsibleKey]
+        () => scopedOutputRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey
+            && (!monthlySitesOnly || visibleSites.some(site => rowMatchesSite(row, site)))),
+        [monthlySitesOnly, scopedOutputRows, selectedResponsibleKey, visibleSites]
     );
 
     const selectedResponsibleSiteKeys = useMemo(
@@ -577,6 +619,17 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 .sort((left, right) => String(right.date ?? '').localeCompare(String(left.date ?? '')))
             : []
     ), [scopedOutputRows, selectedSite]);
+
+    const selectedSiteYearRows = useMemo(
+        () => scopedPeriodRows.filter(row => rowMatchesSite(row, selectedSite)),
+        [scopedPeriodRows, selectedSite]
+    );
+    const cumulativeManDay = (rows: DailyReportWorkerRow[]) => rows
+        .filter(row => !row.isEmptyReport && row.date >= `${selectedYear}-01-01` && row.date <= endDate)
+        .reduce((sum, row) => sum + asNumber(row.manDay), 0);
+    const responsibleCumulativeManDay = cumulativeManDay(scopedPeriodRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey));
+    const siteCumulativeManDay = cumulativeManDay(selectedSiteYearRows);
+    const cumulativeValue = (value: number) => loadingOutput || outputError ? '-' : formatManDay(value);
 
     const selectedSiteStatsByKey = useMemo(() => {
         const map = new Map<string, SiteListStats>();
@@ -720,34 +773,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
         setMobileView('detail');
     };
 
-    const handleRefresh = async () => {
-        setLoadingMaster(true);
-        setLoadingOutput(true);
-        try {
-            const [nextSites, nextTeams, nextWorkers, rows] = await Promise.all([
-                siteService.getSites(),
-                teamService.getTeams(),
-                manpowerService.getWorkers(true),
-                dailyReportService.getWorkerRows({ startDate, endDate }),
-            ]);
-            const cheongyeonTeams = nextTeams
-                .filter(team => isCheongyeonTeam(team, nextWorkers))
-                .sort((left, right) =>
-                    String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR')
-                );
-            setSites(nextSites);
-            setTeams(cheongyeonTeams);
-            setWorkers(nextWorkers);
-            setOutputRows(rows);
-            toast.success('최신 현장 데이터로 새로고침했습니다.');
-        } catch (error) {
-            console.error(error);
-            toast.error('새로고침 중 오류가 발생했습니다.');
-        } finally {
-            setLoadingMaster(false);
-            setLoadingOutput(false);
-        }
-    };
+    const handleRefresh = () => setRefreshRevision(current => current + 1);
 
     const handleCsvDownload = () => {
         const suffix = selectedSite?.name || selectedResponsible?.name || '현장';
@@ -757,10 +783,10 @@ const SiteResponsibleDetailPage: React.FC = () => {
             현장소속팀: getResponsibleName(row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName, teamByKey),
             성명: row.workerName || '',
             소속팀: row.workerTeamName || '',
-            급여방식: resolveReportPayType(row) || '',
+            급여방식: row.isSiteSupport ? '' : resolveReportPayType(row) || '',
             공수: row.manDay,
-            단가: row.unitPrice || 0,
-            금액: getReportRowAmount(row),
+            단가: row.isSiteSupport ? '' : row.unitPrice || 0,
+            금액: row.isSiteSupport ? '' : getReportRowAmount(row),
         })));
     };
 
@@ -778,7 +804,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
             </span>
             <span className="tw-team-item__meta">
                 <strong>{formatManDay(group.totalManDay)}</strong>
-                <small>{formatCurrency(group.totalAmount)}</small>
+                <small>{detailView === 'siteInfo' ? '월 공수' : `${restrictedTeam ? '내 팀 ' : ''}${formatCurrency(group.totalAmount)}`}</small>
             </span>
         </button>
     );
@@ -791,11 +817,11 @@ const SiteResponsibleDetailPage: React.FC = () => {
                         <Building2 size={16} />
                         월별 현장담당 현장 조회
                     </div>
-                    <h1>현장별 노임명세서 · 출력일보</h1>
+                    <h1>{view === 'dailyReport' ? '현장 출력일보' : restrictedTeam || view === 'siteInfo' ? '현장정보' : '현장별 노임명세서 · 출력일보'}</h1>
                 </div>
 
                 <div className="tw-header-actions">
-                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기">
+                    <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기" disabled={loadingOutput || !!outputError}>
                         <Download size={18} />
                         <span>CSV</span>
                     </button>
@@ -825,20 +851,9 @@ const SiteResponsibleDetailPage: React.FC = () => {
                         </button>
                     )}
                 </label>
-                <button
-                    type="button"
-                    className={isMobileFilterOpen ? 'sr-mobile-filter-button sr-mobile-filter-button--active' : 'sr-mobile-filter-button'}
-                    onClick={() => setIsMobileFilterOpen(prev => !prev)}
-                    aria-expanded={isMobileFilterOpen}
-                    aria-controls="site-responsible-filter-controls"
-                >
-                    <SlidersHorizontal size={18} />
-                    <span>필터</span>
-                    <small>{statusFilter === 'active' ? '진행' : statusFilter === 'planned' ? '예정' : statusFilter === 'completed' ? '완료' : '전체'}</small>
-                </button>
             </section>
 
-            <section id="site-responsible-filter-controls" className={isMobileFilterOpen ? 'tw-toolbar sr-toolbar--mobile-expanded' : 'tw-toolbar'}>
+            <section id="site-responsible-filter-controls" className="tw-toolbar tw-toolbar--always-visible">
                 <div className="tw-control tw-control--month">
                     <span>조회월</span>
                     <MonthNavigator
@@ -861,20 +876,21 @@ const SiteResponsibleDetailPage: React.FC = () => {
 
                 <label className="tw-control">
                     <span>현장 상태</span>
-                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as SiteStatusFilter)}>
-                        <option value="active">진행중 ({selectedResponsibleStatusCounts.active})</option>
+                    <select aria-label="현장 상태" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as SiteStatusFilter); setMobileView('sites'); }}>
+                        <option value="active">진행중 현장 ({selectedResponsibleStatusCounts.active})</option>
                         <option value="planned">예정 ({selectedResponsibleStatusCounts.planned})</option>
-                        <option value="completed">완료 ({selectedResponsibleStatusCounts.completed})</option>
+                        <option value="completed">종료 현장 ({selectedResponsibleStatusCounts.completed})</option>
                         <option value="all">전체 ({selectedResponsibleStatusCounts.all})</option>
                     </select>
                 </label>
             </section>
 
             <div className="sr-filter-summary" aria-live="polite">
+                {monthlySitesOnly && <span>{selectedMonth} 내 팀 투입 현장</span>}
                 <span>전체 {selectedResponsibleStatusCounts.all.toLocaleString('ko-KR')}개</span>
                 <span>진행 {selectedResponsibleStatusCounts.active.toLocaleString('ko-KR')}개</span>
                 <span>예정 {selectedResponsibleStatusCounts.planned.toLocaleString('ko-KR')}개</span>
-                <span>완료 {selectedResponsibleStatusCounts.completed.toLocaleString('ko-KR')}개</span>
+                <span>종료 {selectedResponsibleStatusCounts.completed.toLocaleString('ko-KR')}개</span>
                 <strong>현재 표시 {selectedResponsibleSites.length.toLocaleString('ko-KR')}개</strong>
             </div>
 
@@ -890,9 +906,9 @@ const SiteResponsibleDetailPage: React.FC = () => {
                     <strong>{formatManDay(selectedResponsibleStats.totalManDay)}</strong>
                 </div>
                 <div className="tw-kpi">
-                    <Banknote size={20} />
-                    <span>노무비</span>
-                    <strong>{formatCurrency(selectedResponsibleStats.totalAmount)}</strong>
+                    {detailView === 'siteInfo' ? <CalendarDays size={20} /> : <Banknote size={20} />}
+                    <span>{detailView === 'siteInfo' ? `${selectedYear}년 누적공수` : restrictedTeam ? '내 팀 노무비' : '노무비'}</span>
+                    <strong>{detailView === 'siteInfo' ? cumulativeValue(responsibleCumulativeManDay) : formatCurrency(selectedResponsibleStats.totalAmount)}</strong>
                 </div>
                 <div className="tw-kpi">
                     <Users size={20} />
@@ -952,10 +968,10 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 </span>
                                 <ChevronDown size={18} className={isResponsiblePickerOpen ? 'tw-team-picker-button__chevron tw-team-picker-button__chevron--open' : 'tw-team-picker-button__chevron'} />
                             </button>
-                            {loadingMaster || accessScope.loading ? (
+                            {loadingMaster || accessScope.loading || (monthlySitesOnly && loadingOutput) ? (
                                 <div className="tw-empty-state">현장담당 데이터를 불러오는 중입니다.</div>
                             ) : responsibleGroups.length === 0 ? (
-                                <div className="tw-empty-state">청연이엔지 소속 현장담당 팀이 없습니다.</div>
+                                <div className="tw-empty-state">{monthlySitesOnly ? '선택한 달에 투입된 현장담당 팀이 없습니다.' : '청연이엔지 소속 현장담당 팀이 없습니다.'}</div>
                             ) : isResponsiblePickerOpen && (
                                 <div className="tw-team-picker-menu">
                                     {responsibleGroups.map(renderResponsibleItem)}
@@ -963,11 +979,13 @@ const SiteResponsibleDetailPage: React.FC = () => {
                             )}
                         </div>
 
-                        <div className="tw-list-block-title tw-list-block-title--workers">현장 목록</div>
-                        {loadingMaster || accessScope.loading ? (
+                        <div className="tw-list-block-title tw-list-block-title--workers">{monthlySitesOnly ? '선택월 투입 현장' : '현장 목록'}</div>
+                        {loadingMaster || accessScope.loading || (monthlySitesOnly && loadingOutput) ? (
                             <div className="tw-empty-state">현장 데이터를 불러오는 중입니다.</div>
+                        ) : monthlySitesOnly && outputError ? (
+                            <div className="tw-empty-state" role="alert">{outputError}</div>
                         ) : selectedResponsibleSites.length === 0 ? (
-                            <div className="tw-empty-state">조건에 맞는 현장이 없습니다.</div>
+                            <div className="tw-empty-state">{monthlySitesOnly ? '선택한 달에 조건에 맞는 투입 현장이 없습니다.' : '조건에 맞는 현장이 없습니다.'}</div>
                         ) : (
                             selectedResponsibleSites.map(site => {
                                 const siteKey = getSitePrimaryKey(site);
@@ -993,7 +1011,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                                 {statusLabel(site)}
                                             </span>
                                             <small>{formatManDay(stats.totalManDay)}</small>
-                                            <small>{formatCurrency(stats.totalAmount)}</small>
+                                            <small>{detailView === 'siteInfo' ? '월 공수' : `${restrictedTeam ? '내 팀 ' : ''}${formatCurrency(stats.totalAmount)}`}</small>
                                         </span>
                                     </button>
                                 );
@@ -1003,9 +1021,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 </section>
 
                 <section className="tw-detail-panel">
-                    <button type="button" className="sr-mobile-back" onClick={() => setMobileView('sites')}>
-                        <ArrowLeft size={17} /> 현장 목록으로
-                    </button>
+                    <MobileListReturnButton kind="site" onClick={() => setMobileView('sites')} />
                     {!selectedSite ? (
                         <div className="tw-empty-detail">
                             <Building2 size={44} />
@@ -1036,8 +1052,8 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                     <strong>{formatManDay(selectedSiteStats.totalManDay)}</strong>
                                 </div>
                                 <div>
-                                    <span>월 노무비</span>
-                                    <strong>{formatCurrency(selectedSiteStats.totalAmount)}</strong>
+                                    <span>{detailView === 'siteInfo' ? `${selectedYear}년 누적공수` : restrictedTeam ? '내 팀 월 노무비' : '월 노무비'}</span>
+                                    <strong>{detailView === 'siteInfo' ? cumulativeValue(siteCumulativeManDay) : formatCurrency(selectedSiteStats.totalAmount)}</strong>
                                 </div>
                                 <div>
                                     <span>작업자</span>
@@ -1045,7 +1061,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="tw-view-tabs" role="tablist" aria-label="월별 현장 문서">
+                            {!restrictedTeam && !view && <div className="tw-view-tabs" role="tablist" aria-label="월별 현장 문서">
                                 <button
                                     type="button"
                                     className={detailView === 'siteInfo' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
@@ -1053,13 +1069,13 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 >
                                     현장정보
                                 </button>
-                                <button
+                                {!restrictedTeam && <button
                                     type="button"
                                     className={detailView === 'payslip' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
                                     onClick={() => setDetailView('payslip')}
                                 >
                                     노임명세서
-                                </button>
+                                </button>}
                                 <button
                                     type="button"
                                     className={detailView === 'dailyReport' ? 'tw-view-tab tw-view-tab--active' : 'tw-view-tab'}
@@ -1067,13 +1083,20 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 >
                                     출력일보
                                 </button>
-                            </div>
+                            </div>}
 
                             {detailView === 'siteInfo' && (
                                 <div
                                     className="tw-section-grid tw-section-grid--team-accent"
                                     style={{ '--team-color': siteDisplayColor } as React.CSSProperties}
                                 >
+                                    {restrictedTeam && accessScope.mode === 'team' && !accessScope.loading
+                                        && workerAccessMatchesTeamRef(accessScope, selectedSite.responsibleTeamId) && <TeamResourceStatusControl
+                                            key={selectedSite.id} kind="site" resource={selectedSite}
+                                            onSaved={result => {
+                                                setSites(current => current.map(site => site.id === result.id ? { ...site, status: result.status as Site['status'] } : site));
+                                                setStatusFilter(result.status === 'completed' ? 'completed' : 'active');
+                                            }} />}
                                     <section className="tw-detail-section">
                                         <h3><Building2 size={18} />현장정보</h3>
                                         <div className="tw-detail-grid">
@@ -1109,15 +1132,17 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                         <h3><ShieldCheck size={18} />월간 요약</h3>
                                         <div className="tw-detail-grid">
                                             <DetailField label="총 공수" value={formatManDay(selectedSiteStats.totalManDay)} />
-                                            <DetailField label="노무비" value={formatCurrency(selectedSiteStats.totalAmount)} />
+                                            <DetailField label="선택 월까지 누적공수" value={cumulativeValue(siteCumulativeManDay)} />
                                             <DetailField label="작업자" value={`${selectedSiteStats.workerCount.toLocaleString('ko-KR')}명`} />
                                             <DetailField label="출력일보" value={`${selectedSiteRows.length.toLocaleString('ko-KR')}건`} />
                                         </div>
                                     </section>
+                                    <SiteMonthlyManDays rows={selectedSiteYearRows} month={selectedMonth}
+                                        loading={loadingOutput} error={outputError} />
                                 </div>
                             )}
 
-                            {detailView === 'payslip' && (
+                            {!restrictedTeam && detailView === 'payslip' && (
                                 <section className="tw-document-panel sr-document-panel sr-labor-panel">
                                     <div className="sr-mobile-document-list" aria-label="노무내역서 모바일 요약">
                                         <div className="sr-mobile-document-list__summary">
@@ -1316,6 +1341,15 @@ const SiteResponsibleDetailPage: React.FC = () => {
                             )}
 
                             {detailView === 'dailyReport' && (
+                                restrictedTeam || view === 'dailyReport' ? <WorkerWorkHistory
+                                    key={selectedSiteKey}
+                                    rows={selectedSiteRows}
+                                    teams={calendarTeams}
+                                    month={selectedMonth}
+                                    siteName={selectedSite.name}
+                                    loading={loadingOutput}
+                                    error={outputError}
+                                /> :
                                 <section className="tw-output-section">
                                     <div className="tw-output-section__header">
                                         <h3><ClipboardList size={18} />출력일보 목록</h3>

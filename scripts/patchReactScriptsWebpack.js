@@ -1,5 +1,7 @@
 const webpackConfigPath = require.resolve('react-scripts/config/webpack.config');
 const webpackDevServerConfigPath = require.resolve('react-scripts/config/webpackDevServer.config');
+const path = require('node:path');
+const { configureBuildCache, workspaceCache } = require('./build-performance.cjs');
 
 const REACT_DATEPICKER_WARNING = /Critical dependency: the request of a dependency is an expression/;
 const REACT_DATEPICKER_MODULE = /[\\/]react-datepicker[\\/]dist[\\/]index(?:\.es)?\.js$/;
@@ -32,14 +34,14 @@ function getTypeCheckerMemoryLimit() {
   return Math.floor(configured);
 }
 
-function configureTypeChecker(config) {
+function configureTypeChecker(config, verifiedTypecheck = false) {
   if (!Array.isArray(config.plugins)) return;
 
   const isTypeChecker = (plugin) => (
     plugin?.constructor?.name === FORK_TS_CHECKER_PLUGIN
   );
 
-  if (isTruthyEnvironmentValue(process.env.DISABLE_FORK_TS_CHECKER)) {
+  if (verifiedTypecheck || isTruthyEnvironmentValue(process.env.DISABLE_FORK_TS_CHECKER)) {
     config.plugins = config.plugins.filter((plugin) => !isTypeChecker(plugin));
     return;
   }
@@ -69,7 +71,7 @@ function shouldIgnoreReactDatepickerWarning(warning) {
   return REACT_DATEPICKER_WARNING.test(message) && REACT_DATEPICKER_MODULE.test(getModuleResource(warning));
 }
 
-function patchReactScriptsWebpack() {
+function patchReactScriptsWebpack({ verifiedTypecheck = false, timings = false } = {}) {
   const createWebpackConfig = require(webpackConfigPath);
 
   require.cache[webpackConfigPath].exports = (webpackEnv) => {
@@ -78,8 +80,15 @@ function patchReactScriptsWebpack() {
 
     ignoreWarnings.push((warning) => shouldIgnoreReactDatepickerWarning(warning));
     config.ignoreWarnings = ignoreWarnings;
-    configureTypeChecker(config);
+    configureBuildCache(config, webpackEnv);
+    configureTypeChecker(config, webpackEnv === 'production' && verifiedTypecheck);
     configureReadableType(config.module?.rules);
+    if (webpackEnv === 'production' && timings) {
+      const { BuildTimingPlugin } = require('./build-timing.cjs');
+      config.plugins.push(new BuildTimingPlugin({
+        outputPath: path.join(workspaceCache(config.context), 'build-timing.json'),
+      }));
+    }
     if (config.cache && typeof config.cache === 'object') {
       config.cache.version = `${config.cache.version || ''}|readable-type-v1`;
       config.cache.buildDependencies = {

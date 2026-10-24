@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { MenuItem, SiteDataType } from '../types/menu';
 import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
@@ -15,6 +15,12 @@ import {
 } from '../utils/devAdminFixtures';
 import { isOperationManagementMenuPath, isOperationManagementMenuText } from '../utils/operationMenuAccess';
 import { permissionAuditService } from './permissionAuditService';
+import { mergeMenuConfigChanges } from '../utils/menuConfigChanges';
+import { ensureDelegatedReceiptsMenu } from '../utils/delegatedReceiptsMenu';
+import { ensureTeamPersonnelMenu } from '../utils/teamPersonnelMenu';
+import { ensureBankTransferMenu } from '../utils/bankTransferMenu';
+import { ensureCorporateTaxMenu } from '../utils/corporateTaxMenu';
+import { ensureAdvanceSummaryMenu } from '../utils/advanceSummaryMenu';
 
 export type { MenuItem, SiteDataType };
 
@@ -24,11 +30,12 @@ export const MENU_DOCUMENT_ID = 'menus_v12';
 const getMenuDocRef = () => doc(db, COLLECTION_NAME, MENU_DOCUMENT_ID);
 
 // Options no longer need mergeWithDefaults
-interface MenuSubscribeOptions { }
+interface MenuSubscribeOptions { onError?: (error: unknown) => void }
 interface MenuFetchOptions { }
 
 interface MenuListener {
     callback: (data: SiteDataType) => void;
+    onError?: (error: unknown) => void;
 }
 
 interface AllowedMenuMap {
@@ -585,7 +592,7 @@ const ensureOfficeMenuPages = (config: SiteDataType): boolean => {
     return changed;
 };
 
-const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
+const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): MenuItem => {
     const base: MenuItem =
         typeof item === 'string'
             ? { text: item }
@@ -600,14 +607,14 @@ const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
     const inferredText = rawText || fromPath || rawId;
     const normalizedText = inferredText ? (MENU_TEXT_ALIASES[inferredText] ?? inferredText) : '';
 
-    const idSeed = `${parentIdPath}/${normalizedText || rawId || 'unknown'}`;
+    const idSeed = `${parentIdPath}/${normalizedText || rawId || 'unknown'}${normalizedText === '-' ? `/${siblingIndex}` : ''}`;
     const normalizedId = rawId.length > 0 ? rawId : createDeterministicId([idSeed]);
 
     const rawSub = Array.isArray(base.sub)
         ? base.sub.filter((c: any) => typeof c === 'string' || (c && typeof c === 'object'))
         : [];
     const normalizedSub = rawSub
-        .map((child: any) => normalizeMenuItem(child, `${idSeed}`))
+        .map((child: any, index: number) => normalizeMenuItem(child, idSeed, index))
         .filter((child: MenuItem) => typeof child.text === 'string' && child.text.trim().length > 0);
 
     const inferredPath = normalizedText ? (MENU_PATHS[normalizedText] || undefined) : undefined;
@@ -625,6 +632,14 @@ const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
         path: normalizedPath,
         sub: normalizedSub
     };
+
+    if (normalizedText === '-') {
+        delete next.path;
+        delete next.action;
+        delete next.icon;
+        delete next.sub;
+        return next;
+    }
 
     if (!next.sub || next.sub.length === 0) {
         delete (next as any).sub;
@@ -657,11 +672,11 @@ const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
             order: typeof site.order === 'number' ? site.order : undefined, // Ensure order is preserved
             headerActions: normalizeHeaderActions(site.headerActions, siteKey),
             menu: rawMenu
-                .map((item: any) => normalizeMenuItem(item, siteKey))
+                .map((item: any, index: number) => normalizeMenuItem(item, siteKey, index))
                 .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0),
             trash: rawTrash
                 ? rawTrash
-                    .map((item: any) => normalizeMenuItem(item, `${siteKey}/trash`))
+                    .map((item: any, index: number) => normalizeMenuItem(item, `${siteKey}/trash`, index))
                     .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0)
                 : undefined,
             deletedItems: Array.isArray(site.deletedItems) ? site.deletedItems.filter((v: any) => typeof v === 'string') : [],
@@ -769,6 +784,7 @@ const getMenuItemPath = (item: MenuItem | string): string | undefined => {
 
 const LOG_MANAGEMENT_FOLDER_TEXT = '로그관리';
 const REQUIRED_LOG_MANAGEMENT_ITEMS: MenuItem[] = [
+    { text: 'Gemini 사용량·비용 로그', icon: 'fa-chart-simple', path: '/admin/gemini-usage-logs', roles: ['admin'] },
     { text: '신분증 로그', icon: 'fa-id-card', path: '/database/identity-logs' },
     { text: '권한 변경 로그', icon: 'fa-shield-halved', path: '/admin/permission-change-logs' },
     { text: '엑셀 업로드·다운로드 로그', icon: 'fa-file-excel', path: '/admin/excel-transfer-logs' },
@@ -791,6 +807,16 @@ const findLogManagementFolders = (items: Array<MenuItem | string>, result: MenuI
 
 const ensureRequiredLogManagementItems = (config: SiteDataType): boolean => {
     let changed = false;
+
+    Object.entries(config).forEach(([key, site]) => {
+        if (!site || !Array.isArray(site.menu)) return;
+        const position = normalizePositionIdForCleanup(key).toLowerCase();
+        if (position !== 'ceo' && !['ceo', '대표', '사장'].includes(String(site.name || '').trim().toLowerCase())) return;
+        if (findLogManagementFolders(site.menu).length === 0) {
+            site.menu.push({ text: LOG_MANAGEMENT_FOLDER_TEXT, icon: 'fa-clock-rotate-left', sub: ['로그인 로그'] });
+            changed = true;
+        }
+    });
 
     Object.values(config).forEach((site) => {
         if (!site || !Array.isArray(site.menu)) return;
@@ -1108,6 +1134,39 @@ const normalizeSupportAssetMenu = (config: SiteDataType): boolean => {
 
 // Removed: mergeSubItems, fillMissingPaths, mergeMenuItemsWithDefaults, ensureMenuWithDefaults
 
+const RETIRED_WORKBOOK_LEDGER_MENU_TEXTS = new Set([
+    '매입매출 스마트 장부',
+    '매입매출 업그레이드',
+    '매입매출V2',
+    '미수미지급 관리'
+]);
+
+// Saved menu configurations may still contain the removed page, including
+// renamed links and legacy text-only entries. Do not write on read.
+const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType): void => {
+    const filterItems = (items: (MenuItem | string)[]): (MenuItem | string)[] =>
+        items.flatMap((item): (MenuItem | string)[] => {
+            const text = (typeof item === 'string' ? item : item.text).trim();
+            const path = typeof item === 'string' ? '' : (item.path || '').trim();
+            const pathname = path.split(/[?#]/)[0].replace(/\/+$/, '');
+            const children = typeof item !== 'string' && Array.isArray(item.sub)
+                ? filterItems(item.sub)
+                : undefined;
+            if (pathname === '/payroll/workbook-ledger-upgrade'
+                || (!path && RETIRED_WORKBOOK_LEDGER_MENU_TEXTS.has(text))) {
+                return children || [];
+            }
+            return [typeof item !== 'string' && children ? { ...item, sub: children } : item];
+        });
+
+    Object.values(config).forEach((site) => {
+        MENU_ROLE_SURFACES.forEach((surface) => {
+            const items = site[surface];
+            if (Array.isArray(items)) site[surface] = filterItems(items) as MenuItem[];
+        });
+    });
+};
+
 // This is the new "Init" logic: normalize inputs, prune illegal items, fix structure.
 // But it DOES NOT merge with defaults.
 const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
@@ -1136,6 +1195,12 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     ensureOfficeMenuPages(final);
     removeRetiredHardcodedMenuSeeds(final);
     ensureRequiredLogManagementItems(final);
+    removeWorkbookLedgerUpgradeMenus(final);
+    ensureDelegatedReceiptsMenu(final);
+    ensureTeamPersonnelMenu(final);
+    ensureBankTransferMenu(final);
+    ensureCorporateTaxMenu(final);
+    ensureAdvanceSummaryMenu(final);
 
     return final;
 };
@@ -1181,11 +1246,14 @@ const setupSnapshotListener = () => {
             },
             (error) => {
                 console.error('[MenuService] Snapshot listener error:', error);
+                unsubscribeSnapshot = null;
+                listeners.forEach(listener => listener.onError?.(error));
             }
         );
     })
         .catch((error) => {
             console.error('[MenuService] Failed to subscribe to menus_v12:', error);
+            listeners.forEach(listener => listener.onError?.(error));
         })
         .finally(() => {
             snapshotSetupPromise = null;
@@ -1194,7 +1262,7 @@ const setupSnapshotListener = () => {
 
 export const menuServiceV11 = {
     subscribe: (callback: (data: SiteDataType) => void, options: MenuSubscribeOptions = {}) => {
-        const listener: MenuListener = { callback };
+        const listener: MenuListener = { callback, onError: options.onError };
         listeners.add(listener);
 
         if (isDevAdminSessionEnabled()) {
@@ -1245,6 +1313,7 @@ export const menuServiceV11 = {
                 const rawConfig = normalizeSiteDataType(snapshot.data() as SiteDataType);
                 currentRawConfig = deepClone(rawConfig);
                 currentConfig = processIncomingConfig(rawConfig);
+                setupSnapshotListener();
                 return deepClone(currentConfig);
             }
 
@@ -1259,7 +1328,7 @@ export const menuServiceV11 = {
         }
     },
 
-    saveMenuConfig: async (newConfig: SiteDataType) => {
+    saveMenuConfig: async (newConfig: SiteDataType, baseConfig?: SiteDataType) => {
         if (isDevAdminSessionEnabled()) {
             setDevMenuConfig(processIncomingConfig(newConfig));
             currentConfig = getDevMenuConfig();
@@ -1284,7 +1353,10 @@ export const menuServiceV11 = {
 
         try {
             const sanitizedData = JSON.parse(JSON.stringify(result.data));
-            const saveFingerprint = JSON.stringify(sanitizedData);
+            const normalizedBase = baseConfig
+                ? JSON.parse(JSON.stringify(SiteDataTypeSchema.parse(pruneLargeConfig(processIncomingConfig(normalizeSiteDataType(baseConfig)))))) as SiteDataType
+                : undefined;
+            const saveFingerprint = JSON.stringify([sanitizedData, normalizedBase]);
 
             if (latestQueuedSavePromise && latestQueuedSaveFingerprint === saveFingerprint) {
                 return await latestQueuedSavePromise;
@@ -1293,26 +1365,41 @@ export const menuServiceV11 = {
             const nextSavePromise = saveWriteQueue
                 .catch(() => undefined)
                 .then(async () => {
-                    const previousConfig = currentRawConfig ? deepClone(currentRawConfig) : null;
+                    let previousConfig = currentRawConfig ? deepClone(currentRawConfig) : null;
+                    let savedData = sanitizedData as SiteDataType;
 
                     // Full replacement keeps Firestore in sync with the menu editor after deletions.
-                    await setDoc(getMenuDocRef(), sanitizedData);
-                    currentRawConfig = deepClone(sanitizedData as SiteDataType);
-                    currentConfig = processIncomingConfig(normalizeSiteDataType(sanitizedData as SiteDataType));
+                    if (normalizedBase) {
+                        savedData = await runTransaction(db, async transaction => {
+                            const snapshot = await transaction.get(getMenuDocRef());
+                            if (!snapshot.exists()) throw new Error('메뉴 설정을 찾을 수 없습니다. 최신 메뉴를 불러와주세요.');
+                            const latest = SiteDataTypeSchema.parse(pruneLargeConfig(processIncomingConfig(normalizeSiteDataType(snapshot.data() as SiteDataType)))) as SiteDataType;
+                            previousConfig = latest;
+                            const merged = mergeMenuConfigChanges(latest, normalizedBase, sanitizedData);
+                            const validated = JSON.parse(JSON.stringify(SiteDataTypeSchema.parse(merged))) as SiteDataType;
+                            transaction.set(getMenuDocRef(), validated);
+                            return validated;
+                        });
+                    } else {
+                        await setDoc(getMenuDocRef(), sanitizedData);
+                    }
+                    currentRawConfig = deepClone(savedData);
+                    const committedConfig = processIncomingConfig(normalizeSiteDataType(savedData));
+                    currentConfig = committedConfig;
 
                     // Do not wait for the Firestore snapshot to make the sidebar consistent.
                     // The snapshot remains the cross-tab/server source of truth.
                     notifyListeners();
 
                     try {
-                        await permissionAuditService.logMenuAccessChanges(previousConfig, sanitizedData as SiteDataType);
+                        await permissionAuditService.logMenuAccessChanges(previousConfig, savedData);
                     } catch (auditError) {
                         // The menu write already succeeded. An audit failure must not make the
                         // editor report that the menu itself was lost.
                         console.error('Failed to audit menu configuration change:', auditError);
                     }
 
-                    return deepClone(currentConfig);
+                    return deepClone(committedConfig);
                 });
 
             saveWriteQueue = nextSavePromise.then(() => undefined, () => undefined);
@@ -1542,12 +1629,13 @@ export const menuServiceV11 = {
                 const seenText = new Set<string>();
                 const uniqueItems: (MenuItem | string)[] = [];
 
-                items.forEach(item => {
+                items.forEach((item, index) => {
                     const text = typeof item === 'string' ? item : item.text;
                     const normalizedText = text.trim();
+                    const isDivider = normalizedText === '-';
 
                     // 1. Text Deduplication (per level)
-                    if (seenText.has(normalizedText)) {
+                    if (!isDivider && seenText.has(normalizedText)) {
                         modified = true;
                         return; // Skip duplicate text at same level
                     }
@@ -1555,7 +1643,7 @@ export const menuServiceV11 = {
 
                     // 2. ID Deduplication (Global) & ID Generation
                     if (typeof item !== 'string') {
-                        const expectedId = generateDeterministicId(normalizedText, parentPath);
+                        const expectedId = generateDeterministicId(isDivider ? `divider-${index}` : normalizedText, parentPath);
 
                         if (!item.id || item.id.startsWith('m_rand_') || seenIds.has(item.id)) {
                             // Fix deterministic ID if missing or potentially random

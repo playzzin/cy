@@ -11,6 +11,11 @@ node_modules/
 /functions/lib/
 *.tsbuildinfo
 
+# Reproducible local verification outputs and compiler caches
+/artifacts/
+/.cache/
+/node-compile-cache/
+
 # Environment variables
 .env
 .env.*
@@ -97,6 +102,7 @@ backups/
 /.deploy_*.zip
 
 # Local verification captures and isolated release worktrees
+/.codex-card-statement-release/
 /.codex-smart-memo-cleanup-backup/
 /.codex-smart-memo-test-config/
 /.codex-team-access-diagnosis/
@@ -110,3 +116,14 @@ backups/
 /workbook-layout-release/
 /.team-settlement-memo-release.patch
 /workbook-layout-release.patch
+
+# Reproducible diagnostics and local verification evidence
+/.tmp/
+/tmp_*.map
+/tmp_*.bin
+/tmp_asset_manifest.json
+/tmp_index_live.html
+/tsc*.txt
+/scripts/tsc*.txt
+/eslint-report.json
+/vscode_history*.txt

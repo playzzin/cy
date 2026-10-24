@@ -27,10 +27,11 @@ import type { AccommodationAssignment } from '../../types/accommodationAssignmen
 import type { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
 import type { UtilityRecord } from '../../types/accommodation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight, faUsers, faCheck } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { shiftYearMonth } from '../../components/common/MonthNavigator';
+import { getContrastingTextColor, hexToRgba, normalizeHexColor } from '../../utils/color';
 import './AdvancePaymentPage.css';
 
 // 임시저장 데이터 타입
@@ -96,6 +97,7 @@ type AdvanceTeamOption = {
     id: string;
     legacyId?: string;
     name: string;
+    color?: string;
     companyId?: string;
     companyName?: string;
     parentTeamId?: string;
@@ -702,9 +704,6 @@ const AdvancePaymentPage: React.FC = () => {
     }, [currentUser]);
 
     // Filters
-    const [selectedCompany, setSelectedCompany] = useState('');
-    // 팀(현장) 검색어 상태 추가
-    const [teamSearch, setTeamSearch] = useState('');
     const [selectedTeamId, setSelectedTeamId] = useState('');
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
 
@@ -714,7 +713,6 @@ const AdvancePaymentPage: React.FC = () => {
     // Data State
     const [teams, setTeams] = useState<AdvanceTeamOption[]>([]);
     const [allTeamOptions, setAllTeamOptions] = useState<AdvanceTeamOption[]>([]);
-    const [companies, setCompanies] = useState<string[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [advances, setAdvances] = useState<{ [workerId: string]: AdvancePayment }>({});
     const [workerPaymentSummaryMap, setWorkerPaymentSummaryMap] = useState<Record<string, WorkerPaymentSummary>>({});
@@ -1096,6 +1094,7 @@ const AdvancePaymentPage: React.FC = () => {
                 id: team.id || '',
                 legacyId: team.legacyId ?? undefined,
                 name: team.name,
+                color: team.color ?? undefined,
                 companyId: team.companyId ?? undefined,
                 parentTeamId: team.parentTeamId ?? undefined,
                 parentTeamName: team.parentTeamName ?? undefined,
@@ -1111,41 +1110,18 @@ const AdvancePaymentPage: React.FC = () => {
 
             const formattedTeams = allowedTeams.map(formatTeamOption);
             setTeams(formattedTeams);
-
-            const uniqueCompanies = Array.from(
-                new Set(
-                    formattedTeams
-                        .map((t) => String(t.companyName ?? '').trim())
-                        .filter((name) => name.length > 0)
-                )
-            ).sort((a, b) => a.localeCompare(b, 'ko-KR'));
-            setCompanies(uniqueCompanies);
-
-            if (uniqueCompanies.length > 0) {
-                setSelectedCompany((prev) => {
-                    const prevKey = normalizeCompanyNameKey(prev);
-                    const matched = uniqueCompanies.find((name) => normalizeCompanyNameKey(name) === prevKey);
-                    return matched ?? uniqueCompanies[0];
-                });
-            } else {
-                setSelectedCompany('');
-            }
         } catch (error) {
             console.error("Failed to load teams:", error);
         }
     };
 
-    // 팀명 normalize 함수 (공백제거, 소문자)
     const normalizeTeamName = (name: string = '') => name.replace(/\s+/g, '').toLowerCase();
 
-    // Filter Teams by Company, 팀명 검색어, 그리고 이름순 정렬
-    const filteredTeams = teams
-        .filter((team) => {
-            if (!selectedCompany) return true;
-            return normalizeCompanyNameKey(team.companyName) === normalizeCompanyNameKey(selectedCompany);
-        })
-        .filter(team => !teamSearch.trim() || normalizeTeamName(team.name).includes(normalizeTeamName(teamSearch)))
-        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+    // 업체 선택 없이 조회 가능한 시공사 팀을 모두 표시한다.
+    const filteredTeams = useMemo(
+        () => [...teams].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko')),
+        [teams]
+    );
 
     // Auto-select first team
     useEffect(() => {
@@ -1913,10 +1889,6 @@ const AdvancePaymentPage: React.FC = () => {
         }
 
         if (queryTeamId) {
-            const matchedTeam = teams.find((t) => t.id === queryTeamId);
-            if (matchedTeam?.companyName) {
-                setSelectedCompany(matchedTeam.companyName);
-            }
             setSelectedTeamId(queryTeamId);
         }
 
@@ -2484,6 +2456,15 @@ const AdvancePaymentPage: React.FC = () => {
                     가불 및 공제 관리
                 </h1>
                 <div className="flex items-center gap-2">
+                    {canUseAdvanceManagement && (
+                        <Link
+                            to={`/payroll/advance-summary?${new URLSearchParams({ yearMonth: selectedMonth,
+                                ...(selectedTeamId && selectedTeamId !== ALL_TEAMS_VALUE ? { teamId: selectedTeamId } : {}) })}`}
+                            className="px-3 py-2 rounded font-bold bg-white text-blue-700 hover:bg-blue-50 border border-blue-200"
+                        >
+                            팀별 가불내역
+                        </Link>
+                    )}
                     {/* Settings Toggle */}
                     {canUseAdvanceManagement && (
                         <button
@@ -2537,53 +2518,69 @@ const AdvancePaymentPage: React.FC = () => {
             </div>
 
             {/* Filters */}
-            <div className="bg-white p-4 rounded-lg mb-4 flex flex-wrap gap-4 items-end shrink-0">
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">업체 구분</label>
-                    <select
-                        value={selectedCompany}
-                        onChange={(e) => {
-                            setSelectedCompany(e.target.value);
-                            setSelectedTeamId('');
-                            setTeamSearch(''); // 회사 변경 시 검색어 초기화
-                        }}
-                        className="border border-slate-300 rounded px-2 py-1.5 text-sm min-w-[120px]"
-                        disabled={loading && !autoSearchRequested}
-                    >
-                        <option value="">전체 업체</option>
-                        {companies.map((c) => (
-                            <option key={c} value={c}>{c}</option>
-                        ))}
-                    </select>
+            <div className="advance-filter-bar">
+                <div className="advance-team-selector">
+                    <span className="advance-filter-label" aria-hidden="true">
+                        <FontAwesomeIcon icon={faUsers} />
+                        팀 선택
+                    </span>
+                    <div className="advance-team-buttons" role="group" aria-label="팀 선택">
+                        <button
+                            type="button"
+                            className="advance-team-button advance-team-button--all"
+                            aria-pressed={selectedTeamId === ALL_TEAMS_VALUE}
+                            aria-label="전체 보기 (조회 전용)"
+                            title="전체 보기 (조회 전용)"
+                            disabled={loading && !autoSearchRequested}
+                            onClick={() => setSelectedTeamId(ALL_TEAMS_VALUE)}
+                        >
+                            전체 보기
+                        </button>
+                        {filteredTeams.map((team) => {
+                            const color = normalizeHexColor(team.color);
+                            const isSelected = selectedTeamId === team.id;
+                            return (
+                                <button
+                                    key={team.id}
+                                    type="button"
+                                    className="advance-team-button"
+                                    aria-pressed={isSelected}
+                                    disabled={loading && !autoSearchRequested}
+                                    onClick={() => setSelectedTeamId(team.id)}
+                                    title={team.name}
+                                    style={{
+                                        backgroundColor: isSelected ? color : hexToRgba(color, 0.1),
+                                        borderColor: isSelected ? color : hexToRgba(color, 0.3),
+                                        color: isSelected ? getContrastingTextColor(color) : '#334155'
+                                    }}
+                                >
+                                    <span
+                                        className="advance-team-marker"
+                                        style={{ color: isSelected ? 'inherit' : color }}
+                                        aria-hidden="true"
+                                    >
+                                        {isSelected ? <FontAwesomeIcon icon={faCheck} /> : <span />}
+                                    </span>
+                                    {team.name}
+                                </button>
+                            );
+                        })}
+                        {filteredTeams.length === 0 && (
+                            <span className="advance-team-empty">선택할 팀이 없습니다</span>
+                        )}
+                    </div>
                 </div>
 
-                <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">팀 선택</label>
-                    <select
-                        value={selectedTeamId}
-                        onChange={(e) => setSelectedTeamId(e.target.value)}
-                        className="border border-slate-300 rounded px-2 py-1.5 text-sm min-w-[150px]"
-                        disabled={loading && !autoSearchRequested}
-                    >
-                        <option value="">팀 선택</option>
-                        {filteredTeams.map((t) => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                        <option value={ALL_TEAMS_VALUE}>전체 보기 (조회 전용)</option>
-                    </select>
-                </div>
-
-                <div className="flex flex-wrap items-end gap-2" role="group" aria-label="월 선택 및 조회">
-                    <div>
-                        <label htmlFor="advance-payment-month" className="block text-xs font-bold text-slate-500 mb-1">조회 월</label>
-                        <div className="flex items-center gap-1">
+                <div className="advance-month-actions" role="group" aria-label="월 선택 및 조회">
+                        <label htmlFor="advance-payment-month" className="advance-filter-label">조회 월</label>
+                        <div className="advance-month-picker">
                             <button
                                 type="button"
                                 onClick={() => setSelectedMonth((month) => shiftYearMonth(month, -1))}
                                 disabled={loading || !selectedMonth}
                                 aria-label="이전 달"
                                 title="이전 달"
-                                className="flex h-10 w-9 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus-visible:outline-blue-500 disabled:opacity-50"
+                                className="advance-month-step"
                             >
                                 <FontAwesomeIcon icon={faChevronLeft} />
                             </button>
@@ -2592,7 +2589,7 @@ const AdvancePaymentPage: React.FC = () => {
                                 type="month"
                                 value={selectedMonth}
                                 onChange={(e) => setSelectedMonth(e.target.value)}
-                                className="h-10 min-w-0 border border-slate-300 rounded px-2 py-1.5 text-sm"
+                                className="advance-month-input"
                                 disabled={loading && !autoSearchRequested}
                             />
                             <button
@@ -2601,17 +2598,16 @@ const AdvancePaymentPage: React.FC = () => {
                                 disabled={loading || !selectedMonth}
                                 aria-label="다음 달"
                                 title="다음 달"
-                                className="flex h-10 w-9 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 focus-visible:outline-blue-500 disabled:opacity-50"
+                                className="advance-month-step"
                             >
                                 <FontAwesomeIcon icon={faChevronRight} />
                             </button>
                         </div>
-                    </div>
                     <button
                         type="button"
                         onClick={() => void handleSearch()}
                         disabled={loading}
-                        className="h-10 bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded flex items-center gap-2 text-sm disabled:opacity-50"
+                        className="advance-search-button"
                     >
                         <FontAwesomeIcon icon={loading ? faSpinner : faSearch} spin={loading} />
                         조회
@@ -2734,39 +2730,44 @@ const AdvancePaymentPage: React.FC = () => {
             )}
 
             {/* Keyword Filter & Salary Type Filter */}
-            <div className="flex items-center gap-2 mb-2 shrink-0">
-                <div className="flex items-center bg-white border border-slate-300 rounded px-2 py-1">
+            <div className="advance-worker-toolbar">
+                <div className="flex h-10 items-center bg-white border border-slate-200 rounded-xl px-3">
                     <FontAwesomeIcon icon={faSearch} className="text-slate-400 mr-2" />
                     <input
                         type="text"
                         value={workerNameQuery}
                         onChange={(e) => setWorkerNameQuery(e.target.value)}
                         placeholder="이름 검색..."
+                        aria-label="이름 검색"
                         className="bg-transparent outline-none text-sm w-32"
                     />
                 </div>
-                <div className="flex bg-white rounded border border-slate-300 p-0.5">
+                <div className="advance-salary-tabs" role="group" aria-label="급여 형태">
                     <button
+                        type="button"
                         onClick={() => setSalaryModelFilter('all')}
-                        className={`px-3 py-1 text-xs rounded ${salaryModelFilter === 'all' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                        aria-pressed={salaryModelFilter === 'all'}
                     >
                         전체
                     </button>
                     <button
+                        type="button"
                         onClick={() => setSalaryModelFilter('daily')}
-                        className={`px-3 py-1 text-xs rounded ${salaryModelFilter === 'daily' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                        aria-pressed={salaryModelFilter === 'daily'}
                     >
                         일당직
                     </button>
                     <button
+                        type="button"
                         onClick={() => setSalaryModelFilter('monthly')}
-                        className={`px-3 py-1 text-xs rounded ${salaryModelFilter === 'monthly' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                        aria-pressed={salaryModelFilter === 'monthly'}
                     >
                         월급직
                     </button>
                     <button
+                        type="button"
                         onClick={() => setSalaryModelFilter('service')}
-                        className={`px-3 py-1 text-xs rounded ${salaryModelFilter === 'service' ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+                        aria-pressed={salaryModelFilter === 'service'}
                     >
                         용역팀
                     </button>

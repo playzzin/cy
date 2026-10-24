@@ -1,0 +1,35 @@
+import React from 'react';
+import '@testing-library/jest-dom';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import TeamAccountApprovalPage from './TeamAccountApprovalPage';
+import { teamAccountApprovalService } from '../../services/teamAccountApprovalService';
+jest.mock('../../services/teamAccountApprovalService', () => ({ teamAccountApprovalService: { list: jest.fn(), approve: jest.fn() } }));
+jest.mock('../../utils/teamAccountApprovalFeature', () => ({ teamAccountApprovalEnabled: () => true }));
+const rows = [{ linkId: 'one', workerId: 'w1', name: '합성 가', teamName: '소속 팀', teamId: 'team', status: 'pending' }, { linkId: 'two', workerId: 'w2', name: '합성 나', teamName: '소속 팀', teamId: 'team', status: 'pending' }];
+beforeEach(() => { jest.clearAllMocks(); (teamAccountApprovalService.list as jest.Mock).mockResolvedValue({ rows, teams: [], nextCursor: null }); });
+test('대상 확인 후 선택 승인하고 부분 실패만 남긴다', async () => {
+    (teamAccountApprovalService.approve as jest.Mock).mockResolvedValue({ results: [{ linkId: 'one', status: 'active' }, { linkId: 'two', status: 'failed', message: '현재 소속 확인 필요' }] });
+    render(<TeamAccountApprovalPage />);
+    await screen.findByText('합성 가');
+    fireEvent.click(screen.getByText('표시된 목록 선택 (최대 20건)'));
+    fireEvent.click(screen.getByText('선택 2건 승인·갱신'));
+    expect(teamAccountApprovalService.approve).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toHaveTextContent('합성 가 · 소속 팀 · w1');
+    fireEvent.click(screen.getByText('확인 후 승인·갱신'));
+    await screen.findByText('합성 나: 현재 소속 확인 필요');
+    expect(teamAccountApprovalService.approve).toHaveBeenCalledWith(['one', 'two']);
+    expect(screen.getByText('선택 1건 승인·갱신')).toBeEnabled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+test('페이지를 추가하고 검색하며 권한 회수 오류 때 이전 목록을 지운다', async () => {
+    (teamAccountApprovalService.list as jest.Mock).mockResolvedValueOnce({ rows: [rows[0]], nextCursor: 'w1' }).mockResolvedValueOnce({ rows: [rows[1]], nextCursor: null }).mockRejectedValueOnce(new Error('denied'));
+    render(<TeamAccountApprovalPage />);
+    fireEvent.click(await screen.findByText('다음 팀원 50명 조회'));
+    await screen.findByText('합성 나');
+    expect(teamAccountApprovalService.list).toHaveBeenLastCalledWith('w1');
+    fireEvent.change(screen.getByPlaceholderText('이름 또는 팀 이름'), { target: { value: '합성 가' } });
+    expect(screen.queryByText('합성 나')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('새로고침'));
+    await screen.findByRole('alert');
+    await waitFor(() => expect(screen.queryByText('합성 가')).not.toBeInTheDocument());
+});

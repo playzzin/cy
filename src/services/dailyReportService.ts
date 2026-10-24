@@ -34,6 +34,7 @@ type SiteSnapshotResolver = (report: DailyReportSiteSnapshotFallback & {
 }) => Promise<DailyReportSiteSnapshot>;
 
 export interface DailyReportWorkerRow {
+    isSiteSupport?: boolean;
     reportId: string;
     isEmptyReport?: boolean;
     workerIndex?: number;
@@ -302,6 +303,28 @@ const updateReportFromExistingData = async (
     await runReportUpdateSideEffects(draft);
 };
 
+// The callback can run again on contention; notifications/statistics run only after commit.
+const updateReportAtomically = async (
+    id: string,
+    createUpdates: (latest: DailyReport) => Partial<DailyReport>,
+    source = 'dailyReportService',
+    deleteWhenEmpty = false,
+): Promise<DailyReportUpdateDraft> => {
+    const resolveSiteSnapshot = createSiteSnapshotResolver();
+    const draft = await dailyReportFirestoreService.transactReport(id, async latest => {
+        const before = normalizeReport({ ...latest, id });
+        const result = await buildReportUpdateDraft(id, before, createUpdates(before), resolveSiteSnapshot);
+        return { data: deleteWhenEmpty && result.newData.workers.length === 0 ? null : result.newData, result };
+    });
+    if (deleteWhenEmpty && draft.newData.workers.length === 0) {
+        await dailyReportService._updateStats(draft.oldData, -1);
+        await notifyDailyReportSystemMessage('dailyReport.deleted', draft.oldData, draft.oldData, source);
+    } else {
+        await runReportUpdateSideEffects(draft, source);
+    }
+    return draft;
+};
+
 export const dailyReportService = {
     addReport: async (report: DailyReportInput): Promise<string> => {
         const enriched = await enrichReportWithSiteSnapshot(report as any);
@@ -313,13 +336,7 @@ export const dailyReportService = {
     },
 
     updateReport: async (id: string, updates: Partial<DailyReport>): Promise<void> => {
-        const oldSnap = await getDoc(doc(db, 'daily_reports', id));
-        if (!oldSnap.exists()) throw new Error('Report not found');
-        await updateReportFromExistingData(
-            id,
-            { id, ...(oldSnap.data() as any) },
-            updates
-        );
+        await updateReportAtomically(id, () => updates);
     },
 
     addReportsBatch: async (reports: DailyReportInput[]): Promise<void> => {
@@ -608,6 +625,7 @@ export const dailyReportService = {
     },
 
     getWorkerRows: async (params: {
+        includeSiteSupport?: boolean;
         startDate?: string;
         endDate?: string;
         teamId?: string;
@@ -615,7 +633,10 @@ export const dailyReportService = {
         siteId?: string;
         companyIds?: string[];
     } = {}): Promise<DailyReportWorkerRow[]> => {
-        const reports = await dailyReportService.getReports(params);
+        const siteReports = params.includeSiteSupport
+            ? await getTeamScopedRows<DailyReport>('site_work_reports', { startDate: params.startDate, endDate: params.endDate })
+            : null;
+        const reports = siteReports ?? await dailyReportService.getReports(params);
         const rows: DailyReportWorkerRow[] = [];
 
         reports.forEach(report => {
@@ -664,6 +685,7 @@ export const dailyReportService = {
                 const unitPrice = worker.unitPrice || 0;
                 const resolvedPayType = resolveReportPayType(worker) || undefined;
                 rows.push({
+                    isSiteSupport: (worker as DailyReportWorker & { isSiteSupport?: boolean }).isSiteSupport,
                     reportId: report.id || '',
                     workerIndex,
                     date: report.date,
@@ -897,72 +919,55 @@ export const dailyReportService = {
 
         let updatedReportCount = 0;
         let updatedWorkerCount = 0;
-        const reportUpdateDrafts: DailyReportUpdateDraft[] = [];
-        const resolveSiteSnapshot = createSiteSnapshotResolver();
 
         for (const [reportId, reportTargets] of grouped.entries()) {
-            const report = await dailyReportService.getReport(reportId);
-            if (!report) throw new Error('Report not found');
+            await updateReportAtomically(reportId, report => {
 
-            const updatedWorkers = [...report.workers];
-            const touchedIndexes = new Set<number>();
+                const updatedWorkers = [...report.workers];
+                const touchedIndexes = new Set<number>();
 
-            for (const target of reportTargets) {
-                const index = typeof target.workerIndex === 'number'
-                    ? target.workerIndex
-                    : updatedWorkers.findIndex(worker => worker.workerId === target.workerId);
-                if (index === -1) throw new Error('Worker not found in report');
-                if (updatedWorkers[index]?.workerId !== target.workerId) {
-                    throw new Error('Worker row no longer matches report');
+                for (const target of reportTargets) {
+                    const index = typeof target.workerIndex === 'number'
+                        ? target.workerIndex
+                        : updatedWorkers.findIndex(worker => worker.workerId === target.workerId);
+                    if (index === -1) throw new Error('Worker not found in report');
+                    if (updatedWorkers[index]?.workerId !== target.workerId) {
+                        throw new Error('Worker row no longer matches report');
+                    }
+                    if (touchedIndexes.has(index)) {
+                        throw new Error('Duplicate worker update target');
+                    }
+
+                    const nextWorker = syncPayTypeFields(
+                        { ...updatedWorkers[index], ...target.updates } as DailyReportWorker,
+                        { returnUndefinedOnEmpty: true, priority: 'salaryModel' }
+                    );
+                    const nextManDay = Number(nextWorker.manDay ?? 0);
+                    const nextUnitPrice = Number(nextWorker.unitPrice ?? 0);
+                    if (!Number.isFinite(nextManDay) || nextManDay < 0) {
+                        throw new Error('Invalid manDay');
+                    }
+                    if (!Number.isFinite(nextUnitPrice) || nextUnitPrice < 0) {
+                        throw new Error('Invalid unitPrice');
+                    }
+
+                    updatedWorkers[index] = {
+                        ...nextWorker,
+                        manDay: nextManDay,
+                        unitPrice: nextUnitPrice,
+                    };
+                    touchedIndexes.add(index);
+
                 }
-                if (touchedIndexes.has(index)) {
-                    throw new Error('Duplicate worker update target');
-                }
 
-                const nextWorker = syncPayTypeFields(
-                    { ...updatedWorkers[index], ...target.updates } as DailyReportWorker,
-                    { returnUndefinedOnEmpty: true, priority: 'salaryModel' }
-                );
-                const nextManDay = Number(nextWorker.manDay ?? 0);
-                const nextUnitPrice = Number(nextWorker.unitPrice ?? 0);
-                if (!Number.isFinite(nextManDay) || nextManDay < 0) {
-                    throw new Error('Invalid manDay');
-                }
-                if (!Number.isFinite(nextUnitPrice) || nextUnitPrice < 0) {
-                    throw new Error('Invalid unitPrice');
-                }
+                const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
+                const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
 
-                updatedWorkers[index] = {
-                    ...nextWorker,
-                    manDay: nextManDay,
-                    unitPrice: nextUnitPrice,
-                };
-                touchedIndexes.add(index);
-                updatedWorkerCount += 1;
-            }
-
-            const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
-            const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
-
-            const draft = await buildReportUpdateDraft(reportId, report, {
-                workers: updatedWorkers,
-                totalManDay,
-                totalAmount,
-            }, resolveSiteSnapshot);
-            reportUpdateDrafts.push(draft);
+                return { workers: updatedWorkers, totalManDay, totalAmount };
+            }, 'dailyReportBulkUpdate');
+            updatedWorkerCount += reportTargets.length;
             updatedReportCount += 1;
         }
-
-        if (reportUpdateDrafts.length > 0) {
-            await dailyReportFirestoreService.updateReportsBatch(
-                reportUpdateDrafts.map(draft => ({ id: draft.id, data: draft.newData as any }))
-            );
-
-            for (const draft of reportUpdateDrafts) {
-                await runReportUpdateSideEffects(draft, 'dailyReportBulkUpdate');
-            }
-        }
-
         return { updatedReportCount, updatedWorkerCount };
     },
 
@@ -978,77 +983,48 @@ export const dailyReportService = {
         });
 
         let deletedWorkerCount = 0;
-        const reportUpdateDrafts: DailyReportUpdateDraft[] = [];
-        const reportIdsToDelete: string[] = [];
-        const resolveSiteSnapshot = createSiteSnapshotResolver();
+        let deletedReportCount = 0;
+        let updatedReportCount = 0;
 
         for (const [reportId, reportTargets] of grouped.entries()) {
-            const report = await dailyReportService.getReport(reportId);
-            if (!report) throw new Error('Report not found');
+            const draft = await updateReportAtomically(reportId, report => {
 
-            const deleteIndexes = new Set<number>();
+                const deleteIndexes = new Set<number>();
 
-            for (const target of reportTargets) {
-                const index = typeof target.workerIndex === 'number'
-                    ? target.workerIndex
-                    : report.workers.findIndex((worker, workerIndex) => (
-                        !deleteIndexes.has(workerIndex) && worker.workerId === target.workerId
-                    ));
+                for (const target of reportTargets) {
+                    const index = typeof target.workerIndex === 'number'
+                        ? target.workerIndex
+                        : report.workers.findIndex((worker, workerIndex) => (
+                            !deleteIndexes.has(workerIndex) && worker.workerId === target.workerId
+                        ));
 
-                if (index < 0 || index >= report.workers.length) {
-                    throw new Error('Worker not found in report');
+                    if (index < 0 || index >= report.workers.length) {
+                        throw new Error('Worker not found in report');
+                    }
+                    if (report.workers[index]?.workerId !== target.workerId) {
+                        throw new Error('Worker row no longer matches report');
+                    }
+                    if (deleteIndexes.has(index)) {
+                        throw new Error('Duplicate worker delete target');
+                    }
+
+                    deleteIndexes.add(index);
                 }
-                if (report.workers[index]?.workerId !== target.workerId) {
-                    throw new Error('Worker row no longer matches report');
-                }
-                if (deleteIndexes.has(index)) {
-                    throw new Error('Duplicate worker delete target');
-                }
 
-                deleteIndexes.add(index);
-            }
+                const updatedWorkers = report.workers
+                    .filter((_, index) => !deleteIndexes.has(index))
+                    .map(cleanWorker);
 
-            const updatedWorkers = report.workers
-                .filter((_, index) => !deleteIndexes.has(index))
-                .map(cleanWorker);
+                const totalManDay = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) as number), 0);
+                const totalAmount = updatedWorkers.reduce((sum, worker) => sum + (((worker.manDay || 0) as number) * ((worker.unitPrice || 0) as number)), 0);
 
-            deletedWorkerCount += deleteIndexes.size;
-
-            if (updatedWorkers.length === 0) {
-                reportIdsToDelete.push(reportId);
-                continue;
-            }
-
-            const totalManDay = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) as number), 0);
-            const totalAmount = updatedWorkers.reduce((sum, worker) => sum + (((worker.manDay || 0) as number) * ((worker.unitPrice || 0) as number)), 0);
-
-            const draft = await buildReportUpdateDraft(reportId, report, {
-                workers: updatedWorkers,
-                totalManDay,
-                totalAmount,
-            }, resolveSiteSnapshot);
-            reportUpdateDrafts.push(draft);
+                return { workers: updatedWorkers, totalManDay, totalAmount };
+            }, 'dailyReportBulkDelete', true);
+            deletedWorkerCount += reportTargets.length;
+            if (draft.newData.workers.length === 0) deletedReportCount += 1;
+            else updatedReportCount += 1;
         }
-
-        if (reportUpdateDrafts.length > 0) {
-            await dailyReportFirestoreService.updateReportsBatch(
-                reportUpdateDrafts.map(draft => ({ id: draft.id, data: draft.newData as any }))
-            );
-
-            for (const draft of reportUpdateDrafts) {
-                await runReportUpdateSideEffects(draft, 'dailyReportBulkDelete');
-            }
-        }
-
-        if (reportIdsToDelete.length > 0) {
-            await dailyReportService.deleteReports(reportIdsToDelete);
-        }
-
-        return {
-            deletedReportCount: reportIdsToDelete.length,
-            updatedReportCount: reportUpdateDrafts.length,
-            deletedWorkerCount,
-        };
+        return { deletedReportCount, updatedReportCount, deletedWorkerCount };
     },
 
     updateWorkerInReport: async (
@@ -1058,41 +1034,41 @@ export const dailyReportService = {
         workerIndex?: number,
         reportUpdates: Partial<DailyReport> = {}
     ): Promise<void> => {
-        const report = await dailyReportService.getReport(reportId);
-        if (!report) throw new Error('Report not found');
+        await updateReportAtomically(reportId, report => {
 
-        const updatedWorkers = [...report.workers];
-        const index = typeof workerIndex === 'number'
-            ? workerIndex
-            : updatedWorkers.findIndex(worker => worker.workerId === workerId);
-        if (index === -1) throw new Error('Worker not found in report');
-        if (updatedWorkers[index]?.workerId !== workerId) {
-            throw new Error('Worker row no longer matches report');
-        }
+            const updatedWorkers = [...report.workers];
+            const index = typeof workerIndex === 'number'
+                ? workerIndex
+                : updatedWorkers.findIndex(worker => worker.workerId === workerId);
+            if (index === -1) throw new Error('Worker not found in report');
+            if (updatedWorkers[index]?.workerId !== workerId) {
+                throw new Error('Worker row no longer matches report');
+            }
 
-        const nextWorker = syncPayTypeFields({ ...updatedWorkers[index], ...updates } as DailyReportWorker, { returnUndefinedOnEmpty: true, priority: 'salaryModel' });
-        const nextManDay = Number(nextWorker.manDay ?? 0);
-        const nextUnitPrice = Number(nextWorker.unitPrice ?? 0);
-        if (!Number.isFinite(nextManDay) || nextManDay < 0) {
-            throw new Error('Invalid manDay');
-        }
-        if (!Number.isFinite(nextUnitPrice) || nextUnitPrice < 0) {
-            throw new Error('Invalid unitPrice');
-        }
+            const nextWorker = syncPayTypeFields({ ...updatedWorkers[index], ...updates } as DailyReportWorker, { returnUndefinedOnEmpty: true, priority: 'salaryModel' });
+            const nextManDay = Number(nextWorker.manDay ?? 0);
+            const nextUnitPrice = Number(nextWorker.unitPrice ?? 0);
+            if (!Number.isFinite(nextManDay) || nextManDay < 0) {
+                throw new Error('Invalid manDay');
+            }
+            if (!Number.isFinite(nextUnitPrice) || nextUnitPrice < 0) {
+                throw new Error('Invalid unitPrice');
+            }
 
-        updatedWorkers[index] = {
-            ...nextWorker,
-            manDay: nextManDay,
-            unitPrice: nextUnitPrice,
-        };
-        const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
-        const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
+            updatedWorkers[index] = {
+                ...nextWorker,
+                manDay: nextManDay,
+                unitPrice: nextUnitPrice,
+            };
+            const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
+            const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
 
-        await updateReportFromExistingData(reportId, report, {
-            ...reportUpdates,
-            workers: updatedWorkers,
-            totalManDay,
-            totalAmount,
+            return {
+                ...reportUpdates,
+                workers: updatedWorkers,
+                totalManDay,
+                totalAmount,
+            };
         });
     },
 

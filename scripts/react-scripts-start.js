@@ -1,5 +1,7 @@
 process.env.BABEL_ENV = 'development';
 process.env.NODE_ENV = 'development';
+require('react-scripts/config/env');
+require('./browser-env-security.cjs').stripServerAiCredentials();
 
 const shouldRunTypeChecker = process.argv.includes('--typecheck');
 process.env.DISABLE_FORK_TS_CHECKER =

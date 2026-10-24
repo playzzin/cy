@@ -6,6 +6,7 @@ import { resolveIcon } from '../../constants/iconMap';
 
 interface PositionPanelProps {
     isOpen: boolean;
+    userPreviewMode?: boolean;
     togglePanel: (type: 'position') => void;
     currentPosition: string;
     changePosition: (positionId: string) => void;
@@ -17,6 +18,7 @@ interface PositionPanelProps {
 
 const PositionPanel: React.FC<PositionPanelProps> = ({
     isOpen,
+    userPreviewMode = false,
     togglePanel,
     currentPosition,
     changePosition,
@@ -25,7 +27,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
     currentSite,
     changeSite
 }) => {
-    const [activeTab, setActiveTab] = React.useState<'site' | 'position'>('site');
+    const [activeTab, setActiveTab] = React.useState<'site' | 'position'>(userPreviewMode ? 'position' : 'site');
 
     // Filter sites for display
     const filteredSites = React.useMemo(() => {
@@ -46,8 +48,8 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                 />
             )}
             <aside
-                id="position-panel"
-                className={`fixed top-[65px] right-4 w-96 bg-slate-800 shadow-2xl z-50 rounded-xl border border-slate-700 transition-all duration-200 origin-top-right ${isOpen
+                id="position-panel" role="dialog" aria-label="모드 선택" aria-modal="true"
+                className={`fixed top-[65px] right-4 w-96 max-w-[calc(100vw-2rem)] bg-slate-800 shadow-2xl z-50 rounded-xl border border-slate-700 transition-all duration-200 origin-top-right ${isOpen
                     ? 'opacity-100 scale-100 translate-y-0'
                     : 'opacity-0 scale-95 -translate-y-2 pointer-events-none'
                     }`}
@@ -62,6 +64,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                     </div>
                     <button
                         onClick={() => togglePanel('position')}
+                        aria-label="모드 선택 닫기"
                         className="text-slate-400 hover:text-white hover:bg-slate-700 p-2 rounded-lg transition-colors"
                     >
                         <FontAwesomeIcon icon={faXmark} />
@@ -124,7 +127,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                     ) : (
                         <>
                             <p className="text-slate-400 text-xs mb-4">
-                                직책을 선택하면 해당 직책에 맞는 메뉴가 표시됩니다.
+                                {userPreviewMode ? '직책을 선택한 뒤 연결된 계정의 화면을 전체 영역에서 확인하세요.' : '직책을 선택하면 해당 직책에 맞는 메뉴가 표시됩니다.'}
                             </p>
                             <div className="grid grid-cols-2 gap-3">
                                 {positions.map((pos) => (
@@ -161,7 +164,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                         </strong>
                         {activeTab === 'site'
                             ? '는 선택한 사이트의 메뉴와 데이터를 기반으로 화면을 구성합니다.'
-                            : '는 권한과 관계없이 해당 직책의 메뉴 구성을 미리보기 할 수 있는 기능입니다.'}
+                            : userPreviewMode ? '에서는 선택한 계정의 메뉴와 조회 범위를 확인합니다. 저장·승인·발송은 차단됩니다.' : '는 권한과 관계없이 해당 직책의 메뉴 구성을 미리보기 할 수 있는 기능입니다.'}
                         </p>
                     </div>
                 </div>

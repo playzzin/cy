@@ -284,12 +284,8 @@ const DailyReportTyping: React.FC<DailyReportTypingProps> = ({ sites, teams }) =
         const file = e.target.files?.[0];
         if (!file) return;
 
-        const apiKey = geminiService.getKey();
-        if (!apiKey) {
-            alert('AI 기능을 사용하려면 API 키 설정이 필요합니다.\n설정 페이지로 이동합니다.');
-            window.location.href = '/settings';
-            return;
-        }
+        
+        
 
         setIsSaving(true);
         // Call the common function
@@ -324,11 +320,8 @@ const DailyReportTyping: React.FC<DailyReportTypingProps> = ({ sites, teams }) =
             return;
         }
 
-        const apiKey = geminiService.getKey();
-        if (!apiKey) {
-            alert('AI 기능을 사용하려면 API 키 설정이 필요합니다.');
-            return;
-        }
+        
+        
 
         // Reuse the logic from handleKakaoUpload (extracted or duplicated)
         // Since handleKakaoUpload expects ChangeEvent, we'll just call the logic directly here or refactor.

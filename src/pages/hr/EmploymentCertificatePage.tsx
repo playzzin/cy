@@ -5,6 +5,7 @@ import { useReactToPrint } from 'react-to-print';
 import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { EmploymentCertificateTemplate } from '../../components/hr/EmploymentCertificateTemplate';
+import CertificatePreview, { CertificateMobileTabs } from '../../components/hr/CertificatePreview';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faFileAlt, faPrint } from '@fortawesome/free-solid-svg-icons';
 import DatePicker from 'react-datepicker';
@@ -40,18 +41,6 @@ const Sidebar = styled.div`
     width: 100%;
     flex: 0 0 auto;
   }
-`;
-
-const PreviewArea = styled.div`
-  flex: 1;
-  padding: 40px;
-  overflow-y: auto;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  background-color: #525659; // Darker background to make paper pop
-  border-radius: 16px;
-  min-width: 0;
 `;
 
 const HeaderCard = styled.div`
@@ -357,11 +346,13 @@ const EmploymentCertificatePage: React.FC = () => {
     // Certificate Data
     const [purpose, setPurpose] = useState('금융기관 제출용');
     const [issueDate, setIssueDate] = useState<Date>(new Date());
-    const [position, setPosition] = useState('');
-    const [duties, setDuties] = useState('');
+    const [position, setPosition] = useState('팀원');
+    const [duties, setDuties] = useState('비계공');
     const [joinDate, setJoinDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
     const [isServing, setIsServing] = useState(true);
+    const [includeStamp, setIncludeStamp] = useState(true);
+    const [mobilePreview, setMobilePreview] = useState(false);
 
     const componentRef = useRef<HTMLDivElement>(null);
 
@@ -463,8 +454,8 @@ const EmploymentCertificatePage: React.FC = () => {
     const currentCompany = companies.find(c => c.id === selectedCompanyId) || null;
 
     return (
-        <PageContainer>
-            <Sidebar>
+        <PageContainer className="certificate-workspace" data-mobile-preview={mobilePreview}>
+            <Sidebar className="certificate-sidebar">
                 <HeaderCard>
                     <HeaderContent>
                         <HeaderIcon>
@@ -475,9 +466,10 @@ const EmploymentCertificatePage: React.FC = () => {
                             <HeaderSubtitle>Employment Certificate</HeaderSubtitle>
                         </div>
                     </HeaderContent>
+                    <CertificateMobileTabs preview={mobilePreview} onChange={setMobilePreview} />
                 </HeaderCard>
 
-                <SettingsCard>
+                <SettingsCard className="certificate-settings">
                     <SectionHeader>발급 설정</SectionHeader>
 
                     <FormGroup>
@@ -523,9 +515,8 @@ const EmploymentCertificatePage: React.FC = () => {
                                             onClick={() => {
                                                 setSelectedWorker(worker);
                                                 setSearchWorkerName(worker.name);
-                                                // Auto-fill position and duties (Requested: Position empty, Duties: '현장직')
-                                                setPosition('');
-                                                setDuties('현장직');
+                                                setPosition('팀원');
+                                                setDuties('비계공');
 
                                                 // Auto-fill dates
                                                 const createdAt = worker.createdAt?.toDate ? worker.createdAt.toDate() : (worker.createdAt as any);
@@ -552,8 +543,8 @@ const EmploymentCertificatePage: React.FC = () => {
                                         onClick={() => {
                                             setSelectedWorker(null);
                                             setSearchWorkerName('');
-                                            setPosition('');
-                                            setDuties('');
+                                            setPosition('팀원');
+                                            setDuties('비계공');
                                             setJoinDate(null);
                                             setEndDate(null);
                                             setIsServing(true);
@@ -567,8 +558,9 @@ const EmploymentCertificatePage: React.FC = () => {
                     </FormGroup>
 
                     <FormGroup>
-                        <Label>직위 (Rank)</Label>
+                        <Label htmlFor="employment-position">직위 (Rank)</Label>
                         <Input
+                            id="employment-position"
                             type="text"
                             value={position}
                             onChange={(e) => setPosition(e.target.value)}
@@ -577,8 +569,9 @@ const EmploymentCertificatePage: React.FC = () => {
                     </FormGroup>
 
                     <FormGroup>
-                        <Label>담당업무 (Duties)</Label>
+                        <Label htmlFor="employment-duties">담당업무 (Duties)</Label>
                         <Input
+                            id="employment-duties"
                             type="text"
                             value={duties}
                             onChange={(e) => setDuties(e.target.value)}
@@ -649,6 +642,18 @@ const EmploymentCertificatePage: React.FC = () => {
                         />
                     </FormGroup>
 
+                    <FormGroup>
+                        <Label htmlFor="employment-stamp-print">도장 인쇄</Label>
+                        <Select
+                            id="employment-stamp-print"
+                            value={includeStamp ? 'include' : 'exclude'}
+                            onChange={(event) => setIncludeStamp(event.target.value === 'include')}
+                        >
+                            <option value="include">도장 포함</option>
+                            <option value="exclude">도장 제외</option>
+                        </Select>
+                    </FormGroup>
+
                     <Button onClick={handlePrintClick} disabled={!selectedWorker || loading}>
                         <FontAwesomeIcon icon={faPrint} />
                         재직증명서 인쇄 / PDF 저장
@@ -656,8 +661,12 @@ const EmploymentCertificatePage: React.FC = () => {
                 </SettingsCard>
             </Sidebar>
 
-            <PreviewArea>
-                <div style={{ boxShadow: '0 0 20px rgba(0,0,0,0.3)' }}>
+            <CertificatePreview
+                targetRef={componentRef}
+                disabled={!selectedWorker || !currentCompany || loading}
+                title={`재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`}
+                documentKey={JSON.stringify([currentCompany, selectedWorker, purpose, issueDate, position, duties, joinDate, endDate, isServing, includeStamp])}
+            >
                     <EmploymentCertificateTemplate
                         ref={componentRef}
                         company={currentCompany}
@@ -669,9 +678,9 @@ const EmploymentCertificatePage: React.FC = () => {
                         joinDate={joinDate}
                         endDate={endDate}
                         isServing={isServing}
+                        includeStamp={includeStamp}
                     />
-                </div>
-            </PreviewArea>
+            </CertificatePreview>
         </PageContainer>
     );
 };

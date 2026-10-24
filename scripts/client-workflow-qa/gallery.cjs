@@ -1,0 +1,9 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '../..');
+const output = path.join(root, 'artifacts/client-workflow-qa');
+const rows = JSON.parse(fs.readFileSync(path.join(output, 'route-results.json')));
+const escape = text => String(text ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+const items = rows.map(row => `<article class="${row.fatal || row.horizontalOverflow || row.errors?.length ? 'problem' : ''}"><h2>${escape(row.route)} · ${row.width}px</h2><p>${escape(row.component)} · ${escape(row.state)}</p>${row.screenshot ? `<a href="${escape(row.screenshot)}"><img loading="lazy" src="${escape(row.screenshot)}" alt="${escape(row.route)}"></a>` : ''}<details><summary>검수 수치</summary><pre>${escape(JSON.stringify({ overflow: row.horizontalOverflow, clipped: row.clipped, errors: row.errors, reason: row.reason }, null, 2))}</pre></details></article>`).join('');
+fs.writeFileSync(path.join(output, 'route-gallery.html'), `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>전체 경로 합성 자료 검수</title><style>body{font:14px system-ui;margin:20px;background:#eef2f7;color:#172033}main{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}article{background:white;border:2px solid #dfe5ef;padding:8px;min-width:0}article.problem{border-color:#dc2626}h2{font-size:13px;overflow-wrap:anywhere}img{width:100%;height:440px;object-fit:contain;object-position:top;background:#f8fafc}pre{white-space:pre-wrap}</style><h1>전체 경로 합성 자료 검수</h1><p>실제 앱 + 로컬 demo 데이터. 빈 자료·권한·외부 연동·개별 시각 검수는 통과와 구분합니다. ${rows.length}개 화면 조건.</p><main>${items}</main></html>`);
+console.log(`Gallery: ${rows.length} conditions.`);

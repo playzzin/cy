@@ -1,11 +1,12 @@
+import { trackedGeminiFetch } from '../../services/geminiUsageFetch';
+import { aiSettingsService } from '../../services/aiSettingsService';
 import { parseManpowerDbQuestion } from './manpowerDbQueryParser';
 import { ManpowerDbSearchQuery } from './manpowerDbSearchTypes';
 import { sanitizeForAiPrompt } from './manpowerDbSchemaCatalog';
 
 export interface ManpowerDbLlmParserOptions {
-    apiKey?: string;
+    useAi?: boolean;
     timeoutMs?: number;
-    fetchImpl?: typeof fetch;
 }
 
 const extractJson = (value: string): string => {
@@ -30,7 +31,7 @@ export const parseManpowerDbQuestionHybrid = async (
     options: ManpowerDbLlmParserOptions = {}
 ): Promise<{ query: ManpowerDbSearchQuery; source: 'llm' | 'rule'; warning?: string }> => {
     const fallback = () => ({ query: parseManpowerDbQuestion(question, today), source: 'rule' as const });
-    if (!options.apiKey || !options.fetchImpl) return fallback();
+    if (!options.useAi) return fallback();
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
     const timeout = controller ? setTimeout(() => controller.abort(), options.timeoutMs ?? 8000) : undefined;
@@ -43,7 +44,7 @@ export const parseManpowerDbQuestionHybrid = async (
             accountNumber: '123456789',
             idNumber: '900101-1234567',
         });
-        const response = await options.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${options.apiKey}`, {
+        const response = await trackedGeminiFetch('manpower-search')(`https://generativelanguage.googleapis.com/v1beta/models/${aiSettingsService.getModels().textModel}:generateContent`, {
             method: 'POST',
             signal: controller?.signal,
             headers: { 'Content-Type': 'application/json' },

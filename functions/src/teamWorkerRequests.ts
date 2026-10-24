@@ -1,3 +1,4 @@
+import { withGeminiUsageContext } from './geminiUsageLogging';
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
@@ -17,8 +18,8 @@ const safeId = (value: unknown) => { const result = text(value); if (!/^[a-zA-Z0
 const documentKind = (value: unknown): WorkerDocumentKind => { if (!['identity', 'bank'].includes(String(value))) fail('invalid-argument', '서류 종류를 확인해 주세요.'); return value as WorkerDocumentKind; };
 const isCompanyName = (value: unknown) => ['청연이엔지', '청연eng'].includes(text(value).normalize('NFKC').toLowerCase().replace(/주식회사|\(주\)|[\s㈜]/g, ''));
 
-export async function registrationCompany() {
-    const snapshot = await admin.firestore().collection('companies').select('name', 'status', 'isActive').limit(1001).get();
+export async function registrationCompany(db: FirebaseFirestore.Firestore = admin.firestore()) {
+    const snapshot = await db.collection('companies').select('name', 'status', 'isActive').limit(1001).get();
     if (snapshot.size > 1000) fail('resource-exhausted', '회사 설정을 확인해 주세요.');
     const matches = snapshot.docs.filter(doc => isCompanyName(doc.data().name) && doc.data().isActive !== false && !['inactive', 'archived'].includes(doc.data().status));
     if (matches.length !== 1) fail('failed-precondition', '통합DB에서 청연이엔지 소속회사를 하나로 확인할 수 없습니다. 사무실에서 회사 등록을 확인해 주세요.');
@@ -40,20 +41,22 @@ export function workerPayroll(input: any) {
     return { payType, salaryModel: payType, unitPrice };
 }
 
+export async function readTeamWorkerRequestList(db: FirebaseFirestore.Firestore, actor: Awaited<ReturnType<typeof actorFor>>, input: any) {
+    const yearMonth = text(input.yearMonth);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '조회 월을 확인해 주세요.');
+    const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth) : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
+    const [snapshot, company] = await Promise.all([readRequestPage(scope, input), registrationCompany(db)]);
+    const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)).filter(row => ['pending', 'approved', 'rejected'].includes(row.status) && row.yearMonth === yearMonth).sort((a, b) => text(b.submittedAt || b.createdAt).localeCompare(text(a.submittedAt || a.createdAt)));
+    return { canReview: actor.canReview, teams: actor.teams, company, requests, nextCursor: snapshot.nextCursor };
+}
+
 export async function handleTeamWorkerRequest(input: any, context: functions.https.CallableContext) {
     const auth = requireCallableAuth(context);
     const actor = await actorFor(auth.uid);
     const db = admin.firestore();
     const action = text(input?.action);
     if (['drafts', 'discardDraft'].includes(action)) return maintainRequestDrafts(input, actor.canReview, COLLECTION, DOCUMENTS);
-    if (action === 'list') {
-        const yearMonth = text(input.yearMonth);
-        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '조회 월을 확인해 주세요.');
-        const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth) : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
-        const snapshot = await readRequestPage(scope, input);
-        const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)).filter(row => ['pending', 'approved', 'rejected'].includes(row.status) && row.yearMonth === yearMonth).sort((a, b) => text(b.submittedAt || b.createdAt).localeCompare(text(a.submittedAt || a.createdAt)));
-        return { canReview: actor.canReview, teams: actor.teams, company: await registrationCompany(), requests, nextCursor: snapshot.nextCursor };
-    }
+    if (action === 'list') return readTeamWorkerRequestList(db, actor, input);
     if (action === 'document') {
         const ref = db.collection(COLLECTION).doc(safeId(input.id));
         const row = (await ref.get()).data();
@@ -88,11 +91,13 @@ export async function handleTeamWorkerRequest(input: any, context: functions.htt
                 const workerRef = db.collection('workers').doc(workerId);
                 const duplicateRef = db.doc(`server_settings/worker-registration-${hash(`${fields.name}:${fields.contact}`)}`);
                 const accountRef = fields.accountNumber ? db.doc(`server_settings/worker-registration-account-${hash(`${fields.name}:${fields.accountNumber}`)}`) : null;
-                const [team, company, existing, duplicate, sameNames, duplicateAccount] = await Promise.all([
-                    transaction.get(db.collection('teams').doc(row.teamId)), transaction.get(db.collection('companies').doc(row.companyId)),
-                    transaction.get(workerRef), transaction.get(duplicateRef), transaction.get(db.collection('workers').where('name', '==', fields.name).limit(101)),
-                    accountRef ? transaction.get(accountRef) : Promise.resolve(null),
-                ]);
+                // Keep the query stream after document locks: concurrent reads on
+                // an aborted transaction can surface INVALID_ARGUMENT instead of a retry.
+                const [team, company, existing, duplicate, duplicateAccount] = await transaction.getAll(
+                    db.collection('teams').doc(row.teamId), db.collection('companies').doc(row.companyId),
+                    workerRef, duplicateRef, ...(accountRef ? [accountRef] : []),
+                );
+                const sameNames = await transaction.get(db.collection('workers').where('name', '==', fields.name).limit(101));
                 if (!team.exists || team.data()?.isActive === false || !company.exists || company.data()?.isActive === false || !isCompanyName(company.data()?.name) || ['inactive', 'archived'].includes(company.data()?.status)) fail('failed-precondition', '신청한 팀 또는 소속회사를 확인해 주세요.');
                 const teamType = text(team.data()?.type);
                 if (['지원팀', '용역팀'].includes(teamType) && payroll.payType !== teamType) fail('invalid-argument', `이 팀의 급여 구분은 ${teamType}이어야 합니다.`);
@@ -172,4 +177,4 @@ export async function handleTeamWorkerRequest(input: any, context: functions.htt
     });
 }
 
-export const teamWorkerRequests = functions.runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 5 }).region('asia-northeast3').https.onCall(handleTeamWorkerRequest);
+export const teamWorkerRequests = functions.runWith({ timeoutSeconds: 120, memory: '512MB', maxInstances: 5 }).region('asia-northeast3').https.onCall(withGeminiUsageContext(handleTeamWorkerRequest));

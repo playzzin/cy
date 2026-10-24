@@ -1,3 +1,4 @@
+import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -97,6 +98,7 @@ const sanitizeExcelFileName = (value: string): string => (
 
 const MaterialTransactionsPage: React.FC = () => {
     const navigate = useNavigate();
+    const canDelete = useMaterialAdministration();
     const [loading, setLoading] = useState(false);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
@@ -586,7 +588,7 @@ const MaterialTransactionsPage: React.FC = () => {
                     <span className="text-xs font-bold text-slate-500">
                         선택 {selectedVisibleCount.toLocaleString('ko-KR')}건
                     </span>
-                    <button
+                    {canDelete && (<button
                         type="button"
                         onClick={handleBulkDelete}
                         disabled={selectedVisibleCount === 0 || loading}
@@ -594,7 +596,7 @@ const MaterialTransactionsPage: React.FC = () => {
                     >
                         <FontAwesomeIcon icon={faTrash} />
                         선택 삭제
-                    </button>
+                    </button>)}
                     <button
                         onClick={handleDownloadExcel}
                         className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm font-medium"
@@ -818,13 +820,13 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 >
                                                     <FontAwesomeIcon icon={faEdit} />
                                                 </button>
-                                                <button
+                                                {canDelete && (<button
                                                     onClick={() => handleDelete(t)}
                                                     className="w-8 h-8 rounded-full bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center transition"
                                                     title="삭제"
                                                 >
                                                     <FontAwesomeIcon icon={faTrash} />
-                                                </button>
+                                                </button>)}
                                             </div>
                                         </td>
                                     </tr>

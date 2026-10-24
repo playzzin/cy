@@ -11,6 +11,7 @@ import { DashboardMobileKpiRail } from './DashboardMobileKpiRail';
 import { DashboardOperationsPulsePanel } from './DashboardOperationsPulsePanel';
 import { DashboardStatisticsPanel } from './DashboardStatisticsPanel';
 import { DashboardModeConfig } from './roleDashboardConfig';
+import { getKoreanDateKey } from '../../utils/koreanBusinessDate';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowRight, faSpinner,
@@ -66,7 +67,7 @@ const DashboardExecutiveViewContent = React.memo<{
 }>(({ stats, refreshing, lastUpdatedAt, onRefresh }) => {
     const navigate = useNavigate();
     const handleTodayManDayClick = React.useCallback(() => {
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = getKoreanDateKey();
         navigate(`/reports/daily?tab=list-v2&date=${todayStr}`);
     }, [navigate]);
     const handleTodoClick = React.useCallback(() => {
@@ -123,7 +124,7 @@ const DashboardExecutiveViewContent = React.memo<{
 
             <DashboardDailyReportCoveragePanel coverage={stats.dailyReportCoverage} />
 
-            <DashboardNextFeaturePanel stats={stats} />
+            <DashboardNextFeaturePanel stats={stats} dataAvailable={lastUpdatedAt !== null} refreshing={refreshing} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2 space-y-8">

@@ -2,12 +2,34 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CardStatementImportHistoryModal } from './CardStatementImportHistoryModal';
 import { cardStatementImportService } from '../../services/cardStatementImportService';
+import { cardStatementAttachmentService } from '../../services/cardStatementAttachmentService';
+
+jest.mock('../../services/cardStatementAttachmentService', () => ({
+  cardStatementAttachmentService: { resolve: jest.fn() },
+  getCardStatementFileName: (path: string) => path.split('/').pop(),
+  getCardStatementAttachmentError: () => '파일 조회 실패',
+}));
 
 jest.mock('../../services/cardStatementImportService', () => ({ cardStatementImportService: { listUploadHistory: jest.fn(), cancelStoredFile: jest.fn() } }));
 const service = cardStatementImportService as jest.Mocked<typeof cardStatementImportService>;
-const file = { id: 'file-1', originalFileName: 'statement.pdf', status: 'completed', fileIndex: 0 } as any;
+const file = { id: 'file-1', jobId: 'job-1', originalFileName: 'statement.pdf', status: 'completed', fileIndex: 0 } as any;
 
 beforeEach(() => { jest.resetAllMocks(); service.listUploadHistory.mockResolvedValue([file]); service.cancelStoredFile.mockResolvedValue(); });
+
+test('opens an original from upload history without cancelling or modifying the file', async () => {
+  service.listUploadHistory.mockResolvedValue([{ ...file, storagePath: 'statements/original.pdf' }]);
+  jest.mocked(cardStatementAttachmentService.resolve).mockResolvedValue({ url: 'https://example.com/original.pdf', release: jest.fn() });
+  const onCancelled = jest.fn();
+  render(<CardStatementImportHistoryModal isOpen yearMonth="2026-09" onClose={jest.fn()} onCancelled={onCancelled} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'statement.pdf 원본 열기' }));
+  expect(await screen.findByRole('link', { name: '새 탭에서 원본 열기' })).toHaveAttribute('href', 'https://example.com/original.pdf');
+  expect(cardStatementAttachmentService.resolve).toHaveBeenCalledWith('statements/original.pdf');
+  fireEvent.click(screen.getByRole('button', { name: '청구서 파일 닫기' }));
+  expect(screen.getByRole('button', { name: 'statement.pdf 원본 열기' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'statement.pdf 상세내역' })).toHaveAttribute('href', '/support/cards/statements?month=2026-09&fileId=file-1');
+  expect(service.cancelStoredFile).not.toHaveBeenCalled();
+  expect(onCancelled).not.toHaveBeenCalled();
+});
 
 test('lists the selected month and only cancels after explicit confirmation', async () => {
   const onCancelled = jest.fn();
@@ -23,6 +45,14 @@ test('lists the selected month and only cancels after explicit confirmation', as
   expect(screen.queryByRole('button', { name: 'statement.pdf 업로드 취소' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByLabelText('취소 내역도 보기'));
   expect(screen.getByText(/취소됨/)).toBeInTheDocument();
+});
+
+test('an attachment without an import job cannot be cancelled as an import', async () => {
+  service.listUploadHistory.mockResolvedValue([{ ...file, jobId: '', id: 'stored-file' }]);
+  render(<CardStatementImportHistoryModal isOpen yearMonth="2026-09" onClose={jest.fn()} onCancelled={jest.fn()} />);
+  await screen.findByRole('link', { name: 'statement.pdf 상세내역' });
+  expect(screen.queryByRole('button', { name: 'statement.pdf 업로드 취소' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '선택한 0건 업로드 취소' })).toBeDisabled();
 });
 
 test('a blocked cancellation keeps the file and explains the remaining amount', async () => {

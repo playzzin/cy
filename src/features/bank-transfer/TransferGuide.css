@@ -1,0 +1,131 @@
+.bank-transfer-page button.bt-guide-trigger { color:#fde68a; border-color:#b9892766; background:linear-gradient(135deg,#fbbf241a,#f59e0b0a); gap:7px; }
+.bt-guide-trigger>span { padding:1px 5px; border-left:1px solid #fbbf244d; color:#b6a475; font-size:10px; }
+.bt-guide-overlay { position:fixed; inset:0; z-index:1500; background:#020617b8; backdrop-filter:blur(5px); }
+.bt-guide-dialog { --guide-border:#2c3b53; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:1501; display:flex; flex-direction:column; width:min(1120px,calc(100vw - 36px)); height:min(900px,calc(100dvh - 40px)); overflow:hidden; border:1px solid #475569; border-radius:20px; color:#e2e8f0; color-scheme:dark; background:#0b1222; box-shadow:0 30px 100px #0008; font-family:inherit; font-size:13px; }
+.bt-guide-dialog * { box-sizing:border-box; }
+.bt-guide-dialog :is(h2,h3,h4,p,figure) { margin:0; }
+.bt-guide-dialog button { display:inline-flex; justify-content:center; align-items:center; gap:6px; min-height:34px; padding:7px 11px; border:1px solid var(--guide-border); border-radius:8px; color:#cbd5e1; background:#111c30; font:inherit; font-weight:600; cursor:pointer; }
+.bt-guide-dialog button:hover:not(:disabled) { color:#fff; border-color:#64748b; background:#1e293b; }
+.bt-guide-dialog button:disabled { cursor:not-allowed; opacity:.35; }
+.bt-guide-dialog :is(button,input,summary,[tabindex]):focus-visible { outline:2px solid #fbbf24; outline-offset:3px; }
+.bt-guide-dialog svg { flex-shrink:0; }
+.bt-guide-header { display:flex; align-items:flex-start; justify-content:space-between; padding:24px 28px 20px; gap:16px; background:radial-gradient(ellipse at top right,#fbbf2412,transparent 70%); }
+.bt-guide-header-copy { display:flex; align-items:center; gap:15px; }
+.bt-guide-book { display:grid; place-items:center; height:48px; width:48px; border:1px solid #fbbf2440; border-radius:14px; color:#fcd34d; background:#fbbf240d; }
+.bt-guide-eyebrow { display:block; color:#c2a966; font-size:10px; letter-spacing:1.5px; font-weight:700; margin-bottom:7px; }
+.bt-guide-header h2 { font-size:25px; line-height:1.3; letter-spacing:-.8px; color:#f8fafc; }
+.bt-guide-header p { margin-top:6px; color:#94a3b8; font-size:12px; }
+.bt-guide-dialog .bt-guide-close { background:transparent; border-color:transparent; padding:6px; }
+.bt-guide-overview { display:flex; align-items:center; justify-content:center; gap:18px; padding:12px 20px; border-block:1px solid var(--guide-border); color:#64748b; background:#111b2d; }
+.bt-guide-overview>span { display:flex; align-items:center; gap:7px; font-size:11px; color:#cbd5e1; }
+.bt-guide-overview>span:first-child { color:#fcd34d; }
+.bt-guide-short-label { display:none; }
+.bt-guide-dialog .bt-guide-theater-toggle { font-size:11px; color:#a5b4fc; border-color:#818cf84d; margin-bottom:2px; }
+.bt-guide-layout.is-theater { grid-template-columns:minmax(0,1fr); }
+.bt-guide-layout.is-theater .bt-guide-sidebar { display:none; }
+.bt-guide-layout.is-theater :is(.bt-guide-chapter-heading,.bt-guide-intro) { display:none; }
+.bt-guide-layout.is-theater .bt-sim-workspace { grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr); }
+.bt-guide-layout.is-theater .bt-sim-workspace.is-review { grid-template-columns:minmax(0,1fr); }
+.bt-guide-dialog:has(.is-theater) .bt-guide-header { padding:10px 20px; align-items:center; }
+.bt-guide-dialog:has(.is-theater) .bt-guide-header h2 { font-size:17px; }
+.bt-guide-dialog:has(.is-theater) .bt-guide-header :is(.bt-guide-eyebrow,p),.bt-guide-dialog:has(.is-theater) .bt-guide-overview { display:none; }
+.bt-guide-dialog:has(.is-theater) .bt-guide-book { width:32px; height:32px; border-radius:8px; }
+.bt-guide-layout.is-theater .bt-guide-reading { padding:10px 18px; }
+.bt-guide-layout.is-theater .bt-simulator { margin-top:8px; }
+.bt-guide-written-steps { margin:15px 0; border:1px solid #334155; border-radius:8px; padding:12px; }
+.bt-guide-written-steps>summary { color:#cbd5e1; font-size:12px; cursor:pointer; }
+.bt-guide-written-steps .bt-guide-instructions { margin-bottom:0; }
+.bt-guide-layout { display:grid; grid-template-columns:234px minmax(0,1fr); flex:1; min-height:0; }
+.bt-guide-sidebar { display:flex; flex-direction:column; border-right:1px solid var(--guide-border); padding:23px 13px; background:#0a1120; overflow:hidden; }
+.bt-guide-nav-label { padding:0 10px 12px; font-size:10px; color:#7e90a9; letter-spacing:.5px; }
+.bt-guide-sidebar nav { display:flex; flex:1; min-height:0; overflow-y:auto; scrollbar-width:thin; flex-direction:column; gap:5px; }
+.bt-guide-sidebar nav button { flex-shrink:0; justify-content:flex-start; text-align:left; padding:10px; gap:10px; background:transparent; border-color:transparent; }
+.bt-guide-chapter-number { color:#64748b; font-size:11px; font-variant-numeric:tabular-nums; }
+.bt-guide-sidebar nav strong { display:block; color:#cbd5e1; font-size:12px; font-weight:600; }
+.bt-guide-sidebar nav small { display:block; color:#7e90a9; font-size:10px; margin-top:3px; font-weight:400; }
+.bt-guide-sidebar nav svg { margin-left:auto; color:#475569; }
+.bt-guide-sidebar nav button[aria-current=step] { border-color:#fbbf243d; background:linear-gradient(110deg,#fbbf2414,#fbbf2405); }
+.bt-guide-sidebar nav button[aria-current=step] :is(strong,.bt-guide-chapter-number,svg) { color:#fcd34d; }
+.bt-guide-dialog .bt-guide-faq-link { flex-shrink:0; margin-top:20px; padding:12px 8px; width:100%; text-align:left; justify-content:flex-start; font-size:11px; color:#a5b4fc; border-color:#818cf83b; background:#818cf80a; }
+.bt-guide-dialog .bt-guide-faq-link.is-active { background:#818cf826; border-color:#818cf880; }
+.bt-guide-sidebar-note { margin:20px 9px 0; padding-top:16px; border-top:1px solid var(--guide-border); display:flex; gap:9px; color:#64748b; }
+.bt-guide-sidebar-note p { font-size:10px; line-height:1.8; }
+.bt-guide-reading { padding:27px 30px 25px; overflow-y:auto; overscroll-behavior:contain; scrollbar-color:#475569 transparent; }
+.bt-guide-chapter-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.bt-guide-reading h3 { font-size:23px; letter-spacing:-.6px; font-weight:700; color:#f8fafc; }
+.bt-guide-reading-badge { padding:4px 9px; color:#94a3b8; background:#172338; border:1px solid var(--guide-border); font-size:10px; border-radius:20px; }
+.bt-guide-reading p.bt-guide-intro { line-height:1.8; color:#aab8cb; margin:9px 0 19px; font-size:12px; }
+
+.bt-guide-instructions { margin:24px 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:19px; }
+.bt-guide-instructions li { display:flex; gap:11px; }
+.bt-guide-instructions li>span { display:grid; place-items:center; width:23px; height:23px; flex-shrink:0; background:#1e2b40; border:1px solid var(--guide-border); border-radius:7px; color:#9aabc3; font-size:10px; }
+.bt-guide-instructions h4 { color:#e2e8f0; font-size:13px; line-height:1.7; font-weight:650; }
+.bt-guide-instructions p { color:#94a3b8; font-size:12px; line-height:1.9; margin-top:4px; word-break:keep-all; overflow-wrap:anywhere; }
+.bt-guide-caution { display:flex; gap:10px; border:1px solid #fbbf2438; border-left:3px solid #e6ac35; padding:15px; border-radius:9px; background:#fbbf2409; }
+.bt-guide-caution svg { color:#fbbf24; margin-top:1px; }
+.bt-guide-caution strong { color:#fde68a; font-size:12px; }
+.bt-guide-caution p { color:#c3b99f; font-size:12px; line-height:1.9; margin-top:7px; word-break:keep-all; overflow-wrap:anywhere; }
+.bt-guide-check { display:flex; gap:9px; align-items:flex-start; padding:15px 2px 0; color:#6ee7b7; }
+.bt-guide-check p { font-size:12px; line-height:1.7; color:#9dbbae; }
+.bt-guide-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 23px; border-top:1px solid var(--guide-border); background:#101a2c; }
+.bt-guide-footer>span { color:#7e90a9; font-size:11px; }
+.bt-guide-footer>span b { font-weight:400; }
+.bt-guide-footer>div { display:flex; gap:7px; }
+.bt-guide-dialog .bt-guide-primary { border-color:#fcd34d; background:#fbbf24; color:#0f172a; }
+.bt-guide-dialog .bt-guide-primary:hover:not(:disabled) { border-color:#fde68a; background:#fcd34d; color:#0f172a; }
+.bt-guide-search { display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid #475569; border-radius:9px; background:#02061777; color:#94a3b8; }
+.bt-guide-search input { flex:1; min-width:0; height:28px; border:0; color:#e2e8f0; background:transparent; font:inherit; }
+.bt-guide-search input::placeholder { color:#7e90a9; }
+.bt-guide-search button { padding:3px; min-height:25px; border:0; background:transparent; }
+.bt-guide-dialog .bt-guide-search-count { color:#94a3b8; font-size:11px; margin:12px 0; }
+.bt-guide-faq-list { display:flex; flex-direction:column; gap:9px; }
+.bt-guide-faq-list details { border:1px solid var(--guide-border); border-radius:9px; background:#111c30; }
+.bt-guide-faq-list summary { cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px; font-size:12px; color:#e2e8f0; list-style:none; }
+.bt-guide-faq-list summary::-webkit-details-marker { display:none; }
+.bt-guide-faq-list details[open] summary { color:#fde68a; }
+.bt-guide-faq-list details[open] summary svg { transform:rotate(90deg); }
+.bt-guide-faq-list details>div { padding:0 14px 14px; }
+.bt-guide-faq-list p { font-size:12px; line-height:1.9; color:#aab8cb; }
+.bt-guide-faq-list button { font-size:11px; margin-top:12px; color:#fcd34d; }
+.bt-guide-no-results { padding:40px 12px; display:flex; flex-direction:column; align-items:center; gap:13px; color:#94a3b8; text-align:center; }
+.bt-guide-no-results p { font-size:12px; }
+@media (min-width:761px) and (max-height:800px) {
+    .bt-guide-header { padding:16px 24px; }
+    .bt-guide-header h2 { font-size:22px; }
+    .bt-guide-book { width:40px; height:40px; }
+    .bt-guide-overview { padding:9px 20px; }
+    .bt-guide-sidebar { padding:14px 13px; }
+    .bt-guide-sidebar nav { gap:3px; }
+    .bt-guide-sidebar nav button { padding:7px 10px; }
+    .bt-guide-dialog .bt-guide-faq-link { margin-top:12px; padding:9px 8px; }
+    .bt-guide-sidebar-note { display:none; }
+    .bt-guide-reading { padding:20px 27px; }
+}
+@media (max-width:760px) {
+    .bt-guide-layout.is-theater .bt-sim-workspace { grid-template-columns:minmax(0,1fr); }
+    .bt-guide-dialog { width:calc(100vw - 16px); height:calc(100dvh - 16px); border-radius:13px; }
+    .bt-guide-header { padding:17px; }
+    .bt-guide-header h2 { font-size:21px; }
+    .bt-guide-book { display:none; }
+    .bt-guide-header p { font-size:11px; word-break:keep-all; }
+    .bt-guide-overview { gap:7px; padding:10px; }
+    .bt-guide-overview>span { gap:4px; font-size:10px; }
+    .bt-guide-overview svg { width:12px; }
+    .bt-guide-wide-label { display:none; }
+    .bt-guide-short-label { display:inline; }
+    .bt-guide-layout { display:flex; flex-direction:column; }
+    .bt-guide-sidebar { flex-shrink:0; flex-direction:column; padding:8px 10px; border-right:0; border-bottom:1px solid var(--guide-border); }
+    .bt-guide-sidebar nav { flex:0 0 auto; flex-direction:row; overflow-x:auto; gap:5px; }
+    .bt-guide-sidebar nav button { padding:7px 9px; white-space:nowrap; gap:6px; }
+    .bt-guide-sidebar nav :is(small,svg),.bt-guide-nav-label,.bt-guide-sidebar-note { display:none; }
+    .bt-guide-sidebar nav strong { font-size:11px; }
+    .bt-guide-dialog .bt-guide-faq-link { flex-shrink:0; width:auto; margin:6px 0 0; padding:7px 9px; }
+    .bt-guide-reading { flex:1; min-height:0; padding:20px 16px; }
+    .bt-guide-footer { padding:11px 15px; }
+    .bt-guide-footer>span { font-size:10px; flex-shrink:0; }
+    .bt-guide-footer-hint { display:none; }
+    .bt-guide-footer button { white-space:nowrap; font-size:11px; padding:6px 8px; }
+}
+@media (prefers-reduced-motion:reduce) {
+    .bt-guide-dialog * { animation:none!important; transition:none!important; scroll-behavior:auto!important; }
+}

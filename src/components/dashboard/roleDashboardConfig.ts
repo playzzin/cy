@@ -141,21 +141,21 @@ export const DASHBOARD_MODES: DashboardModeConfig[] = [
         accent: '#0891b2',
         softBg: '#ecfeff',
         heroTitle: '팀 출역과 공수를 빠르게 정리합니다',
-        heroDescription: '오늘 투입, 팀별 흐름, 일보 작성과 현장 현황을 팀 운영 순서에 맞췄습니다.',
+        heroDescription: '현장 현황, 작업자 근무내역, 급여와 가불 신청을 확인합니다.',
         focusItems: [
             { label: '오늘 출역', value: '인원·공수', description: '당일 작업자와 공수 변화를 먼저 확인합니다.' },
             { label: '팀 현황', value: '팀별 성과', description: '팀 단위 투입 추세를 바로 비교합니다.' },
-            { label: '현장 이동', value: '일보·현황', description: '작성과 확인 화면을 짧은 동선으로 연결합니다.' },
+            { label: '근무 확인', value: '달력·목록', description: '작업자별 날짜와 현장을 확인합니다.' },
         ],
         quickActions: [
-            { label: '일보 작성', desc: '오늘 작업 내용 기록', path: '/reports/daily?tab=input', icon: faCalendarCheck, color: 'brand' },
-            { label: '오늘 현황', desc: '오늘 일보와 공수 확인', path: '/reports/daily?tab=list-v2', icon: faClipboardList, color: 'orange' },
-            { label: '작업자 관리', desc: '팀원 정보 확인', path: '/database/manpower-db', icon: faUsers, color: 'cyan' },
-            { label: '팀 관리', desc: '팀 구성과 배정 확인', path: '/database/team-db', icon: faHardHat, color: 'violet' },
+            { label: '근무내역', desc: '날짜별 현장과 공수 확인', path: '/manpower/team-worker-detail?section=work', icon: faCalendarCheck, color: 'brand' },
+            { label: '통합 현황판', desc: '현장별 투입 현황 확인', path: '/jeonkuk/integrated-status', icon: faClipboardList, color: 'orange' },
+            { label: '작업자정보', desc: '팀원 정보 확인', path: '/manpower/team-worker-detail', icon: faUsers, color: 'cyan' },
+            { label: '신규작업자등록', desc: '사무실에 신규 등록 요청', path: '/manpower/team-worker-requests', icon: faHardHat, color: 'violet' },
             { label: '현장 현황', desc: '현장별 투입 현황', path: '/dashboard/site-status', icon: faBuilding, color: 'green' },
             { label: '지원 관리', desc: '지원 공수와 청구 확인', path: '/payroll/support-claim', icon: faRightLeft, color: 'teal' },
-            { label: '가불 신청', desc: '가불 등록과 내역 확인', path: '/payroll/advance-payment', icon: faHandHoldingDollar, color: 'amber' },
-            { label: '급여 조회', desc: '급여 지급 내역 확인', path: '/payroll/payslip', icon: faFileInvoiceDollar, color: 'emerald' },
+            { label: '가불 신청', desc: '가불 신청과 처리 상태 확인', path: '/payroll/advance-request', icon: faHandHoldingDollar, color: 'amber' },
+            { label: '급여명세서', desc: '작업자별 급여 명세 확인', path: '/manpower/team-worker-payslip', icon: faFileInvoiceDollar, color: 'emerald' },
         ],
     },
     {
@@ -261,7 +261,7 @@ const BUSINESS_PARTNER_DASHBOARD_OVERRIDES: Record<BusinessPartnerPositionId, Pa
             { label: '임대 거래명세표', desc: '임대 거래 문서 작성', path: '/transaction/manage', icon: faClipboardList, color: 'amber' },
             { label: '임대 견적', desc: '임대 견적 작성 및 관리', path: '/estimate/manage', icon: faFileExcel, color: 'sky' },
             { label: '자재 통합관리', desc: '자재 입출고와 재고 확인', path: '/materials', icon: faBuilding, color: 'slate' },
-            { label: '매입매출 장부', desc: '임대 거래 매입매출 확인', path: '/payroll/workbook-ledger-upgrade', icon: faFileInvoiceDollar, color: 'green' },
+            { label: '매입매출 장부', desc: '임대 거래 매입매출 확인', path: '/payroll/workbook-ledger', icon: faFileInvoiceDollar, color: 'green' },
         ],
     },
     referral: {
@@ -378,7 +378,7 @@ export const getPreferredPositionIdForDashboardMode = (
     positions: PositionItem[] = []
 ): string | undefined => {
     if (modeId === 'executive') {
-        return findPositionId(positions, ['ceo'], ['대표', '사장']) || findPositionId(positions, ['full'], ['전체']);
+        return findPositionId(positions, ['ceo'], ['ceo', '대표', '사장']) || findPositionId(positions, ['full'], ['전체']);
     }
     if (modeId === 'manager') {
         return findPositionId(positions, ['manager1', 'manager'], ['메니저', '매니저', '실장']);

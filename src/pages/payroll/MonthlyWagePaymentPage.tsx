@@ -1,4 +1,7 @@
 import React from 'react';
+import AppIntroScreen from '../../components/common/AppIntroScreen';
+
+const MonthlyWageDraftPage = React.lazy(() => import('./MonthlyWageDraftPage'));
 
 interface MonthlyWagePaymentPageProps {
     hideHeader?: boolean;
@@ -6,12 +9,9 @@ interface MonthlyWagePaymentPageProps {
 
 const MonthlyWagePaymentPage: React.FC<MonthlyWagePaymentPageProps> = ({ hideHeader = false }) => {
     return (
-        <div className="p-6">
-            {!hideHeader && (
-                <h1 className="text-2xl font-semibold text-gray-900">월급제 지급 준비 중</h1>
-            )}
-            <p className="mt-2 text-sm text-gray-600">현재 페이지는 리뉴얼 작업 중입니다. 곧 새로운 인터페이스로 제공될 예정입니다.</p>
-        </div>
+        <React.Suspense fallback={<AppIntroScreen message="월급제 지급 화면을 불러오고 있습니다" />}>
+            <MonthlyWageDraftPage hideHeader={hideHeader} />
+        </React.Suspense>
     );
 };
 

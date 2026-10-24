@@ -21,7 +21,8 @@ const transaction = (id: string, patch: Record<string, unknown> = {}) => ({
 test('card expense audit access is strict to CEO and DEV role values', async () => {
     const { hasStrictCardExpenseAuditAccess } = await loadAuditModule();
     assert.equal(hasStrictCardExpenseAuditAccess({ role: 'admin' }), false);
-    assert.equal(hasStrictCardExpenseAuditAccess({ position: '대표' }), true);
+    assert.equal(hasStrictCardExpenseAuditAccess({ position: 'CEO' }), true);
+    assert.equal(hasStrictCardExpenseAuditAccess({ position: 'ceo' }), true);
     assert.equal(hasStrictCardExpenseAuditAccess({ additionalPositions: ['일반', 'DEV'] }), true);
     assert.equal(hasStrictCardExpenseAuditAccess({ erpRoleGroups: ['finance'] }), false);
 });

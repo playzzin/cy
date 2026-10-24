@@ -1,5 +1,27 @@
 {
   "indexes": [
+    {"collectionGroup":"login_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actor.uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"daily_report_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actor.uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"database_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actor.uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"material_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actor.uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"workbook_ledger_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actor.uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"vehicle_billing_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actor.uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"card_billing_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actor.uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"accommodation_billing_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actor.uid","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"audit_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actorId","order":"ASCENDING"},{"fieldPath":"timestamp","order":"DESCENDING"}]},
+    {"collectionGroup":"audit_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"actorId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]},
+    {"collectionGroup":"audit_logs","queryScope":"COLLECTION","fields":[{"fieldPath":"category","order":"ASCENDING"},{"fieldPath":"actorId","order":"ASCENDING"},{"fieldPath":"timestamp","order":"DESCENDING"}]},
+    { "collectionGroup": "ai_report_schedules", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "uid", "order": "ASCENDING" }, { "fieldPath": "nextRunAt", "order": "ASCENDING" }] },
+    { "collectionGroup": "ai_report_runs", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "uid", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "cardBillings", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "team.id", "order": "ASCENDING" }] },
+    { "collectionGroup": "cardBillings", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "teamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "cardBillings", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "assignedTeamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "accommodation_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "team.id", "order": "ASCENDING" }] },
+    { "collectionGroup": "accommodation_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "teamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "accommodation_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "assignedTeamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "vehicle_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "team.id", "order": "ASCENDING" }] },
+    { "collectionGroup": "vehicle_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "teamId", "order": "ASCENDING" }] },
+    { "collectionGroup": "vehicle_billing_documents", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "yearMonth", "order": "ASCENDING" }, { "fieldPath": "assignedTeamId", "order": "ASCENDING" }] },
     {
       "collectionGroup": "smart_memo_reminders",
       "queryScope": "COLLECTION",
@@ -333,6 +355,34 @@
       "fields": [
         { "fieldPath": "transactionType", "order": "ASCENDING" },
         { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "notice_notification_outbox",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "nextAttemptAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notification_user_states",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "reminderStatus",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "snoozedUntil",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],

@@ -126,7 +126,7 @@ describe('smart memo dev access', () => {
     it('accepts an additional dev position and excludes non-dev or inactive profiles', () => {
         expect(canViewAllSmartMemos({ additionalPositions: ['일반', 'DEV'] })).toBe(true);
         expect(canViewAllSmartMemos({ role: 'DEV' })).toBe(true);
-        expect(canViewAllSmartMemos({ role: 'admin', position: '사장' })).toBe(false);
+        expect(canViewAllSmartMemos({ role: 'admin', position: 'CEO' })).toBe(false);
         expect(canViewAllSmartMemos({ position: 'dev', status: 'suspended' })).toBe(false);
         expect(canViewAllSmartMemos(null)).toBe(false);
     });

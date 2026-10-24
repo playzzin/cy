@@ -84,7 +84,7 @@ export const SimplePayrollClosingTable: React.FC<SimplePayrollClosingTableProps>
                     : null;
 
     return (
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="monthly-payroll-closing flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
                 <div>
                     <h2 className="text-lg font-bold text-slate-800">간편 급여 마감표</h2>
@@ -139,8 +139,9 @@ export const SimplePayrollClosingTable: React.FC<SimplePayrollClosingTableProps>
                 </div>
             )}
 
-            <div className="min-h-0 flex-1 overflow-auto p-3">
-                <table className="min-w-[840px] w-full border-separate border-spacing-0 text-sm">
+            {rows.length > 0 && <p className="monthly-payroll-scroll-hint">좌우로 밀어 급여 항목을 확인하세요.</p>}
+            <div className="monthly-payroll-table-scroll min-h-0 flex-1 overflow-auto p-3" role="region" aria-label="간편 급여 마감표 가로 스크롤" tabIndex={0}>
+                <table className={`${rows.length === 0 ? 'monthly-payroll-empty-table' : ''} min-w-[840px] w-full border-separate border-spacing-0 text-sm`}>
                     <thead className="sticky top-0 z-10 bg-slate-100 text-xs text-slate-600">
                         <tr>
                             <th className="border-y border-slate-200 px-3 py-2 text-left font-bold">월</th>

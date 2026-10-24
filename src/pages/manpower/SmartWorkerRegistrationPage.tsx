@@ -276,8 +276,8 @@ const SmartWorkerRegistrationPage: React.FC = () => {
             {/* Header - Full Width */}
             {/* Header & Toolbar - Single Row */}
             <div className="bg-white border-b border-slate-200 p-4 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 flex-shrink-0">
-                <div className="flex items-center gap-4">
-                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 whitespace-nowrap">
+                <div className="flex flex-wrap items-center gap-4">
+                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faPaste} className="text-blue-600" />
                         {registrationMode === 'worker' ? '작업자 대량 등록' : '팀 대량 등록'} (Smart Excel)
                     </h2>

@@ -21,12 +21,13 @@ describe('firebase security rules', () => {
 
   it('keeps Firestore broad fallback behind the locked collection guard', () => {
     expect(firestoreRules).not.toContain('allow read, write: if request.auth != null');
-    expect(firestoreRules).toContain('allow read, write: if hasActiveUserProfile() && !isLockedCollection(collectionId);');
+    expect(firestoreRules).toContain('allow read: if (hasActiveUserProfile() && !isLockedCollection(collectionId)) && previewReadsAllowed();');
+    expect(firestoreRules).toContain('allow write: if !isPreviewIdentity() && (hasActiveUserProfile() && !isLockedCollection(collectionId));');
   });
 
   it('protects user profile reads and writes explicitly', () => {
     expect(firestoreRules).toContain('match /users/{userId}');
-    expect(firestoreRules).toContain('allow list: if isAdmin();');
+    expect(firestoreRules).toContain('allow list: if (isAdmin()) && previewReadsAllowed();');
     expect(firestoreRules).toContain('isSafeSelfUserCreate');
     expect(firestoreRules).toContain('isSafeSelfUserUpdate');
   });
@@ -104,8 +105,8 @@ describe('firebase security rules', () => {
     expect(firestoreRules).toContain("'cardExpenseAuditRuns'");
     expect(firestoreRules).toContain("'cardExpenseAuditFindings'");
     expect(firestoreRules).toContain("'cardExpenseAuditReviewLogs'");
-    expect(firestoreRules).toContain('&& canAccessCardExpenseAudit();');
-    expect(firestoreRules).toContain('allow create, update, delete: if false;');
+    expect(firestoreRules).toContain('&& canAccessCardExpenseAudit()) && previewReadsAllowed();');
+    expect(firestoreRules).toContain('allow create, update, delete: if !isPreviewIdentity() && (false);');
   });
 
   it('deploys TTL retention for sensitive bank integration records', () => {
@@ -133,16 +134,16 @@ describe('firebase security rules', () => {
     expect(storageRules).toContain("'profiles'");
     expect(storageRules).toContain("'users'");
     expect(storageRules).toContain("'backups'");
-    expect(storageRules).toContain('allow read: if !isExplicitlyProtectedTopLevel(topLevel) && activeProfile();');
-    expect(storageRules).toContain('allow write: if !isExplicitlyProtectedTopLevel(topLevel)');
+    expect(storageRules).toContain('allow read: if (!isExplicitlyProtectedTopLevel(topLevel) && activeProfile()) && previewReadsAllowed();');
+    expect(storageRules).toContain('allow write: if !isPreviewIdentity() && (!isExplicitlyProtectedTopLevel(topLevel)');
   });
 
   it('keeps daily-advance finance documents behind finance access checks', () => {
     expect(firestoreRules).toContain('match /daily_advance_workbook_profiles/{profileId}');
     expect(firestoreRules).toContain('match /daily_advance_statement_recruiter_fees/{feeId}');
     expect(firestoreRules).not.toContain('allow read, write: if isSignedIn();');
-    expect(firestoreRules).toContain('allow read: if canReadFinance();');
-    expect(firestoreRules).toContain('allow create, update, delete: if canWriteFinance();');
+    expect(firestoreRules).toContain('allow read: if (canReadFinance()) && previewReadsAllowed();');
+    expect(firestoreRules).toContain('allow create, update, delete: if !isPreviewIdentity() && (canWriteFinance());');
   });
 
   it('locks confirmed monthly payroll snapshots against ordinary finance writes', () => {
@@ -151,5 +152,14 @@ describe('firebase security rules', () => {
     expect(firestoreRules).toContain("beforeStatus == 'confirmed'");
     expect(firestoreRules).toContain("afterStatus == 'paid'");
     expect(firestoreRules).toContain("collectionId != 'monthly_payroll_settlements'");
+  });
+
+  it('guards every storage and database rule, including future write paths', () => {
+    for (const rules of [firestoreRules, storageRules]) {
+      for (const match of rules.matchAll(/allow\s+([\w, ]+):\s*if\s+([^;]+);/g)) {
+        const readsOnly = match[1].split(',').every(operation => ['read', 'get', 'list'].includes(operation.trim()));
+        expect(match[2]).toMatch(readsOnly ? /&& previewReadsAllowed\(\)$/ : /^!isPreviewIdentity\(\) &&/);
+      }
+    }
   });
 });

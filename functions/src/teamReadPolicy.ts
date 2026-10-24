@@ -73,6 +73,6 @@ export const filterTeamRows = (collection: string, rows: TeamRow[], scope: TeamR
                 memo: row.siteId === '__date_off_duty__' ? '' : row.memo }];
         });
     }
-    if (collection === 'materialInbounds' || collection === 'materialOutbounds') return rows.filter(row => scope.siteIds.includes(text(row.siteId)));
+    if (['materialInbounds', 'materialOutbounds', 'materialPhotoBatches'].includes(collection)) return rows.filter(row => scope.siteIds.includes(text(row.siteId)));
     return rows.filter(row => belongsToTeam(row, scope));
 };

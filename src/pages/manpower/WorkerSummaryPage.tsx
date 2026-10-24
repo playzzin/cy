@@ -4,14 +4,15 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCopy, faSearch, faCheckSquare, faFilter, faImage, faDownload, faPaperPlane } from '@fortawesome/free-solid-svg-icons';
+import { faCopy, faSearch, faFilter, faPaperPlane, faXmark, faArrowRight, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { toast } from '../../utils/swal';
-import Swal from 'sweetalert2';
-import { storage } from '../../config/firebase';
-import { ref, getDownloadURL } from 'firebase/storage';
 import html2canvas from 'html2canvas';
-import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { getTeamScopedRows } from '../../services/teamScopedReadService';
+import WorkerIdImageShare from './WorkerIdImageShare';
+import WorkerBankPhotoRegistration from './WorkerBankPhotoRegistration';
+import './WorkerSummaryPage.css';
 
 
 const PageContainer = styled.div`
@@ -125,7 +126,7 @@ const WorkerList = styled.div`
     }
 `;
 
-const WorkerItem = styled.div<{ $selected: boolean; $teamColor: string; $teamTint: string }>`
+const WorkerItem = styled.label<{ $selected: boolean; $teamColor: string; $teamTint: string }>`
     display: flex;
     align-items: center;
     padding: 12px 15px;
@@ -144,19 +145,13 @@ const WorkerItem = styled.div<{ $selected: boolean; $teamColor: string; $teamTin
     }
 `;
 
-const Checkbox = styled.div<{ $checked: boolean }>`
+const Checkbox = styled.input.attrs({ type: 'checkbox' })`
     width: 20px;
     height: 20px;
-    border: 2px solid ${props => props.$checked ? '#339af0' : '#adb5bd'};
-    border-radius: 4px;
+    flex: 0 0 20px;
     margin-right: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: ${props => props.$checked ? '#339af0' : 'white'};
-    color: white;
-    font-size: 12px;
-    transition: all 0.2s;
+    accent-color: #228be6;
+    cursor: pointer;
 `;
 
 const WorkerInfo = styled.div`
@@ -371,32 +366,52 @@ const isActiveWorker = (worker: Worker) => {
 };
 
 const WorkerSummaryPage: React.FC = () => {
+    const restricted = useRestrictedTeamWorkflow();
     const summaryRef = React.useRef<HTMLTableElement>(null);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(false);
 
     const [selectedTeam, setSelectedTeam] = useState<string>('');
     const [searchQuery, setSearchQuery] = useState('');
+    const [mobileView, setMobileView] = useState<'select' | 'summary'>('select');
+    const [selectedOnly, setSelectedOnly] = useState(false);
     const [selectedWorkerIds, setSelectedWorkerIds] = useState<Set<string>>(new Set());
-    const [showIdCards, setShowIdCards] = useState(true);
     const [isSendingImage, setIsSendingImage] = useState(false);
+    const selectionHeadingRef = React.useRef<HTMLHeadingElement>(null);
+    const summaryHeadingRef = React.useRef<HTMLHeadingElement>(null);
+    const selectAllRef = React.useRef<HTMLInputElement>(null);
 
-    // Store resolved image download URLs
-    const [idCardUrls, setIdCardUrls] = useState<Record<string, string>>({});
+    const [documentWorkerIds, setDocumentWorkerIds] = useState<Set<string>>(new Set());
 
     useEffect(() => {
+        let cancelled = false;
         const loadData = async () => {
             try {
                 setLoading(true);
+                setLoadError(false);
+                setWorkers([]);
+                setTeams([]);
+                setSelectedWorkerIds(new Set());
+                setDocumentWorkerIds(new Set());
+                const directory = restricted
+                    ? (await getTeamScopedRows<{ workers: Worker[]; teams: Team[]; documentWorkerIds: string[] }>('worker_summary_directory'))?.[0]
+                    : null;
+                if (restricted && (!directory || !Array.isArray(directory.workers) || !Array.isArray(directory.teams)
+                    || !Array.isArray(directory.documentWorkerIds))) throw new Error('작업자 명단 조회 권한을 확인하지 못했습니다.');
                 const [allWorkers, allTeams, allCompanies] = await Promise.all([
-                    manpowerService.getWorkers(),
-                    teamService.getTeams(),
-                    companyService.getCompanies()
+                    directory ? Promise.resolve(directory.workers) : manpowerService.getWorkers(),
+                    directory ? Promise.resolve(directory.teams) : teamService.getTeams(),
+                    restricted ? Promise.resolve([]) : companyService.getCompanies()
                 ]);
+                if (cancelled) return;
+                if (!allWorkers || !allTeams) throw new Error('소속 팀 조회 권한을 확인하지 못했습니다.');
 
                 // Active workers only
-                const activeWorkers = allWorkers.filter(isActiveWorker);
+                const teamIds = new Set(allTeams.flatMap(team => [team.id, team.legacyId]).filter(Boolean));
+                const activeWorkers = allWorkers.filter(worker => isActiveWorker(worker)
+                    && (!restricted || teamIds.has(worker.teamId)));
 
                 const cheongyeonCompanies = allCompanies.filter((company) => isCheongyeonCompanyName(company.name));
                 const cheongyeonCompanyIds = new Set(
@@ -411,6 +426,7 @@ const WorkerSummaryPage: React.FC = () => {
                 );
                 const allowedTeams = allTeams
                     .filter((team) => {
+                        if (restricted) return true;
                         const teamCompanyId = String(team.companyId ?? '').trim();
                         const teamCompanyName = normalizeText(team.companyName);
 
@@ -421,26 +437,26 @@ const WorkerSummaryPage: React.FC = () => {
                     .sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR'));
 
                 setWorkers(activeWorkers);
+                setDocumentWorkerIds(new Set(directory?.documentWorkerIds ?? activeWorkers.map(worker => worker.id!)));
                 setTeams(allowedTeams);
                 setSelectedTeam((prev) => {
                     if (!prev) return '';
                     return allowedTeams.some((team) => getTeamKey(team) === prev) ? prev : '';
                 });
 
-                // Default select first team if available
-                if (allowedTeams.length > 0) {
-                    // setSelectedTeam(allTeams[0].id || '');
-                }
             } catch (error) {
+                if (cancelled) return;
+                setLoadError(true);
                 console.error("Failed to load data:", error);
                 toast.error("데이터를 불러오는데 실패했습니다.");
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
 
         loadData();
-    }, []);
+        return () => { cancelled = true; };
+    }, [restricted]);
 
     const teamMemberCounts = useMemo(() => {
         const counts = new Map<string, number>();
@@ -485,71 +501,61 @@ const WorkerSummaryPage: React.FC = () => {
             result = result.filter(w => workerMatchesTeam(w, selectedTeamRecord, selectedTeam));
         }
 
-        if (searchQuery) {
-            const lowerQuery = searchQuery.toLowerCase();
+        const trimmedQuery = searchQuery.trim();
+        if (trimmedQuery) {
+            const lowerQuery = trimmedQuery.toLowerCase();
             result = result.filter(w =>
                 w.name.toLowerCase().includes(lowerQuery) ||
-                (w.idNumber && w.idNumber.includes(searchQuery))
+                (w.idNumber && w.idNumber.includes(trimmedQuery))
             );
         }
 
+        if (selectedOnly) result = result.filter(w => selectedWorkerIds.has(w.id!));
         return result;
-    }, [workers, selectedTeam, searchQuery, teams]);
+    }, [workers, selectedTeam, selectedTeamRecord, searchQuery, selectedOnly, selectedWorkerIds]);
 
-    // Fetch ID Card Images
+    const selectedWorkers = useMemo(
+        () => workers.filter(w => selectedWorkerIds.has(w.id!)),
+        [workers, selectedWorkerIds]
+    );
+    const selectedDocumentWorkers = useMemo(
+        () => selectedWorkers.filter(worker => documentWorkerIds.has(worker.id!)),
+        [selectedWorkers, documentWorkerIds]
+    );
+    const visibleSelectedCount = filteredWorkers.filter(w => selectedWorkerIds.has(w.id!)).length;
+    const allVisibleSelected = filteredWorkers.length > 0 && visibleSelectedCount === filteredWorkers.length;
+
     useEffect(() => {
-        const fetchImages = async () => {
-            const urlMap: Record<string, string> = {};
-            // Filter workers who have a file name saved
-            const workersWithId = workers.filter(w => w.fileNameSaved);
-
-            await Promise.all(workersWithId.map(async (w) => {
-                if (!w.fileNameSaved) return;
-                try {
-                    // Check if we already have it to avoid re-fetching (simple optimization)
-                    if (idCardUrls[w.id!]) return;
-
-                    const storageRef = ref(storage, w.fileNameSaved);
-                    const url = await getDownloadURL(storageRef);
-                    urlMap[w.id!] = url;
-                } catch (error) {
-                    // If file doesn't exist or permission denied
-                    console.warn(`Failed to fetch ID card for ${w.name}:`, error);
-                }
-            }));
-
-            if (Object.keys(urlMap).length > 0) {
-                setIdCardUrls(prev => ({ ...prev, ...urlMap }));
-            }
-        };
-
-        if (workers.length > 0) {
-            fetchImages();
+        if (selectAllRef.current) {
+            selectAllRef.current.indeterminate = visibleSelectedCount > 0 && !allVisibleSelected;
         }
-    }, [workers]);
+    }, [visibleSelectedCount, allVisibleSelected, loading]);
+
+    const changeMobileView = (view: 'select' | 'summary') => {
+        setMobileView(view);
+        requestAnimationFrame(() => {
+            (view === 'select' ? selectionHeadingRef : summaryHeadingRef).current?.focus({ preventScroll: true });
+        });
+    };
 
     // Handle Selection
     const toggleSelection = (id: string) => {
-        const newSet = new Set(selectedWorkerIds);
-        if (newSet.has(id)) {
-            newSet.delete(id);
-        } else {
-            newSet.add(id);
-        }
-        setSelectedWorkerIds(newSet);
+        setSelectedWorkerIds(previous => {
+            const next = new Set(previous);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
     };
 
     const toggleSelectAll = () => {
         const currentIds = filteredWorkers.map(w => w.id!);
-        const allSelected = currentIds.every(id => selectedWorkerIds.has(id));
-
-        const newSet = new Set(selectedWorkerIds);
-        if (allSelected) {
-            currentIds.forEach(id => newSet.delete(id));
-        } else {
-            currentIds.forEach(id => newSet.add(id));
-        }
-        setSelectedWorkerIds(newSet);
+        setSelectedWorkerIds(previous => {
+            const allSelected = currentIds.every(id => previous.has(id));
+            const next = new Set(previous);
+            currentIds.forEach(id => allSelected ? next.delete(id) : next.add(id));
+            return next;
+        });
     };
 
     // Generate Summary Text based on selected workers
@@ -578,12 +584,19 @@ const WorkerSummaryPage: React.FC = () => {
             throw new Error('요약 테이블을 찾을 수 없습니다.');
         }
 
-        const canvas = await html2canvas(summaryRef.current, {
+        const captureOptions = {
             useCORS: true,
-            allowTaint: true,
-            background: '#ffffff',
-            scale: 2 // High quality
-        } as any);
+            backgroundColor: '#ffffff',
+            scale: 2,
+            windowWidth: 1280,
+            onclone: (_document: Document, table: HTMLElement) => {
+                // Keep the exported image tabular even when the screen uses mobile cards.
+                table.setAttribute('data-export', 'true');
+                table.style.width = '1080px';
+                table.style.minWidth = '1080px';
+            }
+        };
+        const canvas = await html2canvas(summaryRef.current, captureOptions);
 
         return await new Promise<Blob>((resolve, reject) => {
             canvas.toBlob((blob) => {
@@ -677,105 +690,33 @@ const WorkerSummaryPage: React.FC = () => {
         }
     };
 
-    const handleDownloadIDCards = async () => {
-        if (selectedWorkerIds.size === 0) {
-            toast.warning('선택된 작업자가 없습니다.');
-            return;
-        }
-
-        const selectedWorkers = workers.filter(w => selectedWorkerIds.has(w.id!));
-        const workerswithImages = selectedWorkers.filter(w => w.id && idCardUrls[w.id]);
-
-        if (workerswithImages.length === 0) {
-            toast.warning('선택된 작업자 중 신분증 이미지가 있는 작업자가 없습니다.');
-            return;
-        }
-
-        try {
-            toast.info('신분증 이미지 다운로드 중...');
-            const zip = new JSZip();
-
-            const promises = workerswithImages.map(async (w) => {
-                const url = idCardUrls[w.id!];
-                try {
-                    // Fetch image as blob
-                    const response = await fetch(url, { mode: 'cors' });
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    const blob = await response.blob();
-
-                    // File name: Name_IDNumber(first 6).png or similar
-                    const idNum = w.idNumber ? w.idNumber.substring(0, 6) : 'unknown';
-                    const cleanName = w.name.replace(/[0-9]/g, '');
-                    const fileName = `${cleanName}_${idNum}.png`; // Assuming PNG or standard image
-
-                    zip.file(fileName, blob);
-                } catch (err) {
-                    console.error(`Failed to download image for ${w.name}`, err);
-                }
-            });
-
-            await Promise.all(promises);
-
-            const content = await zip.generateAsync({ type: "blob" });
-            const dateStr = new Date().toISOString().split('T')[0];
-            saveAs(content, `작업자_신분증_모음_${dateStr}.zip`);
-            toast.success('신분증 압축 파일이 다운로드되었습니다.');
-
-        } catch (error) {
-            console.error('ZIP Process Error:', error);
-            toast.error('압축 파일 생성에 실패했습니다.');
-        }
-    };
-
-    const handleSingleIdCardCopy = async (workerName: string, url: string) => {
-        try {
-            // Create a temporary image to draw on canvas
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.src = url;
-
-            await new Promise((resolve, reject) => {
-                img.onload = resolve;
-                img.onerror = reject;
-            });
-
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return;
-
-            ctx.drawImage(img, 0, 0);
-
-            canvas.toBlob(async (blob) => {
-                if (!blob) {
-                    toast.error('이미지 변환 실패');
-                    return;
-                }
-                const item = new ClipboardItem({ 'image/png': blob });
-                await navigator.clipboard.write([item]);
-                const cleanName = workerName.replace(/[0-9]/g, '');
-                toast.success(`${cleanName}님의 신분증이 복사되었습니다.`);
-            });
-
-        } catch (error) {
-            console.error('Single ID Copy Error:', error);
-            toast.error('이미지 복사 실패 (CORS 문제일 수 있습니다)');
-        }
-    };
-
     if (loading) return <LoadingOverlay>데이터 로딩 중...</LoadingOverlay>;
+    if (loadError) return <p role="alert" className="p-6">작업자 정보를 불러오지 못했습니다. 소속 팀 연결과 조회 권한을 확인한 뒤 새로고침해 주세요.</p>;
 
     return (
-        <PageContainer>
-            <Sidebar>
+        <PageContainer className="worker-summary-page" data-mobile-view={mobileView}>
+            <div className="ws-mobile-header">
+                <span className="ws-eyebrow">인력 관리</span>
+                <h1>작업자 요약</h1>
+                <p>필요한 작업자를 골라 한 번에 확인하세요.</p>
+                <nav className="ws-view-switch" aria-label="작업자 요약 화면">
+                    <button type="button" aria-pressed={mobileView === 'select'} onClick={() => changeMobileView('select')}>
+                        작업자 선택
+                    </button>
+                    <button type="button" aria-pressed={mobileView === 'summary'} onClick={() => changeMobileView('summary')}>
+                        요약 확인 <span>{selectedWorkerIds.size}</span>
+                    </button>
+                </nav>
+            </div>
+            <Sidebar className="ws-sidebar" aria-label="작업자 선택">
                 <SidebarHeader>
-                    <Title>
+                    <Title ref={selectionHeadingRef} tabIndex={-1} className="ws-selection-heading">
                         <FontAwesomeIcon icon={faFilter} size="sm" />
-                        작업자 필터
+                        작업자 선택
                     </Title>
                     <TeamFilterWrapper $color={selectedTeamColor}>
                         <TeamFilter
+                            aria-label="소속 팀"
                             value={selectedTeam}
                             onChange={(e) => setSelectedTeam(e.target.value)}
                         >
@@ -795,29 +736,46 @@ const WorkerSummaryPage: React.FC = () => {
                     </TeamFilterWrapper>
                 </SidebarHeader>
 
-                <div style={{ padding: '0 20px' }}>
-                    <SearchBox>
+                <div className="ws-search-area">
+                    <SearchBox className="ws-search">
                         <FontAwesomeIcon icon={faSearch} />
                         <input
-                            type="text"
-                            placeholder="이름 또는 주민번호 검색..."
+                            type="search"
+                            aria-label="작업자 검색"
+                            placeholder="이름 또는 주민번호 검색"
+                            autoComplete="off"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                         />
+                        {searchQuery && (
+                            <button type="button" className="ws-search-clear" aria-label="검색어 지우기" onClick={() => setSearchQuery('')}>
+                                <FontAwesomeIcon icon={faXmark} />
+                            </button>
+                        )}
                     </SearchBox>
                 </div>
 
-                <SelectAllBar onClick={toggleSelectAll}>
-                    <Checkbox $checked={filteredWorkers.length > 0 && filteredWorkers.every(w => selectedWorkerIds.has(w.id!))}>
-                        <FontAwesomeIcon icon={faCheckSquare} style={{ visibility: filteredWorkers.length > 0 && filteredWorkers.every(w => selectedWorkerIds.has(w.id!)) ? 'visible' : 'hidden' }} />
-                    </Checkbox>
-                    <span>전체 선택 ({filteredWorkers.length}명)</span>
+                <SelectAllBar className="ws-selection-tools">
+                    <label>
+                        <Checkbox ref={selectAllRef} checked={allVisibleSelected} onChange={toggleSelectAll} disabled={filteredWorkers.length === 0} />
+                        <span>목록 전체 선택 <b>{filteredWorkers.length}</b></span>
+                    </label>
+                    <button type="button" aria-pressed={selectedOnly} onClick={() => setSelectedOnly(value => !value)}>
+                        선택만 {selectedWorkerIds.size}
+                    </button>
                 </SelectAllBar>
 
-                <WorkerList>
+                <WorkerList className="ws-worker-list">
                     {filteredWorkers.length === 0 ? (
-                        <div style={{ textAlign: 'center', padding: '20px', color: '#adb5bd', fontSize: '13px' }}>
-                            검색 결과가 없습니다.
+                        <div className="ws-empty">
+                            <FontAwesomeIcon icon={faSearch} />
+                            <strong>{selectedOnly && selectedWorkerIds.size === 0 ? '선택한 작업자가 없습니다' : '조건에 맞는 작업자가 없습니다'}</strong>
+                            <p>팀이나 검색어를 바꿔 다시 찾아보세요.</p>
+                            {(searchQuery || selectedTeam || selectedOnly) && (
+                                <button type="button" onClick={() => { setSearchQuery(''); setSelectedTeam(''); setSelectedOnly(false); }}>
+                                    전체 작업자 보기
+                                </button>
+                            )}
                         </div>
                     ) : (
                         filteredWorkers.map(worker => {
@@ -832,11 +790,9 @@ const WorkerSummaryPage: React.FC = () => {
                                     $selected={selectedWorkerIds.has(worker.id!)}
                                     $teamColor={teamColor}
                                     $teamTint={teamTint}
-                                    onClick={() => toggleSelection(worker.id!)}
+                                    className="ws-worker-item"
                                 >
-                                    <Checkbox $checked={selectedWorkerIds.has(worker.id!)}>
-                                        {selectedWorkerIds.has(worker.id!) && <FontAwesomeIcon icon={faCheckSquare} size="xs" />}
-                                    </Checkbox>
+                                    <Checkbox checked={selectedWorkerIds.has(worker.id!)} onChange={() => toggleSelection(worker.id!)} aria-label={`${worker.name} 선택`} />
                                     <WorkerInfo>
                                         <WorkerName>{worker.name}</WorkerName>
                                         <WorkerDetail>
@@ -851,49 +807,49 @@ const WorkerSummaryPage: React.FC = () => {
                 </WorkerList>
             </Sidebar>
 
-            <MainContent>
-                <SummaryCard>
-                    <CardHeader>
-                        <HeaderTitle>
+            <MainContent className="ws-main" aria-label="선택한 작업자 요약">
+                <SummaryCard className="ws-summary-card">
+                    <CardHeader className="ws-card-header">
+                        <HeaderTitle ref={summaryHeadingRef} tabIndex={-1}>
                             작업자 요약
                             <span>{selectedWorkerIds.size}명 선택됨</span>
                         </HeaderTitle>
-                        <ActionButtons>
-                            <label className="flex items-center gap-2 mr-4 cursor-pointer text-sm select-none text-slate-600 hover:text-slate-900 transition-colors">
-                                <input
-                                    type="checkbox"
-                                    checked={showIdCards}
-                                    onChange={(e) => setShowIdCards(e.target.checked)}
-                                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                />
-                                신분증 보기
-                            </label>
-                            <ActionButton onClick={handleDownloadIDCards} className="secondary">
-                                <FontAwesomeIcon icon={faDownload} />
-                                신분증 다운로드 (ZIP)
-                            </ActionButton>
-                            <ActionButton onClick={handleCopyImage}>
+                        <ActionButtons className="ws-actions">
+                            <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedDocumentWorkers} disabled={isSendingImage} />
+                            <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedDocumentWorkers} disabled={isSendingImage}
+                                onSaved={updates => setWorkers(previous => previous.map(worker => {
+                                    const update = updates.find(item => item.workerId === worker.id);
+                                    return update ? { ...worker, bankPhotoId: update.bankPhotoId } : worker;
+                                }))} />
+                            <WorkerIdImageShare key={restricted ? 'team-bank' : 'office-bank'} workers={selectedDocumentWorkers} disabled={isSendingImage} kind="bank" />
+                            <ActionButton onClick={handleCopyImage} title="서류 사진 없이 명단만 복사한 뒤 PC 카카오톡에 붙여넣기" className="ws-copy" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
                                 <FontAwesomeIcon icon={faCopy} />
-                                이미지 복사
+                                PC 공유
                             </ActionButton>
                             <ActionButton
                                 onClick={handleSendKakao}
                                 className="kakao"
-                                disabled={isSendingImage}
-                                title="카카오톡으로 보내기"
+                                disabled={selectedWorkerIds.size === 0 || isSendingImage}
+                                title="모바일 공유창에서 카카오톡 등을 선택해 서류 사진 없이 명단만 보내기"
                             >
                                 <FontAwesomeIcon icon={faPaperPlane} />
-                                {isSendingImage ? '준비 중' : '보내기'}
+                                {isSendingImage ? '준비 중' : '모바일 공유'}
                             </ActionButton>
                         </ActionButtons>
                     </CardHeader>
+                    <p className="ws-share-guide">PC·모바일 공유는 명단만 보냅니다. 신분증·통장사본은 별도 공유 버튼을 이용해 주세요.
+                        {restricted && selectedDocumentWorkers.length < selectedWorkers.length && <span> 서류 공유·등록은 선택한 내 팀 인원 {selectedDocumentWorkers.length}명에게 적용됩니다.</span>}
+                    </p>
                     {selectedWorkerIds.size === 0 ? (
-                        <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
-                            좌측 목록에서 작업자를 선택하세요.
+                        <div className="ws-empty ws-summary-empty">
+                            <FontAwesomeIcon icon={faUsers} />
+                            <strong>아직 선택한 작업자가 없습니다</strong>
+                            <p>작업자를 선택하면 정보가 여기에 모입니다.</p>
+                            <button type="button" className="ws-mobile-only" onClick={() => changeMobileView('select')}>작업자 선택하기</button>
                         </div>
                     ) : (
-                        <div className="flex-1 overflow-auto p-0">
-                            <table ref={summaryRef} className="w-full text-left text-sm border-collapse">
+                        <div className="ws-summary-scroll">
+                            <table ref={summaryRef} className="ws-summary-table w-full text-left text-sm border-collapse" aria-label="선택한 작업자 정보">
                                 <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
                                     <tr>
                                         <th className="px-4 py-3 font-semibold text-slate-600 w-16 text-center">No</th>
@@ -903,20 +859,25 @@ const WorkerSummaryPage: React.FC = () => {
                                         {/* <th className="px-6 py-3 font-semibold text-slate-600">소속팀</th> */}
                                         <th className="px-6 py-3 font-semibold text-slate-600 text-center">주소</th>
                                         <th className="px-4 py-3 font-semibold text-slate-600 w-20 text-center">혈액형</th>
-                                        {showIdCards && <th className="px-6 py-3 font-semibold text-slate-600 w-24 text-center">신분증</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 bg-white">
-                                    {workers
-                                        .filter(w => selectedWorkerIds.has(w.id!))
+                                    {selectedWorkers
                                         .map((w, index) => (
                                             <tr key={w.id} className="hover:bg-slate-50 transition-colors">
-                                                <td className="px-4 py-3 text-slate-500 text-center align-middle">{index + 1}</td>
-                                                <td className="px-4 py-3 font-medium text-slate-900 text-center align-middle">{w.name.replace(/[0-9]/g, '')}</td>
-                                                <td className="px-2 py-3 text-slate-600 text-center text-sm align-middle">
+                                                <td className="ws-number px-4 py-3 text-slate-500 text-center align-middle">{index + 1}</td>
+                                                <td className="ws-name px-4 py-3 font-medium text-slate-900 text-center align-middle">
+                                                    <strong>{w.name.replace(/[0-9]/g, '')}</strong>
+                                                    <span className="ws-mobile-team" data-html2canvas-ignore>{workerTeamMetaById.get(w.id!)?.name || '미배정'}</span>
+                                                </td>
+                                                <td data-label="주민번호" className="px-2 py-3 text-slate-600 text-center text-sm align-middle">
+                                                    <span className="ws-field-label" data-html2canvas-ignore>주민번호</span>
                                                     {w.idNumber ? w.idNumber : '-'}
                                                 </td>
-                                                <td className="px-2 py-3 text-slate-600 text-center text-sm align-middle">{w.contact || '-'}</td>
+                                                <td data-label="연락처" className="px-2 py-3 text-slate-600 text-center text-sm align-middle">
+                                                    <span className="ws-field-label" data-html2canvas-ignore>연락처</span>
+                                                    {w.contact || '-'}
+                                                </td>
                                                 {/* <td className="px-6 py-3 text-slate-600 align-middle">
                                                     {w.teamName ? (
                                                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
@@ -926,35 +887,23 @@ const WorkerSummaryPage: React.FC = () => {
                                                         <span className="text-slate-400">미배정</span>
                                                     )}
                                                 </td> */}
-                                                <td className="px-6 py-3 text-slate-600 whitespace-pre-wrap break-words align-middle">{w.address || '-'}</td>
-                                                <td className="px-4 py-3 text-slate-600 text-center align-middle">
+                                                <td data-label="주소" className="px-6 py-3 text-slate-600 whitespace-pre-wrap break-words align-middle">
+                                                    <span className="ws-field-label" data-html2canvas-ignore>주소</span>
+                                                    {w.address || '-'}
+                                                </td>
+                                                <td data-label="혈액형" className="px-4 py-3 text-slate-600 text-center align-middle">
+                                                    <span className="ws-field-label" data-html2canvas-ignore>혈액형</span>
                                                     {w.bloodType ? (
                                                         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-100">
                                                             {w.bloodType}형
                                                         </span>
                                                     ) : '-'}
                                                 </td>
-                                                {showIdCards && (
-                                                    <td className="px-6 py-3 align-middle text-center">
-                                                        <div className="flex justify-center items-center h-full">
-                                                            {idCardUrls[w.id!] ? (
-                                                                <img
-                                                                    src={idCardUrls[w.id!]}
-                                                                    alt="ID Card"
-                                                                    crossOrigin="anonymous"
-                                                                    title="클릭하여 이미지 복사"
-                                                                    onClick={() => handleSingleIdCardCopy(w.name, idCardUrls[w.id!])}
-                                                                    className="w-16 h-10 object-cover rounded border border-slate-200 hover:scale-[3] origin-center transition-transform bg-white relative z-0 hover:z-50 shadow-sm hover:shadow-xl cursor-copy"
-                                                                />
-                                                            ) : (
-                                                                <span className="text-slate-300 text-xs">
-                                                                    <FontAwesomeIcon icon={faImage} className="mr-1" />
-                                                                    없음
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                )}
+                                                <td className="ws-remove-cell" data-html2canvas-ignore>
+                                                    <button type="button" aria-label={`${w.name} 선택 해제`} onClick={() => toggleSelection(w.id!)}>
+                                                        <FontAwesomeIcon icon={faXmark} />
+                                                    </button>
+                                                </td>
                                             </tr>
 
                                         ))}
@@ -964,8 +913,20 @@ const WorkerSummaryPage: React.FC = () => {
                     )}
                 </SummaryCard>
             </MainContent>
-
-
+            <div className="ws-selection-footer">
+                <div className="ws-selection-count" role="status" aria-live="polite">
+                    <strong>{selectedWorkerIds.size}<span>명 선택</span></strong>
+                    <span>{selectedWorkerIds.size > visibleSelectedCount ? `현재 목록 밖 ${selectedWorkerIds.size - visibleSelectedCount}명 포함` : '선택한 작업자를 요약으로 확인'}</span>
+                </div>
+                {selectedWorkerIds.size > 0 && (
+                    <button type="button" className="ws-reset-selection" onClick={() => setSelectedWorkerIds(new Set())}>선택 해제</button>
+                )}
+                <button type="button" className="ws-next" disabled={mobileView === 'select' && selectedWorkerIds.size === 0}
+                    onClick={() => changeMobileView(mobileView === 'select' ? 'summary' : 'select')}>
+                    {mobileView === 'select' ? '요약 보기' : '선택 수정'}
+                    <FontAwesomeIcon icon={faArrowRight} />
+                </button>
+            </div>
         </PageContainer >
     );
 };

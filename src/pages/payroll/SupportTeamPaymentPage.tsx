@@ -1,3 +1,7 @@
+import { PagePrimaryAccountSettings } from '../../components/accounts/PagePrimaryAccountManager';
+import { PrimaryAccountPage } from '../../services/primaryAccountService';
+import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
+import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -3149,6 +3153,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
             <tr>
                 <td colSpan={12} className="border border-slate-900 bg-emerald-50 p-4">
                     <SupportLaborStatementPanel
+                        primaryAccountScope={scope === 'incoming' ? 'support-team-incoming' : scope === 'internalOut' ? 'support-team-internal' : scope === 'internalIn' ? 'support-team-internal-incoming' : 'support-team'}
                         aggregate={laborStatementTarget}
                         previews={laborStatementTargetPreviews}
                         yearMonth={selectedMonth}
@@ -3166,7 +3171,8 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
         laborStatementTarget,
         laborStatementTargetPreviews,
         selectedMonth,
-        statementLogoUrl
+        statementLogoUrl,
+        scope
     ]);
 
     const expenseStatementContext = useMemo(
@@ -3204,40 +3210,38 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
     }
 
     return (
-        <div className="support-team-font p-6 w-full max-w-none space-y-6 font-['Pretendard']">
+        <div className="support-team-font w-full min-w-0 max-w-none space-y-2 p-2 font-['Pretendard'] sm:px-3">
             <PayrollIssueTopTabs />
 
             {/* 상단 헤더 영역 */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-6 py-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                    <div className="bg-amber-100 text-amber-600 rounded-xl p-3 shadow-inner">
-                        <FontAwesomeIcon icon={faUsers} size="lg" />
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600">
+                        <FontAwesomeIcon icon={faUsers} />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-black text-slate-800 tracking-tight">{pageTitle}</h1>
-                        <p className="text-[13px] text-slate-500 font-bold mt-0.5 flex items-center gap-2">
-                            <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">BETA</span>
-                            {pageDescription}
-                        </p>
+                        <h1 className="text-lg font-black text-slate-800 tracking-tight" title={pageDescription}>{pageTitle}</h1>
                     </div>
                 </div>
-                <div className="flex flex-wrap gap-2.5">
-                    <ActionButton variant="solid-green" disabled={supportExcelRows.length === 0} onClick={() => setShowLaborPreview(true)}>
+                <div className="flex flex-wrap gap-1.5">
+                    <ActionButton compact variant="solid-green" disabled={supportExcelRows.length === 0} onClick={() => setShowLaborPreview(true)}>
                         <FontAwesomeIcon icon={faFileExcel} /> 노무내역서 미리보기
                     </ActionButton>
-                    <ActionButton variant="outline-green" disabled={supportExcelRows.length === 0} onClick={handleDownloadLabor}>
+                    <ActionButton compact variant="outline-green" disabled={supportExcelRows.length === 0} onClick={handleDownloadLabor}>
                         <FontAwesomeIcon icon={faFileExcel} /> 엑셀 다운로드
                     </ActionButton>
-                    <ActionButton variant="outline-amber" disabled={kbRows.length === 0} onClick={() => setShowKBPreview(true)}>
+                    <ActionButton compact variant="outline-amber" disabled={kbRows.length === 0} onClick={() => setShowKBPreview(true)}>
                         <FontAwesomeIcon icon={faSearch} /> 국민은행 미리보기
                     </ActionButton>
-                    <ActionButton variant="solid-amber" disabled={kbRows.length === 0} onClick={handleDownloadKB}>
+                    <ActionButton compact variant="solid-amber" disabled={kbRows.length === 0} onClick={handleDownloadKB}>
                         <FontAwesomeIcon icon={faFileExcel} /> 국민은행용 다운로드
                     </ActionButton>
                 </div>
             </div>
 
-            <div className="flex w-full flex-col gap-6 lg:flex-row">
+            <PagePrimaryAccountSettings compact scope={scope === 'incoming' ? 'support-team-incoming' : scope === 'internalOut' ? 'support-team-internal' : scope === 'internalIn' ? 'support-team-internal-incoming' : 'support-team'} />
+
+            <div className="flex w-full flex-col gap-3 lg:flex-row">
                 {/* 좌측 사이드바 */}
                 {!hideSidebarFilter && (
                     <aside className="w-full lg:w-72 flex-none space-y-4">
@@ -3282,14 +3286,14 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                 )}
 
                 {/* 우측 메인 */}
-                <div className="min-w-0 flex-1 space-y-6">
+                <div className="min-w-0 flex-1 space-y-2">
                     {/* 상단 요약 카드 및 필터 */}
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                            <div className="flex items-center gap-2">
                                 <FontAwesomeIcon icon={faCalendarAlt} className="text-amber-500" />
                                 <span className="text-sm font-bold text-slate-500">집계 기준월</span>
-                                <div className="flex min-h-10 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 shadow-sm" aria-label="집계 기준월 선택">
+                                <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-1 shadow-sm" aria-label="집계 기준월 선택">
                                     <button
                                         type="button"
                                         onClick={() => setSelectedMonth((current) => shiftYearMonth(current, -1))}
@@ -3324,6 +3328,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                     onFocus={(event) => event.currentTarget.select()}
                                     className="h-9 w-32 rounded-lg border border-slate-200 bg-slate-50 px-3 text-right text-sm font-black text-slate-900 outline-none transition focus:border-sky-400 focus:bg-white focus:ring-2 focus:ring-sky-100"
                                     aria-label="일괄 적용 지원단가"
+                                    title={`기본 지원단가 ${formatNumber(DEFAULT_SUPPORT_UNIT_PRICE)}원`}
                                 />
                                 <span className="text-sm font-bold text-slate-500">원</span>
                                 <button
@@ -3335,10 +3340,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                     <FontAwesomeIcon icon={faCircleCheck} />
                                     일괄적용
                                 </button>
-                                <span className="text-[11px] font-bold text-slate-400">
-                                    기본 지원단가 {formatNumber(DEFAULT_SUPPORT_UNIT_PRICE)}원
-                                    {monthlyRateOverrides.bulkSupportRate ? ` · ${selectedMonth} 적용됨` : ''}
-                                </span>
+                                {monthlyRateOverrides.bulkSupportRate && <span className="text-sm font-bold text-sky-700">월 적용됨</span>}
                             </div>
                             <div className="h-6 w-px bg-slate-200 hidden sm:block" />
                             <div className="flex flex-wrap items-center gap-2">
@@ -3351,6 +3353,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                     onFocus={(event) => event.currentTarget.select()}
                                     className="h-9 w-32 rounded-lg border border-slate-200 bg-slate-50 px-3 text-right text-sm font-black text-slate-900 outline-none transition focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-100"
                                     aria-label="일괄 적용 청구단가"
+                                    title={`기본 청구단가 ${formatNumber(DEFAULT_SUPPORT_UNIT_PRICE)}원`}
                                 />
                                 <span className="text-sm font-bold text-slate-500">원</span>
                                 <button
@@ -3362,24 +3365,21 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                     <FontAwesomeIcon icon={faCircleCheck} />
                                     월 적용
                                 </button>
-                                <span className="text-[11px] font-bold text-slate-400">
-                                    기본 청구단가 {formatNumber(DEFAULT_SUPPORT_UNIT_PRICE)}원
-                                    {monthlyRateOverrides.bulkRate ? ` · ${selectedMonth} 적용됨` : ''}
-                                </span>
+                                {monthlyRateOverrides.bulkRate && <span className="text-sm font-bold text-amber-700">월 적용됨</span>}
                             </div>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <select
                                 value={selectedDirection}
                                 onChange={(e) => setSelectedDirection(e.target.value as any)}
-                                className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black focus:ring-2 focus:ring-amber-500 outline-none"
+                                className="max-w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black focus:ring-2 focus:ring-amber-500 outline-none"
                             >
                                 {directionOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                             </select>
                             <select
                                 value={selectedSiteId}
                                 onChange={(e) => setSelectedSiteId(e.target.value)}
-                                className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black focus:ring-2 focus:ring-amber-500 outline-none"
+                                className="max-w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black focus:ring-2 focus:ring-amber-500 outline-none"
                             >
                                 <option value="">모든 현장</option>
                                 {siteOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -3387,17 +3387,17 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                         </div>
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
                         <SummaryCard label="총 투입 공수" value={`${formatNumber(totalSummary.totalManDay)} 공`} icon={faCalendarAlt} tone="violet" />
                         <SummaryCard label="총 노임총액" value={`${formatNumber(totalSummary.totalAmount)} 원`} icon={faCircleCheck} tone="sky" />
                         <SummaryCard label="총 추가금액" value={`${formatNumber(totalSummary.additionalAmount)} 원`} icon={faFileInvoiceDollar} tone="orange" />
                         <SummaryCard label="총 발행금액" value={`${formatNumber(totalSummary.issuedAmount)} 원`} icon={faCircleCheck} tone="emerald" />
                         <SummaryCard label={scopedTeamBasisLabel} value={`${formatNumber(totalSummary.partnerCount)} 팀`} icon={faUsers} tone="sky" />
-                        <SummaryCard label={`관련 ${pageTitle}`} value={`${formatNumber(totalSummary.siteCount)} 개`} icon={faCircleExclamation} tone="orange" />
+                        <SummaryCard label="관련 현장" value={`${formatNumber(totalSummary.siteCount)} 개`} icon={faCircleExclamation} tone="orange" />
                     </div>
 
                     <div className="bg-white border border-slate-900 shadow-sm overflow-hidden">
-                        <div className="px-5 py-3 border-b border-slate-900 bg-white flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-slate-900 bg-white px-3 py-2">
                             <h2 className="text-base font-black text-slate-900">
                                 {activeSourceTeamId ? sidebarTeams.find(t => t.id === activeSourceTeamId)?.name : scopedAllTeamLabel} {pageTitle} 정산 요약
                             </h2>
@@ -4048,13 +4048,14 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
 // --- Sub Components ---
 
 const SupportLaborStatementPanel: React.FC<{
+    primaryAccountScope: PrimaryAccountPage;
     aggregate: SupportCompanyAggregate;
     previews: SitePreviewBlock[];
     yearMonth: string;
     adjustment: SupportManualAdjustment;
     logoUrl?: string | null;
     onClose: () => void;
-}> = ({ aggregate, previews, yearMonth, adjustment, onClose }) => {
+}> = ({ primaryAccountScope, aggregate, previews, yearMonth, adjustment, onClose }) => {
     const [statementOptionPreset, setStatementOptionPreset] = useState<StatementIssueOptionPreset>(() => loadStatementIssueOptionPreset());
     const [showBankColumn, setShowBankColumn] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).showBankColumn);
     const [showBillingColumns, setShowBillingColumns] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).showBillingColumns);
@@ -4075,9 +4076,13 @@ const SupportLaborStatementPanel: React.FC<{
             loadSupportLaborStatementDefaults(statementOptionPreset)
         )
     );
-    const [delegateBankName, setDelegateBankName] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateBankName);
-    const [delegateAccountHolder, setDelegateAccountHolder] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateAccountHolder);
-    const [delegateAccountNumber, setDelegateAccountNumber] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateAccountNumber);
+    const [legacyDelegateBankName, setDelegateBankName] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateBankName);
+    const [legacyDelegateAccountHolder, setDelegateAccountHolder] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateAccountHolder);
+    const [legacyDelegateAccountNumber, setDelegateAccountNumber] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).delegateAccountNumber);
+    const pagePrimaryAccount = usePagePrimaryAccount(primaryAccountScope);
+    const delegateBankName = pagePrimaryAccount.account?.bankName ?? legacyDelegateBankName;
+    const delegateAccountHolder = pagePrimaryAccount.account?.accountHolder ?? legacyDelegateAccountHolder;
+    const delegateAccountNumber = pagePrimaryAccount.account?.accountNumber ?? legacyDelegateAccountNumber;
     const statementOptions = useMemo<SupportLaborStatementOptions>(() => ({
         unitPriceOverride: appliedBulkUnitPrice,
         defaultPayType: 'direct',
@@ -4290,6 +4295,7 @@ const SupportLaborStatementPanel: React.FC<{
     }, []);
 
     const handleSaveStatementOptions = useCallback(async () => {
+        if (!ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         saveLaborStatementPresetDefaults(statementOptionPreset, {
             showBankColumn,
             showBillingColumns,
@@ -4299,9 +4305,6 @@ const SupportLaborStatementPanel: React.FC<{
             unitPriceOverride: appliedBulkUnitPrice,
             useWorkerMasterPayType,
             workerPayTypes,
-            delegateBankName,
-            delegateAccountHolder,
-            delegateAccountNumber,
         });
         const label = STATEMENT_ISSUE_OPTION_PRESETS.find((option) => option.value === statementOptionPreset)?.label ?? '선택';
         try {
@@ -4312,11 +4315,9 @@ const SupportLaborStatementPanel: React.FC<{
             setStatusMessage(`${label} 노임명세 옵션은 저장했지만 문서대장 반영에 실패했습니다.`);
         }
     }, [
+        pagePrimaryAccount,
         appliedBulkUnitPrice,
         buildLaborStatementOutput,
-        delegateAccountHolder,
-        delegateAccountNumber,
-        delegateBankName,
         isSplitView,
         showBankColumn,
         showBankUnderAddress,
@@ -4335,6 +4336,7 @@ const SupportLaborStatementPanel: React.FC<{
     };
 
     const handleCopy = async () => {
+        if (!ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         try {
             setBusyAction('copy');
             const blob = await captureStatementImage();
@@ -4349,6 +4351,7 @@ const SupportLaborStatementPanel: React.FC<{
     };
 
     const handleSend = async () => {
+        if (!ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         const shareNavigator = navigator as Navigator & {
             canShare?: (data: { files?: File[] }) => boolean;
             share?: (data: { title?: string; text?: string; files?: File[] }) => Promise<void>;
@@ -4382,6 +4385,7 @@ const SupportLaborStatementPanel: React.FC<{
     };
 
     const handleExcelDownload = async () => {
+        if (!ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
         if (statementPreviews.length === 0) {
             setStatusMessage('엑셀로 저장할 노임명세 데이터가 없습니다.');
             return;
@@ -4390,7 +4394,8 @@ const SupportLaborStatementPanel: React.FC<{
         try {
             setBusyAction('excel');
             await generateLaborStatementExcel(
-                statementPreviews.map(buildLaborStatementExcelBlock),
+                statementPreviews.map(preview => ({ ...buildLaborStatementExcelBlock(preview),
+                    delegateBankName, delegateAccountHolder, delegateAccountNumber })),
                 yearMonth,
                 {
                     fileName: `노무내역서_${sanitizeFileNamePart(yearMonth)}_${sanitizeFileNamePart(aggregate.companyName)}.xlsx`,
@@ -4588,35 +4593,7 @@ const SupportLaborStatementPanel: React.FC<{
                                 </button>
                             )}
                         </div>
-                        <div className="min-w-0 rounded-lg border border-yellow-200 bg-yellow-50 px-2 py-2">
-                            <div className="mb-1 flex items-center gap-1 text-xs font-black text-yellow-700">
-                                <FontAwesomeIcon icon={faReceipt} />
-                                위임 계좌
-                            </div>
-                            <div className="grid grid-cols-[72px_82px_minmax(120px,1fr)] gap-1.5">
-                                <input
-                                    type="text"
-                                    value={delegateBankName}
-                                    onChange={(event) => setDelegateBankName(event.target.value)}
-                                    placeholder="은행"
-                                    className="h-8 rounded-md border border-yellow-200 bg-white px-2 text-xs font-bold outline-none focus:border-yellow-500"
-                                />
-                                <input
-                                    type="text"
-                                    value={delegateAccountHolder}
-                                    onChange={(event) => setDelegateAccountHolder(event.target.value)}
-                                    placeholder="예금주"
-                                    className="h-8 rounded-md border border-yellow-200 bg-white px-2 text-xs font-bold outline-none focus:border-yellow-500"
-                                />
-                                <input
-                                    type="text"
-                                    value={delegateAccountNumber}
-                                    onChange={(event) => setDelegateAccountNumber(event.target.value)}
-                                    placeholder="계좌번호"
-                                    className="h-8 rounded-md border border-yellow-200 bg-white px-2 text-xs font-bold outline-none focus:border-yellow-500"
-                                />
-                            </div>
-                        </div>
+                        <PagePrimaryAccountCard state={pagePrimaryAccount} fallbackAccount={{ bankName: delegateBankName, accountHolder: delegateAccountHolder, accountNumber: delegateAccountNumber }} />
                     </div>
                 </div>
 
@@ -5094,10 +5071,11 @@ interface ActionButtonProps {
     disabled?: boolean;
     onClick?: () => void | Promise<void>;
     className?: string;
+    compact?: boolean;
 }
 
-const ActionButton: React.FC<ActionButtonProps> = ({ children, variant, disabled, onClick, className }) => {
-    const base = 'inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 shadow-sm hover:translate-y-[-1px] active:translate-y-[0px]';
+const ActionButton: React.FC<ActionButtonProps> = ({ children, variant, disabled, onClick, className, compact = false }) => {
+    const base = `inline-flex items-center gap-2 ${compact ? 'min-h-8 rounded-lg px-3 py-1' : 'rounded-xl px-4 py-2.5'} text-sm font-black transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 shadow-sm hover:translate-y-[-1px] active:translate-y-[0px]`;
     const variants: Record<ActionButtonProps['variant'], string> = {
         'outline-green': 'border-2 border-emerald-500 text-emerald-600 hover:bg-emerald-50',
         'outline-amber': 'border-2 border-amber-500 text-amber-600 hover:bg-amber-50',
@@ -5126,12 +5104,12 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ label, value, icon, tone }) =
         violet: { bg: 'bg-violet-50', text: 'text-violet-700', icon: 'text-violet-500' }
     };
     return (
-        <div className={`rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all hover:shadow-md group`}>
-            <div className={`mb-3 inline-flex h-12 w-12 items-center justify-center rounded-2xl ${toneMap[tone].bg} transition-transform group-hover:scale-110`}>
-                <FontAwesomeIcon icon={icon} className={`text-xl ${toneMap[tone].icon}`} />
+        <div className="min-w-0 rounded-lg border border-slate-100 bg-white px-3 py-2 shadow-sm">
+            <div className="flex items-center gap-1.5">
+                <FontAwesomeIcon icon={icon} className={`text-sm ${toneMap[tone].icon}`} />
+                <p className="text-sm font-bold text-slate-500">{label}</p>
             </div>
-            <p className="text-[12px] font-black text-slate-400 uppercase tracking-wider">{label}</p>
-            <p className={`text-2xl font-black mt-1 ${toneMap[tone].text}`}>{value}</p>
+            <p className={`break-words text-lg font-black leading-tight ${toneMap[tone].text}`}>{value}</p>
         </div>
     );
 };

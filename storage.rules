@@ -1,6 +1,33 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+
+    // A reserved, short-lived identity reads as the selected user, never writes.
+    function isPreviewIdentity() {
+      return request.auth != null && (request.auth.uid.matches('^cy-preview-.*')
+        || request.auth.token.get('devPreview', false) == true || 'previewTargetUid' in request.auth.token);
+    }
+    function viewerUid() {
+      return request.auth.token.get('previewTargetUid', request.auth.uid);
+    }
+    function previewActorStillAllowed() {
+      let actorPath = /databases/(default)/documents/users/$(request.auth.token.previewActorUid);
+      let actor = firestore.get(actorPath).data;
+      return actor.get('status', '') == 'active'
+        && [actor.get('role', ''), actor.get('position', ''), actor.get('systemRole', '')]
+          .concat(actor.get('roles', [])).concat(actor.get('additionalPositions', []))
+          .hasAny([request.auth.token.previewDevRole]);
+    }
+    function previewReadsAllowed() {
+      return !isPreviewIdentity() || (
+        request.auth.uid.matches('^cy-preview-.*')
+        && request.auth.token.get('devPreview', false) == true
+        && request.auth.token.get('previewTargetUid', '') != ''
+        && request.auth.token.previewExpiresAt > request.time.toMillis() / 1000
+        && previewActorStillAllowed()
+      );
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }
@@ -52,11 +79,11 @@ service firebase.storage {
     }
 
     function activeProfile() {
-      return isSignedIn() && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') == 'active';
+      return isSignedIn() && firestore.exists(/databases/(default)/documents/users/$(viewerUid()))
+        && firestore.get(/databases/(default)/documents/users/$(viewerUid())).data.get('status', 'active') == 'active';
     }
     function hasTokenRole(roles) {
-      let profile = firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+      let profile = firestore.get(/databases/(default)/documents/users/$(viewerUid())).data;
       return activeProfile() && (profile.get('role', '') in roles || profile.get('position', '') in roles
         || profile.get('systemRole', '') in roles || profile.get('accountType', '') in roles
         || profile.get('roles', []).hasAny(roles) || profile.get('additionalPositions', []).hasAny(roles));
@@ -69,15 +96,11 @@ service firebase.storage {
     // /storage starts by listing the bucket root. The request-path guard grants
     // only that directory listing; protected descendants retain their rules.
     match /{rootPath=**} {
-      allow list: if request.path == /b/$(bucket)/o && isAdmin();
+      allow list: if (request.path == /b/$(bucket)/o && isAdmin()) && previewReadsAllowed();
     }
 
     function canAccessCardBillingStatements() {
-      return isAdmin()
-        || hasTokenRole(officeRoles())
-        || hasTokenRole(supportRoles())
-        || hasTokenRole(financeRoles())
-        || hasTokenRole(payrollRoles());
+      return activeProfile();
     }
 
     function constructionPlanCentralRoles() {
@@ -100,35 +123,35 @@ service firebase.storage {
           hasTokenRole(roles)
           || (
             firestore.exists(
-              /databases/(default)/documents/users/$(request.auth.uid)
+              /databases/(default)/documents/users/$(viewerUid())
             )
             && (
               firestore.get(
-                /databases/(default)/documents/users/$(request.auth.uid)
+                /databases/(default)/documents/users/$(viewerUid())
               ).data.get('role', '') in roles
               || firestore.get(
-                /databases/(default)/documents/users/$(request.auth.uid)
+                /databases/(default)/documents/users/$(viewerUid())
               ).data.get('position', '') in roles
               || firestore.get(
-                /databases/(default)/documents/users/$(request.auth.uid)
+                /databases/(default)/documents/users/$(viewerUid())
               ).data.get('systemRole', '') in roles
               || firestore.get(
-                /databases/(default)/documents/users/$(request.auth.uid)
+                /databases/(default)/documents/users/$(viewerUid())
               ).data.get('accountType', '') in roles
               || (
                 firestore.get(
-                  /databases/(default)/documents/users/$(request.auth.uid)
+                  /databases/(default)/documents/users/$(viewerUid())
                 ).data.get('roles', []) is list
                 && firestore.get(
-                  /databases/(default)/documents/users/$(request.auth.uid)
+                  /databases/(default)/documents/users/$(viewerUid())
                 ).data.get('roles', []).hasAny(roles)
               )
               || (
                 firestore.get(
-                  /databases/(default)/documents/users/$(request.auth.uid)
+                  /databases/(default)/documents/users/$(viewerUid())
                 ).data.get('additionalPositions', []) is list
                 && firestore.get(
-                  /databases/(default)/documents/users/$(request.auth.uid)
+                  /databases/(default)/documents/users/$(viewerUid())
                 ).data.get('additionalPositions', []).hasAny(roles)
               )
             )
@@ -161,12 +184,12 @@ service firebase.storage {
     }
 
     function hasAuditedConstructionPlanPdfGrant(planId, artifactFile) {
-      let grantPath = /databases/(default)/documents/constructionPlanPdfDownloadGrants/$(planId + '__' + request.auth.uid);
+      let grantPath = /databases/(default)/documents/constructionPlanPdfDownloadGrants/$(planId + '__' + viewerUid());
       let grant = firestore.get(grantPath).data;
       return isSignedIn()
         && firestore.exists(grantPath)
         && grant.get('planId', '') == planId
-        && grant.get('actorId', '') == request.auth.uid
+        && grant.get('actorId', '') == viewerUid()
         && grant.get('status', '') == 'active'
         && grant.get('expiresAtEpochMs', 0) is number
         && grant.get('expiresAtEpochMs', 0) > request.time.toMillis()
@@ -179,21 +202,21 @@ service firebase.storage {
         /databases/(default)/documents/constructionPlans/$(planId)
       ).data;
       let participants = planData.get('participants', {});
-      return planData.get('createdBy', '') == request.auth.uid
+      return planData.get('createdBy', '') == viewerUid()
         || (
           participants is map
           && (
             (
               participants.get('authorIds', []) is list
-              && request.auth.uid in participants.get('authorIds', [])
+              && viewerUid() in participants.get('authorIds', [])
             )
             || (
               participants.get('reviewerIds', []) is list
-              && request.auth.uid in participants.get('reviewerIds', [])
+              && viewerUid() in participants.get('reviewerIds', [])
             )
             || (
               participants.get('approverIds', []) is list
-              && request.auth.uid in participants.get('approverIds', [])
+              && viewerUid() in participants.get('approverIds', [])
             )
           )
         );
@@ -267,7 +290,7 @@ service firebase.storage {
       let sessionPath = /databases/(default)/documents/constructionPlanUploadSessions/$(sessionId);
       let session = firestore.get(sessionPath).data;
       return isSignedIn()
-        && request.auth.uid == uid
+        && viewerUid() == uid
         && firestore.exists(sessionPath)
         && resource == null
         && session.get('schemaVersion', 0) == 1
@@ -291,7 +314,7 @@ service firebase.storage {
       let sessionPath = /databases/(default)/documents/constructionPlanRecordUploadSessions/$(sessionId);
       let session = firestore.get(sessionPath).data;
       return isSignedIn()
-        && request.auth.uid == uid
+        && viewerUid() == uid
         && firestore.exists(sessionPath)
         && resource == null
         && session.get('schemaVersion', 0) == 1
@@ -341,6 +364,7 @@ service firebase.storage {
         'backups',
         'system',
         'card-billing-statements',
+        'card-ledger-statements',
         'construction-plans',
         'construction-plan-staging',
         'construction-plan-record-staging',
@@ -350,61 +374,69 @@ service firebase.storage {
 
     function canAccessWorkerSignature(workerId) {
       return activeProfile() && (hasTokenRole(adminRoles().concat(officeRoles()).concat(payrollRoles()))
-        || workerId in firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('linkedWorkerIds', []));
+        || workerId in firestore.get(/databases/(default)/documents/users/$(viewerUid())).data.get('linkedWorkerIds', []));
     }
     match /signatures/{workerId}/{fileName} {
-      allow read: if canAccessWorkerSignature(workerId);
-      allow delete: if canAccessWorkerSignature(workerId);
-      allow create, update: if false;
+      allow read: if (canAccessWorkerSignature(workerId)) && previewReadsAllowed();
+      allow delete: if !isPreviewIdentity() && (canAccessWorkerSignature(workerId));
+      allow create, update: if !isPreviewIdentity() && (false);
     }
     // Legacy filenames cannot safely encode a worker binding. Office access only.
     match /signatures/{fileName} {
-      allow read, delete: if activeProfile() && hasTokenRole(adminRoles().concat(officeRoles()).concat(payrollRoles()));
-      allow create, update: if false;
+      allow read: if (activeProfile() && hasTokenRole(adminRoles().concat(officeRoles()).concat(payrollRoles()))) && previewReadsAllowed();
+      allow delete: if !isPreviewIdentity() && (activeProfile() && hasTokenRole(adminRoles().concat(officeRoles()).concat(payrollRoles())));
+      allow create, update: if !isPreviewIdentity() && (false);
     }
 
     match /public/{allPaths=**} {
-      allow read: if true;
-      allow write: if isAdmin() && isValidBusinessUpload();
+      allow read: if (true) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (isAdmin() && isValidBusinessUpload());
     }
 
     match /profiles/{userId}/{allPaths=**} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow write: if isSignedIn()
-        && (request.auth.uid == userId || isAdmin())
-        && isValidBusinessUpload();
+      allow read: if (isSignedIn() && (viewerUid() == userId || isAdmin())) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (isSignedIn()
+        && (viewerUid() == userId || isAdmin())
+        && isValidBusinessUpload());
     }
 
     match /users/{userId}/{allPaths=**} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow write: if isSignedIn()
-        && (request.auth.uid == userId || isAdmin())
-        && isValidBusinessUpload();
+      allow read: if (isSignedIn() && (viewerUid() == userId || isAdmin())) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (isSignedIn()
+        && (viewerUid() == userId || isAdmin())
+        && isValidBusinessUpload());
     }
 
     match /backups/{allPaths=**} {
-      allow read, write: if isAdmin();
+      allow read: if (isAdmin()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (isAdmin());
     }
 
     match /system/{allPaths=**} {
-      allow read: if isSignedIn();
-      allow write: if isAdmin() && isValidBusinessUpload();
+      allow read: if (isSignedIn()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (isAdmin() && isValidBusinessUpload());
     }
 
     match /card-billing-statements/{yearMonth}/imports/{batchId}/{fileName} {
-      allow read: if canAccessCardBillingStatements();
-      allow write: if canAccessCardBillingStatements()
+      allow read: if (canAccessCardBillingStatements()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (canAccessCardBillingStatements()
         && isValidCardBillingAttachment()
-        && request.resource.contentType == 'application/pdf';
+        && request.resource.contentType == 'application/pdf');
     }
 
     // Monthly-card-ledger attachments use a billing document id instead of an
     // AI import session id. This explicit path keeps those PDFs/images private
     // while allowing the same card-billing roles to upload and view them.
     match /card-billing-statements/{yearMonth}/{documentId}/{fileName} {
-      allow read: if canAccessCardBillingStatements();
-      allow write: if canAccessCardBillingStatements()
-        && isValidCardBillingAttachment();
+      allow read: if (canAccessCardBillingStatements()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (canAccessCardBillingStatements()
+        && isValidCardBillingAttachment());
+    }
+
+    match /card-ledger-statements/{yearMonth}/{cardId}/{rowId}/{fileName} {
+      allow read: if (canAccessCardBillingStatements()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (canAccessCardBillingStatements()
+        && isValidCardBillingAttachment());
     }
 
     // Browsers may create exactly one source object under a short-lived,
@@ -412,113 +444,119 @@ service firebase.storage {
     // MIME magic, SHA-256, lock ownership, and the immutable canonical copy are
     // verified by finalizeConstructionPlanDrawingUploadServer.
     match /construction-plan-staging/{uid}/{sessionId}/source {
-      allow create: if canCreateConstructionPlanStagingSource(uid, sessionId);
-      allow read, update, delete: if false;
+      allow create: if !isPreviewIdentity() && (canCreateConstructionPlanStagingSource(uid, sessionId));
+      allow read: if (false) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /construction-plan-staging/{allPaths=**} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // The browser may create only the exact source object described by a
     // short-lived server session. It cannot read, replace, rename or delete it.
     match /construction-plan-record-staging/{uid}/{sessionId}/source {
-      allow create: if canCreateConstructionPlanRecordStagingSource(uid, sessionId);
-      allow read, update, delete: if false;
+      allow create: if !isPreviewIdentity() && (canCreateConstructionPlanRecordStagingSource(uid, sessionId));
+      allow read: if (false) && previewReadsAllowed();
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     match /construction-plan-record-staging/{allPaths=**} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Confirmed/draft record readers may fetch an exact immutable photo or
     // appendix through authenticated Storage APIs. Browser writes and list
     // operations stay denied; canonical objects are Admin SDK create-only.
     match /construction-plan-records/{siteId}/{planId}/{recordId}/{allPaths=**} {
-      allow get: if canAccessConstructionPlanRecordPath(siteId, planId, recordId);
-      allow write: if false;
+      allow get: if (canAccessConstructionPlanRecordPath(siteId, planId, recordId)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /construction-plan-records/{allPaths=**} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Raster previews are derived from immutable PDF sources by Admin SDK.
     // Keeping them outside drawings/** prevents a browser participant from
     // forging a page image that would later be used for review or printing.
     match /construction-plans/{siteId}/{planId}/previews/{allPaths=**} {
-      allow get: if canAccessConstructionPlanPath(siteId, planId);
-      allow write: if false;
+      allow get: if (canAccessConstructionPlanPath(siteId, planId)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Server-rendered visual-check candidates are visible only to a central
     // issuer who also has access to the plan. Browser writes are never
     // permitted, preventing namespace pre-claim/412 denial of service.
     match /construction-plans/{siteId}/{planId}/server-exports/candidate/{allPaths=**} {
-      allow get: if canIssueConstructionPlans()
-        && canAccessConstructionPlanPath(siteId, planId);
-      allow write: if false;
+      allow get: if (canIssueConstructionPlans()
+        && canAccessConstructionPlanPath(siteId, planId)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Every final field-use download must first obtain a short-lived,
     // server-authored grant. The grant is created only after the callable has
     // re-hashed the immutable bytes and appended a download-intent audit.
     match /construction-plans/{siteId}/{planId}/server-exports/issued/{revisionDir}/{rendererVersion}/{snapshotHash}/{artifactFile} {
-      allow get: if canAccessConstructionPlanPath(siteId, planId)
+      allow get: if (canAccessConstructionPlanPath(siteId, planId)
         && constructionPlanIsFieldUseRelease(planId)
-        && hasAuditedConstructionPlanPdfGrant(planId, artifactFile);
-      allow write: if false;
+        && hasAuditedConstructionPlanPdfGrant(planId, artifactFile)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /construction-plans/{siteId}/{planId}/server-exports/issued/{allPaths=**} {
-      allow read: if false;
-      allow write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /construction-plans/{siteId}/{planId}/drawings/{allPaths=**} {
-      allow get: if canAccessConstructionPlanPath(siteId, planId);
+      allow get: if (canAccessConstructionPlanPath(siteId, planId)) && previewReadsAllowed();
       // Canonical drawing sources and derived previews are Admin SDK-only.
       // Browser uploads must pass through construction-plan-staging first.
-      allow write: if false;
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Existing two-segment drawing objects remain readable after the canonical
     // siteId migration, but they can never be created, replaced, or deleted by
     // browser clients. The plan document supplies the missing site scope.
     match /construction-plans/{planId}/drawings/{allPaths=**} {
-      allow get: if canReadLegacyConstructionPlanDrawing(planId);
-      allow write: if false;
+      allow get: if (canReadLegacyConstructionPlanDrawing(planId)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /construction-plans/{siteId}/{planId}/exports/{allPaths=**} {
-      allow get: if canAccessConstructionPlanPath(siteId, planId);
-      allow create: if canIssueConstructionPlans()
+      allow get: if (canAccessConstructionPlanPath(siteId, planId)) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (canIssueConstructionPlans()
         && canAccessConstructionPlanPath(siteId, planId)
         && resource == null
         && isValidConstructionPlanAttachment()
-        && request.resource.contentType == 'application/pdf';
-      allow update, delete: if false;
+        && request.resource.contentType == 'application/pdf');
+      allow update, delete: if !isPreviewIdentity() && (false);
     }
 
     // Approved snapshot JSON is written only by Admin SDK and is readable only
     // through the same canonical site/plan binding. Keeping this namespace
     // explicit prevents a legacy path from triggering an extra bogus plan read.
     match /construction-plans/{siteId}/{planId}/snapshots/{allPaths=**} {
-      allow get: if canAccessConstructionPlanPath(siteId, planId);
-      allow write: if false;
+      allow get: if (canAccessConstructionPlanPath(siteId, planId)) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     // Legacy paths without siteId, malformed paths, and orphan plan objects
     // must not inherit the authenticated fallback below.
     match /construction-plans/{allPaths=**} {
-      allow read, write: if false;
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
     }
 
     match /{topLevel}/{allPaths=**} {
-      allow read: if !isExplicitlyProtectedTopLevel(topLevel) && activeProfile();
-      allow write: if !isExplicitlyProtectedTopLevel(topLevel)
+      allow read: if (!isExplicitlyProtectedTopLevel(topLevel) && activeProfile()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (!isExplicitlyProtectedTopLevel(topLevel)
         && activeProfile()
-        && isValidBusinessUpload();
+        && isValidBusinessUpload());
     }
   }
 }

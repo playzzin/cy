@@ -1,0 +1,5 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: 'Malgun Gothic', system-ui, sans-serif; background: #f1f5f9; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+.preview-workspace { padding: 12px; max-width: 1280px; margin: auto; }

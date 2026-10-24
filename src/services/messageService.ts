@@ -1,6 +1,7 @@
 import { auth, db } from '../config/firebase';
 import {
   Timestamp,
+  FieldPath,
   arrayUnion,
   collection,
   doc,
@@ -80,7 +81,9 @@ const normalizeMessage = (id: string, data: DocumentData): ErpMessage => {
     actionUrl: data.actionUrl ? String(data.actionUrl) : null,
     createdAt: asTimestamp(data.createdAt, now),
     updatedAt: asTimestamp(data.updatedAt, now),
-    expiresAt: data.expiresAt ? asTimestamp(data.expiresAt) : null
+    expiresAt: data.expiresAt ? asTimestamp(data.expiresAt) : null,
+    requiresConfirmation: data.requiresConfirmation === true,
+    dueAt: data.dueAt ? asTimestamp(data.dueAt) : null
   };
 };
 
@@ -106,6 +109,7 @@ const publishMergedSnapshots = (
   snapshots.forEach((snapshot) => {
     snapshot?.docs.forEach((docSnap) => {
       const message = normalizeMessage(docSnap.id, docSnap.data());
+      message.readReceiptPending = docSnap.metadata?.hasPendingWrites === true;
       if (isActiveMessage(message)) merged.set(message.id, message);
     });
   });
@@ -121,15 +125,18 @@ const subscribeMergedQueries = (
   limitCount?: number
 ): Unsubscribe => {
   const snapshots: Array<QuerySnapshot<DocumentData> | null> = queries.map(() => null);
+  const failures = new Set<number>();
 
   const unsubscribes = queries.map((messageQuery, index) =>
     onSnapshot(
       messageQuery,
       (snapshot) => {
         snapshots[index] = snapshot;
-        publishMergedSnapshots(snapshots, callback, limitCount);
+        failures.delete(index);
+        if (snapshots.every(Boolean) && failures.size === 0) publishMergedSnapshots(snapshots, callback, limitCount);
       },
       (error) => {
+        failures.add(index);
         console.error('[messageService] subscription failed:', error);
         onError?.(error);
       }
@@ -158,12 +165,12 @@ const buildSummary = (uid: string, messages: ErpMessage[]): ErpMessageSummary =>
 export const messageService = {
   collectionName: COLLECTION_NAME,
 
-  getReadAtKey: safeReadAtKey,
+  getReadAtKey: (uid: string): string => uid,
 
   isReadBy,
 
   getReadAt: (message: ErpMessage, uid: string): Timestamp | undefined => {
-    return message.readAtBy?.[safeReadAtKey(uid)];
+    return message.readAtBy?.[uid] ?? message.readAtBy?.[safeReadAtKey(uid)];
   },
 
   buildSummary,
@@ -187,7 +194,7 @@ export const messageService = {
     const now = Timestamp.now();
     const messageRef = doc(collection(db, COLLECTION_NAME));
     const initialReadBy = input.senderId ? [input.senderId] : [];
-    const readAtBy = input.senderId ? { [safeReadAtKey(input.senderId)]: now } : {};
+    const readAtBy = input.senderId ? { [input.senderId]: now } : {};
 
     await setDoc(messageRef, {
       type: input.type,
@@ -311,11 +318,13 @@ export const messageService = {
 
     if (!messageId || !uid) return;
 
-    await updateDoc(doc(db, COLLECTION_NAME, messageId), {
-      readBy: arrayUnion(uid),
-      [`readAtBy.${safeReadAtKey(uid)}`]: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
+    // Preserve the authenticated UID exactly, including dots in custom UIDs.
+    // The receipt rules only allow the current user's map entry to change.
+    await updateDoc(doc(db, COLLECTION_NAME, messageId),
+      'readBy', arrayUnion(uid),
+      new FieldPath('readAtBy', uid), serverTimestamp(),
+      'updatedAt', serverTimestamp()
+    );
   },
 
   markAllAsRead: async (messages: ErpMessage[], uid: string): Promise<void> => {
@@ -323,19 +332,20 @@ export const messageService = {
 
     if (!uid) return;
 
-    const unreadMessages = messages.filter((message) => !message.readBy.includes(uid)).slice(0, 450);
+    const unreadMessages = Array.from(new Map(messages.filter((message) => !message.readBy.includes(uid)).map(message => [message.id, message])).values());
     if (unreadMessages.length === 0) return;
 
-    const batch = writeBatch(db);
-    unreadMessages.forEach((message) => {
-      batch.update(doc(db, COLLECTION_NAME, message.id), {
-        readBy: arrayUnion(uid),
-        [`readAtBy.${safeReadAtKey(uid)}`]: serverTimestamp(),
-        updatedAt: serverTimestamp()
+    for (let index = 0; index < unreadMessages.length; index += 450) {
+      const batch = writeBatch(db);
+      unreadMessages.slice(index, index + 450).forEach((message) => {
+        batch.update(doc(db, COLLECTION_NAME, message.id),
+          'readBy', arrayUnion(uid),
+          new FieldPath('readAtBy', uid), serverTimestamp(),
+          'updatedAt', serverTimestamp()
+        );
       });
-    });
-
-    await batch.commit();
+      await batch.commit();
+    }
   },
 
   archiveMessage: async (messageId: string): Promise<void> => {

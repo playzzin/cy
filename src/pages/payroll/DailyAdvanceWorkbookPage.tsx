@@ -2023,6 +2023,15 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     });
   }, [filteredEntries, getEntryManDay]);
 
+  const serviceTotals = useMemo(() => ({
+    days: statementDayNumbers.map((day) =>
+      serviceRows.reduce((sum, row) => sum + (row.entriesByDay[day]?.manDay || 0), 0)
+    ),
+    manDay: serviceRows.reduce((sum, row) => sum + row.totalManDay, 0),
+    recruiterFee: serviceRows.reduce((sum, row) => sum + row.totalRecruiterFee, 0),
+    invoiceAmount: serviceRows.reduce((sum, row) => sum + row.totalClaimAmount + row.totalRecruiterFee, 0),
+  }), [serviceRows, statementDayNumbers]);
+
   const handleDownloadStatementExcel = useCallback(() => {
     if (statementRows.length === 0) {
       window.alert('엑셀로 다운로드할 청구서 데이터가 없습니다.');
@@ -2178,6 +2187,15 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         Math.round(row.totalClaimAmount + row.totalRecruiterFee),
         row.totalRecruiterFee > 0 ? `소개비 ${Math.round(row.totalRecruiterFee / SERVICE_RECRUITER_FEE_PER_DAY)}일분 포함` : '-',
       ]),
+      [
+        '일자별 공수합계',
+        '',
+        ...serviceTotals.days.map((value) => (value ? Number(value.toFixed(1)) : '-')),
+        Number(serviceTotals.manDay.toFixed(1)),
+        Math.round(serviceTotals.recruiterFee),
+        Math.round(serviceTotals.invoiceAmount),
+        '',
+      ],
     ];
 
     downloadAoaAsExcel(
@@ -2201,10 +2219,18 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         rightColumns: new Set([totalManDayColumn, recruiterFeeColumn, invoiceAmountColumn]),
         moneyColumns: new Set([recruiterFeeColumn, invoiceAmountColumn]),
         manDayColumns: new Set([...dayColumns, totalManDayColumn]),
+        totalRowIndex: rows.length - 1,
+        totalFill: COLORS.pink,
+        merges: [
+          {
+            s: { r: rows.length - 1, c: 0 },
+            e: { r: rows.length - 1, c: 1 },
+          },
+        ],
         rowHeight: 30,
       }
     );
-  }, [month, serviceRows, statementDayNumbers]);
+  }, [month, serviceRows, serviceTotals, statementDayNumbers]);
 
   const teamSummaryRows = useMemo(() => {
     const rowMap = new Map<string, { name: string; days: number[]; total: number }>();
@@ -3224,6 +3250,36 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     </td>
                   </tr>
                 ))
+              )}
+              {serviceRows.length > 0 && (
+                <tr style={{ backgroundColor: COLORS.pink }}>
+                  <td
+                    colSpan={2}
+                    className="h-12 border border-[#d5ccb0] px-3 py-2 font-black sticky left-0 z-10 align-middle whitespace-nowrap"
+                    style={{ backgroundColor: COLORS.pink }}
+                  >
+                    일자별 공수합계
+                  </td>
+                  {serviceTotals.days.map((value, index) => (
+                    <td
+                      key={`service-total-${index}`}
+                      className="h-12 border border-[#d5ccb0] px-0 py-2 text-center font-black align-middle tabular-nums whitespace-nowrap"
+                      style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
+                    >
+                      {value ? formatNumber(value) : '-'}
+                    </td>
+                  ))}
+                  <td className="h-12 border border-[#d5ccb0] px-3 py-2 text-right font-black align-middle">
+                    {formatNumber(serviceTotals.manDay)}
+                  </td>
+                  <td className="h-12 border border-[#d5ccb0] px-3 py-2 text-right font-black align-middle">
+                    {formatCurrency(serviceTotals.recruiterFee)}
+                  </td>
+                  <td className="h-12 border border-[#d5ccb0] px-3 py-2 text-right font-black align-middle">
+                    {formatCurrency(serviceTotals.invoiceAmount)}
+                  </td>
+                  <td className="h-12 border border-[#d5ccb0] px-3 py-2" />
+                </tr>
               )}
             </tbody>
           </table>

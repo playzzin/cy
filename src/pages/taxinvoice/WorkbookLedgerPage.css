@@ -1195,74 +1195,63 @@
 
 .workbook-query-search {
     display: flex;
-    flex: 1 1 400px;
+    flex: 1 1 640px;
+    flex-wrap: wrap;
     min-width: 0;
-    max-width: 480px;
+    max-width: 900px;
     align-items: center;
-    gap: 4px;
-    padding: 3px;
+    gap: 6px 10px;
+    padding: 5px 6px;
     border: 1px solid #cbd5e1;
     border-radius: 8px;
     background: #fff;
 }
 
-.workbook-query-search > .workbook-query-targets {
-    flex: 0 0 auto;
-    gap: 2px;
-}
-
-.workbook-query-search > .workbook-query-targets button {
-    height: 32px;
-    padding: 4px 7px;
-    border-color: transparent;
-    border-radius: 5px;
-}
-
 .workbook-query-search > .workbook-input-field {
-    flex: 1;
+    flex: 1 1 170px;
+    flex-direction: row;
+    align-items: center;
     min-width: 0;
+}
+
+.workbook-query-search > .workbook-input-field > span {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 .workbook-query-search > .workbook-input-field input {
-    width: 100%;
+    flex: 1;
+    width: 0;
     min-width: 0;
     height: 32px;
     padding: 0 8px;
-    border: 0;
+    border: 1px solid #cbd5e1;
     border-radius: 5px;
     font-size: 13px;
 }
 
-.workbook-query-targets {
+.workbook-query-types {
     display: flex;
     gap: 4px;
+    min-height: 36px;
 }
 
-.workbook-query-targets button {
+.workbook-query-types > button {
     flex: 1;
-    min-width: 0;
     border: 1px solid #cbd5e1;
     border-radius: 7px;
-    padding: 5px 8px;
-    background: #f8fafc;
+    padding: 5px 10px;
+    background: #ffffff;
     color: #475569;
-    font-size: 12px;
-    font-weight: 800;
-    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
 }
 
-.workbook-query-targets button[aria-pressed="true"] {
-    border-color: #4f46e5;
-    background: #4f46e5;
-    color: #fff;
-}
-
-.workbook-query-targets button:hover {
-    border-color: #4f46e5;
-}
-
-.workbook-query-types {
-    min-height: 36px;
+.workbook-query-types > button[aria-pressed="true"] {
+    border-color: #1d4ed8;
+    background: #1d4ed8;
+    color: #ffffff;
 }
 
 .workbook-query-panel {
@@ -1347,6 +1336,19 @@
 }
 
 @media (max-width: 640px) {
+    .workbook-query-search {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .workbook-query-search > .workbook-input-field > span {
+        width: 40px;
+    }
+
+    .workbook-query-submit {
+        justify-self: end;
+    }
+
     .workbook-query-actions {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2521,7 +2523,8 @@
     font-weight: 800;
 }
 
-.workbook-vat-payment-form input {
+.workbook-vat-payment-form input,
+.workbook-vat-payment-form select {
     min-width: 0;
     width: 100%;
     border: 1px solid #cbd5e1;
@@ -2532,12 +2535,13 @@
     font-size: 13px;
 }
 
-.workbook-vat-payment-form label:nth-child(2) input {
+.workbook-vat-payment-form input[aria-label="납부금액"] {
     font-weight: 800;
     text-align: right;
 }
 
-.workbook-vat-payment-form input:disabled {
+.workbook-vat-payment-form input:disabled,
+.workbook-vat-payment-form select:disabled {
     background: #f8fafc;
     color: #64748b;
 }
@@ -2558,11 +2562,35 @@
 }
 
 .workbook-vat-payment-history-wrapper {
-    max-height: 260px;
+    max-height: 420px;
 }
 
 .workbook-vat-payment-history-table {
-    min-width: 660px;
+    min-width: 940px;
+}
+
+.workbook-vat-payment-history-table th:nth-child(1) { width: 52px; }
+.workbook-vat-payment-history-table th:nth-child(2) { width: 150px; }
+.workbook-vat-payment-history-table th:nth-child(3),
+.workbook-vat-payment-history-table th:nth-child(4),
+.workbook-vat-payment-history-table th:nth-child(5),
+.workbook-vat-payment-history-table th:nth-child(6) { width: 130px; }
+.workbook-vat-payment-history-table th:last-child { width: 80px; }
+
+.workbook-vat-payment-history-table tbody td:nth-child(7) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.workbook-vat-payment-history-table .workbook-vat-opening-row td {
+    background: #eff6ff;
+    font-weight: 700;
+}
+
+.workbook-vat-payment-history-table tfoot td {
+    background: #e0e7ff;
+    color: #312e81;
+    font-weight: 800;
 }
 
 .workbook-vat-payment-history-table td:nth-child(1),
@@ -2572,8 +2600,12 @@
 
 .workbook-vat-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
+}
+
+.workbook-vat-balance-table {
+    min-width: 1050px;
 }
 
 .workbook-vat-panel {

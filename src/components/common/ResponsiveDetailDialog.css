@@ -1,0 +1,12 @@
+.cy-detail-dialog__overlay { position: fixed; inset: 0; z-index: 2000; background: rgb(15 23 42 / 45%); }
+.cy-detail-dialog { position: fixed; z-index: 2001; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(620px, calc(100vw - 32px)); max-height: 85dvh; display: flex; flex-direction: column; overflow: hidden; border-radius: 16px; background: white; color: #0f172a; box-shadow: 0 20px 60px rgb(15 23 42 / 25%); }
+.cy-detail-dialog__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px; border-bottom: 1px solid #e2e8f0; }
+.cy-detail-dialog__header h2 { margin: 0; font-size: 18px; font-weight: 800; overflow-wrap: anywhere; }
+.cy-detail-dialog__header p { margin: 4px 0 0; color: #64748b; font-size: 14px; }
+.cy-detail-dialog__close { flex-shrink: 0; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; color: #334155; }
+.cy-detail-dialog__body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 16px; }
+.cy-detail-dialog button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+@media (max-width: 640px) {
+    .cy-detail-dialog { top: auto; bottom: 0; left: 0; transform: none; width: 100%; max-height: 85dvh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+}
+@media print { .cy-detail-dialog, .cy-detail-dialog__overlay { display: none !important; } }

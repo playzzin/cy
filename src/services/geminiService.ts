@@ -1,4 +1,7 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
+import { DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_LITE_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
+import { analyzeBankAccountPhoto } from './bankAccountPhotoService';
 
 export interface AnalyzedIdCard {
     name?: string;
@@ -97,24 +100,21 @@ type GeminiPart =
     | { text: string }
     | { inlineData: { mimeType: string; data: string } };
 
-const getApiKeyOrThrow = (): string => {
+const assertAiAnalysisEnabled = (): void => {
     aiSettingsService.assertCurrentPageEnabled('AI 분석 기능');
-    const apiKey = aiSettingsService.getApiKey();
-    if (!apiKey) throw new Error('Google API 키가 설정되지 않았습니다. (/settings/ai 또는 .env.local REACT_APP_GOOGLE_API_KEY)');
-    return apiKey;
 };
 
-const buildGeminiGenerateContentUrl = (apiKey: string, model?: string): string => {
-    const selectedModel = normalizeGeminiModelName(model || aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
-    return `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
+const buildGeminiGenerateContentUrl = (model?: string): string => {
+    const selectedModel = normalizeGeminiModelName(model || aiSettingsService.getModels().textModel, DEFAULT_GEMINI_TEXT_MODEL);
+    return `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent`;
 };
 
 const getTextModelCandidates = (): string[] => {
-    const selectedModel = normalizeGeminiModelName(aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
+    const selectedModel = normalizeGeminiModelName(aiSettingsService.getModels().textModel, DEFAULT_GEMINI_TEXT_MODEL);
     return Array.from(new Set([
         selectedModel,
-        'gemini-2.5-flash',
-        'gemini-2.5-flash-lite'
+        DEFAULT_GEMINI_TEXT_MODEL,
+        DEFAULT_GEMINI_LITE_MODEL
     ].filter(Boolean)));
 };
 
@@ -426,7 +426,7 @@ ${sourceType === 'text' ? `\nKakaoTalk text:\n${text || ''}` : '\nKakaoTalk scre
 const extractGeminiText = (data: any): string => {
     const parts = data?.candidates?.[0]?.content?.parts;
     if (!Array.isArray(parts)) return '';
-    return parts.map((part: any) => typeof part?.text === 'string' ? part.text : '').join('').trim();
+    return parts.filter((part: any) => !part.thought).map((part: any) => typeof part?.text === 'string' ? part.text : '').join('').trim();
 };
 
 const formatGeminiApiError = (message: string, status?: number): string => {
@@ -448,29 +448,30 @@ const formatGeminiApiError = (message: string, status?: number): string => {
 };
 
 const fetchGeminiStructuredJson = async <T,>(
-    apiKey: string,
     parts: GeminiPart[],
     responseJsonSchema: Record<string, any>,
     errorLabel: string
 ): Promise<T> => {
-    const body = JSON.stringify({
+    const body = {
         contents: [{
             role: 'user',
             parts
         }],
         generationConfig: {
-            temperature: 0.1,
             responseMimeType: 'application/json',
             responseJsonSchema
         }
-    });
+    };
     const attempts: Array<{ model: string; status: number; message: string }> = [];
 
     for (const model of getTextModelCandidates()) {
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey, model), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(model), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body
+            body: JSON.stringify({
+                ...body,
+                generationConfig: { ...body.generationConfig, ...geminiTextGenerationOptions(model) }
+            })
         });
 
         const rawText = await response.text();
@@ -511,15 +512,6 @@ const fetchGeminiStructuredJson = async <T,>(
 };
 
 export const geminiService = {
-    saveKey: (key: string) => {
-        aiSettingsService.setApiKey(key);
-    },
-
-    getKey: (): string | null => {
-        const key = aiSettingsService.getApiKey();
-        return key || null;
-    },
-
     fileToBase64: (file: File): Promise<string> => {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -530,7 +522,7 @@ export const geminiService = {
     },
 
     analyzeImage: async (file: File): Promise<AnalyzedIdCard> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
 
         const base64Data = await geminiService.fileToBase64(file);
         const base64Content = base64Data.split(',')[1];
@@ -553,7 +545,6 @@ Extract:
 Return empty strings for fields that are not visible.`;
 
         return fetchGeminiStructuredJson<AnalyzedIdCard>(
-            apiKey,
             [
                 { text: prompt },
                 { inlineData: { mimeType, data: base64Content } }
@@ -564,7 +555,7 @@ Return empty strings for fields that are not visible.`;
     },
 
     analyzeReceiptImage: async (file: File): Promise<AnalyzedReceipt> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
 
         const base64Data = await geminiService.fileToBase64(file);
         const base64Content = base64Data.split(',')[1];
@@ -583,7 +574,6 @@ Return empty strings for fields that are not visible.`;
 7. 설명 없이 제공된 JSON 스키마에 맞는 결과만 반환하세요.`;
 
         const analyzed = await fetchGeminiStructuredJson<AnalyzedReceipt>(
-            apiKey,
             [
                 { text: prompt },
                 { inlineData: { mimeType, data: base64Content } }
@@ -607,7 +597,7 @@ Return empty strings for fields that are not visible.`;
     },
 
     analyzeDailyReportText: async (text: string): Promise<AnalyzedDailyReport> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
 
         const prompt = `
             Analyze the following construction daily report text and extract structured data.
@@ -630,7 +620,7 @@ Return empty strings for fields that are not visible.`;
             Do not include markdown or explanations.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -649,7 +639,7 @@ Return empty strings for fields that are not visible.`;
     },
 
     analyzeDailyReportImage: async (file: File): Promise<AnalyzedDailyReport> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
 
         const base64Data = await geminiService.fileToBase64(file);
         const base64Content = base64Data.split(',')[1];
@@ -671,7 +661,7 @@ Return empty strings for fields that are not visible.`;
             Do not include markdown or explanations.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -693,13 +683,12 @@ Return empty strings for fields that are not visible.`;
     },
 
     analyzeKakaoImage: async (file: File, context?: KakaoAnalyzeContext): Promise<AnalyzedDailyReport[]> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
 
         const base64Data = await geminiService.fileToBase64(file);
         const base64Content = base64Data.split(',')[1];
 
         return fetchGeminiStructuredJson<AnalyzedDailyReport[]>(
-            apiKey,
             [
                 { text: buildKakaoDailyReportPrompt('image', context) },
                 { inlineData: { mimeType: file.type, data: base64Content } }
@@ -710,10 +699,9 @@ Return empty strings for fields that are not visible.`;
     },
 
     analyzeKakaoText: async (text: string, context?: KakaoAnalyzeContext): Promise<AnalyzedDailyReport[]> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
 
         return fetchGeminiStructuredJson<AnalyzedDailyReport[]>(
-            apiKey,
             [{ text: buildKakaoDailyReportPrompt('text', context, text) }],
             DAILY_REPORT_ARRAY_JSON_SCHEMA,
             'Kakao text analysis'
@@ -724,7 +712,7 @@ Return empty strings for fields that are not visible.`;
         files: File[],
         context: MaterialAnalyzeContext
     ): Promise<AnalyzedMaterialTransaction> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
         const imageFiles = files.filter((file) =>
             file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name)
         );
@@ -746,7 +734,6 @@ Return empty strings for fields that are not visible.`;
         );
 
         return fetchGeminiStructuredJson<AnalyzedMaterialTransaction>(
-            apiKey,
             [
                 { text: buildMaterialTransactionPrompt(context, imageFiles.length) },
                 ...imageParts
@@ -756,47 +743,10 @@ Return empty strings for fields that are not visible.`;
         );
     },
 
-    analyzeBankBook: async (file: File): Promise<AnalyzedBankBook> => {
-        const apiKey = getApiKeyOrThrow();
-
-        const base64Data = await geminiService.fileToBase64(file);
-        const base64Content = base64Data.split(',')[1];
-
-        const prompt = `
-            Analyze this image of a bank book (통장사본) or digital bank account details.
-            
-            Extract:
-            1. Bank Name (은행명)
-            2. Account Number (계좌번호) - Extract digits and hyphens.
-            3. Account Holder (예금주) - Name of the account owner.
-
-            Return ONLY a valid JSON object with keys: "bankName", "accountNumber", "accountHolder".
-            Do not include markdown or explanations.
-        `;
-
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{
-                    role: "user",
-                    parts: [
-                        { text: prompt },
-                        { inlineData: { mimeType: file.type, data: base64Content } }
-                    ]
-                }]
-            })
-        });
-
-        const data = await response.json();
-        if (data.error) throw new Error(data.error.message);
-
-        const textResult = data.candidates[0].content.parts[0].text;
-        return geminiService.parseJSON(textResult);
-    },
+    analyzeBankBook: analyzeBankAccountPhoto,
 
     analyzeWorkerRegistrationText: async (text: string): Promise<AnalyzedWorkerRegistration[]> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
 
         const prompt = `
             Analyze the following text containing worker registration details.
@@ -824,7 +774,7 @@ Return empty strings for fields that are not visible.`;
             Do not include markdown or explanations.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -843,7 +793,7 @@ Return empty strings for fields that are not visible.`;
     },
 
     analyzeCommand: async (command: string, context: { sites: any[], teams: any[], workers: any[] }): Promise<{ action: string, targetType?: string, targetKeywords?: string[], destinationKeyword?: string, quantity?: number }[]> => {
-        const apiKey = getApiKeyOrThrow();
+        assertAiAnalysisEnabled();
 
         const siteNames = context.sites.map(s => `${s.name}(${s.id})`).join(', ');
         const teamNames = context.teams.map(t => `${t.name}(${t.id})`).join(', ');
@@ -880,7 +830,7 @@ Return empty strings for fields that are not visible.`;
             Return ONLY JSON.
         `;
 
-        const response = await fetch(buildGeminiGenerateContentUrl(apiKey), {
+        const response = await trackedGeminiFetch('document-analysis')(buildGeminiGenerateContentUrl(), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

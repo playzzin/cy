@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Swal from 'sweetalert2';
-import { aiSettingsService } from '../services/aiSettingsService';
 
 // Types for GAPI and GIS
 // We declare them globally or essentially treat window.gapi as any for interactions, 
@@ -18,7 +17,7 @@ const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/drive/v3/r
 // Configuration - Check Env Vars
 const CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
 
-const getGoogleApiKey = () => aiSettingsService.getApiKey() || process.env.REACT_APP_GOOGLE_API_KEY || '';
+const getGoogleApiKey = () => process.env.REACT_APP_GOOGLE_DRIVE_API_KEY || '';
 
 export interface GoogleDriveFile {
     id: string;

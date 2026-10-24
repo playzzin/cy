@@ -26,7 +26,7 @@ export type CardStatementImportResultStatus =
   | 'committed'
   | 'failed';
 
-export type CardStatementImportAnalysisSource = 'fast_text' | 'gemini';
+export type CardStatementImportAnalysisSource = 'fast_text' | 'pdf_text' | 'gemini';
 
 export interface CardStatementImportJob {
   id: string;
@@ -72,13 +72,36 @@ export interface CardStatementImportFile {
   status: CardStatementImportFileStatus;
   statementMonth?: string;
   grandTotalAmount?: number;
+  grandTotalAvailable?: boolean;
   cardCount: number;
   transactionCount: number;
   analysisSource?: CardStatementImportAnalysisSource;
+  detailAnalysisStatus?: CardStatementFileAnalysisStatus;
   warnings: string[];
   errorMessage?: string;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+}
+
+export type CardStatementFileAnalysisStatus = 'not_analyzed' | 'analyzing' | 'completed' | 'failed';
+
+export interface StoredCardStatementInput {
+  fileId?: string;
+  storagePath?: string;
+  yearMonth?: string;
+  originalFileName?: string;
+}
+
+export interface CardStatementFileDetailPayload {
+  ok: boolean;
+  analysisAvailable?: boolean;
+  readNotice?: string;
+  file: CardStatementImportFile;
+  job: CardStatementImportJob | null;
+  results: CardStatementImportResult[];
+  analysisStatus: CardStatementFileAnalysisStatus;
+  analysisError?: string;
+  analyzedAt?: Timestamp;
 }
 
 export interface CardStatementImportTransaction {
@@ -117,6 +140,12 @@ export interface CardStatementImportResult {
   matchCandidates: CardStatementMatchCandidate[];
   status: CardStatementImportResultStatus;
   subtotalAmount: number;
+  /** True only when the card subtotal was read independently from the statement. */
+  statementTotalAvailable?: boolean;
+  transactionTotalAmount?: number;
+  /** Itemized transaction sum minus the statement card subtotal. */
+  reconciliationDifference?: number | null;
+  reconciliationStatus?: 'matched' | 'mismatch' | 'missing_total' | 'no_transactions';
   transactionCount: number;
   transactions: CardStatementImportTransaction[];
   warnings: string[];

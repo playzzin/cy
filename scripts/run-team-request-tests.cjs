@@ -10,8 +10,9 @@ if (existsSync(path.join(javaHome, 'bin', 'java.exe'))) {
 }
 const cli = path.join(env.APPDATA || '', 'npm', 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
 for (const [project, tests] of [
-  ['demo-team-worker-request', 'functions/lib/workerSignatures.test.js functions/lib/teamAdvanceRequests.test.js functions/lib/teamScopedRead.test.js functions/lib/teamWorkerRequests.test.js functions/lib/workerDocumentAnalysis.test.js functions/lib/teamRequestDrafts.test.js scripts/team-request-rules.test.cjs'],
-  ['demo-team-expense-request', 'functions/lib/teamExpenseRequests.test.js functions/lib/expenseReceiptAnalysis.test.js']
+  ['demo-team-worker-request', 'functions/lib/teamAccountApprovals.test.js functions/lib/workerSignatures.test.js functions/lib/teamAdvanceRequests.test.js functions/lib/teamScopedRead.test.js functions/lib/teamWorkerRequests.test.js functions/lib/workerDocumentAnalysis.test.js functions/lib/teamRequestDrafts.test.js scripts/team-request-rules.test.cjs'],
+  ['demo-team-expense-request', 'functions/lib/teamExpenseRequests.test.js functions/lib/expenseReceiptAnalysis.test.js'],
+  ['demo-worker-delegation', 'functions/lib/workerRequestDelegation.test.js']
 ]) {
   const result = spawnSync(process.execPath, [cli, 'emulators:exec', '--config', 'firebase.json', '--only', 'auth,firestore,storage', '--project', project, `node --test --test-concurrency=1 ${tests}`], { cwd: path.resolve(__dirname, '..'), env, stdio: 'inherit', shell: false });
   if (result.error || result.status !== 0) process.exit(result.status || 1);

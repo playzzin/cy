@@ -15,13 +15,14 @@ export function ExpenseReceiptDocument({ receipt }: { receipt: ExpenseReceiptFil
 type Props = {
   receipt: ExpenseReceiptFile;
   teamId: string;
+  showPaymentMethod?: boolean;
   categories: Array<{ id: string; label: string }>;
   onApply: (fields: ExpenseReceiptFields) => void;
   onClose: () => void;
 };
 const blank = (): ExpenseReceiptFields => ({ date: '', amount: '', paymentMethod: '', category: '' });
 
-export default function ExpenseReceiptAnalysis({ receipt, teamId, categories, onApply, onClose }: Props) {
+export default function ExpenseReceiptAnalysis({ receipt, teamId, categories, showPaymentMethod = true, onApply, onClose }: Props) {
   const [fields, setFields] = useState(blank);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState('');
@@ -45,8 +46,8 @@ export default function ExpenseReceiptAnalysis({ receipt, teamId, categories, on
   const apply = (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
-    if (!fields.date || !Number.isSafeInteger(Number(fields.amount)) || Number(fields.amount) <= 0 || Number(fields.amount) > 1_000_000_000 || !fields.paymentMethod || !categories.some(category => category.id === fields.category)) {
-      setError('사용일·금액·결제수단·경비 구분을 모두 확인해 주세요.'); return;
+    if (!fields.date || !Number.isSafeInteger(Number(fields.amount)) || Number(fields.amount) <= 0 || Number(fields.amount) > 1_000_000_000 || (showPaymentMethod && !fields.paymentMethod) || !categories.some(category => category.id === fields.category)) {
+      setError(showPaymentMethod ? '사용일·금액·결제수단·경비 구분을 모두 확인해 주세요.' : '사용일·금액·경비 구분을 모두 확인해 주세요.'); return;
     }
     onApply(fields);
   };
@@ -61,7 +62,7 @@ export default function ExpenseReceiptAnalysis({ receipt, teamId, categories, on
         <fieldset disabled={busy}>
           <label>분석 사용일<input type="date" required value={fields.date} onChange={event => change('date', event.target.value)} /></label>
           <label>분석 금액 (원)<input type="number" inputMode="numeric" required min="1" max="1000000000" step="1" value={fields.amount} onChange={event => change('amount', event.target.value)} /></label>
-          <label>분석 결제수단<select required value={fields.paymentMethod} onChange={event => change('paymentMethod', event.target.value)}><option value="">직접 확인 후 선택</option><option>현찰</option><option>개인카드</option><option>계좌이체</option></select></label>
+          {showPaymentMethod && <label>분석 결제수단<select required value={fields.paymentMethod} onChange={event => change('paymentMethod', event.target.value)}><option value="">직접 확인 후 선택</option><option>현찰</option><option>개인카드</option><option>계좌이체</option></select></label>}
           <label>분석 경비 구분<select required value={fields.category} onChange={event => change('category', event.target.value)}><option value="">직접 확인 후 선택</option>{categories.map(category => <option key={category.id} value={category.id}>{category.label}</option>)}</select></label>
         </fieldset>
         <div className="expense-request-actions"><button type="button" disabled={busy} onClick={() => setAttempt(previous => previous + 1)}><Sparkles size={16} />다시 분석</button><button type="submit" className="primary" disabled={busy}>확인 후 입력란에 적용</button></div>

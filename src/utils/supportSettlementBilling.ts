@@ -20,6 +20,8 @@ export const selectPreferredSettlementBillings = <T extends SettlementBillingLik
     getScopeKey?: (doc: T) => unknown
 ): T[] => {
     if (!Array.isArray(docs) || docs.length === 0) return [];
+    // Cancelled/manual row drafts must not hide a valid legacy envelope.
+    docs = docs.filter(doc => normalizeSettlementBillingStatus(doc.status) !== 'cancelled');
 
     // Posted documents supersede an automatic ledger draft only for the same
     // billing source. Applying that preference to an entire team/month would
@@ -53,7 +55,8 @@ export const selectPreferredSettlementBillings = <T extends SettlementBillingLik
             // migration runs. Manual drafts are already excluded by the
             // additionalPosted predicate in the recursive selection below.
             const hasScopedDocument = group.some((doc) => (
-                Boolean(String(getScopeKey(doc) ?? '').trim())
+                Boolean(String(getScopeKey(doc) ?? '').trim()) &&
+                (isPostedSettlementBillingStatus(doc.status) || Boolean(additionalPosted?.(doc)))
             ));
             const candidates = hasScopedDocument
                 ? group.filter((doc) => Boolean(String(getScopeKey(doc) ?? '').trim()))

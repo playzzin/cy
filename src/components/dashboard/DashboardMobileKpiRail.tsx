@@ -8,6 +8,8 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import type { DashboardExecutiveStats } from '../../services/dashboardExecutiveService';
+import { dashboardHealthLabels } from '../../features/dashboard-operations';
+import { getReportCoverageLabel } from '../../features/daily-report-coverage/dailyReportCoverage';
 
 interface DashboardMobileKpiRailProps {
   stats: DashboardExecutiveStats;
@@ -45,13 +47,13 @@ export const DashboardMobileKpiRail: React.FC<DashboardMobileKpiRailProps> = ({ 
       <div className="flex min-w-max gap-2">
         <RailItem
           label="일보 커버리지"
-          value={`${stats.operations.reportCoverageRate}%`}
+          value={stats.operations.reportCoverageRate === null ? getReportCoverageLabel(stats.dailyReportCoverage) : `${stats.operations.reportCoverageRate}%`}
           icon={faClipboardCheck}
           tone="bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
         />
         <RailItem
           label="운영 건강도"
-          value={`${stats.operations.healthScore}/100`}
+          value={stats.operations.healthScore === null ? dashboardHealthLabels[stats.operations.healthLabel] : `${stats.operations.healthScore}/100`}
           icon={faGaugeHigh}
           tone="bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-200"
         />

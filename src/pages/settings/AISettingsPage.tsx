@@ -1,13 +1,12 @@
+import { DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_IMAGE_MODEL } from '../../services/geminiModelPolicy';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowLeft,
-    faBrain,
     faCheckCircle,
     faFloppyDisk,
     faImage,
-    faKey,
     faRotateRight,
     faRobot,
     faServer,
@@ -17,7 +16,6 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import {
     aiSettingsService,
-    AI_IMAGE_MODEL_OPTIONS,
     AI_MANAGED_PAGES,
     AI_TEXT_MODEL_OPTIONS,
     AI_CONVERSION_MODEL_OPTIONS,
@@ -37,17 +35,12 @@ const scopeLabelMap: Record<AiModelScope, string> = {
 };
 
 const AISettingsPage: React.FC = () => {
-    const [apiKey, setApiKey] = useState('');
-    const [models, setModels] = useState<AiModelSettings>({
-        textModel: '',
-        analyticsModel: '',
-        imageModel: ''
-    });
+    
     const [pageEnabledById, setPageEnabledById] = useState<Record<string, boolean>>({});
     const [serverApiKey, setServerApiKey] = useState('');
-    const [serverModel, setServerModel] = useState('gemini-2.5-flash');
-    const [serverDocumentModel, setServerDocumentModel] = useState('gemini-2.5-flash');
-    const [serverBatchModel, setServerBatchModel] = useState('gemini-2.5-flash');
+    const [serverModel, setServerModel] = useState(DEFAULT_GEMINI_TEXT_MODEL);
+    const [serverDocumentModel, setServerDocumentModel] = useState(DEFAULT_GEMINI_TEXT_MODEL);
+    const [serverBatchModel, setServerBatchModel] = useState(DEFAULT_GEMINI_TEXT_MODEL);
     const [conversionModel, setConversionModel] = useState('gemini-3.8-flash');
     const [conversionThinking, setConversionThinking] = useState<'low' | 'medium' | 'high'>('medium');
     const [serverStatus, setServerStatus] = useState<ServerAiSettingsStatus | null>(null);
@@ -58,8 +51,6 @@ const AISettingsPage: React.FC = () => {
 
     useEffect(() => {
         const settings = aiSettingsService.getSettings();
-        setApiKey(aiSettingsService.getApiKey());
-        setModels(settings.models);
         setPageEnabledById(settings.pageEnabledById);
         setSavedAt(settings.updatedAt);
     }, []);
@@ -70,9 +61,9 @@ const AISettingsPage: React.FC = () => {
         try {
             const status = await serverAiSettingsService.getStatus();
             setServerStatus(status);
-            setServerModel(status.model || 'gemini-2.5-flash');
-            setServerDocumentModel(status.documentModel || 'gemini-2.5-flash');
-            setServerBatchModel(status.batchModel || status.model || 'gemini-2.5-flash');
+            setServerModel(status.model || DEFAULT_GEMINI_TEXT_MODEL);
+            setServerDocumentModel(status.documentModel || DEFAULT_GEMINI_TEXT_MODEL);
+            setServerBatchModel(status.batchModel || status.model || DEFAULT_GEMINI_TEXT_MODEL);
             setConversionModel(status.excelConversionModel);
             setConversionThinking(status.excelConversionThinking);
         } catch (error) {
@@ -87,11 +78,8 @@ const AISettingsPage: React.FC = () => {
         loadServerStatus();
     }, []);
 
-    const maskedApiKey = useMemo(() => {
-        if (!apiKey) return '미설정';
-        if (apiKey.length <= 8) return `${apiKey.slice(0, 2)}****`;
-        return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
-    }, [apiKey]);
+
+    const models = useMemo<AiModelSettings>(() => ({ textModel: serverDocumentModel, analyticsModel: serverModel, imageModel: DEFAULT_GEMINI_IMAGE_MODEL }), [serverDocumentModel, serverModel]);
 
     const resolveModelByScope = (scope: AiModelScope): string => {
         if (scope === 'textModel') return models.textModel;
@@ -111,14 +99,14 @@ const AISettingsPage: React.FC = () => {
             {
                 id: 'binding-analytics-agent',
                 service: 'analyticsAgent + agentOrchestrator',
-                model: models.textModel,
+                model: models.analyticsModel,
                 note: '관리자 에이전트 대화형 분석'
             },
             {
                 id: 'binding-gemini-analytics',
-                service: 'geminiAnalyticsService',
-                model: models.analyticsModel,
-                note: '일보 통계 질문/인사이트 생성'
+                service: '일보 통계 AI (서버)',
+                model: serverStatus?.model || serverModel || 'server-managed',
+                note: '서버용 Gemini 설정으로 질문 해석·인사이트 생성'
             },
             {
                 id: 'binding-gemini-image',
@@ -135,7 +123,7 @@ const AISettingsPage: React.FC = () => {
             {
                 id: 'binding-document-recognition',
                 service: '공공요금·차량 과태료 문서 인식',
-                model: serverStatus?.documentModel || serverDocumentModel || 'gemini-2.5-flash',
+                model: serverStatus?.documentModel || serverDocumentModel || DEFAULT_GEMINI_TEXT_MODEL,
                 note: '전기·가스·수도 청구서와 과태료 고지서의 고정밀 OCR·매칭'
             },
             { id: 'binding-excel-conversion', service: '위임장·노임명세서 양식 변환', model: serverStatus?.excelConversionModel || conversionModel, note: '양식 변환 전용 모델 · 개인정보 행은 브라우저에서 처리' },
@@ -164,13 +152,9 @@ const AISettingsPage: React.FC = () => {
     };
 
     const handleSave = async () => {
+        if (isSaving || isLoadingServer || !serverStatus) return;
         setIsSaving(true);
         try {
-            aiSettingsService.setApiKey(apiKey);
-            const next = aiSettingsService.saveSettings({
-                models,
-                pageEnabledById
-            });
             const status = await serverAiSettingsService.save({
                 apiKey: serverApiKey.trim() || undefined,
                 model: serverModel,
@@ -181,6 +165,7 @@ const AISettingsPage: React.FC = () => {
             });
             setServerStatus(status);
             setServerApiKey('');
+            const next = aiSettingsService.saveSettings({ models, pageEnabledById });
             setSavedAt(next.updatedAt);
             alert('AI 설정이 저장되었습니다.');
         } catch (error) {
@@ -238,7 +223,7 @@ const AISettingsPage: React.FC = () => {
                             <button
                                 type="button"
                                 onClick={handleSave}
-                                disabled={isSaving}
+                                disabled={isSaving || isLoadingServer || !serverStatus}
                                 className={`px-4 py-2.5 rounded-xl text-sm font-bold text-white flex items-center gap-2 ${
                                     isSaving ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
                                 }`}
@@ -253,27 +238,7 @@ const AISettingsPage: React.FC = () => {
                     </div>
                 </header>
 
-                <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                    <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                        <FontAwesomeIcon icon={faKey} className="text-amber-500" />
-                        Gemini API Key
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-1">
-                        입력한 키는 브라우저 로컬 스토리지에 저장됩니다.
-                    </p>
-                    <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3 items-center">
-                        <input
-                            type="password"
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            placeholder="Gemini API Key"
-                            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                        />
-                        <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
-                            현재 키: <span className="font-mono text-slate-700">{maskedApiKey}</span>
-                        </div>
-                    </div>
-                </section>
+                <p className="rounded-xl bg-blue-50 p-4 text-sm text-blue-800">모든 AI 요청은 로그인 권한을 확인한 서버에서 처리합니다. API 키는 아래 서버 설정에서만 관리합니다.</p>
 
                 <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
                     <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
@@ -283,7 +248,7 @@ const AISettingsPage: React.FC = () => {
                                 서버용 Gemini 설정
                             </h2>
                             <p className="text-sm text-slate-500 mt-1">
-                                사진 거래처 등록, 법인카드 청구관리처럼 Cloud Function에서 실행되는 Gemini 기능에 사용됩니다.
+                                문서·이미지·도면·통계 등 모든 AI 기능에서 사용합니다. 브라우저에 API 키를 저장하지 않습니다.
                             </p>
                         </div>
                         <button
@@ -353,7 +318,7 @@ const AISettingsPage: React.FC = () => {
                                 value={serverModel}
                                 onChange={(e) => setServerModel(e.target.value)}
                                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
-                                placeholder="gemini-2.5-flash"
+                                placeholder={DEFAULT_GEMINI_TEXT_MODEL}
                             />
                         </div>
                         <div className="space-y-2">
@@ -364,7 +329,7 @@ const AISettingsPage: React.FC = () => {
                                 value={serverDocumentModel}
                                 onChange={(e) => setServerDocumentModel(e.target.value)}
                                 className="w-full border border-indigo-200 bg-indigo-50 rounded-xl px-3 py-2.5 text-xs font-mono font-bold text-indigo-800"
-                                placeholder="gemini-2.5-flash"
+                                placeholder={DEFAULT_GEMINI_TEXT_MODEL}
                             />
                             <datalist id="server-document-model-options">
                                 {AI_TEXT_MODEL_OPTIONS.map((option) => (
@@ -379,7 +344,7 @@ const AISettingsPage: React.FC = () => {
                                 value={serverBatchModel}
                                 onChange={(e) => setServerBatchModel(e.target.value)}
                                 className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
-                                placeholder="gemini-2.5-flash"
+                                placeholder={DEFAULT_GEMINI_TEXT_MODEL}
                             />
                         </div>
                         <button
@@ -400,83 +365,7 @@ const AISettingsPage: React.FC = () => {
                     <p className="text-xs text-slate-500 mt-3">선택 후 상단 저장을 누르면 적용됩니다. 실제 사용 모델은 변환 화면과 결과에 표시됩니다.</p><Link to="/tools/excel-converter" className="inline-block mt-3 font-bold text-sm text-blue-700">양식 변환과 미리보기 열기 →</Link>
                 </section>
 
-                <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                    <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
-                        <FontAwesomeIcon icon={faBrain} className="text-indigo-500" />
-                        Gemini 모델 선택
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-1">
-                        서비스별 기본 모델을 분리해 설정할 수 있습니다. 커스텀 모델명이 있으면 직접 입력하세요.
-                    </p>
-
-                    <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">공통 분석 모델</label>
-                            <select
-                                value={models.textModel}
-                                onChange={(e) => setModels((prev) => ({ ...prev, textModel: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold"
-                            >
-                                {AI_TEXT_MODEL_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                            <input
-                                type="text"
-                                value={models.textModel}
-                                onChange={(e) => setModels((prev) => ({ ...prev, textModel: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
-                                placeholder="커스텀 모델명"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">통계 분석 모델</label>
-                            <select
-                                value={models.analyticsModel}
-                                onChange={(e) => setModels((prev) => ({ ...prev, analyticsModel: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold"
-                            >
-                                {AI_TEXT_MODEL_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                            <input
-                                type="text"
-                                value={models.analyticsModel}
-                                onChange={(e) => setModels((prev) => ({ ...prev, analyticsModel: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
-                                placeholder="커스텀 모델명"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">이미지 생성 모델</label>
-                            <select
-                                value={models.imageModel}
-                                onChange={(e) => setModels((prev) => ({ ...prev, imageModel: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold"
-                            >
-                                {AI_IMAGE_MODEL_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </select>
-                            <input
-                                type="text"
-                                value={models.imageModel}
-                                onChange={(e) => setModels((prev) => ({ ...prev, imageModel: e.target.value }))}
-                                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-mono"
-                                placeholder="커스텀 모델명"
-                            />
-                        </div>
-                    </div>
-                </section>
+                
 
                 <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
                     <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
@@ -565,7 +454,7 @@ const AISettingsPage: React.FC = () => {
                                                     {page.paths.map((path) => (
                                                         <code
                                                             key={`${page.id}:${path}`}
-                                                            className="text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-0.5 text-slate-700"
+                                                            className="break-all whitespace-normal text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-0.5 text-slate-700"
                                                         >
                                                             {path}
                                                         </code>
@@ -574,7 +463,7 @@ const AISettingsPage: React.FC = () => {
                                             </td>
                                             <td className="px-4 py-3 text-slate-600">{scopeLabelMap[page.modelScope]}</td>
                                             <td className="px-4 py-3">
-                                                <code className="text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-1 text-slate-700">
+                                                <code className="break-all whitespace-normal text-[11px] bg-slate-100 border border-slate-200 rounded px-2 py-1 text-slate-700">
                                                     {model}
                                                 </code>
                                             </td>

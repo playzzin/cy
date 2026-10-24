@@ -4,6 +4,7 @@ import { MENU_PATHS } from '../../constants/menuPaths';
 
 const SITE_TITLE = '청연ENG ERP';
 const pageNames: Record<string, string> = {
+    '/activity': '활동 내역',
     '/': '로그인',
     '/login': '로그인',
     '/homepage/client': '홈페이지 제작 진행 현황',
@@ -21,6 +22,7 @@ const pageNames: Record<string, string> = {
     '/database/company-db-construction': '건설사 관리',
     '/database/office-staff-db': '사무직 관리',
     '/database/account-management': '계좌 관리',
+    '/payroll/bank-transfer': '국민은행 송금',
     '/database/worker-input': '작업자 입력',
     '/mass-upload/daily-report-integrated': '통합 일보 등록',
     '/payroll/daily-wage-statement': '일용 노임명세서',

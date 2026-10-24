@@ -175,6 +175,7 @@ export const ERP_FINANCE_COLLECTIONS = [
   'advance_payments',
   'advance_requests',
   'monthly_payroll_settlements',
+  'delegated_receipt_claims',
   'payments',
   'tax_invoices',
   'receivables',

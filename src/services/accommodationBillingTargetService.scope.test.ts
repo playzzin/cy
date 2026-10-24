@@ -4,7 +4,9 @@ import { getTeamScopedRows } from './teamScopedReadService';
 
 jest.mock('../config/firebase', () => ({ db: {} }));
 jest.mock('./teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
-jest.mock('firebase/firestore', () => ({ getDocs: jest.fn() }));
+jest.mock('firebase/firestore', () => ({ getDocs: jest.fn(), collection: jest.fn() }));
+
+beforeEach(() => jest.clearAllMocks());
 
 it('팀장 숙소 청구대상은 서버 범위 조회로 읽고 전체 목록을 요청하지 않는다', async () => {
     (getTeamScopedRows as jest.Mock).mockResolvedValue([
@@ -21,4 +23,12 @@ it('팀 조회 실패를 빈 청구대상 목록으로 숨기지 않는다', asy
     (getTeamScopedRows as jest.Mock).mockRejectedValue(new Error('unavailable'));
     await expect(accommodationBillingTargetService.listTargets()).rejects.toThrow('unavailable');
     expect(getDocs).not.toHaveBeenCalled();
+});
+
+it('일반 조회 실패도 빈 청구대상 목록으로 숨기지 않는다', async () => {
+    (getTeamScopedRows as jest.Mock).mockResolvedValue(null);
+    (getDocs as jest.Mock).mockRejectedValue(new Error('unavailable'));
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try { await expect(accommodationBillingTargetService.listTargets()).rejects.toThrow('unavailable'); }
+    finally { log.mockRestore(); }
 });

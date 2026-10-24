@@ -1,0 +1,230 @@
+/* Match MonthlyWageStyles' KBPreview palette and compact controls.
+   Scoped here so payroll calculations and other pages keep their own styles. */
+.bank-transfer-page {
+    --bt-line:#334155; --bt-muted:#94a3b8; --bt-surface:#0f172a;
+    --bt-raised:#1e293b; --bt-text:#e2e8f0; --bt-accent:#fbbf24;
+    color-scheme:dark; color:var(--bt-text); background:linear-gradient(180deg,#020617,#111827);
+    padding:16px 16px 78px; min-height:100%;
+}
+.bank-transfer-page button { background:var(--bt-surface); color:#cbd5e1; border-color:#475569; min-height:30px; padding:5px 9px; box-shadow:none; }
+.bank-transfer-page button:hover:not(:disabled) { background:var(--bt-raised); color:#fff; border-color:#64748b; }
+.bank-transfer-page button:disabled { opacity:.45; }
+.bank-transfer-page :is(input:not([type=checkbox]),select) { background:#020617b8; border-color:#475569; color:#f8fafc; height:32px; font-size:12px; }
+.bank-transfer-page input::placeholder { color:#94a3b8; }
+.bank-transfer-page input[type=checkbox] { accent-color:var(--bt-accent); }
+.bank-transfer-page :is(button,input,select,a,summary,[tabindex]):focus-visible { outline:2px solid var(--bt-accent); outline-offset:2px; }
+.bank-transfer-page a { color:#fcd34d; }
+.bank-transfer-page .bt-primary,.bank-transfer-page .bt-payroll-load { color:#0f172a; background:#fbbf24; border-color:#fcd34d; }
+.bank-transfer-page :is(.bt-primary,.bt-payroll-load):hover:not(:disabled) { color:#020617; background:#fcd34d; border-color:#fde68a; }
+.bank-transfer-page :is(.bt-invalid,.bt-transfer-row>p.bt-invalid) { color:#fda4af!important; }
+.bank-transfer-page .bt-valid { color:#6ee7b7; }
+.bank-transfer-page .bt-page-header { margin-bottom:10px; gap:8px; }
+.bank-transfer-page .bt-title { gap:10px; }
+.bank-transfer-page .bt-title>div { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.bank-transfer-page .bt-title h1 { color:#f8fafc; font-size:21px; margin:0; }
+.bank-transfer-page .bt-title p { font-size:12px; }
+.bank-transfer-page .bt-logo { width:36px; height:36px; border-radius:9px; background:#fbbf2414; color:#fbbf24; box-shadow:none; border:1px solid #fbbf2433; }
+.bank-transfer-page .bt-header-actions a { padding:6px 9px; border:1px solid var(--bt-line); border-radius:7px; margin:0; color:#cbd5e1; }
+.bank-transfer-page .bt-stage-nav { margin-bottom:10px; gap:5px; padding:4px; border:1px solid var(--bt-line); border-radius:9px; background:#0f172a; }
+.bank-transfer-page .bt-stage-nav button { border-color:transparent; padding:7px 12px; color:#94a3b8; }
+.bank-transfer-page .bt-stage-nav button[aria-current=step] { color:#fcd34d; background:#fbbf2414; border-color:#fbbf2466; box-shadow:none; }
+.bank-transfer-page .bt-work-state { background:#1e293b; border-color:#475569; color:#cbd5e1; padding:4px 10px; margin-right:5px; font-size:11px; }
+.bank-transfer-page .bt-draft-panel { margin-bottom:10px; background:#0f172a; border-color:var(--bt-line); border-radius:10px; }
+.bank-transfer-page .bt-draft-bar { padding:8px 12px 0; gap:6px; }
+.bank-transfer-page .bt-draft-bar label { gap:8px; font-size:12px; }
+.bank-transfer-page .bt-draft-bar label input { width:220px; }
+.bank-transfer-page .bt-save-button { color:#fcd34d; background:#fbbf2414; border-color:#fbbf2466; }
+.bank-transfer-page .bt-save-button:hover:not(:disabled) { color:#fde68a; background:#fbbf2426; border-color:#fbbf24; }
+.bank-transfer-page .bt-save-state { color:#6ee7b7; background:#064e3b55; font-size:11px; }
+.bank-transfer-page .bt-save-state.is-dirty { color:#fcd34d; background:#78350f55; }
+.bank-transfer-page .bt-save-help { margin:6px 0 8px; padding:0 12px; font-size:11px; }
+.bank-transfer-page .bt-save-help strong { color:#cbd5e1; }
+.bank-transfer-page .bt-draft-tools { display:flex; flex-wrap:wrap; border-top:1px solid var(--bt-line); gap:0 14px; padding:0 10px; }
+.bank-transfer-page .bt-draft-tools>details { border:0; flex:0 1 auto; min-width:0; }
+.bank-transfer-page .bt-draft-tools>details[open] { flex:1 0 100%; order:2; border-top:1px solid var(--bt-line); }
+.bank-transfer-page .bt-draft-tools>details>summary { padding:8px 2px; font-size:12px; color:#cbd5e1; }
+.bank-transfer-page .bt-saved-lists>summary>span { color:#fcd34d; background:#fbbf2414; }
+.bank-transfer-page .bt-saved-lists>summary>small { color:#94a3b8; margin-left:8px; }
+.bank-transfer-page .bt-saved-grid { padding:0 2px 10px; }
+.bank-transfer-page .bt-saved-grid article { background:#02061788; border-color:#334155; padding:10px; }
+.bank-transfer-page .bt-saved-grid article.is-current { background:#fbbf240c; border-color:#fbbf2466; }
+.bank-transfer-page .bt-saved-grid .bt-export-status { color:#fcd34d; }
+.bank-transfer-page .bt-delete-saved { color:#fda4af; }
+.bank-transfer-page .bt-notice { background:#064e3b4d; border:1px solid #34d39940; color:#a7f3d0; }
+.bank-transfer-page .bt-error { background:#88133740; border-color:#fb71854d; color:#fecdd3; }
+.bank-transfer-page .bt-notice button { background:transparent; color:#a7f3d0; }
+.bank-transfer-page .bt-check-warning,.bank-transfer-page .bt-source-warnings,.bank-transfer-page .bt-assign-notice { background:#78350f4d; color:#fde68a; border:1px solid #fbbf243d; }
+.bank-transfer-page .bt-source-check { background:#0f172a; border-color:#334155; border-radius:9px; margin-bottom:10px; padding:8px 12px; }
+.bank-transfer-page .bt-source-check-bar strong { color:#e2e8f0; font-size:12px; }
+.bank-transfer-page .bt-source-check-bar p,.bank-transfer-page .bt-check-help { color:#94a3b8; font-size:11px; margin-top:4px; }
+.bank-transfer-page .bt-comparison-results li { border-color:#334155; }
+.bank-transfer-page .bt-comparison-results li p { color:#fcd34d; }
+.bank-transfer-page .bt-comparison-results li small,.bank-transfer-page .bt-comparison-results li>div span { color:#94a3b8; }
+.bank-transfer-page .bt-workspace { grid-template-columns:minmax(300px,.72fr) minmax(0,1.4fr); gap:12px; }
+.bank-transfer-page .bt-review-mode { grid-template-columns:minmax(0,1fr); }
+.bank-transfer-page :is(.bt-picker,.bt-basket,.bt-preview) { background:#0f172a; border-color:#475569ad; border-radius:12px; box-shadow:none; }
+.bank-transfer-page .bt-section-heading { padding:10px 12px; background:radial-gradient(circle at top right,#f59e0b14,transparent 28%),linear-gradient(135deg,#0f172a,#111827); }
+.bank-transfer-page .bt-section-heading h2 { color:#f8fafc; font-size:15px; margin-bottom:3px; }
+.bank-transfer-page .bt-section-heading p { color:#94a3b8; font-size:11px; }
+.bank-transfer-page .bt-step,.bank-transfer-page .bt-count { color:#fcd34d; background:#fbbf2414; border:1px solid #fbbf2433; }
+.bank-transfer-page .bt-step { width:26px; height:26px; border-radius:6px; font-size:11px; }
+.bank-transfer-page .bt-source-tabs { background:#02061799; padding:3px; margin:0 10px 8px; border:1px solid #334155; }
+.bank-transfer-page .bt-source-tabs button { border:0; color:#94a3b8; background:transparent; min-height:28px; }
+.bank-transfer-page .bt-source-tabs button.is-active { background:#fbbf2426; color:#fcd34d; box-shadow:none; }
+.bank-transfer-page .bt-payroll-picker { background:linear-gradient(180deg,#0f172a,#1e293b); border-color:#fbbf244d; padding:8px; }
+.bank-transfer-page .bt-payroll-options { color:#cbd5e1; }
+.bank-transfer-page .bt-payroll-load { min-height:30px; }
+.bank-transfer-page .bt-search { border-color:#475569; background:#02061780; margin-top:8px; }
+.bank-transfer-page .bt-team-affiliation button[aria-pressed=true] { background:#fbbf241a; border-color:#fbbf2473; color:#fcd34d; }
+.bank-transfer-page .bt-candidate-list { padding:8px; }
+.bank-transfer-page .bt-candidate { background:#02061766; padding:9px 8px; border-radius:7px; margin-bottom:6px; }
+.bank-transfer-page .bt-candidate:hover { border-color:#fbbf2480; box-shadow:none; }
+.bank-transfer-page .bt-candidate.is-added { background:#1e293b80; }
+.bank-transfer-page .bt-candidate-title>span,.bank-transfer-page .bt-source-badge { background:#1e293b; border-color:#475569; color:#cbd5e1; }
+.bank-transfer-page .bt-candidate-title strong,.bank-transfer-page .bt-row-heading strong { color:#f8fafc; font-size:13px; }
+.bank-transfer-page .bt-candidate-title b { color:#fcd34d; }
+.bank-transfer-page .bt-candidate-body p.bt-account-number { color:#e2e8f0; }
+.bank-transfer-page .bt-candidate-body p,.bank-transfer-page .bt-candidate-body small { font-size:12px; }
+.bank-transfer-page .bt-candidate .bt-add { background:#fbbf2414; border:1px solid #fbbf243d; color:#fcd34d; }
+.bank-transfer-page .bt-empty strong { color:#cbd5e1; }
+.bank-transfer-page .bt-drop-empty { background:#02061766; border-color:#475569; }
+.bank-transfer-page .bt-drop-icon { background:#1e293b; color:#94a3b8; }
+.bank-transfer-page .bt-basket.is-drag-over { background:#fbbf240d; outline-color:#fbbf24; }
+.bank-transfer-page .bt-list-review { padding:0 12px 8px; }
+.bank-transfer-page .bt-issue-filters { gap:4px; }
+.bank-transfer-page .bt-issue-filters button { min-height:27px; padding:3px 7px; font-size:11px; }
+.bank-transfer-page .bt-issue-filters b { background:#334155; color:#cbd5e1; }
+.bank-transfer-page :is(.bt-issue-filters,.bt-group-totals) button[aria-pressed=true] { background:#fbbf2414; border-color:#fbbf2473; color:#fcd34d; }
+.bank-transfer-page .bt-filter-help { color:#94a3b8; font-size:11px; margin:6px 0; }
+.bank-transfer-page .bt-list-filter-fields { gap:5px; }
+.bank-transfer-page .bt-list-totals { display:flex; flex-wrap:wrap; gap:6px 20px; margin-top:8px; padding:7px 9px; border:1px solid #334155; border-radius:7px; background:#02061780; }
+.bank-transfer-page .bt-list-totals>span { display:flex; flex-wrap:wrap; gap:5px; align-items:baseline; padding:0; background:transparent; color:#94a3b8; font-size:11px; }
+.bank-transfer-page .bt-list-totals strong { color:#e2e8f0; font-size:12px; }
+.bank-transfer-page .bt-list-totals>span:last-child strong { color:#fcd34d; }
+.bank-transfer-page .bt-group-totals { margin-top:5px; }
+.bank-transfer-page .bt-group-totals summary,.bank-transfer-page .bt-bulk-settings>summary { color:#cbd5e1; font-size:11px; }
+.bank-transfer-page .bt-group-totals p { color:#94a3b8; font-size:11px; }
+.bank-transfer-page .bt-group-totals button { background:#02061766; color:#cbd5e1; min-width:115px; }
+.bank-transfer-page .bt-bulk-settings { background:#0f172a; border-color:#334155; }
+.bank-transfer-page .bt-bulk-settings>summary { padding:7px 12px; }
+.bank-transfer-page .bt-memo-settings { padding:5px 10px 8px; background:transparent; gap:6px; align-items:start; }
+.bank-transfer-page .bt-memo-settings label { display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 8px; align-items:center; padding:5px 8px; border:1px solid #334155; border-radius:8px; background:linear-gradient(180deg,#0f172a,#1e293b); white-space:nowrap; }
+.bank-transfer-page .bt-memo-settings small { grid-column:1/-1; color:#94a3b8; font-size:11px; white-space:normal; }
+.bank-transfer-page .bt-memo-settings button { align-self:center; }
+.bank-transfer-page .bt-list-tools { padding:7px 12px; gap:6px; border-bottom:1px solid #334155; }
+.bank-transfer-page .bt-transfer-list { padding:8px 10px; }
+.bank-transfer-page .bt-transfer-row { padding:10px; border-color:#334155; background:#02061766; border-radius:8px; margin-bottom:7px; }
+.bank-transfer-page .bt-transfer-row.has-error { background:#8813371a; border-color:#fb718559; }
+.bank-transfer-page .bt-row-fields { gap:7px; margin-top:8px; }
+.bank-transfer-page .bt-review-mode .bt-row-fields { grid-template-columns:minmax(190px,1.35fr) repeat(3,minmax(0,1fr)); }
+.bank-transfer-page .bt-row-account strong,.bank-transfer-page .bt-row-account small { font-size:12px; }
+.bank-transfer-page .bt-row-fields label { color:#cbd5e1; font-size:11px; }
+.bank-transfer-page input.bt-money-input { font-size:14px; color:#fcd34d; }
+.bank-transfer-page .bt-inline-account { margin-top:7px; }
+.bank-transfer-page .bt-inline-account summary { color:#cbd5e1; font-size:11px; }
+.bank-transfer-page .bt-inline-account p { color:#94a3b8; }
+.bank-transfer-page .bt-inline-account .bt-row-fields { background:#1e293b80; grid-template-columns:1fr 1.3fr 1fr; padding:8px; }
+.bank-transfer-page .bt-adjustment-reason { color:#fcd34d; font-size:11px; margin-top:7px; }
+.bank-transfer-page .bt-row-notes { color:#fcd34d; font-size:11px; margin-top:6px; }
+.bank-transfer-page .bt-row-detail,.bank-transfer-page .bt-row-group { font-size:11px; }
+.bank-transfer-page .bt-payroll-detail { background:#0f172a; border-color:#334155; margin-top:7px; }
+.bank-transfer-page .bt-payroll-detail>summary { color:#cbd5e1; font-size:12px; padding:7px 9px; }
+.bank-transfer-page .bt-payroll-detail>summary small { color:#94a3b8; font-size:11px; }
+.bank-transfer-page .bt-detail-content { background:#02061766; border-color:#334155; }
+.bank-transfer-page .bt-detail-caption span,.bank-transfer-page .bt-detail-content p,.bank-transfer-page .bt-detail-footnote,.bank-transfer-page .bt-detail-content h3>span { color:#94a3b8; }
+.bank-transfer-page .bt-detail-caption strong,.bank-transfer-page .bt-detail-content h3 { color:#f1f5f9; }
+.bank-transfer-page .bt-pay-summary>div,.bank-transfer-page .bt-amount-summary>div { background:#1e293b; color:#e2e8f0; }
+.bank-transfer-page .bt-pay-summary>div:last-child,.bank-transfer-page .bt-amount-summary>div:last-of-type { background:#064e3b4d; color:#a7f3d0; }
+.bank-transfer-page .bt-pay-summary span,.bank-transfer-page .bt-amount-summary span { color:#cbd5e1; }
+.bank-transfer-page .bt-detail-basis { background:#78350f33; border-color:#fbbf2440; }
+.bank-transfer-page .bt-detail-basis :is(span,strong,b) { color:#fcd34d; }
+.bank-transfer-page .bt-detail-content p.bt-detail-edited { color:#fde68a; background:#78350f4d; }
+.bank-transfer-page .bt-amount-summary p { color:#fcd34d!important; }
+.bank-transfer-page .bt-deduction-lines>div { border-color:#334155; }
+.bank-transfer-page .bt-deduction-lines dt { color:#cbd5e1; }
+.bank-transfer-page .bt-deduction-lines dt small,.bank-transfer-page .bt-support-detail td small { color:#94a3b8; }
+.bank-transfer-page .bt-work-table { border-color:#334155; }
+.bank-transfer-page .bt-work-table th { background:#1e293b; color:#cbd5e1; }
+.bank-transfer-page .bt-work-table :is(th,td) { border-color:#334155; }
+.bank-transfer-page .bt-expanded-detail { background:#0f172a; border-color:#64748b; margin-bottom:10px; }
+.bank-transfer-page .bt-expanded-detail .bt-detail-content { padding:12px; }
+.bank-transfer-page .bt-sticky-progress { background:linear-gradient(180deg,#0f172af5,#020617fa); border:1px solid #475569; color:#94a3b8; padding:8px 12px; border-radius:9px; bottom:8px; gap:8px 14px; box-shadow:0 4px 20px #0004; font-size:11px; }
+.bank-transfer-page .bt-sticky-progress>span { display:flex; gap:6px; align-items:baseline; }
+.bank-transfer-page .bt-sticky-progress strong { color:#e2e8f0; font-size:12px; }
+.bank-transfer-page .bt-sticky-progress>span:first-child strong { color:#fcd34d; }
+.bank-transfer-page .bt-preview .bt-section-heading { padding:10px 12px; }
+.bank-transfer-page.is-preview>.bt-draft-panel { margin-top:12px; }
+.bank-transfer-page .bt-kb-preview-header>div { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 12px; }
+.bank-transfer-page .bt-kb-preview-header h2 { font-size:18px; margin:0; }
+.bank-transfer-page .bt-review-summary { padding:7px 12px; gap:8px 20px; background:#0f172a; border-color:#334155; }
+.bank-transfer-page .bt-review-summary>div { display:flex; align-items:baseline; gap:6px; }
+.bank-transfer-page .bt-review-summary span { color:#94a3b8; font-size:12px; }
+.bank-transfer-page .bt-review-summary strong { font-size:13px; color:#fcd34d; }
+.bank-transfer-page .bt-review-notice { padding:5px 9px; margin:8px 12px; background:#78350f33; border-color:#fbbf2440; color:#fde68a; font-size:12px; }
+.bank-transfer-page .bt-review-help { color:#94a3b8; font-size:11px; margin:7px 12px; }
+.bank-transfer-page .bt-preview-table { padding:0 12px 8px; background:#0f172ac7; max-height:65dvh; }
+.bank-transfer-page .bt-preview table { min-width:920px; color:#e2e8f0; font-size:13px; }
+.bank-transfer-page .bt-preview :is(th,td) { padding:8px 9px; border-color:#334155; }
+.bank-transfer-page .bt-preview th { background:#1e293bf5; color:#f1f5f9; font-size:12px; white-space:nowrap; }
+.bank-transfer-page .bt-preview tbody>tr:not(.bt-review-context):hover { background:#1e293b99; }
+.bank-transfer-page .bt-preview .bt-amount { color:#fcd34d; white-space:nowrap; }
+.bank-transfer-page .bt-preview-person { min-width:150px; }
+.bank-transfer-page .bt-preview-person>strong { display:block; color:#f8fafc; font-size:13px; }
+.bank-transfer-page .bt-preview-person>small,.bank-transfer-page .bt-review-period { display:block; margin-top:3px; color:#94a3b8; font-size:11px; }
+.bank-transfer-page .bt-preview-check { min-width:125px; max-width:190px; font-size:11px; }
+.bank-transfer-page .bt-preview-check>div { display:flex; gap:4px; margin-top:5px; flex-wrap:wrap; }
+.bank-transfer-page .bt-preview-check button { min-height:25px; padding:2px 5px; font-size:11px; }
+.bank-transfer-page .bt-review-has-note { background:#fbbf2408; }
+.bank-transfer-page .bt-employment-badge { display:inline-flex; align-items:center; flex-shrink:0; width:max-content; padding:2px 6px; border:1px solid #475569; border-radius:5px; font-size:10px; font-weight:600; line-height:1.4; white-space:nowrap; }
+.bank-transfer-page .bt-employment-badge.is-active { color:#6ee7b7; background:#064e3b66; border-color:#047857; }
+.bank-transfer-page .bt-employment-badge.is-retired { color:#fda4af; background:#88133740; border-color:#9f1239; }
+.bank-transfer-page .bt-employment-badge.is-unknown { color:#cbd5e1; background:#334155; }
+.bank-transfer-page .bt-employment-filter { display:flex; align-items:center; flex-wrap:wrap; gap:5px 12px; padding:8px 12px; border-bottom:1px solid #334155; font-size:12px; }
+.bank-transfer-page .bt-employment-filter label { display:flex; align-items:center; gap:6px; cursor:pointer; color:#e2e8f0; }
+.bank-transfer-page .bt-employment-filter span,.bank-transfer-page .bt-employment-filter small { color:#94a3b8; font-size:11px; }
+.bank-transfer-page .bt-employment-filter small { flex-basis:100%; }
+.bank-transfer-page .bt-review-has-error { background:#88133733; }
+.bank-transfer-page .bt-review-context td { background:#78350f26; border-top-width:1px; padding:4px 9px; }
+.bank-transfer-page .bt-review-row-notes { margin:0; color:#fcd34d; font-size:11px; line-height:1.6; }
+.bank-transfer-page .bt-preview-footer { padding:8px 12px; border-color:#4755696b; background:linear-gradient(180deg,#0f172af5,#020617f5); gap:8px; }
+.bank-transfer-page .bt-preview-footer-copy { display:grid; gap:4px; flex:1 1 240px; }
+.bank-transfer-page .bt-preview-footer-copy strong { font-size:12px; color:#cbd5e1; }
+.bank-transfer-page .bt-preview-footer-copy small { font-size:11px; color:#94a3b8; }
+.bank-transfer-page .bt-preview-footer-actions { display:flex; gap:6px; flex-wrap:wrap; }
+.bank-transfer-page .bt-export-history summary,.bank-transfer-page .bt-backup-panel>summary { color:#cbd5e1; }
+.bank-transfer-page :is(.bt-export-history>p,.bt-export-history li small,.bt-export-history summary small,.bt-backup-content p,.bt-backup-preview small) { color:#94a3b8; }
+.bank-transfer-page .bt-export-history li { border-color:#334155; }
+.bank-transfer-page :is(.bt-backup-preview,.bt-history-detail,.bt-results-panel) { background:#02061766; border-color:#334155; }
+.bank-transfer-page :is(.bt-history-detail p,.bt-results-panel p,.bt-result-mapping p) { color:#94a3b8; }
+.bank-transfer-page :is(.bt-history-rows>details,.bt-result-match li,.bt-result-manual label) { border-color:#334155; }
+.bank-transfer-page .bt-history-rows .bt-payroll-detail { background:#0f172a; }
+.bank-transfer-page .bt-result-mapping { background:#1e293b80; }
+.bank-transfer-page .bt-result-match { background:#0f172a; border-color:#475569; }
+@media(max-width:1100px) {
+    .bank-transfer-page .bt-workspace { grid-template-columns:minmax(280px,.8fr) minmax(0,1.2fr); }
+    .bank-transfer-page .bt-review-mode { grid-template-columns:minmax(0,1fr); }
+    .bank-transfer-page .bt-memo-settings { grid-template-columns:minmax(0,1fr); }
+    .bank-transfer-page .bt-memo-settings button { justify-self:end; }
+}
+@media(max-width:850px) {
+    .bank-transfer-page { padding:12px 12px 88px; }
+    .bank-transfer-page .bt-workspace { grid-template-columns:minmax(0,1fr); }
+    .bank-transfer-page .bt-review-mode .bt-row-fields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:600px) {
+    .bank-transfer-page { padding:10px 10px 105px; }
+    .bank-transfer-page .bt-title h1 { font-size:18px; }
+    .bank-transfer-page .bt-header-actions { width:auto; }
+    .bank-transfer-page .bt-stage-nav button { padding:7px 5px; }
+    .bank-transfer-page .bt-stage-nav .bt-work-state { width:auto; margin:0 0 0 auto; }
+    .bank-transfer-page .bt-draft-bar label { flex-basis:100%; }
+    .bank-transfer-page .bt-draft-bar label input { width:0; }
+    .bank-transfer-page .bt-draft-tools { gap:0 12px; }
+    .bank-transfer-page .bt-saved-lists>summary>small { display:none; }
+    .bank-transfer-page .bt-sticky-progress>span { flex:1 1 42%; flex-wrap:wrap; }
+    .bank-transfer-page .bt-review-mode .bt-row-fields,.bank-transfer-page .bt-inline-account .bt-row-fields { grid-template-columns:minmax(0,1fr); }
+    .bank-transfer-page .bt-memo-settings label { grid-template-columns:auto minmax(0,1fr); }
+    .bank-transfer-page .bt-preview-footer-actions { width:100%; }
+    .bank-transfer-page .bt-preview-footer-actions button { flex:1; white-space:normal; }
+    .bank-transfer-page .bt-kb-preview-header { align-items:start; }
+}

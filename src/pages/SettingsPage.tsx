@@ -37,6 +37,12 @@ const SettingsPage: React.FC = () => {
                             </Link>
                         </div>
                     </section>
+                    <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                            <div><h3 className="font-bold text-slate-800">도장 이미지 관리</h3><p className="mt-1 text-sm text-slate-500">기본 도장 등록·수정·삭제와 재직·해촉증명서, 견적서, 거래명세서 도장 일괄 변경</p></div>
+                            <Link to="/settings/stamps" className="shrink-0 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-700">도장 관리 페이지 이동</Link>
+                        </div>
+                    </section>
                     <SystemBrandingSection />
                     <UserAndRoleManagementSection />
                     <DataManagementSection />

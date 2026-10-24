@@ -2,23 +2,7 @@ import React, { Suspense, useCallback, useDeferredValue, useEffect, useMemo, use
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import {
-    faChevronLeft,
-    faChevronRight,
-    faCopy,
-    faDownload,
-    faDatabase,
-    faMagnifyingGlass,
-    faHistory,
-    faPenToSquare,
-    faPrint,
-    faRotateRight,
-    faSpinner,
-    faTrashCan,
-    faUpload,
-    faWandMagicSparkles,
-    faXmark
-} from '@fortawesome/free-solid-svg-icons';
+import { faChevronLeft, faChevronRight, faCopy, faDownload, faDatabase, faMagnifyingGlass, faHistory, faPenToSquare, faPrint, faRotateRight, faSpinner, faTrashCan, faUpload, faWandMagicSparkles, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import AppIntroScreen from '../../components/common/AppIntroScreen';
 import { companyService } from '../../services/companyService';
@@ -26,27 +10,20 @@ import { siteService } from '../../services/siteService';
 import { teamService } from '../../services/teamService';
 import { accountDirectoryService, AccountDirectory } from '../../services/accountDirectoryService';
 import { aiSettingsService } from '../../services/aiSettingsService';
-import {
-    createWorkbookLedgerService,
-    WorkbookLedgerEntry,
-    WorkbookLedgerTenant,
-    WorkbookTransactionType
-} from '../../services/workbookLedgerService';
-import {
-    createQuarterVatPaymentService,
-    QuarterVatPaymentQuarter,
-    QuarterVatPaymentRecord
-} from '../../services/quarterVatPaymentService';
-import {
-    createTaxInvoiceDuplicateFingerprint,
-    TaxInvoiceExtractedCandidate,
-    validateTaxInvoiceFiles,
-} from '../../services/taxInvoiceBulkImportService';
+import { createWorkbookLedgerService, WorkbookLedgerEntry, WorkbookLedgerTenant, WorkbookTransactionType } from '../../services/workbookLedgerService';
+import { createQuarterVatPaymentService, QuarterVatPaymentRecord } from '../../services/quarterVatPaymentService';
+import { buildQuarterVatBalances, buildQuarterVatPaymentHistory, sumQuarterVatBalances, VatQuarter } from '../../utils/quarterVatSettlement';
+import { createTaxInvoiceDuplicateFingerprint, TaxInvoiceExtractedCandidate, validateTaxInvoiceFiles } from '../../services/taxInvoiceBulkImportService';
 import { calculateWorkbookTotalAmount, calculateWorkbookVatAmount } from '../../utils/workbookLedgerAmounts';
-import { parseWorkbookNumber } from '../../utils/workbookLedgerParsing';
 import { applyWorkbookLedgerExcelStyle } from '../../utils/workbookLedgerExcelStyle';
 import TaxInvoiceBulkImportModal from './components/TaxInvoiceBulkImportModal';
 import './WorkbookLedgerPage.css';
+import { WorkbookLedgerBatchError } from '../../services/workbookLedgerService';
+import { getWorkbookNumericIssues } from '../../utils/workbookLedgerValidation';
+import { prepareWorkbookImportEntries } from './utils/workbookLedgerImport';
+import { ADVANCE_USAGE_SOURCE_TYPE, DB_HEADERS, DB_PAGE_SIZE, EXCEL_REPORT_BORDER, INPUT_GRID_COLUMN_PROPS, INPUT_GRID_DERIVED_SOURCE, INPUT_GRID_MOUSE_COMMIT_SOURCE, INPUT_ROW_COUNT, KB_BANK_CODE_BY_NAME, LEDGER_PRINT_COLUMNS, QUARTER_VAT_OPTIONS, SETTLEMENT_AMOUNT_EPSILON, SUMMARY_ADVANCE_LOOKBACK_START, SUMMARY_MODE_TABS, SUMMARY_PAGE_SIZE, SUMMARY_PRINT_COLUMNS, TENANT_TABS, WORKBOOK_TABS, applyExcelRangeStyle, applyInputGridDerivedValues, areInputGridValuesEqual, buildDefaultLedgerStart, buildEntryLoadQueryKey, buildLedgerExcelData, buildLedgerRows, buildPaymentMatchCandidates, buildPaymentMatchContext, buildPrintColGroup, buildPrintColumnStyles, buildQuarterVatReport, buildReceiptHistorySettlementEntries, buildSummaryBaseRowsForTransaction, buildSummaryExcelData, buildSummaryRows, canUseSummaryRangePreview, compareDbEntriesBySortState, createAllEntryLoadQuery, createDbEditDraft, createEmptyInputRows, createRangeEntryLoadQuery, createRecentDbEntryLoadQuery, createTransactionTypeEntryLoadQuery, emptyDbFilter, emptyInputRow, escapeHtml, filterSummaryRows, formatAmountInputValue, formatDateInput, formatNumber, getEntryLoadScopeText, getExcelFill, getInitialWorkbookTab, getLinkedPaymentTotal, getLinkedSettlementStatus, getMonthFromDate, getPaymentMappingStatusLabel, getPaymentMappingSuggestion, getPrintTableTheme, getQuarterFromMonth, getQuarterVatLabel, getSettlementLabels, getSummaryDisplayedSettledAmount, getVisibleWorkbookRemark, getWorkbookInputRowIssues, getWorkbookMonthRange, getYearFromDate, hasInputContent, isAdvanceUsageEntry, isInvoiceEntry, isPaymentEntry, isStandalonePaymentEntry, isSummarySettlementMode, isUnmappedPaymentEntry, mergeExcelCells, normalizeBankName, normalizeDate, normalizeInputGridAmountChanges, normalizeInputGridPastedData, normalizeInputRow, normalizeInputRows, normalizePartnerMatchKey, normalizeText, parseImportedDbEntries, parseInputYear, partitionWorkbookImportDuplicates, saveWorkbookTab, setExcelRowHeight, shiftWorkbookMonth, sortSummaryRowsByDate, sortWorkbookEntries, toDbRow, toNumberOrNull } from './WorkbookLedgerModel';
+import type { DatabaseDisplayRow, DateSearchMode, DbEditDraft, DbFilterState, DbPaymentMappingMode, DbSortField, DbSortState, EntryLoadQuery, EntryLoadScope, InputGridChange, InputRow, InputRowValidationIssue, LedgerFilter, PaymentMappingSuggestion, QuarterVatBasis, QuarterVatDetailTransactionType, QuarterVatFilter, QuarterVatOption, ReceiptEditDraft, RefreshPageDataOptions, StyledExcelWorksheet, SummaryFilter, SummaryRow, WorkbookTab, XlsxModule } from './WorkbookLedgerModel';
+export * from './WorkbookLedgerModel';
 
 let workbookInputHotTableModulePromise: ReturnType<typeof importWorkbookInputHotTable> | null = null;
 
@@ -60,2383 +37,6 @@ const loadWorkbookInputHotTable = () => {
 };
 
 const WorkbookInputHotTable = React.lazy(loadWorkbookInputHotTable);
-
-const ADVANCE_USAGE_SOURCE_TYPE = 'advanceUsage';
-const SUMMARY_ADVANCE_LOOKBACK_START = '1900-01-01';
-
-type WorkbookTab = 'input' | 'database' | 'ledger' | 'summary' | 'vat';
-type SummaryMode = '매출' | '매입' | '미수금' | '미지급금';
-type DateSearchMode = 'range' | 'month';
-type QuarterVatBasis = 'date' | 'applied';
-type QuarterVatOption = 'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4';
-type QuarterVatDetailTransactionType = 'all' | WorkbookTransactionType;
-
-interface InputRow {
-    transactionType: WorkbookTransactionType | '';
-    date: string;
-    partnerName: string;
-    siteName: string;
-    description: string;
-    manDays: number | null;
-    supplyAmount: number | null;
-    taxAmount: number | null;
-    totalAmount: number | null;
-    paymentAmount: number | null;
-    appliedYear: number | null;
-    appliedMonth: number | null;
-    note: string;
-    teamName: string;
-}
-
-type InputGridChange = [number, keyof InputRow | string | number, unknown, unknown];
-
-interface InputRowValidationIssue {
-    rowIndex: number;
-    rowNumber: number;
-    fields: Array<keyof InputRow>;
-    messages: string[];
-}
-
-type WorkbookImportEntry = Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'updatedAt'>;
-
-interface LedgerFilter {
-    startDate: string;
-    endDate: string;
-    teamName: string;
-    transactionType: WorkbookTransactionType;
-    partnerName: string;
-    siteName: string;
-}
-
-interface SummaryFilter {
-    startDate: string;
-    endDate: string;
-    startYear?: number;
-    startMonth?: number;
-    startDay?: number;
-    endYear?: number;
-    endMonth?: number;
-    endDay?: number;
-    teamName: string;
-    mode: SummaryMode;
-    partnerName: string;
-    siteName: string;
-}
-
-interface QuarterVatFilter {
-    year: number;
-    quarter: QuarterVatOption;
-    basis: QuarterVatBasis;
-    detailTransactionType: QuarterVatDetailTransactionType;
-    partnerName: string;
-    siteName: string;
-}
-
-interface LedgerRow {
-    id: string;
-    date: string;
-    partnerName: string;
-    description: string;
-    transactionAmount: number;
-    paymentAmount: number;
-    balance: number;
-    siteName: string;
-    note: string;
-    teamName: string;
-}
-
-interface SummaryRow {
-    id: string;
-    transactionType: WorkbookTransactionType;
-    partnerName: string;
-    siteName: string;
-    issueDate: string;
-    appliedYear: number | null;
-    appliedMonth: number | null;
-    supplyAmount: number;
-    taxAmount: number;
-    totalAmount: number;
-    paymentDates: string[];
-    settledAmount: number;
-    advanceUsedAmount: number;
-    outstandingAmount: number;
-    advanceAmount: number;
-    settlementEntryIds: string[];
-    note: string;
-    teamName: string;
-}
-
-interface QuarterVatSummaryRow {
-    quarter: QuarterVatOption;
-    label: string;
-    periodLabel: string;
-    salesSupply: number;
-    salesVat: number;
-    salesTotal: number;
-    purchaseSupply: number;
-    purchaseVat: number;
-    purchaseTotal: number;
-    payableVat: number;
-    entryCount: number;
-    warningCount: number;
-}
-
-interface QuarterVatMonthlyRow {
-    month: number;
-    label: string;
-    salesSupply: number;
-    salesVat: number;
-    salesTotal: number;
-    purchaseSupply: number;
-    purchaseVat: number;
-    purchaseTotal: number;
-    payableVat: number;
-    entryCount: number;
-    warningCount: number;
-}
-
-interface QuarterVatDetailRow {
-    id: string;
-    transactionType: WorkbookTransactionType;
-    date: string;
-    periodLabel: string;
-    quarter: QuarterVatOption;
-    partnerName: string;
-    siteName: string;
-    description: string;
-    supplyAmount: number;
-    taxAmount: number;
-    expectedTaxAmount: number;
-    totalAmount: number;
-    expectedTotalAmount: number;
-    issues: string[];
-    note: string;
-    teamName: string;
-}
-
-interface QuarterVatReport {
-    quarterRows: QuarterVatSummaryRow[];
-    monthlyRows: QuarterVatMonthlyRow[];
-    detailRows: QuarterVatDetailRow[];
-    warningRows: QuarterVatDetailRow[];
-    totals: QuarterVatSummaryRow;
-}
-
-type StyledExcelCell = {
-    t?: string;
-    v?: unknown;
-    f?: string;
-    s?: Record<string, unknown>;
-};
-
-type StyledExcelWorksheet = Record<string, StyledExcelCell | unknown> & {
-    '!cols'?: Array<{ wch: number }>;
-    '!rows'?: Array<{ hpx: number }>;
-    '!merges'?: unknown[];
-    '!autofilter'?: { ref: string };
-};
-
-type XlsxModule = typeof import('xlsx');
-
-interface LegacyMatchCandidate {
-    id: string;
-    partnerName: string;
-    siteName: string;
-    issueDate: string;
-    appliedYear: number | null;
-    appliedMonth: number | null;
-    teamName: string;
-}
-
-interface ReceiptEditDraft {
-    id: string;
-    date: string;
-    paymentAmount: string;
-    note: string;
-}
-
-interface DbEditDraft {
-    id: string;
-    transactionType: WorkbookTransactionType;
-    date: string;
-    partnerName: string;
-    siteName: string;
-    description: string;
-    supplyAmount: string;
-    paymentAmount: string;
-    appliedYear: string;
-    appliedMonth: string;
-    note: string;
-    teamName: string;
-}
-
-interface DatabaseDisplayRow {
-    entry: WorkbookLedgerEntry;
-    indexLabel: string;
-    nested: boolean;
-}
-
-type DbPaymentMappingMode = 'all' | 'unmappedPayments';
-type PaymentMappingStatus = 'linked' | 'auto' | 'ambiguous' | 'none';
-
-interface PaymentMatchCandidate {
-    entry: WorkbookLedgerEntry;
-    linkedPaymentAmount: number;
-    outstandingAmount: number;
-    score: number;
-    reasons: string[];
-}
-
-interface PaymentMatchContext {
-    invoiceEntriesByPartnerKey: Map<string, WorkbookLedgerEntry[]>;
-    linkedPaymentTotalsByInvoiceId: Map<string, number>;
-    entriesById: Map<string, WorkbookLedgerEntry>;
-}
-
-interface PaymentMappingSuggestion {
-    status: PaymentMappingStatus;
-    candidates: PaymentMatchCandidate[];
-}
-
-type DbSortField = 'date' | 'partnerName' | 'amount';
-
-interface DbSortState {
-    field: DbSortField;
-    direction: 'asc' | 'desc';
-}
-
-interface DbFilterState {
-    transactionType: string;
-    date: string;
-    partnerName: string;
-    siteName: string;
-    description: string;
-    supplyAmount: string;
-    taxAmount: string;
-    totalAmount: string;
-    paymentAmount: string;
-    appliedYear: string;
-    appliedMonth: string;
-    note: string;
-    teamName: string;
-}
-
-const INPUT_ROW_COUNT = 80;
-const DB_PAGE_SIZE = 100;
-const SUMMARY_PAGE_SIZE = 200;
-const DB_INITIAL_LOAD_LIMIT = 300;
-const INPUT_GRID_DERIVED_SOURCE = 'workbook-input-derived';
-const INPUT_GRID_MOUSE_COMMIT_SOURCE = 'workbook-input-mouse-commit';
-const INPUT_GRID_AMOUNT_COLUMNS = new Set([6, 7, 8, 9]);
-const INPUT_GRID_AMOUNT_PROPS = new Set<keyof InputRow>([
-    'supplyAmount',
-    'taxAmount',
-    'totalAmount',
-    'paymentAmount'
-]);
-const INPUT_GRID_COLUMN_PROPS: Array<keyof InputRow> = [
-    'transactionType',
-    'date',
-    'partnerName',
-    'siteName',
-    'description',
-    'manDays',
-    'supplyAmount',
-    'taxAmount',
-    'totalAmount',
-    'paymentAmount',
-    'appliedYear',
-    'appliedMonth',
-    'note',
-    'teamName'
-];
-const isInputGridAmountColumn = (columnIndex: number) => INPUT_GRID_AMOUNT_COLUMNS.has(columnIndex);
-type EntryLoadScope = 'none' | 'recent' | 'range' | 'summary' | 'all';
-interface EntryLoadQuery {
-    scope: EntryLoadScope;
-    startDate?: string;
-    endDate?: string;
-    paymentCutoffDate?: string;
-    transactionType?: WorkbookTransactionType;
-    limitCount?: number;
-    orderDirection?: 'asc' | 'desc';
-}
-
-const createRecentDbEntryLoadQuery = (): EntryLoadQuery => ({
-    scope: 'recent',
-    limitCount: DB_INITIAL_LOAD_LIMIT,
-    orderDirection: 'desc'
-});
-
-const createAllEntryLoadQuery = (): EntryLoadQuery => ({
-    scope: 'all',
-    orderDirection: 'asc'
-});
-
-const createTransactionTypeEntryLoadQuery = (transactionType: WorkbookTransactionType): EntryLoadQuery => ({
-    scope: 'all',
-    transactionType,
-    orderDirection: 'asc'
-});
-
-const createRangeEntryLoadQuery = (
-    startDate: string,
-    endDate: string,
-    transactionType?: WorkbookTransactionType
-): EntryLoadQuery => {
-    const normalizedStart = String(startDate ?? '').trim();
-    const normalizedEnd = String(endDate ?? '').trim();
-
-    if (normalizedStart && normalizedEnd && normalizedStart > normalizedEnd) {
-        return {
-            scope: 'range',
-            startDate: normalizedEnd,
-            endDate: normalizedStart,
-            transactionType,
-            orderDirection: 'asc'
-        };
-    }
-
-    return {
-        scope: 'range',
-        startDate: normalizedStart,
-        endDate: normalizedEnd,
-        transactionType,
-        orderDirection: 'asc'
-    };
-};
-
-const buildEntryLoadQueryKey = (entryQuery: EntryLoadQuery) => [
-    entryQuery.scope,
-    entryQuery.startDate ?? '',
-    entryQuery.endDate ?? '',
-    entryQuery.paymentCutoffDate ?? '',
-    entryQuery.transactionType ?? '',
-    entryQuery.limitCount ?? '',
-    entryQuery.orderDirection ?? 'asc'
-].join('|');
-
-const getEntryLoadScopeText = (scope: EntryLoadScope, count: number) => {
-    if (scope === 'all') return `전체 ${count.toLocaleString()}건`;
-    if (scope === 'recent') return `최근 ${count.toLocaleString()}건`;
-    if (scope === 'range') return `기간 ${count.toLocaleString()}건`;
-    if (scope === 'summary') return `기간 정산 ${count.toLocaleString()}건`;
-    return '미로드';
-};
-
-interface RefreshPageDataOptions {
-    forceEntries?: boolean;
-    forceCatalogs?: boolean;
-    loadEntries?: boolean;
-    entryQuery?: EntryLoadQuery;
-    silent?: boolean;
-}
-
-const buildDefaultLedgerStart = (date: Date) => (
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
-);
-const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
-    { id: 'input', label: '입력폼' },
-    { id: 'database', label: 'DB' },
-    { id: 'ledger', label: '조회 (매출, 매입 거래장)' },
-    { id: 'summary', label: '전체 조회' },
-    { id: 'vat', label: '분기 부가세' },
-];
-
-const getWorkbookTabStorageKey = (tenantKey: WorkbookLedgerTenant | string) => (
-    `workbook-ledger:${tenantKey}:active-tab`
-);
-
-const getInitialWorkbookTab = (tenantKey: WorkbookLedgerTenant | string): WorkbookTab => {
-    if (typeof window === 'undefined') return 'input';
-
-    try {
-        const savedTab = window.sessionStorage.getItem(getWorkbookTabStorageKey(tenantKey));
-        return WORKBOOK_TABS.some((tab) => tab.id === savedTab)
-            ? savedTab as WorkbookTab
-            : 'input';
-    } catch {
-        return 'input';
-    }
-};
-
-const saveWorkbookTab = (tenantKey: WorkbookLedgerTenant | string, tab: WorkbookTab) => {
-    if (typeof window === 'undefined') return;
-
-    try {
-        window.sessionStorage.setItem(getWorkbookTabStorageKey(tenantKey), tab);
-    } catch {
-        // Storage can be unavailable in private or restricted browser contexts.
-    }
-};
-
-const SUMMARY_MODE_TABS: SummaryMode[] = ['매출', '매입', '미수금', '미지급금'];
-
-const TENANT_TABS: Array<{ key: WorkbookLedgerTenant; label: string; path: string; colorClass: string }> = [
-    { key: 'cheongyeon', label: '청연', path: '/payroll/workbook-ledger', colorClass: 'tenant-cheongyeon' },
-    { key: 'dawon', label: '다원', path: '/payroll/workbook-ledger-dawon', colorClass: 'tenant-dawon' }
-];
-
-const DB_HEADERS = [
-    '구분',
-    '날짜',
-    '거래처명',
-    '현장명',
-    '내용',
-    '공급가액',
-    '부가세',
-    '합계',
-    '입금금액',
-    '적용연도',
-    '적용월',
-    '매칭매출ID',
-    '비고',
-    '팀명',
-] as const;
-
-const NOTE_HEADER_ALIASES = ['비고', '비 고', '메모', '비고/메모', '메모/비고', '특이사항', 'remark', 'remarks', 'memo', 'note'] as const;
-
-const emptyInputRow = (): InputRow => ({
-    transactionType: '',
-    date: '',
-    partnerName: '',
-    siteName: '',
-    description: '',
-    manDays: null,
-    supplyAmount: null,
-    taxAmount: null,
-    totalAmount: null,
-    paymentAmount: null,
-    appliedYear: null,
-    appliedMonth: null,
-    note: '',
-    teamName: ''
-});
-
-const createEmptyInputRows = () => Array.from({ length: INPUT_ROW_COUNT }, emptyInputRow);
-
-const emptyDbFilter = (): DbFilterState => ({
-    transactionType: '',
-    date: '',
-    partnerName: '',
-    siteName: '',
-    description: '',
-    supplyAmount: '',
-    taxAmount: '',
-    totalAmount: '',
-    paymentAmount: '',
-    appliedYear: '',
-    appliedMonth: '',
-    note: '',
-    teamName: ''
-});
-
-const normalizeInputRows = (rows: Array<Partial<InputRow> | null | undefined>, baseYear: number, selectedTeam: string) =>
-    rows.map((row) => normalizeInputRowForGrid(row, baseYear, selectedTeam));
-
-
-const formatDateInput = (date: Date) => (
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-);
-
-const formatDateInputForGrid = (normalizedDate: string) => normalizedDate;
-
-const isSupportedInputYear = (value: number): boolean => (
-    Number.isInteger(value) && value >= 2000 && value <= 2100
-);
-
-const parseInputYear = (value: unknown): number | null => {
-    const firstCell = String(value ?? '')
-        .split(/\t|\r\n|\n|\r/)
-        .map((part) => part.trim())
-        .find(Boolean) ?? '';
-
-    if (!firstCell) return null;
-
-    const fullYearMatch = firstCell.match(/\b(19\d{2}|20\d{2}|2100)\b/);
-    if (fullYearMatch) {
-        const year = Number(fullYearMatch[1]);
-        return isSupportedInputYear(year) ? year : null;
-    }
-
-    const compactDigits = firstCell.replace(/\D/g, '');
-    if (compactDigits.length >= 4) {
-        const year = Number(compactDigits.slice(0, 4));
-        if (isSupportedInputYear(year)) return year;
-    }
-
-    const twoDigitYearMatch = firstCell.match(/^\d{2}(?:[-./]\d{1,2}[-./]\d{1,2})?$/);
-    if (twoDigitYearMatch) {
-        const year = 2000 + Number(firstCell.slice(0, 2));
-        return isSupportedInputYear(year) ? year : null;
-    }
-
-    return null;
-};
-
-const expandDateYear = (yearText: string): number => {
-    const year = Number(yearText);
-    if (!Number.isFinite(year)) return NaN;
-    return yearText.length === 2 ? 2000 + year : year;
-};
-
-const formatDateParts = (year: number, month: number, day: number) => (
-    `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-);
-
-const normalizeDateParts = (yearText: string, monthText: string, dayText: string): string => {
-    const yearNumber = expandDateYear(yearText);
-    const monthNumber = Number(monthText);
-    const dayNumber = Number(dayText);
-
-    if (
-        !Number.isFinite(yearNumber) ||
-        !Number.isInteger(monthNumber) ||
-        !Number.isInteger(dayNumber) ||
-        monthNumber < 1 ||
-        monthNumber > 12 ||
-        dayNumber < 1 ||
-        dayNumber > 31
-    ) {
-        return '';
-    }
-
-    const parsed = new Date(yearNumber, monthNumber - 1, dayNumber);
-    if (
-        parsed.getFullYear() !== yearNumber ||
-        parsed.getMonth() !== monthNumber - 1 ||
-        parsed.getDate() !== dayNumber
-    ) {
-        return '';
-    }
-
-    return formatDateParts(yearNumber, monthNumber, dayNumber);
-};
-
-const formatNumber = (value: number | null | undefined) => {
-    if (value === null || value === undefined || !Number.isFinite(value)) return '-';
-    return new Intl.NumberFormat('ko-KR').format(value);
-};
-
-const EXCEL_REPORT_BORDER = {
-    top: { style: 'thin', color: { rgb: 'CBD5E1' } },
-    bottom: { style: 'thin', color: { rgb: 'CBD5E1' } },
-    left: { style: 'thin', color: { rgb: 'CBD5E1' } },
-    right: { style: 'thin', color: { rgb: 'CBD5E1' } },
-};
-
-const getExcelFill = (rgb: string) => ({
-    fgColor: { rgb },
-    patternType: 'solid'
-});
-
-const getOrCreateStyledExcelCell = (worksheet: StyledExcelWorksheet, address: string): StyledExcelCell => {
-    const existing = worksheet[address];
-    if (existing && typeof existing === 'object') return existing as StyledExcelCell;
-
-    const nextCell: StyledExcelCell = { t: 's', v: '' };
-    worksheet[address] = nextCell;
-    return nextCell;
-};
-
-const applyExcelRangeStyle = (
-    xlsx: XlsxModule,
-    worksheet: StyledExcelWorksheet,
-    rangeText: string,
-    style: Record<string, unknown>
-) => {
-    const range = xlsx.utils.decode_range(rangeText);
-    for (let row = range.s.r; row <= range.e.r; row += 1) {
-        for (let column = range.s.c; column <= range.e.c; column += 1) {
-            const address = xlsx.utils.encode_cell({ r: row, c: column });
-            getOrCreateStyledExcelCell(worksheet, address).s = style;
-        }
-    }
-};
-
-const mergeExcelCells = (xlsx: XlsxModule, worksheet: StyledExcelWorksheet, rangeText: string) => {
-    worksheet['!merges'] = [
-        ...(worksheet['!merges'] ?? []),
-        xlsx.utils.decode_range(rangeText)
-    ];
-};
-
-const setExcelRowHeight = (worksheet: StyledExcelWorksheet, rowNumber: number, height: number) => {
-    const rows = worksheet['!rows'] ?? [];
-    rows[rowNumber - 1] = { hpx: height };
-    worksheet['!rows'] = rows;
-};
-
-const toNumberOrNull = (value: unknown): number | null => {
-    return parseWorkbookNumber(value);
-};
-
-const formatAmountInputValue = (value: unknown) => {
-    const amount = toNumberOrNull(value);
-    return amount === null ? '' : formatNumber(amount);
-};
-
-const normalizeInputGridAmountValue = (value: unknown): unknown => {
-    const parsed = parseWorkbookNumber(value);
-    return parsed === null ? value : parsed;
-};
-
-const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
-const normalizeHeaderKey = (value: unknown) => normalizeText(value).replace(/\s+/g, '').toLowerCase();
-const normalizeBankName = (value: unknown) => (
-    String(value ?? '')
-        .toLowerCase()
-        .replace(/\s+/g, '')
-        .trim()
-);
-
-const KB_BANK_CODE_BY_NAME = new Map<string, string>([
-    ['한국은행', '001'],
-    ['산업은행', '002'], ['kdb', '002'],
-    ['기업은행', '003'], ['기업', '003'], ['ibk', '003'], ['ibk기업은행', '003'], ['ibk기업', '003'],
-    ['국민은행', '004'], ['국민', '004'], ['kb국민', '004'], ['kb국민은행', '004'], ['kb', '004'],
-    ['수협은행', '007'], ['수협', '007'], ['sh수협', '007'],
-    ['수출입은행', '008'],
-    ['농협은행', '011'], ['nh농협은행', '011'], ['nh농협', '011'], ['농협', '011'],
-    ['지역농협', '012'], ['농축협', '012'],
-    ['우리은행', '020'], ['우리', '020'],
-    ['sc제일은행', '023'], ['제일은행', '023'], ['sc', '023'],
-    ['한국씨티은행', '027'], ['씨티은행', '027'], ['씨티', '027'],
-    ['대구은행', '031'], ['im뱅크', '031'], ['dgb', '031'],
-    ['부산은행', '032'], ['bnk부산', '032'],
-    ['광주은행', '034'],
-    ['제주은행', '035'],
-    ['전북은행', '037'],
-    ['경남은행', '039'], ['bnk경남', '039'],
-    ['새마을금고', '045'], ['mg새마을', '045'], ['mg', '045'],
-    ['신협', '048'],
-    ['상호저축은행', '050'], ['저축은행', '050'],
-    ['우체국', '071'], ['우체국예금', '071'],
-    ['하나은행', '081'], ['keb하나', '081'], ['하나', '081'],
-    ['신한은행', '088'], ['신한', '088'],
-    ['케이뱅크', '089'], ['k뱅크', '089'],
-    ['카카오뱅크', '090'], ['카카오', '090'],
-    ['토스뱅크', '092'], ['토스', '092'],
-]);
-
-const normalizePartnerMatchKey = (value: unknown) => normalizeText(value)
-    .toLowerCase()
-    .replace(/\(주\)|㈜|주식회사/g, '')
-    .replace(/\s+/g, '')
-    .replace(/[^0-9a-z가-힣]/g, '');
-const escapeHtml = (value: string) => value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
-interface PrintColumnSpec {
-    className: string;
-    width: string;
-}
-
-const LEDGER_PRINT_COLUMNS: PrintColumnSpec[] = [
-    { className: 'print-ledger-col-date', width: '78px' },
-    { className: 'print-ledger-col-partner', width: '170px' },
-    { className: 'print-ledger-col-description', width: '200px' },
-    { className: 'print-ledger-col-transaction', width: '92px' },
-    { className: 'print-ledger-col-payment', width: '92px' },
-    { className: 'print-ledger-col-balance', width: '92px' },
-    { className: 'print-ledger-col-site', width: '220px' },
-    { className: 'print-ledger-col-note', width: '72px' },
-    { className: 'print-ledger-col-team', width: '56px' }
-];
-
-const SUMMARY_PRINT_COLUMNS: PrintColumnSpec[] = [
-    { className: 'print-summary-col-no', width: '38px' },
-    { className: 'print-summary-col-partner', width: '150px' },
-    { className: 'print-summary-col-site', width: '250px' },
-    { className: 'print-summary-col-issue-date', width: '90px' },
-    { className: 'print-summary-col-amount', width: '94px' },
-    { className: 'print-summary-col-tax', width: '84px' },
-    { className: 'print-summary-col-total', width: '94px' },
-    { className: 'print-summary-col-payment-date', width: '90px' },
-    { className: 'print-summary-col-settled', width: '94px' },
-    { className: 'print-summary-col-outstanding', width: '100px' },
-    { className: 'print-summary-col-advance', width: '94px' },
-    { className: 'print-summary-col-note', width: '60px' },
-    { className: 'print-summary-col-team', width: '48px' }
-];
-
-const buildPrintColGroup = (columns: PrintColumnSpec[]) => `
-                            <colgroup>
-                                ${columns.map((column) => `<col class="${column.className}" />`).join('')}
-                            </colgroup>
-                        `;
-
-const buildPrintColumnStyles = (columns: PrintColumnSpec[]) => columns
-    .map((column) => `.${column.className} { width: ${column.width}; }`)
-    .join('\n');
-
-const getPrintTableTheme = (tenantKey: WorkbookLedgerTenant | string) => {
-    if (tenantKey === 'dawon') {
-        return {
-            headerBackground: '#dc2626',
-            headerColor: '#f8fafc',
-            summaryHeaderBackground: '#fee2e2',
-            summaryHeaderColor: '#7f1d1d',
-            totalBackground: '#fff1f2',
-            totalColor: '#7f1d1d'
-        };
-    }
-
-    return {
-        headerBackground: '#4338ca',
-        headerColor: '#f8fafc',
-        summaryHeaderBackground: '#ede9fe',
-        summaryHeaderColor: '#312e81',
-        totalBackground: '#f5f3ff',
-        totalColor: '#312e81'
-    };
-};
-
-const normalizeTransactionType = (value: unknown): WorkbookTransactionType | null => {
-    const text = normalizeText(value);
-    if (text.includes('매입')) return '매입';
-    if (text.includes('매출')) return '매출';
-    return null;
-};
-
-const normalizeDate = (value: unknown, fallbackYear?: number): string => {
-    if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        return formatDateInput(value);
-    }
-
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        const parsed = new Date(Math.round((value - 25569) * 86400 * 1000));
-        return Number.isNaN(parsed.getTime()) ? '' : formatDateInput(parsed);
-    }
-
-    if (typeof value !== 'string') return '';
-
-    const trimmed = value.trim();
-    if (!trimmed) return '';
-
-    const yearFirstMatch = trimmed.match(/^(\d{2}|\d{4})[-.](\d{1,2})[-.](\d{1,2})$/);
-    if (yearFirstMatch) {
-        return normalizeDateParts(yearFirstMatch[1], yearFirstMatch[2], yearFirstMatch[3]);
-    }
-
-    const slashMatch = trimmed.match(/^(\d{1,4})\/(\d{1,2})\/(\d{1,4})$/);
-    if (slashMatch) {
-        const [, firstText, secondText, thirdText] = slashMatch;
-        const firstNumber = Number(firstText);
-        const thirdNumber = Number(thirdText);
-
-        if (firstText.length === 4 || firstNumber > 12) {
-            return normalizeDateParts(firstText, secondText, thirdText);
-        }
-
-        if (thirdText.length === 2 || thirdText.length === 4 || thirdNumber > 31) {
-            return normalizeDateParts(thirdText, firstText, secondText);
-        }
-    }
-
-    const compactMatch = trimmed.match(/^(\d{2}|\d{4})(\d{2})(\d{2})$/);
-    if (compactMatch) {
-        return normalizeDateParts(compactMatch[1], compactMatch[2], compactMatch[3]);
-    }
-
-    const monthDayMatch = trimmed.match(/^(\d{1,2})[-./](\d{1,2})$/);
-    if (monthDayMatch && fallbackYear) {
-        return normalizeDateParts(String(fallbackYear), monthDayMatch[1], monthDayMatch[2]);
-    }
-
-    const parsed = new Date(trimmed);
-    return Number.isNaN(parsed.getTime()) ? '' : formatDateInput(parsed);
-};
-
-export const getWorkbookMonthRange = (monthValue: string): { startDate: string; endDate: string } | null => {
-    const match = String(monthValue ?? '').trim().match(/^(\d{4})-(\d{2})$/);
-    if (!match) return null;
-
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    if (!Number.isInteger(year) || year < 2000 || year > 2100 || month < 1 || month > 12) return null;
-
-    const lastDay = new Date(year, month, 0).getDate();
-    const normalizedMonth = `${year}-${String(month).padStart(2, '0')}`;
-    return {
-        startDate: `${normalizedMonth}-01`,
-        endDate: `${normalizedMonth}-${String(lastDay).padStart(2, '0')}`,
-    };
-};
-
-export const shiftWorkbookMonth = (monthValue: string, offset: number): string => {
-    const range = getWorkbookMonthRange(monthValue);
-    if (!range || !Number.isInteger(offset)) return monthValue;
-
-    const year = Number(range.startDate.slice(0, 4));
-    const month = Number(range.startDate.slice(5, 7));
-    const shifted = new Date(year, month - 1 + offset, 1);
-    return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}`;
-};
-
-const getMonthFromDate = (date: string): number | null => {
-    const normalized = normalizeDate(date);
-    if (!normalized) return null;
-    return Number(normalized.slice(5, 7));
-};
-
-const getYearFromDate = (date: string): number | null => {
-    const normalized = normalizeDate(date);
-    if (!normalized) return null;
-    return Number(normalized.slice(0, 4));
-};
-
-const toDbRow = (entry: WorkbookLedgerEntry) => ([
-    entry.transactionType,
-    entry.date || '',
-    entry.partnerName || '',
-    entry.siteName || '',
-    entry.description || '',
-    entry.supplyAmount || '',
-    entry.taxAmount || '',
-    entry.totalAmount || '',
-    entry.paymentAmount || '',
-    entry.appliedYear ?? '',
-    entry.appliedMonth ?? '',
-    entry.matchedEntryId || '',
-    entry.note || '',
-    entry.teamName || ''
-]);
-
-const createDbEditDraft = (entry: WorkbookLedgerEntry): DbEditDraft => ({
-    id: entry.id ?? '',
-    transactionType: entry.transactionType,
-    date: entry.date || '',
-    partnerName: entry.partnerName || '',
-    siteName: entry.siteName || '',
-    description: entry.description || '',
-    supplyAmount: String(entry.supplyAmount ?? 0),
-    paymentAmount: String(entry.paymentAmount ?? 0),
-    appliedYear: entry.appliedYear ? String(entry.appliedYear) : '',
-    appliedMonth: entry.appliedMonth ? String(entry.appliedMonth) : '',
-    note: entry.note || '',
-    teamName: entry.teamName || ''
-});
-
-const hasInputContent = (row: InputRow) => {
-    return Boolean(
-        row.transactionType ||
-        row.date ||
-        row.partnerName ||
-        row.siteName ||
-        row.description ||
-        row.note ||
-        toNumberOrNull(row.manDays) !== null ||
-        toNumberOrNull(row.supplyAmount) !== null ||
-        toNumberOrNull(row.paymentAmount) !== null
-    );
-};
-
-const coerceInputRow = (row: Partial<InputRow> | null | undefined): InputRow => ({
-    ...emptyInputRow(),
-    ...(row ?? {})
-});
-
-const toInputText = (value: unknown) => {
-    if (value === null || value === undefined) return '';
-    return typeof value === 'string' ? value : String(value);
-};
-
-const normalizeInputDateForGrid = (value: unknown, baseYear: number): string => {
-    const normalizedDate = normalizeDate(value, baseYear);
-    if (normalizedDate) return formatDateInputForGrid(normalizedDate);
-    return toInputText(value);
-};
-
-const normalizeInputRowForGrid = (
-    row: Partial<InputRow> | null | undefined,
-    baseYear: number,
-    selectedTeam: string
-): InputRow => {
-    const source = coerceInputRow(row);
-    const normalizedDate = normalizeDate(source.date, baseYear);
-    const date = normalizeInputDateForGrid(source.date, baseYear);
-    const supplyAmount = toNumberOrNull(source.supplyAmount);
-    const taxAmount = supplyAmount === null ? null : calculateWorkbookVatAmount(supplyAmount);
-    const totalAmount = supplyAmount === null ? null : calculateWorkbookTotalAmount(supplyAmount);
-    const paymentAmount = toNumberOrNull(source.paymentAmount);
-    const manDays = toNumberOrNull(source.manDays);
-    const appliedMonth = normalizedDate
-        ? (toNumberOrNull(source.appliedMonth) ?? getMonthFromDate(normalizedDate))
-        : null;
-    const rowHasContent = hasInputContent({
-        ...source,
-        date,
-        partnerName: toInputText(source.partnerName),
-        siteName: toInputText(source.siteName),
-        description: toInputText(source.description),
-        note: toInputText(source.note),
-        supplyAmount,
-        paymentAmount,
-        manDays
-    });
-
-    return {
-        transactionType: normalizeTransactionType(source.transactionType) ?? '',
-        date,
-        partnerName: toInputText(source.partnerName),
-        siteName: toInputText(source.siteName),
-        description: toInputText(source.description),
-        manDays,
-        supplyAmount,
-        taxAmount,
-        totalAmount,
-        paymentAmount,
-        appliedYear: normalizedDate ? baseYear : null,
-        appliedMonth,
-        note: toInputText(source.note),
-        teamName: rowHasContent ? (toInputText(source.teamName) || selectedTeam) : ''
-    };
-};
-
-const INPUT_GRID_DERIVED_PROPS: Array<keyof InputRow> = [
-    'taxAmount',
-    'totalAmount',
-    'appliedYear',
-    'appliedMonth'
-];
-
-const isEmptyInputGridValue = (value: unknown) => value === null || value === undefined || value === '';
-
-const areInputGridValuesEqual = (left: unknown, right: unknown) => {
-    if (left === right) return true;
-    if (isEmptyInputGridValue(left) && isEmptyInputGridValue(right)) return true;
-    return false;
-};
-
-const isInputGridAmountProp = (prop: unknown) => {
-    if (typeof prop === 'number') return isInputGridAmountColumn(prop);
-    if (typeof prop === 'string') {
-        if (INPUT_GRID_AMOUNT_PROPS.has(prop as keyof InputRow)) return true;
-
-        const numericProp = Number(prop);
-        return Number.isInteger(numericProp) && isInputGridAmountColumn(numericProp);
-    }
-    return false;
-};
-
-const normalizeInputGridAmountChanges = (changes: Array<unknown>) => {
-    changes.forEach((change) => {
-        if (!Array.isArray(change)) return;
-        if (!change || !isInputGridAmountProp(change[1])) return;
-        change[3] = normalizeInputGridAmountValue(change[3]);
-    });
-};
-
-const normalizeInputGridPastedData = (data: unknown[][], startColumn: number) => {
-    const normalizedStartColumn = Number.isInteger(startColumn) ? startColumn : 0;
-
-    data.forEach((row) => {
-        if (!Array.isArray(row)) return;
-
-        row.forEach((cellValue, columnOffset) => {
-            if (!isInputGridAmountColumn(normalizedStartColumn + columnOffset)) return;
-            row[columnOffset] = normalizeInputGridAmountValue(cellValue);
-        });
-    });
-};
-
-const applyInputGridDerivedValues = (
-    hotInstance: any,
-    rowIndexes: number[],
-    baseYear: number,
-    selectedTeam: string
-) => {
-    const sourceRows = hotInstance.getSourceData() as InputRow[];
-    const updates: Array<[number, keyof InputRow, unknown]> = [];
-    const uniqueRowIndexes = Array.from(new Set(rowIndexes));
-
-    uniqueRowIndexes.forEach((rowIndex) => {
-        if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= sourceRows.length) return;
-
-        const sourceRow = sourceRows[rowIndex];
-        const normalizedRow = normalizeInputRowForGrid(sourceRow, baseYear, selectedTeam);
-
-        INPUT_GRID_DERIVED_PROPS.forEach((prop) => {
-            if (!areInputGridValuesEqual(sourceRow?.[prop], normalizedRow[prop])) {
-                updates.push([rowIndex, prop, normalizedRow[prop]]);
-            }
-        });
-    });
-
-    if (updates.length === 0) return;
-
-    const applyUpdates = () => {
-        updates.forEach(([rowIndex, prop, value]) => {
-            hotInstance.setSourceDataAtCell(rowIndex, prop, value, INPUT_GRID_DERIVED_SOURCE);
-        });
-    };
-
-    if (typeof hotInstance.batch === 'function') {
-        hotInstance.batch(applyUpdates);
-    } else {
-        applyUpdates();
-    }
-};
-
-const hasLedgerEntryContent = (entry: WorkbookLedgerEntry) => {
-    return Boolean(
-        entry.transactionType ||
-        entry.date ||
-        entry.partnerName ||
-        entry.siteName ||
-        entry.description ||
-        entry.note ||
-        toNumberOrNull(entry.manDays) !== null ||
-        (entry.supplyAmount ?? 0) > 0 ||
-        (entry.taxAmount ?? 0) > 0 ||
-        (entry.totalAmount ?? 0) > 0 ||
-        (entry.paymentAmount ?? 0) > 0
-    );
-};
-
-const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fallbackYear: number) => {
-    if (rows.length === 0) {
-        return { entries: [] as Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'updatedAt'>[], skipped: 0 };
-    }
-
-    const headerRow = rows[0].map((cell) => normalizeText(cell));
-    const headerIndex = new Map<string, number>();
-    const normalizedHeaderIndex = new Map<string, number>();
-    headerRow.forEach((header, index) => {
-        if (!header) return;
-        headerIndex.set(header, index);
-
-        const normalizedHeader = normalizeHeaderKey(header);
-        if (normalizedHeader && !normalizedHeaderIndex.has(normalizedHeader)) {
-            normalizedHeaderIndex.set(normalizedHeader, index);
-        }
-    });
-
-    const requiredHeaders = ['구분', '날짜', '거래처명'];
-    const hasRequiredHeaders = requiredHeaders.every((header) => (
-        headerIndex.has(header) || normalizedHeaderIndex.has(normalizeHeaderKey(header))
-    ));
-
-    if (!hasRequiredHeaders) {
-        throw new Error('업로드 파일에서 DB 헤더를 찾지 못했습니다. DB 시트 또는 동일한 헤더 형식의 파일을 올려주세요.');
-    }
-
-    const getHeaderIndex = (header: string) => {
-        const exactIndex = headerIndex.get(header);
-        if (exactIndex !== undefined) return exactIndex;
-        return normalizedHeaderIndex.get(normalizeHeaderKey(header));
-    };
-
-    const readCell = (row: unknown[], header: string) => {
-        const index = getHeaderIndex(header);
-        return index === undefined ? '' : row[index];
-    };
-
-    const readFirstCell = (row: unknown[], headers: readonly string[]) => {
-        for (const header of headers) {
-            const value = readCell(row, header);
-            if (normalizeText(value)) return value;
-        }
-        return '';
-    };
-
-    const entries: Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'updatedAt'>[] = [];
-    let skipped = 0;
-
-    rows.slice(1).forEach((row) => {
-        const transactionType = normalizeTransactionType(readCell(row, '구분'));
-        const date = normalizeDate(readCell(row, '날짜'));
-        const partnerName = normalizeText(readCell(row, '거래처명'));
-        const siteName = normalizeText(
-            readCell(row, '현장명')
-        );
-        const description = normalizeText(readCell(row, '내용'));
-        const manDays = getHeaderIndex('공수') !== undefined ? toNumberOrNull(readCell(row, '공수')) : null;
-        const supplyAmount = toNumberOrNull(readCell(row, '공급가액')) ?? 0;
-        const taxAmount = toNumberOrNull(readCell(row, '부가세')) ?? 0;
-        const totalAmount = toNumberOrNull(readCell(row, '합계')) ?? 0;
-        const paymentAmount = toNumberOrNull(readCell(row, '입금금액')) ?? 0;
-        const appliedYear = toNumberOrNull(readCell(row, '적용연도')) ?? getYearFromDate(date) ?? fallbackYear;
-        const appliedMonth = toNumberOrNull(
-            readCell(row, '적용월')
-        ) ?? getMonthFromDate(date);
-        const matchedEntryId = normalizeText(readCell(row, '매칭매출ID'));
-        const note = normalizeText(readFirstCell(row, NOTE_HEADER_ALIASES));
-        const teamName = normalizeText(
-            readCell(row, '팀명')
-        ) || fallbackTeamName;
-
-        const entry: WorkbookLedgerEntry = {
-            transactionType: transactionType ?? '매출',
-            date,
-            partnerName,
-            siteName,
-            description,
-            manDays,
-            supplyAmount,
-            taxAmount,
-            totalAmount,
-            paymentAmount,
-            appliedYear,
-            appliedMonth,
-            matchedEntryId,
-            note,
-            teamName
-        };
-
-        if (!hasLedgerEntryContent(entry)) {
-            skipped += 1;
-            return;
-        }
-
-        if (!transactionType || !date || !partnerName) {
-            skipped += 1;
-            return;
-        }
-
-        entries.push(entry);
-    });
-
-    return { entries, skipped };
-};
-
-const normalizeInputRow = (row: Partial<InputRow> | null | undefined, baseYear: number, selectedTeam: string): InputRow => {
-    const source = coerceInputRow(row);
-    const normalizedDate = normalizeDate(source.date, baseYear);
-    const supplyAmount = toNumberOrNull(source.supplyAmount);
-    const taxAmount = supplyAmount === null ? null : calculateWorkbookVatAmount(supplyAmount);
-    const totalAmount = supplyAmount === null ? null : calculateWorkbookTotalAmount(supplyAmount);
-    const paymentAmount = toNumberOrNull(source.paymentAmount);
-    const manDays = toNumberOrNull(source.manDays);
-    const rowHasContent = hasInputContent({
-        ...source,
-        date: normalizedDate,
-        supplyAmount,
-        paymentAmount,
-        manDays
-    });
-
-    return {
-        transactionType: normalizeTransactionType(source.transactionType) ?? '',
-        date: normalizedDate,
-        partnerName: normalizeText(source.partnerName),
-        siteName: normalizeText(source.siteName),
-        description: normalizeText(source.description),
-        manDays,
-        supplyAmount,
-        taxAmount,
-        totalAmount,
-        paymentAmount,
-        appliedYear: normalizedDate ? baseYear : null,
-        appliedMonth: normalizedDate ? (toNumberOrNull(source.appliedMonth) ?? getMonthFromDate(normalizedDate)) : null,
-        note: normalizeText(source.note),
-        teamName: rowHasContent ? (normalizeText(source.teamName) || selectedTeam) : ''
-    };
-};
-
-export const getWorkbookInputRowIssues = (
-    rows: Array<Partial<InputRow> | null | undefined>,
-    baseYear: number,
-    selectedTeam: string
-): InputRowValidationIssue[] => rows.flatMap((sourceRow, rowIndex) => {
-    const row = normalizeInputRow(sourceRow, baseYear, selectedTeam);
-    if (!hasInputContent(row)) return [];
-
-    const fields: Array<keyof InputRow> = [];
-    const messages: string[] = [];
-    const addIssue = (field: keyof InputRow, message: string) => {
-        if (!fields.includes(field)) fields.push(field);
-        messages.push(message);
-    };
-
-    if (!row.transactionType) addIssue('transactionType', '구분을 선택하세요.');
-    if (!row.date) addIssue('date', '유효한 날짜를 입력하세요.');
-    if (!row.partnerName) addIssue('partnerName', '거래처명을 입력하세요.');
-
-    const totalAmount = toNumberOrNull(row.totalAmount) ?? 0;
-    const paymentAmount = toNumberOrNull(row.paymentAmount) ?? 0;
-    if (totalAmount === 0 && paymentAmount <= 0) {
-        addIssue('supplyAmount', '공급가액 또는 입금금액을 입력하세요.');
-        addIssue('paymentAmount', '공급가액 또는 입금금액을 입력하세요.');
-    }
-
-    if (messages.length === 0) return [];
-    return [{
-        rowIndex,
-        rowNumber: rowIndex + 1,
-        fields,
-        messages: Array.from(new Set(messages))
-    }];
-});
-
-export const createWorkbookImportDuplicateFingerprint = (
-    entry: Pick<WorkbookLedgerEntry, 'transactionType' | 'date' | 'partnerName' | 'siteName' | 'totalAmount' | 'paymentAmount'>
-): string => {
-    const transactionType = normalizeTransactionType(entry.transactionType);
-    const date = normalizeDate(entry.date);
-    const partnerName = normalizePartnerMatchKey(entry.partnerName);
-    const siteName = normalizePartnerMatchKey(entry.siteName);
-    const totalAmount = Math.abs(toNumberOrNull(entry.totalAmount) ?? 0);
-    const paymentAmount = Math.abs(toNumberOrNull(entry.paymentAmount) ?? 0);
-    const amount = totalAmount > 0 ? totalAmount : paymentAmount;
-    const entryKind = totalAmount > 0 ? 'invoice' : 'payment';
-
-    if (!transactionType || !date || !partnerName || amount <= 0) return '';
-    return [transactionType, date, partnerName, siteName, entryKind, amount].join('|');
-};
-
-export const partitionWorkbookImportDuplicates = (
-    importedEntries: WorkbookImportEntry[],
-    existingEntries: WorkbookLedgerEntry[]
-) => {
-    const knownFingerprints = new Set(
-        existingEntries
-            .map(createWorkbookImportDuplicateFingerprint)
-            .filter(Boolean)
-    );
-    const newEntries: WorkbookImportEntry[] = [];
-    const duplicateEntries: WorkbookImportEntry[] = [];
-
-    importedEntries.forEach((entry) => {
-        const fingerprint = createWorkbookImportDuplicateFingerprint(entry);
-        if (fingerprint && knownFingerprints.has(fingerprint)) {
-            duplicateEntries.push(entry);
-            return;
-        }
-
-        newEntries.push(entry);
-        if (fingerprint) knownFingerprints.add(fingerprint);
-    });
-
-    return { newEntries, duplicateEntries };
-};
-
-const sortWorkbookEntries = (left: WorkbookLedgerEntry, right: WorkbookLedgerEntry) => {
-    const dateCompare = (left.date ?? '').localeCompare(right.date ?? '', 'en');
-    if (dateCompare !== 0) return dateCompare;
-
-    const createdCompare = (left.createdAt ?? '').localeCompare(right.createdAt ?? '', 'en');
-    if (createdCompare !== 0) return createdCompare;
-
-    return (left.id ?? '').localeCompare(right.id ?? '', 'en');
-};
-
-const getDbEntrySortAmount = (entry: WorkbookLedgerEntry) => {
-    if ((entry.totalAmount ?? 0) !== 0) return entry.totalAmount ?? 0;
-    return entry.paymentAmount ?? 0;
-};
-
-const compareDbEntriesBySortState = (
-    left: WorkbookLedgerEntry,
-    right: WorkbookLedgerEntry,
-    sortState: DbSortState
-) => {
-    const fallbackCompare = sortWorkbookEntries(left, right);
-    const direction = sortState.direction === 'asc' ? 1 : -1;
-
-    if (sortState.field === 'date') {
-        return fallbackCompare * direction;
-    }
-
-    if (sortState.field === 'partnerName') {
-        const nameCompare = (left.partnerName ?? '').localeCompare(right.partnerName ?? '', 'ko');
-        if (nameCompare !== 0) return nameCompare * direction;
-
-        const siteCompare = (left.siteName ?? '').localeCompare(right.siteName ?? '', 'ko');
-        if (siteCompare !== 0) return siteCompare * direction;
-
-        return fallbackCompare;
-    }
-
-    const amountCompare = getDbEntrySortAmount(left) - getDbEntrySortAmount(right);
-    if (amountCompare !== 0) {
-        return amountCompare * direction;
-    }
-
-    return fallbackCompare;
-};
-
-const sortSummaryRowsByDate = (left: SummaryRow, right: SummaryRow) => {
-    const dateCompare = (left.issueDate ?? '').localeCompare(right.issueDate ?? '', 'en');
-    if (dateCompare !== 0) return dateCompare;
-
-    const partnerCompare = (left.partnerName ?? '').localeCompare(right.partnerName ?? '', 'ko-KR', {
-        numeric: true,
-        sensitivity: 'base'
-    });
-    if (partnerCompare !== 0) return partnerCompare;
-
-    return (left.id ?? '').localeCompare(right.id ?? '', 'en');
-};
-
-const matchesFilter = (source: string | undefined, keyword: string) => {
-    if (!keyword.trim()) return true;
-    return (source ?? '').toLowerCase().includes(keyword.trim().toLowerCase());
-};
-
-const isDateWithinRange = (date: string | undefined, startDate: string, endDate: string) => {
-    const normalizedDate = normalizeDate(date);
-    if (!normalizedDate) return false;
-    return normalizedDate >= startDate && normalizedDate <= endDate;
-};
-
-const getWorkbookEntryKey = (entry: Pick<WorkbookLedgerEntry, 'id' | 'date' | 'partnerName' | 'description'>) => (
-    entry.id ?? `${entry.date}-${entry.partnerName}-${entry.description}`
-);
-
-
-const isInvoiceEntry = (entry: WorkbookLedgerEntry) => (entry.totalAmount ?? 0) > 0;
-const isNegativeInvoiceEntry = (entry: WorkbookLedgerEntry) => (entry.totalAmount ?? 0) < 0;
-const isPaymentEntry = (entry: WorkbookLedgerEntry) => (entry.paymentAmount ?? 0) > 0;
-const isAdvanceUsageEntry = (entry: WorkbookLedgerEntry) => normalizeText(entry.sourceType) === ADVANCE_USAGE_SOURCE_TYPE;
-const isSummarySettlementMode = (mode: SummaryMode) => mode === '미수금' || mode === '미지급금';
-const isStandalonePaymentEntry = (entry: WorkbookLedgerEntry) => isPaymentEntry(entry) && (entry.totalAmount ?? 0) <= 0;
-const isUnmappedPaymentEntry = (entry: WorkbookLedgerEntry) => isStandalonePaymentEntry(entry) && !normalizeText(entry.matchedEntryId);
-const SETTLEMENT_AMOUNT_EPSILON = 0.5;
-
-export const canUseSummaryRangePreview = (entries: WorkbookLedgerEntry[]) => {
-    const entryIds = new Set(
-        entries.map((entry) => normalizeText(entry.id)).filter(Boolean)
-    );
-
-    return !entries.some((entry) => {
-        if (isUnmappedPaymentEntry(entry)) return true;
-        if (isNegativeInvoiceEntry(entry) && !normalizeText(entry.matchedEntryId)) return true;
-        if (!isAdvanceUsageEntry(entry)) return false;
-
-        const sourceId = normalizeText(entry.sourceId);
-        const targetId = normalizeText(entry.matchedEntryId);
-        return !sourceId || !targetId || !entryIds.has(sourceId) || !entryIds.has(targetId);
-    });
-};
-
-export const getLinkedSettlementStatus = (
-    invoice: Pick<WorkbookLedgerEntry, 'id' | 'totalAmount' | 'paymentAmount'>,
-    linkedEntries: WorkbookLedgerEntry[],
-) => {
-    const invoiceId = normalizeText(invoice.id);
-    const activeLinkedEntries = linkedEntries.filter((entry) => (
-        !normalizeText(entry.deletedAt) &&
-        normalizeText(entry.matchedEntryId) === invoiceId &&
-        (isPaymentEntry(entry) || isNegativeInvoiceEntry(entry))
-    ));
-    const originalSettlementAmount = Math.max(invoice.paymentAmount ?? 0, 0);
-    const linkedSettlementAmount = activeLinkedEntries.reduce((total, entry) => (
-        total + Math.max(entry.paymentAmount ?? 0, 0) + Math.max(-(entry.totalAmount ?? 0), 0)
-    ), 0);
-    const totalAmount = Math.max(invoice.totalAmount ?? 0, 0);
-    const settledAmount = originalSettlementAmount + linkedSettlementAmount;
-    const outstandingAmount = Math.max(totalAmount - settledAmount, 0);
-
-    return {
-        entries: activeLinkedEntries,
-        settledAmount,
-        outstandingAmount,
-        isFullySettled: totalAmount > 0 && outstandingAmount < SETTLEMENT_AMOUNT_EPSILON,
-    };
-};
-
-const QUARTER_VAT_OPTIONS: Array<{ value: QuarterVatOption; label: string; months: number[] }> = [
-    { value: 'Q1', label: '1분기', months: [1, 2, 3] },
-    { value: 'Q2', label: '2분기', months: [4, 5, 6] },
-    { value: 'Q3', label: '3분기', months: [7, 8, 9] },
-    { value: 'Q4', label: '4분기', months: [10, 11, 12] },
-];
-
-const getQuarterFromMonth = (month: number | null | undefined): QuarterVatOption | null => {
-    if (!month || month < 1 || month > 12) return null;
-    if (month <= 3) return 'Q1';
-    if (month <= 6) return 'Q2';
-    if (month <= 9) return 'Q3';
-    return 'Q4';
-};
-
-const getQuarterVatOption = (quarter: QuarterVatOption) =>
-    QUARTER_VAT_OPTIONS.find((option) => option.value === quarter);
-
-const getQuarterVatLabel = (quarter: QuarterVatOption) =>
-    quarter === 'all' ? '전체' : getQuarterVatOption(quarter)?.label ?? quarter;
-
-const getQuarterVatPeriodLabel = (year: number, quarter: QuarterVatOption) => {
-    const option = getQuarterVatOption(quarter);
-    if (!option) return `${year}년 전체`;
-    return `${year}.${String(option.months[0]).padStart(2, '0')}~${String(option.months[2]).padStart(2, '0')}`;
-};
-
-const getQuarterVatEntryPeriod = (entry: WorkbookLedgerEntry, basis: QuarterVatBasis) => {
-    if (basis === 'applied') {
-        const appliedYear = entry.appliedYear ?? getYearFromDate(entry.date);
-        const appliedMonth = entry.appliedMonth ?? getMonthFromDate(entry.date);
-        const quarter = getQuarterFromMonth(appliedMonth);
-
-        return {
-            year: appliedYear,
-            month: appliedMonth,
-            quarter,
-            periodLabel: appliedYear && appliedMonth
-                ? `${appliedYear}-${String(appliedMonth).padStart(2, '0')}`
-                : '-',
-        };
-    }
-
-    const normalizedDate = normalizeDate(entry.date);
-    const year = getYearFromDate(normalizedDate);
-    const month = getMonthFromDate(normalizedDate);
-    const quarter = getQuarterFromMonth(month);
-
-    return {
-        year,
-        month,
-        quarter,
-        periodLabel: normalizedDate || '-',
-    };
-};
-
-const emptyQuarterVatSummaryRow = (
-    quarter: QuarterVatOption,
-    label: string,
-    periodLabel: string
-): QuarterVatSummaryRow => ({
-    quarter,
-    label,
-    periodLabel,
-    salesSupply: 0,
-    salesVat: 0,
-    salesTotal: 0,
-    purchaseSupply: 0,
-    purchaseVat: 0,
-    purchaseTotal: 0,
-    payableVat: 0,
-    entryCount: 0,
-    warningCount: 0,
-});
-
-const addQuarterVatAmount = (
-    target: QuarterVatSummaryRow | QuarterVatMonthlyRow,
-    entry: WorkbookLedgerEntry,
-    warningCount: number
-) => {
-    const supplyAmount = entry.supplyAmount ?? 0;
-    const taxAmount = entry.taxAmount ?? 0;
-    const totalAmount = entry.totalAmount ?? 0;
-
-    if (entry.transactionType === '매입') {
-        target.purchaseSupply += supplyAmount;
-        target.purchaseVat += taxAmount;
-        target.purchaseTotal += totalAmount;
-    } else {
-        target.salesSupply += supplyAmount;
-        target.salesVat += taxAmount;
-        target.salesTotal += totalAmount;
-    }
-
-    target.payableVat = target.salesVat - target.purchaseVat;
-    target.entryCount += 1;
-    target.warningCount += warningCount;
-};
-
-const getQuarterVatEntryIssues = (entry: WorkbookLedgerEntry, basis: QuarterVatBasis): string[] => {
-    const issues: string[] = [];
-    const supplyAmount = entry.supplyAmount ?? 0;
-    const taxAmount = entry.taxAmount ?? 0;
-    const totalAmount = entry.totalAmount ?? 0;
-    const expectedTaxAmount = calculateWorkbookVatAmount(supplyAmount);
-    const expectedTotalAmount = supplyAmount + taxAmount;
-
-    if (!normalizeDate(entry.date)) issues.push('날짜 오류');
-    if (basis === 'applied' && (!entry.appliedYear || !entry.appliedMonth)) issues.push('적용연월 없음');
-    if (Math.abs(taxAmount - expectedTaxAmount) > 1) issues.push('세액 불일치');
-    if (Math.abs(totalAmount - expectedTotalAmount) > 1) issues.push('합계 불일치');
-
-    return issues;
-};
-
-const buildQuarterVatReport = (entries: WorkbookLedgerEntry[], filter: QuarterVatFilter): QuarterVatReport => {
-    const year = Number(filter.year);
-    const quarterRowsByKey = new Map<QuarterVatOption, QuarterVatSummaryRow>();
-    QUARTER_VAT_OPTIONS.forEach((option) => {
-        quarterRowsByKey.set(
-            option.value,
-            emptyQuarterVatSummaryRow(option.value, option.label, getQuarterVatPeriodLabel(year, option.value))
-        );
-    });
-
-    const selectedMonths = filter.quarter === 'all'
-        ? Array.from({ length: 12 }, (_, index) => index + 1)
-        : getQuarterVatOption(filter.quarter)?.months ?? [];
-    const monthlyRowsByMonth = new Map<number, QuarterVatMonthlyRow>();
-    selectedMonths.forEach((month) => {
-        monthlyRowsByMonth.set(month, {
-            month,
-            label: `${month}월`,
-            salesSupply: 0,
-            salesVat: 0,
-            salesTotal: 0,
-            purchaseSupply: 0,
-            purchaseVat: 0,
-            purchaseTotal: 0,
-            payableVat: 0,
-            entryCount: 0,
-            warningCount: 0,
-        });
-    });
-
-    const allDetailRows: QuarterVatDetailRow[] = [];
-
-    entries
-        .filter((entry) => (entry.totalAmount ?? 0) !== 0 || (entry.supplyAmount ?? 0) !== 0 || (entry.taxAmount ?? 0) !== 0)
-        .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
-        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
-        .forEach((entry) => {
-            const period = getQuarterVatEntryPeriod(entry, filter.basis);
-            if (period.year !== year || !period.month || !period.quarter) return;
-
-            const issues = getQuarterVatEntryIssues(entry, filter.basis);
-            const warningCount = issues.length > 0 ? 1 : 0;
-            const quarterRow = quarterRowsByKey.get(period.quarter);
-            if (quarterRow) addQuarterVatAmount(quarterRow, entry, warningCount);
-
-            const isSelectedQuarter = filter.quarter === 'all' || filter.quarter === period.quarter;
-            if (!isSelectedQuarter) return;
-
-            const monthRow = monthlyRowsByMonth.get(period.month);
-            if (monthRow) addQuarterVatAmount(monthRow, entry, warningCount);
-
-            const supplyAmount = entry.supplyAmount ?? 0;
-            const taxAmount = entry.taxAmount ?? 0;
-            allDetailRows.push({
-                id: getWorkbookEntryKey(entry),
-                transactionType: entry.transactionType,
-                date: entry.date,
-                periodLabel: period.periodLabel,
-                quarter: period.quarter,
-                partnerName: entry.partnerName,
-                siteName: entry.siteName ?? '',
-                description: entry.description,
-                supplyAmount,
-                taxAmount,
-                expectedTaxAmount: calculateWorkbookVatAmount(supplyAmount),
-                totalAmount: entry.totalAmount ?? 0,
-                expectedTotalAmount: supplyAmount + taxAmount,
-                issues,
-                note: entry.note ?? '',
-                teamName: entry.teamName ?? '',
-            });
-        });
-
-    const quarterRows = QUARTER_VAT_OPTIONS.map((option) => quarterRowsByKey.get(option.value))
-        .filter((row): row is QuarterVatSummaryRow => Boolean(row));
-    const monthlyRows = selectedMonths
-        .map((month) => monthlyRowsByMonth.get(month))
-        .filter((row): row is QuarterVatMonthlyRow => Boolean(row));
-    const detailRows = allDetailRows
-        .filter((row) => (
-            filter.detailTransactionType === 'all' || row.transactionType === filter.detailTransactionType
-        ));
-    const warningRows = detailRows.filter((row) => row.issues.length > 0);
-    const totals = allDetailRows.reduce((accumulator, row) => {
-        const syntheticEntry: WorkbookLedgerEntry = {
-            transactionType: row.transactionType,
-            date: row.date,
-            partnerName: row.partnerName,
-            siteName: row.siteName,
-            description: row.description,
-            supplyAmount: row.supplyAmount,
-            taxAmount: row.taxAmount,
-            totalAmount: row.totalAmount,
-            paymentAmount: 0,
-        };
-        addQuarterVatAmount(accumulator, syntheticEntry, row.issues.length > 0 ? 1 : 0);
-        return accumulator;
-    }, emptyQuarterVatSummaryRow(
-        filter.quarter,
-        filter.quarter === 'all' ? `${year}년 전체` : `${year}년 ${getQuarterVatLabel(filter.quarter)}`,
-        getQuarterVatPeriodLabel(year, filter.quarter)
-    ));
-
-    return {
-        quarterRows,
-        monthlyRows,
-        detailRows: detailRows.sort((left, right) => {
-            const dateCompare = left.date.localeCompare(right.date, 'en');
-            if (dateCompare !== 0) return dateCompare;
-            const typeCompare = left.transactionType.localeCompare(right.transactionType, 'ko');
-            if (typeCompare !== 0) return typeCompare;
-            return left.partnerName.localeCompare(right.partnerName, 'ko');
-        }),
-        warningRows,
-        totals,
-    };
-};
-
-const getLinkedPaymentTotal = (entries: WorkbookLedgerEntry[], invoiceId: string, excludePaymentId?: string) => entries
-    .filter((entry) => (
-        isPaymentEntry(entry) &&
-        entry.matchedEntryId === invoiceId &&
-        entry.id !== excludePaymentId
-    ))
-    .reduce((sum, entry) => sum + (entry.paymentAmount ?? 0), 0);
-
-const buildPaymentMatchContext = (entries: WorkbookLedgerEntry[]): PaymentMatchContext => {
-    const invoiceEntriesByPartnerKey = new Map<string, WorkbookLedgerEntry[]>();
-    const linkedPaymentTotalsByInvoiceId = new Map<string, number>();
-    const entriesById = new Map<string, WorkbookLedgerEntry>();
-
-    entries.forEach((entry) => {
-        if (entry.id) {
-            entriesById.set(entry.id, entry);
-        }
-
-        if (entry.id && isInvoiceEntry(entry)) {
-            const partnerKey = normalizePartnerMatchKey(entry.partnerName);
-            if (partnerKey) {
-                const bucket = invoiceEntriesByPartnerKey.get(partnerKey) ?? [];
-                bucket.push(entry);
-                invoiceEntriesByPartnerKey.set(partnerKey, bucket);
-            }
-        }
-
-        if (isPaymentEntry(entry) && entry.matchedEntryId) {
-            linkedPaymentTotalsByInvoiceId.set(
-                entry.matchedEntryId,
-                (linkedPaymentTotalsByInvoiceId.get(entry.matchedEntryId) ?? 0) + (entry.paymentAmount ?? 0)
-            );
-        }
-    });
-
-    return {
-        invoiceEntriesByPartnerKey,
-        linkedPaymentTotalsByInvoiceId,
-        entriesById
-    };
-};
-
-const getLinkedPaymentTotalFromContext = (
-    context: PaymentMatchContext,
-    invoiceId: string,
-    excludePaymentId?: string
-) => {
-    const total = context.linkedPaymentTotalsByInvoiceId.get(invoiceId) ?? 0;
-    if (!excludePaymentId) return total;
-
-    const excludedPayment = context.entriesById.get(excludePaymentId);
-    if (!excludedPayment || excludedPayment.matchedEntryId !== invoiceId) {
-        return total;
-    }
-
-    return total - (excludedPayment.paymentAmount ?? 0);
-};
-
-const buildPaymentMatchCandidates = (
-    entries: WorkbookLedgerEntry[],
-    paymentEntry: WorkbookLedgerEntry,
-    options?: { relaxed?: boolean },
-    context?: PaymentMatchContext
-): PaymentMatchCandidate[] => {
-    const paymentAmount = paymentEntry.paymentAmount ?? 0;
-    const paymentDate = normalizeDate(paymentEntry.date);
-    const partnerKey = normalizePartnerMatchKey(paymentEntry.partnerName);
-    const normalizedSiteName = normalizeText(paymentEntry.siteName).toLowerCase();
-    const normalizedTeamName = normalizeText(paymentEntry.teamName).toLowerCase();
-    const appliedYear = paymentEntry.appliedYear ?? null;
-    const appliedMonth = paymentEntry.appliedMonth ?? null;
-    const relaxed = options?.relaxed ?? false;
-
-    if (paymentAmount <= 0 || !partnerKey) return [];
-
-    const candidateEntries = context
-        ? (context.invoiceEntriesByPartnerKey.get(partnerKey) ?? [])
-        : entries;
-
-    return candidateEntries
-        .filter((entry) => {
-            if (!entry.id || entry.id === paymentEntry.id) return false;
-            if (entry.transactionType !== paymentEntry.transactionType) return false;
-            if (!isInvoiceEntry(entry)) return false;
-            if (normalizePartnerMatchKey(entry.partnerName) !== partnerKey) return false;
-            if (paymentDate && normalizeDate(entry.date) > paymentDate) return false;
-            if (!relaxed && normalizedSiteName && normalizeText(entry.siteName).toLowerCase() !== normalizedSiteName) return false;
-            if (!relaxed && normalizedTeamName && normalizeText(entry.teamName).toLowerCase() !== normalizedTeamName) return false;
-
-            const invoiceAppliedYear = entry.appliedYear ?? getYearFromDate(entry.date);
-            const invoiceAppliedMonth = entry.appliedMonth ?? getMonthFromDate(entry.date);
-            if (!relaxed && appliedYear !== null && invoiceAppliedYear !== appliedYear) return false;
-            if (!relaxed && appliedMonth !== null && invoiceAppliedMonth !== appliedMonth) return false;
-
-            return true;
-        })
-        .map((entry) => {
-            const linkedPaymentAmount = entry.id
-                ? context
-                    ? getLinkedPaymentTotalFromContext(context, entry.id, paymentEntry.id)
-                    : getLinkedPaymentTotal(entries, entry.id, paymentEntry.id)
-                : 0;
-            const outstandingAmount = Math.max((entry.totalAmount ?? 0) - linkedPaymentAmount, 0);
-            const reasons: string[] = [];
-            let score = 0;
-
-            if (Math.abs((entry.totalAmount ?? 0) - paymentAmount) < 0.5) {
-                score += 1000;
-                reasons.push('합계 일치');
-            }
-
-            if (Math.abs(outstandingAmount - paymentAmount) < 0.5) {
-                score += 900;
-                reasons.push('잔액 일치');
-            }
-
-            if (normalizedSiteName && normalizeText(entry.siteName).toLowerCase() === normalizedSiteName) {
-                score += 120;
-                reasons.push('현장 일치');
-            }
-
-            if (normalizedTeamName && normalizeText(entry.teamName).toLowerCase() === normalizedTeamName) {
-                score += 40;
-                reasons.push('팀 일치');
-            }
-
-            const invoiceAppliedYear = entry.appliedYear ?? getYearFromDate(entry.date);
-            const invoiceAppliedMonth = entry.appliedMonth ?? getMonthFromDate(entry.date);
-            if (appliedYear !== null && invoiceAppliedYear === appliedYear) score += 30;
-            if (appliedMonth !== null && invoiceAppliedMonth === appliedMonth) {
-                score += 80;
-                reasons.push('적용월 일치');
-            }
-
-            if (paymentDate) {
-                const invoiceDate = normalizeDate(entry.date);
-                const dayGap = invoiceDate
-                    ? Math.abs(new Date(paymentDate).getTime() - new Date(invoiceDate).getTime()) / 86400000
-                    : 3650;
-                score += Math.max(0, 70 - Math.min(dayGap, 70));
-            }
-
-            return {
-                entry,
-                linkedPaymentAmount,
-                outstandingAmount,
-                score,
-                reasons: reasons.length > 0 ? reasons : ['거래처 일치']
-            };
-        })
-        .sort((left, right) => {
-            const scoreCompare = right.score - left.score;
-            if (scoreCompare !== 0) return scoreCompare;
-            const dateCompare = (right.entry.date ?? '').localeCompare(left.entry.date ?? '', 'en');
-            if (dateCompare !== 0) return dateCompare;
-            return (left.entry.id ?? '').localeCompare(right.entry.id ?? '', 'en');
-        });
-};
-
-const getPaymentMappingSuggestion = (
-    entries: WorkbookLedgerEntry[],
-    paymentEntry: WorkbookLedgerEntry,
-    context?: PaymentMatchContext
-): PaymentMappingSuggestion => {
-    if (paymentEntry.matchedEntryId) {
-        return { status: 'linked', candidates: [] };
-    }
-
-    const strictCandidates = buildPaymentMatchCandidates(entries, paymentEntry, undefined, context);
-    const paymentAmount = paymentEntry.paymentAmount ?? 0;
-    const exactCandidates = strictCandidates.filter((candidate) => (
-        Math.abs((candidate.entry.totalAmount ?? 0) - paymentAmount) < 0.5 ||
-        Math.abs(candidate.outstandingAmount - paymentAmount) < 0.5
-    ));
-
-    if (exactCandidates.length === 1) {
-        return { status: 'auto', candidates: exactCandidates };
-    }
-
-    if (strictCandidates.length === 1) {
-        return { status: 'auto', candidates: strictCandidates };
-    }
-
-    if (strictCandidates.length > 1) {
-        return { status: 'ambiguous', candidates: strictCandidates };
-    }
-
-    const relaxedCandidates = buildPaymentMatchCandidates(entries, paymentEntry, { relaxed: true }, context);
-    if (relaxedCandidates.length > 0) {
-        return { status: 'ambiguous', candidates: relaxedCandidates };
-    }
-
-    return { status: 'none', candidates: [] };
-};
-
-const getPaymentMappingStatusLabel = (status: PaymentMappingStatus) => {
-    if (status === 'linked') return '연결됨';
-    if (status === 'auto') return '자동추천';
-    if (status === 'ambiguous') return '후보다수';
-    return '후보없음';
-};
-
-
-const getSettlementLabels = (transactionType: WorkbookTransactionType | undefined) => {
-    const isPurchase = transactionType === '매입';
-
-    return {
-        action: isPurchase ? '지급' : '입금',
-        history: isPurchase ? '지급내역' : '입금내역',
-        date: isPurchase ? '지급일자' : '입금일자',
-        amount: isPurchase ? '지급금액' : '입금금액',
-        cumulative: isPurchase ? '누적지급' : '누적입금',
-        outstanding: isPurchase ? '미지급금' : '미수금',
-        advance: isPurchase ? '선급금' : '선수금',
-        placeholder: isPurchase ? '지급 메모' : '입금 메모',
-    };
-};
-
-const getSummaryDisplayedSettledAmount = (row: SummaryRow) => {
-    return row.settledAmount;
-};
-
-export const buildLedgerExcelData = (rows: LedgerRow[], transactionType: WorkbookTransactionType) => {
-    const isPurchase = transactionType === '매입';
-    return [
-        ['날짜', '거래처명', '내용', isPurchase ? '매입금액' : '매출금액', isPurchase ? '지급금액' : '입금금액', '잔액', '현장명', '비고', '팀명'],
-        ...rows.map((row) => [row.date, row.partnerName, row.description, row.transactionAmount, row.paymentAmount, row.balance, row.siteName, row.note, row.teamName]),
-        ['', '', '합계', rows.reduce((sum, row) => sum + row.transactionAmount, 0), rows.reduce((sum, row) => sum + row.paymentAmount, 0), rows[rows.length - 1]?.balance ?? 0, '', '', '']
-    ];
-};
-
-export const buildSummaryExcelData = (rows: SummaryRow[], mode: SummaryMode) => {
-    const isPurchase = mode === '매입' || mode === '미지급금';
-    const sum = (getAmount: (row: SummaryRow) => number) => rows.reduce((total, row) => total + getAmount(row), 0);
-    return [
-        ['No', '거래처명', '현장명', '발행일', '공급가액', '세액', '합계', isPurchase ? '지급일' : '입금일', isPurchase ? '지급금액' : '수금금액', isPurchase ? '미지급금' : '미수금', isPurchase ? '선급금' : '선수금', '비고', '팀명'],
-        ...rows.map((row, index) => [index + 1, row.partnerName, row.siteName, row.issueDate, row.supplyAmount, row.taxAmount, row.totalAmount, row.paymentDates.join('\n'), getSummaryDisplayedSettledAmount(row), row.outstandingAmount, row.advanceAmount, row.note, row.teamName]),
-        ['', '합계', '', '', sum((row) => row.supplyAmount), sum((row) => row.taxAmount), sum((row) => row.totalAmount), '', sum(getSummaryDisplayedSettledAmount), sum((row) => row.outstandingAmount), sum((row) => row.advanceAmount), '', '']
-    ];
-};
-
-const AI_TAX_INVOICE_REMARK_PATTERN = /(?:gemini|ai)\s*세금\s*계산서|세금\s*계산서\s*(?:ai\s*)?(?:대량\s*)?검수|대량\s*검수/i;
-const MAPPING_ADDRESS_REMARK_PATTERN = /(?:매핑\s*주소|주소\s*매핑|mapping\s*address)\s*[:：=-]?\s*/i;
-const REMARK_SEGMENT_SEPARATOR = /\s*(?:·|\||\n)\s*|\s+\/\s+/;
-
-/**
- * Keeps stored remarks intact while hiding automatically generated import
- * metadata. User-entered business remarks remain visible.
- */
-export const getVisibleWorkbookRemark = (value: unknown): string => {
-    const note = normalizeText(value);
-    if (!note || !AI_TAX_INVOICE_REMARK_PATTERN.test(note)) return note;
-
-    let generatedMetadata = false;
-    return note
-        .split(REMARK_SEGMENT_SEPARATOR)
-        .map((segment) => {
-            const text = normalizeText(segment);
-            if (/^-?\s*Gemini\s*세금\s*계산서\s*검수$/i.test(text)) {
-                generatedMetadata = true;
-                return '';
-            }
-            if (generatedMetadata && (/\.(?:pdf|jpe?g|png|webp|heic|heif)$/i.test(text) || /^승인번호\s+\S+$/.test(text))) {
-                return '';
-            }
-            generatedMetadata = false;
-            const markerIndex = segment.search(MAPPING_ADDRESS_REMARK_PATTERN);
-            if (markerIndex < 0) return normalizeText(segment);
-
-            return normalizeText(segment.slice(0, markerIndex).replace(/[\s([,:;/-]+$/, ''));
-        })
-        .filter(Boolean)
-        .join(' · ');
-};
-
-const appendSummaryNote = (currentNote: string, nextNote: unknown) => {
-    const current = normalizeText(currentNote);
-    const next = normalizeText(nextNote);
-
-    if (!next) return getVisibleWorkbookRemark(current);
-    if (!current) return getVisibleWorkbookRemark(next);
-    if (current.split(' / ').includes(next)) return getVisibleWorkbookRemark(current);
-
-    return getVisibleWorkbookRemark(`${current} / ${next}`);
-};
-
-const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): LedgerRow[] => {
-    const scopedEntries = entries
-        .filter((entry) => entry.transactionType === filter.transactionType)
-        .filter((entry) => entry.date >= filter.startDate && entry.date <= filter.endDate)
-        .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
-        .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
-        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
-        .sort(sortWorkbookEntries);
-
-    let runningBalance = 0;
-
-    return scopedEntries.map((entry) => {
-        const transactionAmount = entry.totalAmount ?? 0;
-        const paymentAmount = entry.paymentAmount ?? 0;
-        runningBalance += transactionAmount - paymentAmount;
-
-        return {
-            id: entry.id ?? `${entry.date}-${entry.partnerName}-${entry.description}`,
-            date: entry.date,
-            partnerName: entry.partnerName ?? '',
-            description: entry.description,
-            transactionAmount,
-            paymentAmount,
-            balance: runningBalance,
-            siteName: entry.siteName ?? '',
-            note: getVisibleWorkbookRemark(entry.note),
-            teamName: entry.teamName ?? ''
-        };
-    });
-};
-
-const buildReceiptHistorySettlementEntries = (
-    entries: WorkbookLedgerEntry[],
-    _filter: SummaryFilter,
-    targetId: string | null
-) => {
-    if (!targetId) return [];
-
-    return entries
-        .filter((entry) => {
-            if (!isPaymentEntry(entry)) return false;
-            return entry.matchedEntryId === targetId;
-        })
-        .sort(sortWorkbookEntries);
-};
-
-const buildSummaryBaseRowsForTransaction = (
-    entries: WorkbookLedgerEntry[],
-    transactionType: WorkbookTransactionType,
-    paymentCutoffDate: string
-): SummaryRow[] => {
-
-    const summaryInvoiceEntries: WorkbookLedgerEntry[] = [];
-    const paymentEntries: WorkbookLedgerEntry[] = [];
-    const advanceUsageEntries: WorkbookLedgerEntry[] = [];
-
-    entries.forEach((entry) => {
-        if (entry.transactionType !== transactionType) return;
-
-        if ((entry.totalAmount ?? 0) !== 0) {
-            summaryInvoiceEntries.push(entry);
-        }
-
-        if (!isPaymentEntry(entry)) return;
-        const paymentDate = normalizeDate(entry.date);
-        // The invoice date range is applied later; balances intentionally include settlements through today.
-        if (!paymentDate || paymentDate > paymentCutoffDate) return;
-
-        if (isAdvanceUsageEntry(entry)) {
-            advanceUsageEntries.push(entry);
-        } else {
-            paymentEntries.push(entry);
-        }
-    });
-
-    summaryInvoiceEntries.sort(sortWorkbookEntries);
-    paymentEntries.sort(sortWorkbookEntries);
-    advanceUsageEntries.sort(sortWorkbookEntries);
-
-    const positiveInvoiceEntries = summaryInvoiceEntries.filter(isInvoiceEntry);
-    const adjustmentInvoiceEntries = summaryInvoiceEntries.filter(isNegativeInvoiceEntry);
-
-    type WorkingSummaryRow = SummaryRow & {
-        remainingAmount: number;
-        normalizedSiteName: string;
-        normalizedTeamName: string;
-        paymentDateSet: Set<string>;
-        settlementEntryIdSet: Set<string>;
-    };
-    type PositiveInvoiceMatchMetadata = {
-        date: string;
-        siteName: string;
-        description: string;
-        teamName: string;
-        appliedYear: number | null;
-        appliedMonth: number | null;
-    };
-    const invoices: WorkingSummaryRow[] = positiveInvoiceEntries
-        .map((entry): WorkingSummaryRow => ({
-            id: getWorkbookEntryKey(entry),
-            transactionType: entry.transactionType,
-            partnerName: entry.partnerName,
-            siteName: entry.siteName ?? '',
-            issueDate: entry.date,
-            appliedYear: entry.appliedYear ?? getYearFromDate(entry.date),
-            appliedMonth: entry.appliedMonth ?? getMonthFromDate(entry.date),
-            supplyAmount: entry.supplyAmount ?? 0,
-            taxAmount: entry.taxAmount ?? 0,
-            totalAmount: entry.totalAmount ?? 0,
-            paymentDates: [],
-            settledAmount: 0,
-            advanceUsedAmount: 0,
-            outstandingAmount: entry.totalAmount ?? 0,
-            advanceAmount: 0,
-            settlementEntryIds: [],
-            remainingAmount: entry.totalAmount ?? 0,
-            normalizedSiteName: normalizeText(entry.siteName).toLowerCase(),
-            normalizedTeamName: normalizeText(entry.teamName).toLowerCase(),
-            paymentDateSet: new Set<string>(),
-            settlementEntryIdSet: new Set<string>(),
-            note: getVisibleWorkbookRemark(entry.note),
-            teamName: entry.teamName ?? ''
-        }));
-
-    const adjustmentRowsById = new Map<string, SummaryRow>();
-    adjustmentInvoiceEntries.forEach((entry) => {
-        const adjustmentId = getWorkbookEntryKey(entry);
-        adjustmentRowsById.set(adjustmentId, {
-            id: adjustmentId,
-            transactionType: entry.transactionType,
-            partnerName: entry.partnerName,
-            siteName: entry.siteName ?? '',
-            issueDate: entry.date,
-            appliedYear: entry.appliedYear ?? getYearFromDate(entry.date),
-            appliedMonth: entry.appliedMonth ?? getMonthFromDate(entry.date),
-            supplyAmount: entry.supplyAmount ?? 0,
-            taxAmount: entry.taxAmount ?? 0,
-            totalAmount: entry.totalAmount ?? 0,
-            paymentDates: [],
-            settledAmount: 0,
-            advanceUsedAmount: 0,
-            outstandingAmount: 0,
-            advanceAmount: 0,
-            settlementEntryIds: [],
-            note: getVisibleWorkbookRemark(entry.note),
-            teamName: entry.teamName ?? ''
-        });
-    });
-
-    const invoiceById = new Map<string, WorkingSummaryRow>();
-    const invoicesByPartner = new Map<string, WorkingSummaryRow[]>();
-    const positiveInvoiceEntriesByPartner = new Map<string, WorkbookLedgerEntry[]>();
-    const positiveInvoiceMatchMetadata = new WeakMap<WorkbookLedgerEntry, PositiveInvoiceMatchMetadata>();
-    invoices.forEach((invoice, index) => {
-        invoiceById.set(invoice.id, invoice);
-
-        const partnerKey = normalizePartnerMatchKey(invoice.partnerName);
-        if (!partnerKey) return;
-
-        const bucket = invoicesByPartner.get(partnerKey) ?? [];
-        bucket.push(invoice);
-        invoicesByPartner.set(partnerKey, bucket);
-
-        const sourceEntry = positiveInvoiceEntries[index];
-        const sourceBucket = positiveInvoiceEntriesByPartner.get(partnerKey) ?? [];
-        sourceBucket.push(sourceEntry);
-        positiveInvoiceEntriesByPartner.set(partnerKey, sourceBucket);
-        positiveInvoiceMatchMetadata.set(sourceEntry, {
-            date: normalizeDate(sourceEntry.date),
-            siteName: normalizeText(sourceEntry.siteName).toLowerCase(),
-            description: normalizeText(sourceEntry.description).toLowerCase(),
-            teamName: normalizeText(sourceEntry.teamName).toLowerCase(),
-            appliedYear: sourceEntry.appliedYear ?? getYearFromDate(sourceEntry.date),
-            appliedMonth: sourceEntry.appliedMonth ?? getMonthFromDate(sourceEntry.date)
-        });
-    });
-
-    const applyPaymentToInvoice = (
-        invoice: WorkingSummaryRow,
-        paymentAmount: number,
-        paymentDate: string,
-        options?: { recordDate?: boolean; note?: string; sourceEntryId?: string; allowAdvance?: boolean }
-    ) => {
-        if (paymentAmount <= 0) return paymentAmount;
-
-        const appliedAmount = invoice.remainingAmount > 0
-            ? Math.min(invoice.remainingAmount, paymentAmount)
-            : 0;
-        const advanceAmount = (options?.allowAdvance ?? true)
-            ? Math.max(paymentAmount - appliedAmount, 0)
-            : 0;
-        const settledAmount = appliedAmount + advanceAmount;
-        if (settledAmount <= 0) return paymentAmount;
-
-        invoice.settledAmount += settledAmount;
-        invoice.remainingAmount = Math.max(invoice.remainingAmount - appliedAmount, 0);
-        invoice.outstandingAmount = invoice.remainingAmount;
-        invoice.advanceAmount += advanceAmount;
-        if ((options?.recordDate ?? true) && paymentDate && !invoice.paymentDateSet.has(paymentDate)) {
-            invoice.paymentDateSet.add(paymentDate);
-            invoice.paymentDates.push(paymentDate);
-        }
-        if (options?.sourceEntryId && !invoice.settlementEntryIdSet.has(options.sourceEntryId)) {
-            invoice.settlementEntryIdSet.add(options.sourceEntryId);
-            invoice.settlementEntryIds.push(options.sourceEntryId);
-        }
-        invoice.note = appendSummaryNote(invoice.note, options?.note);
-
-        return paymentAmount - settledAmount;
-    };
-
-    const applyAdvanceUsageToInvoice = (usageEntry: WorkbookLedgerEntry) => {
-        const sourceId = normalizeText(usageEntry.sourceId);
-        const targetId = normalizeText(usageEntry.matchedEntryId);
-        const usageAmount = usageEntry.paymentAmount ?? 0;
-        if (!sourceId || !targetId || usageAmount <= 0) return;
-
-        const sourceInvoice = invoiceById.get(sourceId);
-        const targetInvoice = invoiceById.get(targetId);
-        if (!sourceInvoice || !targetInvoice || sourceInvoice.id === targetInvoice.id) return;
-        if (normalizePartnerMatchKey(sourceInvoice.partnerName) !== normalizePartnerMatchKey(targetInvoice.partnerName)) return;
-
-        const appliedAmount = Math.min(
-            usageAmount,
-            Math.max(sourceInvoice.advanceAmount, 0),
-            Math.max(targetInvoice.remainingAmount, 0)
-        );
-        if (appliedAmount <= 0) return;
-
-        sourceInvoice.advanceAmount = Math.max(sourceInvoice.advanceAmount - appliedAmount, 0);
-        targetInvoice.advanceUsedAmount += appliedAmount;
-        targetInvoice.remainingAmount = Math.max(targetInvoice.remainingAmount - appliedAmount, 0);
-        targetInvoice.outstandingAmount = targetInvoice.remainingAmount;
-
-        const usageEntryKey = getWorkbookEntryKey(usageEntry);
-        if (usageEntry.date && !targetInvoice.paymentDateSet.has(usageEntry.date)) {
-            targetInvoice.paymentDateSet.add(usageEntry.date);
-            targetInvoice.paymentDates.push(usageEntry.date);
-        }
-        if (!targetInvoice.settlementEntryIdSet.has(usageEntryKey)) {
-            targetInvoice.settlementEntryIdSet.add(usageEntryKey);
-            targetInvoice.settlementEntryIds.push(usageEntryKey);
-        }
-        targetInvoice.note = appendSummaryNote(targetInvoice.note, usageEntry.note);
-    };
-
-    const findDirectOffsetInvoice = (adjustmentEntry: WorkbookLedgerEntry) => {
-        const exactAmount = Math.abs(adjustmentEntry.totalAmount ?? 0);
-        if (exactAmount <= 0) return null;
-
-        const partnerKey = normalizePartnerMatchKey(adjustmentEntry.partnerName);
-        if (!partnerKey) return null;
-
-        const adjustmentDate = normalizeDate(adjustmentEntry.date);
-        const normalizedSiteName = normalizeText(adjustmentEntry.siteName).toLowerCase();
-        const normalizedDescription = normalizeText(adjustmentEntry.description).toLowerCase();
-        const normalizedTeamName = normalizeText(adjustmentEntry.teamName).toLowerCase();
-        const appliedYear = adjustmentEntry.appliedYear ?? null;
-        const appliedMonth = adjustmentEntry.appliedMonth ?? null;
-
-        const directCandidates = (positiveInvoiceEntriesByPartner.get(partnerKey) ?? []).filter((invoiceEntry) => {
-            const metadata = positiveInvoiceMatchMetadata.get(invoiceEntry);
-            if (!metadata) return false;
-            if (Math.abs((invoiceEntry.totalAmount ?? 0) - exactAmount) >= 0.5) return false;
-            if (adjustmentDate && metadata.date !== adjustmentDate) return false;
-            if (normalizedSiteName && metadata.siteName !== normalizedSiteName) return false;
-            if (normalizedDescription && metadata.description !== normalizedDescription) return false;
-            if (normalizedTeamName && metadata.teamName !== normalizedTeamName) return false;
-
-            if (appliedYear !== null && metadata.appliedYear !== appliedYear) return false;
-            if (appliedMonth !== null && metadata.appliedMonth !== appliedMonth) return false;
-
-            return true;
-        });
-
-        if (directCandidates.length !== 1) return null;
-
-        return invoiceById.get(getWorkbookEntryKey(directCandidates[0])) ?? null;
-    };
-
-    const findLegacyMatchedInvoice = (paymentEntry: WorkbookLedgerEntry, exactAmount?: number) => {
-        const partnerKey = normalizePartnerMatchKey(paymentEntry.partnerName);
-        if (!partnerKey) return null;
-
-        const partnerInvoices = invoicesByPartner.get(partnerKey) ?? [];
-        if (!partnerInvoices.length) return null;
-
-        const paymentDate = normalizeDate(paymentEntry.date);
-        const normalizedSiteName = normalizeText(paymentEntry.siteName).toLowerCase();
-        const normalizedTeamName = normalizeText(paymentEntry.teamName).toLowerCase();
-        const appliedYear = paymentEntry.appliedYear ?? null;
-        const appliedMonth = paymentEntry.appliedMonth ?? null;
-
-        const matchesBaseConditions = (invoice: WorkingSummaryRow) => {
-            if (paymentDate && invoice.issueDate > paymentDate) return false;
-            if (normalizedSiteName && invoice.normalizedSiteName !== normalizedSiteName) return false;
-            if (normalizedTeamName && invoice.normalizedTeamName !== normalizedTeamName) return false;
-            return true;
-        };
-
-        const resolveCandidateSet = (candidates: WorkingSummaryRow[]) => {
-            if (candidates.length === 1) return candidates[0];
-
-            let outstandingCandidate: WorkingSummaryRow | null = null;
-            let outstandingCount = 0;
-            let exactAmountCandidate: WorkingSummaryRow | null = null;
-            let exactAmountCount = 0;
-            const shouldMatchExactAmount = Boolean(exactAmount && exactAmount > 0);
-
-            candidates.forEach((invoice) => {
-                if ((invoice.remainingAmount ?? 0) > 0) {
-                    outstandingCandidate = invoice;
-                    outstandingCount += 1;
-                }
-
-                if (shouldMatchExactAmount && (
-                    Math.abs((invoice.totalAmount ?? 0) - (exactAmount ?? 0)) < 0.5 ||
-                    Math.abs((invoice.remainingAmount ?? 0) - (exactAmount ?? 0)) < 0.5
-                )) {
-                    exactAmountCandidate = invoice;
-                    exactAmountCount += 1;
-                }
-            });
-
-            if (outstandingCount === 1) return outstandingCandidate;
-            if (exactAmountCount === 1) return exactAmountCandidate;
-            return null;
-        };
-
-        const strictCandidates: WorkingSummaryRow[] = [];
-        const relaxedCandidates: WorkingSummaryRow[] = [];
-        partnerInvoices.forEach((invoice) => {
-            if (!matchesBaseConditions(invoice)) return;
-
-            relaxedCandidates.push(invoice);
-            if (appliedYear !== null && invoice.appliedYear !== appliedYear) return;
-            if (appliedMonth !== null && invoice.appliedMonth !== appliedMonth) return;
-            strictCandidates.push(invoice);
-        });
-
-        return resolveCandidateSet(strictCandidates) ?? resolveCandidateSet(relaxedCandidates);
-    };
-
-    paymentEntries.forEach((paymentEntry) => {
-        const paymentAmount = paymentEntry.paymentAmount ?? 0;
-        if (paymentAmount <= 0) return;
-
-        const paymentEntryKey = getWorkbookEntryKey(paymentEntry);
-        const selfInvoice = isInvoiceEntry(paymentEntry) ? invoiceById.get(paymentEntryKey) : null;
-
-        if (paymentEntry.matchedEntryId) {
-            const matchedInvoice = invoiceById.get(paymentEntry.matchedEntryId);
-            if (matchedInvoice) {
-                applyPaymentToInvoice(matchedInvoice, paymentAmount, paymentEntry.date, {
-                    note: paymentEntry.note,
-                    sourceEntryId: paymentEntryKey
-                });
-            }
-            return;
-        }
-
-        if (selfInvoice) {
-            applyPaymentToInvoice(selfInvoice, paymentAmount, paymentEntry.date, {
-                note: paymentEntry.note,
-                sourceEntryId: paymentEntryKey
-            });
-            return;
-        }
-
-        const legacyMatchedInvoice = findLegacyMatchedInvoice(paymentEntry, paymentAmount);
-        if (legacyMatchedInvoice) {
-            applyPaymentToInvoice(legacyMatchedInvoice, paymentAmount, paymentEntry.date, {
-                note: paymentEntry.note,
-                sourceEntryId: paymentEntryKey
-            });
-            return;
-        }
-
-        // Leave ambiguous legacy payments unmatched so summary rows do not show
-        // settled amounts without a concrete linked payment history.
-    });
-
-    adjustmentInvoiceEntries.forEach((adjustmentEntry) => {
-        const adjustmentAmount = Math.abs(adjustmentEntry.totalAmount ?? 0);
-        if (adjustmentAmount <= 0) return;
-
-        if (adjustmentEntry.matchedEntryId) {
-            const matchedInvoice = invoiceById.get(adjustmentEntry.matchedEntryId);
-            if (matchedInvoice) {
-                applyPaymentToInvoice(matchedInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note, allowAdvance: false });
-            }
-            return;
-        }
-
-        const directOffsetInvoice = findDirectOffsetInvoice(adjustmentEntry);
-        if (directOffsetInvoice) {
-            applyPaymentToInvoice(directOffsetInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note, allowAdvance: false });
-            return;
-        }
-
-        const legacyMatchedInvoice = findLegacyMatchedInvoice(adjustmentEntry, adjustmentAmount);
-        if (legacyMatchedInvoice) {
-            applyPaymentToInvoice(legacyMatchedInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note, allowAdvance: false });
-            return;
-        }
-
-        // Same rule for negative adjustments: only apply when the target invoice
-        // can be identified uniquely from the legacy data.
-    });
-
-    advanceUsageEntries.forEach(applyAdvanceUsageToInvoice);
-
-    const finalizedPositiveRowsById = new Map<string, SummaryRow>();
-    invoices.forEach(({
-        remainingAmount,
-        normalizedSiteName,
-        normalizedTeamName,
-        paymentDateSet,
-        settlementEntryIdSet,
-        ...row
-    }) => {
-        row.paymentDates.sort((left, right) => left.localeCompare(right, 'en'));
-        finalizedPositiveRowsById.set(row.id, row);
-    });
-
-    const finalizedRows = summaryInvoiceEntries
-        .map((entry) => {
-            const entryId = getWorkbookEntryKey(entry);
-            if (isInvoiceEntry(entry)) {
-                return finalizedPositiveRowsById.get(entryId) ?? null;
-            }
-            if (isNegativeInvoiceEntry(entry)) {
-                return adjustmentRowsById.get(entryId) ?? null;
-            }
-            return null;
-        })
-        .filter((row): row is SummaryRow => Boolean(row));
-
-    return finalizedRows;
-};
-
-export const buildSummaryBaseRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter): SummaryRow[] => {
-    const startDate = normalizeDate(filter.startDate);
-    const endDate = normalizeDate(filter.endDate);
-    if (!startDate || !endDate) return [];
-
-    const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
-    return buildSummaryBaseRowsForTransaction(entries, transactionType, formatDateInput(new Date()));
-};
-
-const filterSummaryRows = (rows: SummaryRow[], filter: SummaryFilter): SummaryRow[] => {
-    const startDate = normalizeDate(filter.startDate);
-    const endDate = normalizeDate(filter.endDate);
-
-    if (!startDate || !endDate) return [];
-
-    const scopedRows = rows.filter((row) => {
-        return (
-            isDateWithinRange(row.issueDate, startDate, endDate) &&
-            matchesFilter(row.teamName, filter.teamName) &&
-            matchesFilter(row.partnerName, filter.partnerName) &&
-            matchesFilter(row.siteName, filter.siteName)
-        );
-    });
-
-    if (isSummarySettlementMode(filter.mode)) {
-        return scopedRows
-            .filter((row) => row.outstandingAmount >= SETTLEMENT_AMOUNT_EPSILON)
-            .sort(sortSummaryRowsByDate);
-    }
-
-    return scopedRows.sort(sortSummaryRowsByDate);
-};
-
-export const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter): SummaryRow[] => (
-    filterSummaryRows(buildSummaryBaseRows(entries, filter), filter)
-);
 
 interface WorkbookLedgerPageProps {
     tenantKey?: WorkbookLedgerTenant;
@@ -2469,6 +69,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const [loading, setLoading] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState('');
     const [summaryVerificationLoading, setSummaryVerificationLoading] = useState(false);
+    const [entryLoadError, setEntryLoadError] = useState('');
+    const summaryActionsBlocked = loading || summaryVerificationLoading || Boolean(entryLoadError);
+    const summaryActionsBlockedRef = useRef(summaryActionsBlocked);
+    summaryActionsBlockedRef.current = summaryActionsBlocked;
     const [saving, setSaving] = useState(false);
     const [uploadingDb, setUploadingDb] = useState(false);
     const [downloadingDb, setDownloadingDb] = useState(false);
@@ -2492,7 +96,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const [inputValidationVisible, setInputValidationVisible] = useState(false);
     const [lastInputSavedAt, setLastInputSavedAt] = useState<string | null>(null);
     const [inputSaveError, setInputSaveError] = useState('');
+    const pendingInputSaveRef = useRef<WorkbookLedgerEntry[] | null>(null);
+    const [pendingInputCount, setPendingInputCount] = useState(0);
+    const inputSaveInFlightRef = useRef(false);
     const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
+    const entriesRef = useRef<WorkbookLedgerEntry[]>([]);
     const [entriesLoaded, setEntriesLoaded] = useState(false);
     const [entryLoadScope, setEntryLoadScope] = useState<EntryLoadScope>('none');
     const [partnerNames, setPartnerNames] = useState<string[]>([]);
@@ -2509,8 +117,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const [selectedTeam, setSelectedTeam] = useState('');
     const [baseYear, setBaseYear] = useState(currentYear);
     const selectedTeamInputRef = useRef<HTMLInputElement | null>(null);
-    const ledgerSearchInputRef = useRef<HTMLInputElement | null>(null);
-    const summarySearchInputRef = useRef<HTMLInputElement | null>(null);
     const baseYearInputRef = useRef<HTMLInputElement | null>(null);
     const inputRowsRef = useRef<InputRow[]>([]);
     const selectedTeamRef = useRef('');
@@ -2518,9 +124,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     if (inputRowsRef.current.length === 0) {
         inputRowsRef.current = createEmptyInputRows();
     }
-
-    const [ledgerSearchTarget, setLedgerSearchTarget] = useState<'partnerName' | 'siteName' | 'teamName'>('partnerName');
-    const [summarySearchTarget, setSummarySearchTarget] = useState<'partnerName' | 'siteName' | 'teamName'>('partnerName');
 
     const [ledgerDateSearchMode, setLedgerDateSearchMode] = useState<DateSearchMode>('range');
     const [ledgerMonth, setLedgerMonth] = useState(currentMonthValue);
@@ -2577,6 +180,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         siteName: '',
     });
     const [quarterVatPayments, setQuarterVatPayments] = useState<QuarterVatPaymentRecord[]>([]);
+    const [quarterVatPaymentYearDraft, setQuarterVatPaymentYearDraft] = useState(String(currentYear));
+    const [quarterVatPaymentQuarterDraft, setQuarterVatPaymentQuarterDraft] = useState<VatQuarter>(currentQuarter as VatQuarter);
+    const [quarterVatPaymentError, setQuarterVatPaymentError] = useState('');
+    const [quarterVatPaymentLoadedKey, setQuarterVatPaymentLoadedKey] = useState('');
+    const [quarterVatPaymentReload, setQuarterVatPaymentReload] = useState(0);
+    const quarterVatPaymentContext = `${tenantKey}:${quarterVatFilter.year}`;
+    const quarterVatPaymentContextRef = useRef(quarterVatPaymentContext);
+    quarterVatPaymentContextRef.current = quarterVatPaymentContext;
+    const quarterVatPaymentSavingRef = useRef(false);
+    const quarterVatPaymentReady = quarterVatPaymentLoadedKey === quarterVatPaymentContext && !quarterVatPaymentError;
     const [quarterVatPaymentDateDraft, setQuarterVatPaymentDateDraft] = useState(todayString);
     const [quarterVatPaymentAmountDraft, setQuarterVatPaymentAmountDraft] = useState('');
     const [quarterVatPaymentNoteDraft, setQuarterVatPaymentNoteDraft] = useState('');
@@ -2604,7 +217,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             normalizeInputRow(row, baseYear, selectedTeam)
         ));
         const filledCount = normalizedRows.filter(hasInputContent).length;
-        const issues = getWorkbookInputRowIssues(normalizedRows, baseYear, selectedTeam);
+        const issues = getWorkbookInputRowIssues(inputRowsRef.current, baseYear, selectedTeam);
 
         return {
             filledCount,
@@ -2654,7 +267,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             if (entry.teamName) nextTeamNames.add(entry.teamName);
         });
 
-        setEntries(savedEntries);
         setPartnerNames(Array.from(nextPartnerNames).sort((left, right) => left.localeCompare(right, 'ko')));
         setSiteNames(Array.from(nextSiteNames).sort((left, right) => left.localeCompare(right, 'ko')));
         setTeamNames(Array.from(nextTeamNames).sort((left, right) => left.localeCompare(right, 'ko')));
@@ -2667,6 +279,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         entryLoadRequestIdRef.current = requestId;
         const shouldLoadEntries = options?.loadEntries ?? entriesLoadedRef.current;
         const shouldShowLoading = !options?.silent;
+        if (shouldLoadEntries) setEntryLoadError('');
+        if (shouldLoadEntries && requestedEntryQuery.scope === 'summary') setSummaryVerificationLoading(true);
         const nextLoadingMessage = shouldLoadEntries
             ? requestedEntryQuery.scope === 'all'
                 ? `${companyLabel} 전체 DB 장부를 불러오는 중`
@@ -2682,6 +296,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         const commitLoadedEntries = (savedEntries: WorkbookLedgerEntry[], scope: EntryLoadScope) => {
             if (entryLoadRequestIdRef.current !== requestId) return;
+            entriesRef.current = savedEntries;
+            setEntries(savedEntries);
             rebuildLookupOptions(savedEntries);
             entriesLoadedRef.current = true;
             entryLoadQueryRef.current = requestedEntryQuery;
@@ -2748,6 +364,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 shouldLoadCatalogs ? teamService.getTeams() : Promise.resolve(null)
             ]);
 
+            if (entryLoadRequestIdRef.current !== requestId) return null;
+
             if (shouldLoadCatalogs) {
                 partnerSeedNamesRef.current = (companies ?? [])
                     .map((company) => company.name)
@@ -2759,6 +377,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     .map((team) => team.name)
                     .filter((name): name is string => Boolean(name));
                 catalogsLoadedRef.current = true;
+                rebuildLookupOptions(savedEntries ?? entriesRef.current);
             }
 
             if (savedEntries) {
@@ -2767,6 +386,17 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             }
         } catch (error) {
             console.error(error);
+            if (entryLoadRequestIdRef.current !== requestId) return null;
+            if (shouldLoadEntries) {
+                entriesRef.current = [];
+                setEntries([]);
+                entriesLoadedRef.current = false;
+                setEntriesLoaded(false);
+                setReceiptHistoryTargetId(null);
+                setShowKbPreview(false);
+                entryLoadQueryKeyRef.current = '';
+                setEntryLoadError('장부 조회 또는 정산 이력 검증에 실패했습니다. 새로고침으로 다시 확인해 주세요.');
+            }
             if (shouldShowLoading) {
                 Swal.fire('오류', '전용 장부 데이터를 불러오지 못했습니다.', 'error');
             }
@@ -2860,17 +490,20 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         let isCurrent = true;
         setLoadingQuarterVatPayment(true);
+        setQuarterVatPaymentLoadedKey('');
+        setQuarterVatPaymentError('');
         setQuarterVatPayments([]);
 
         void quarterVatPaymentService
-            .getPayments(quarterVatFilter.year, quarterVatFilter.quarter as QuarterVatPaymentQuarter)
+            .getPayments(quarterVatFilter.year, 'all')
             .then((payments) => {
                 if (!isCurrent) return;
                 setQuarterVatPayments(payments);
+                setQuarterVatPaymentLoadedKey(quarterVatPaymentContext);
             })
             .catch((error) => {
                 console.error(error);
-                if (isCurrent) setQuarterVatPayments([]);
+                if (isCurrent) setQuarterVatPaymentError('납부 내역을 불러오지 못했습니다. 납부액과 잔액을 확인하려면 다시 시도해주세요.');
             })
             .finally(() => {
                 if (isCurrent) setLoadingQuarterVatPayment(false);
@@ -2879,7 +512,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         return () => {
             isCurrent = false;
         };
-    }, [activeTab, quarterVatFilter.quarter, quarterVatFilter.year, quarterVatPaymentService]);
+    }, [activeTab, quarterVatFilter.year, quarterVatPaymentService, quarterVatPaymentContext, quarterVatPaymentReload]);
+
+    useEffect(() => {
+        setQuarterVatPaymentYearDraft(String(quarterVatFilter.year));
+        if (quarterVatFilter.quarter !== 'all') setQuarterVatPaymentQuarterDraft(quarterVatFilter.quarter);
+        setQuarterVatPaymentAmountDraft('');
+        setQuarterVatPaymentNoteDraft('');
+    }, [tenantKey, quarterVatFilter.year, quarterVatFilter.quarter]);
 
     useEffect(() => {
         if (activeTab !== 'summary' || purchaseAccountsByName.size > 0) return;
@@ -3084,6 +724,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [commitActiveInputGridEditor]);
 
     const clearInputGrid = useCallback(() => {
+        pendingInputSaveRef.current = null;
+        setPendingInputCount(0);
         const nextRows = createEmptyInputRows();
         inputRowsRef.current = nextRows;
 
@@ -3104,7 +746,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         if (hasDraft) {
             const result = await Swal.fire({
                 title: '입력 내용 초기화',
-                text: '아직 DB에 저장하지 않은 입력 내용을 모두 지울까요?',
+                text: pendingInputSaveRef.current
+                    ? '이미 저장된 거래는 유지됩니다. 남은 항목의 재시도와 입력 내용을 취소할까요?'
+                    : '아직 DB에 저장하지 않은 입력 내용을 모두 지울까요?',
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonText: '입력 내용 지우기',
@@ -3178,15 +822,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const handleOpenTaxInvoiceImport = useCallback(() => {
         try {
             aiSettingsService.assertCurrentPageEnabled('세금계산서 AI 분석');
-            if (!aiSettingsService.getApiKey()) {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'Gemini API Key가 필요합니다.',
-                    html: '<a href="/settings/ai" style="color:#2563eb;font-weight:800;text-decoration:underline;">AI 설정</a>에서 Gemini API Key를 저장한 뒤 다시 시도하세요.',
-                    confirmButtonText: '확인',
-                });
-                return;
-            }
+            
             taxInvoiceUploadInputRef.current?.click();
         } catch (error) {
             Swal.fire('AI 기능 사용 불가', error instanceof Error ? error.message : 'AI 설정을 확인하세요.', 'warning');
@@ -3319,7 +955,38 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         });
     }, [inputStatusSnapshot.issues]);
 
+    const persistInputEntries = useCallback(async (preparedEntries: WorkbookLedgerEntry[]) => {
+        if (inputSaveInFlightRef.current) return;
+        inputSaveInFlightRef.current = true;
+        setSaving(true);
+        setInputSaveError('');
+        try {
+            await ledgerService.addEntries(preparedEntries);
+            clearInputGrid();
+            setLastInputSavedAt(new Date().toISOString());
+            await refreshPageData();
+            Swal.fire('저장 완료', `${preparedEntries.length}건을 전용 장부 DB에 등록했습니다.`, 'success');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'DB 등록에 실패했습니다. 입력 내용은 유지됩니다.';
+            if (error instanceof WorkbookLedgerBatchError) {
+                pendingInputSaveRef.current = error.pendingEntries;
+                setPendingInputCount(error.pendingEntries.length);
+            }
+            setInputSaveError(message);
+            setInputDirty(true);
+            Swal.fire('저장 확인 필요', message, 'error');
+        } finally {
+            inputSaveInFlightRef.current = false;
+            setSaving(false);
+        }
+    }, [clearInputGrid, ledgerService, refreshPageData]);
+
     const handleSaveRows = useCallback(async () => {
+        if (inputSaveInFlightRef.current) return;
+        if (pendingInputSaveRef.current) {
+            await persistInputEntries(pendingInputSaveRef.current);
+            return;
+        }
         syncTopInputRefs();
         commitActiveInputGridEditor();
 
@@ -3340,7 +1007,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         }
 
         const validationIssues = getWorkbookInputRowIssues(
-            normalizedRows,
+            sourceRows,
             baseYearRef.current,
             selectedTeamRef.current
         );
@@ -3429,23 +1096,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             return;
         }
 
-        setSaving(true);
-        setInputSaveError('');
-        try {
-            await ledgerService.addEntries(preparedEntries);
-            clearInputGrid();
-            setLastInputSavedAt(new Date().toISOString());
-            await refreshPageData();
-            Swal.fire('저장 완료', `${preparedEntries.length}건을 전용 장부 DB에 등록했습니다.`, 'success');
-        } catch (error) {
-            console.error(error);
-            setInputSaveError('DB 등록에 실패했습니다. 입력 내용은 유지됩니다.');
-            setInputDirty(true);
-            Swal.fire('오류', '장부 데이터를 저장하지 못했습니다.', 'error');
-        } finally {
-            setSaving(false);
-        }
-    }, [clearInputGrid, commitActiveInputGridEditor, currentUser?.uid, focusInputIssue, refreshPageData, syncTopInputRefs]);
+        await persistInputEntries(preparedEntries);
+    }, [commitActiveInputGridEditor, currentUser?.uid, focusInputIssue, persistInputEntries, syncTopInputRefs]);
 
     const handleOpenDbUpload = useCallback(() => {
         dbUploadInputRef.current?.click();
@@ -3487,21 +1139,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 return;
             }
 
-            const importedDates = importedEntries
-                .map((entry) => entry.date)
-                .filter(Boolean)
-                .sort();
-            const existingEntries = importedDates.length > 0
-                ? await ledgerService.getEntries({
-                    force: true,
-                    startDate: importedDates[0],
-                    endDate: importedDates[importedDates.length - 1],
-                    orderDirection: 'asc'
-                })
-                : [];
-            const { newEntries, duplicateEntries } = partitionWorkbookImportDuplicates(
+            // Linked invoices and advance sources can be outside the uploaded date range.
+            const existingEntries = await ledgerService.getEntries({ force: true, orderDirection: 'asc' });
+            const { newEntries, duplicateEntries } = prepareWorkbookImportEntries(
                 importedEntries,
-                existingEntries
+                existingEntries,
+                ledgerService.createEntryId,
             );
 
             if (newEntries.length === 0) {
@@ -3899,7 +1542,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             Swal.fire('수정 완료', 'DB 행을 수정했습니다.', 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', 'DB 행 수정에 실패했습니다.', 'error');
+            Swal.fire('오류', error instanceof Error ? error.message : 'DB 행 수정에 실패했습니다.', 'error');
         } finally {
             setDbActionLoading(false);
         }
@@ -3920,6 +1563,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
     const handleSaveDbEntry = useCallback(async () => {
         if (!editingDbDraft?.id) return;
+        const numericIssues = getWorkbookNumericIssues(editingDbDraft);
+        if (numericIssues.length) {
+            Swal.fire('입력 확인', numericIssues.map((issue) => issue.message).join(' '), 'warning');
+            return;
+        }
 
         const entry = entries.find((item) => item.id === editingDbDraft.id);
         if (!entry?.id) {
@@ -4169,7 +1817,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             Swal.fire('삭제 완료', 'DB 행을 삭제했습니다.', 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', 'DB 행 삭제에 실패했습니다.', 'error');
+            Swal.fire('오류', error instanceof Error ? error.message : 'DB 행 삭제에 실패했습니다.', 'error');
         } finally {
             setDbActionLoading(false);
         }
@@ -4316,13 +1964,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             );
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', '선택 행 일괄삭제에 실패했습니다.', 'error');
+            Swal.fire('오류', error instanceof Error ? error.message : '선택 행 일괄삭제에 실패했습니다.', 'error');
         } finally {
             setDbActionLoading(false);
         }
     }, [currentUser?.uid, entries, refreshPageData, selectedDbEntryIds]);
 
     const handleRegisterReceipt = useCallback(async (row: SummaryRow) => {
+        if (summaryActionsBlockedRef.current) return;
         const labels = getSettlementLabels(row.transactionType);
         const sourceInvoice = entries.find((entry) => entry.id === row.id && isInvoiceEntry(entry)) ?? {
             id: row.id,
@@ -4579,6 +2228,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [advanceLookupRows]);
 
     const handleApplyAdvanceToSummaryRow = useCallback(async (row: SummaryRow) => {
+        if (summaryActionsBlockedRef.current) return;
         const labels = getSettlementLabels(row.transactionType);
         const partnerKey = normalizePartnerMatchKey(row.partnerName);
         const sourceRows = (advanceRowsByPartnerKey.get(partnerKey) ?? [])
@@ -5112,8 +2762,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [quarterVatDraft]);
 
     const handleSaveQuarterVatPayment = useCallback(async () => {
-        if (quarterVatFilter.quarter === 'all') {
-            Swal.fire('입력 확인', '납부 내역은 분기를 선택한 뒤 등록해주세요.', 'warning');
+        if (quarterVatPaymentSavingRef.current || !quarterVatPaymentReady) return;
+        const paymentYear = Number(quarterVatPaymentYearDraft);
+        if (!Number.isInteger(paymentYear) || paymentYear < 2000 || paymentYear > 2100) {
+            Swal.fire('입력 확인', '귀속연도는 2000년부터 2100년 사이로 입력해주세요.', 'warning');
             return;
         }
 
@@ -5129,17 +2781,25 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             return;
         }
 
+        quarterVatPaymentSavingRef.current = true;
+        const savedContext = quarterVatPaymentContext;
         setSavingQuarterVatPayment(true);
         try {
             const payment = await quarterVatPaymentService.addPayment({
-                year: quarterVatFilter.year,
-                quarter: quarterVatFilter.quarter as QuarterVatPaymentQuarter,
+                year: paymentYear,
+                quarter: quarterVatPaymentQuarterDraft,
                 date: paymentDate,
                 amount,
                 note: quarterVatPaymentNoteDraft,
                 createdBy: currentUser?.uid ?? ''
             });
-            setQuarterVatPayments((previous) => [...previous, payment].sort((left, right) => {
+            if (quarterVatPaymentContextRef.current !== savedContext) return;
+            if (paymentYear !== quarterVatFilter.year) {
+                setQuarterVatFilter((previous) => ({ ...previous, year: paymentYear, quarter: payment.quarter }));
+                setQuarterVatDraft((previous) => ({ ...previous, year: paymentYear, quarter: payment.quarter }));
+            }
+            setQuarterVatPayments((previous) => [...previous.filter((item) =>
+                !(item.id === payment.id && item.year === payment.year && item.quarter === payment.quarter)), payment].sort((left, right) => {
                 const dateCompare = right.date.localeCompare(left.date, 'en');
                 if (dateCompare !== 0) return dateCompare;
                 return right.createdAt.localeCompare(left.createdAt, 'en');
@@ -5148,7 +2808,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             setQuarterVatPaymentNoteDraft('');
             Swal.fire({
                 icon: 'success',
-                title: '납부 내역을 등록했습니다.',
+                title: `${payment.year}년 ${getQuarterVatLabel(payment.quarter)} 납부 내역을 등록했습니다.`,
                 toast: true,
                 position: 'top-end',
                 showConfirmButton: false,
@@ -5158,12 +2818,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             console.error(error);
             Swal.fire('오류', '납부 내역을 저장하지 못했습니다.', 'error');
         } finally {
+            quarterVatPaymentSavingRef.current = false;
             setSavingQuarterVatPayment(false);
         }
     }, [
         currentUser?.uid,
-        quarterVatFilter.quarter,
         quarterVatFilter.year,
+        quarterVatPaymentYearDraft,
+        quarterVatPaymentQuarterDraft,
+        quarterVatPaymentReady,
+        quarterVatPaymentContext,
         quarterVatPaymentAmountDraft,
         quarterVatPaymentDateDraft,
         quarterVatPaymentNoteDraft,
@@ -5171,27 +2835,34 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     ]);
 
     const handleDeleteQuarterVatPayment = useCallback(async (payment: QuarterVatPaymentRecord) => {
+        if (quarterVatPaymentSavingRef.current || !quarterVatPaymentReady) return;
+        const savedContext = quarterVatPaymentContext;
         const result = await Swal.fire({
             title: '납부 내역 삭제',
-            text: `${payment.date} · ${formatNumber(payment.amount)}원 납부 내역을 삭제할까요?`,
+            text: `${payment.year}년 ${getQuarterVatLabel(payment.quarter)} · ${payment.date} · ${formatNumber(payment.amount)}원 납부 내역을 삭제할까요?`,
             icon: 'warning',
             showCancelButton: true,
             confirmButtonText: '삭제',
             cancelButtonText: '취소'
         });
-        if (!result.isConfirmed) return;
+        if (!result.isConfirmed || quarterVatPaymentSavingRef.current || quarterVatPaymentContextRef.current !== savedContext) return;
 
+        quarterVatPaymentSavingRef.current = true;
         setSavingQuarterVatPayment(true);
         try {
             await quarterVatPaymentService.deletePayment(payment.year, payment.quarter, payment.id);
-            setQuarterVatPayments((previous) => previous.filter((item) => item.id !== payment.id));
+            if (quarterVatPaymentContextRef.current === savedContext) {
+                setQuarterVatPayments((previous) => previous.filter((item) =>
+                    !(item.id === payment.id && item.year === payment.year && item.quarter === payment.quarter)));
+            }
         } catch (error) {
             console.error(error);
             Swal.fire('오류', '납부 내역을 삭제하지 못했습니다.', 'error');
         } finally {
+            quarterVatPaymentSavingRef.current = false;
             setSavingQuarterVatPayment(false);
         }
-    }, [quarterVatPaymentService]);
+    }, [quarterVatPaymentService, quarterVatPaymentReady, quarterVatPaymentContext]);
 
     const ledgerRows = useMemo(
         () => (activeTab === 'ledger' ? buildLedgerRows(entries, ledgerFilter) : []),
@@ -5214,9 +2885,23 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         () => (activeTab === 'vat' ? buildQuarterVatReport(entries, quarterVatFilter) : buildQuarterVatReport([], quarterVatFilter)),
         [activeTab, entries, quarterVatFilter]
     );
-    const quarterVatPaidAmount = useMemo(
-        () => quarterVatPayments.reduce((sum, payment) => sum + payment.amount, 0),
-        [quarterVatPayments]
+    const quarterVatCompanyReport = useMemo(
+        () => buildQuarterVatReport(activeTab === 'vat' ? entries : [], { ...quarterVatFilter, partnerName: '', siteName: '' }),
+        [activeTab, entries, quarterVatFilter]
+    );
+    const quarterVatBalances = useMemo(
+        () => buildQuarterVatBalances(quarterVatFilter.year, quarterVatCompanyReport.quarterRows, quarterVatPayments),
+        [quarterVatFilter.year, quarterVatCompanyReport, quarterVatPayments]
+    );
+    const quarterVatBalanceTotals = useMemo(
+        () => sumQuarterVatBalances(quarterVatBalances, quarterVatFilter.quarter),
+        [quarterVatBalances, quarterVatFilter.quarter]
+    );
+    const quarterVatPaidAmount = quarterVatBalanceTotals.paidAmount;
+    const quarterVatAnnualBalance = useMemo(() => sumQuarterVatBalances(quarterVatBalances, 'all'), [quarterVatBalances]);
+    const quarterVatPaymentHistory = useMemo(
+        () => buildQuarterVatPaymentHistory(quarterVatFilter.year, quarterVatBalances, quarterVatPayments),
+        [quarterVatFilter.year, quarterVatBalances, quarterVatPayments]
     );
 
     const ledgerTotals = useMemo(() => {
@@ -5366,6 +3051,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [analyzeSummaryKbBank, kbMemoSuffix, kbReceiverDisplay, purchaseAccountsByName, selectedSummaryRowIds, summaryFilter.mode, summaryRows]);
 
     const handleOpenKbPreview = useCallback(() => {
+        if (summaryActionsBlockedRef.current) return;
         if (summaryFilter.mode !== '미지급금') {
             Swal.fire('안내', '국민은행용 다운로드는 미지급금 조회에서만 가능합니다.', 'info');
             return;
@@ -5380,6 +3066,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [kbPreviewRows.length, summaryFilter.mode]);
 
     const handleDownloadSummaryKb = useCallback(async () => {
+        if (summaryActionsBlockedRef.current) return;
         if (summaryFilter.mode !== '미지급금') {
             Swal.fire('안내', '국민은행용 다운로드는 미지급금 조회에서만 가능합니다.', 'info');
             return;
@@ -5444,7 +3131,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [kbPreviewRows, summaryFilter.mode]);
 
     const handleDownloadQuarterVat = useCallback(async () => {
-        if (quarterVatReport.detailRows.length === 0) {
+        if (loading || !quarterVatPaymentReady || savingQuarterVatPayment) return;
+        if (quarterVatReport.detailRows.length === 0 && quarterVatPayments.length === 0) {
             Swal.fire('안내', '다운로드할 분기 부가세 데이터가 없습니다.', 'info');
             return;
         }
@@ -5461,8 +3149,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const detailTypeLabel = quarterVatFilter.detailTransactionType === 'all'
                 ? '매출·매입 전체'
                 : quarterVatFilter.detailTransactionType;
-            const expectedPaymentAmount = quarterVatReport.totals.payableVat;
-            const remainingPaymentAmount = Math.max(expectedPaymentAmount - quarterVatPaidAmount, 0);
+            const expectedPaymentAmount = quarterVatBalanceTotals.expectedAmount;
+            const remainingPaymentAmount = quarterVatBalanceTotals.remainingAmount;
             const generatedAt = new Date().toLocaleString('ko-KR');
 
             const titleStyle = {
@@ -5547,11 +3235,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 [`${selectedLabel} · ${basisLabel} · 생성 ${generatedAt}`, '', '', '', '', '', '', '', '', ''],
                 [],
                 ['매출세액', '', '매입세액', '', '예상 납부세액', '', '누적 납부금액', '', '남은 납부금액', ''],
-                [quarterVatReport.totals.salesVat, '', quarterVatReport.totals.purchaseVat, '', expectedPaymentAmount, '', quarterVatPaidAmount, '', remainingPaymentAmount, ''],
+                [quarterVatCompanyReport.totals.salesVat, '', quarterVatCompanyReport.totals.purchaseVat, '', expectedPaymentAmount, '', quarterVatPaidAmount, '', remainingPaymentAmount, ''],
                 [],
                 ['조회 기준', selectedLabel, '세부 구분', detailTypeLabel, '거래처', quarterVatFilter.partnerName || '전체', '현장', quarterVatFilter.siteName || '전체', '생성일', generatedAt],
-                ['※ 납부일별 내역은 「납부내역」 시트에서 확인할 수 있습니다.', '', '', '', '', '', '', '', '', ''],
-                ['분기 요약', '', '', '', '', '', '', '', '', ''],
+                ['※ 상단 납부 현황은 회사 전체 기준입니다. 분기별 잔액은 「분기별 납부현황」 시트를 확인하세요.', '', '', '', '', '', '', '', '', ''],
+                ['분기별 거래 요약 · 검색조건 적용', '', '', '', '', '', '', '', '', ''],
                 ['분기', '기간', '매출 공급가액', '매출세액', '매출 합계', '매입 공급가액', '매입세액', '매입 합계', '예상 납부세액'],
                 ...quarterVatReport.quarterRows.map((row) => [
                     row.label,
@@ -5636,59 +3324,68 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             });
             summarySheet['!autofilter'] = { ref: `A10:I${10 + quarterVatReport.quarterRows.length}` };
 
-            const paymentRows = quarterVatPayments.map((payment, index) => [
+            const annualBalance = quarterVatAnnualBalance;
+            const paymentHistory = quarterVatPaymentHistory;
+            const paymentRows = paymentHistory.map((row, index) => [
                 index + 1,
-                getQuarterVatLabel(payment.quarter),
-                payment.date,
-                payment.amount,
-                payment.note || '-',
+                `${row.year}년 ${getQuarterVatLabel(row.quarter)}`,
+                row.date || '-',
+                row.expectedAmount ?? '',
+                row.paymentAmount ?? '',
+                row.remainingAmount,
+                row.note || '-',
             ]);
             const paymentDataStartRow = 9;
             const paymentTotalRow = paymentDataStartRow + Math.max(paymentRows.length, 1);
             const paymentSheet = XLSX.utils.aoa_to_sheet([
-                [`${companyLabel} 부가세 납부 내역`, '', '', '', ''],
-                [`${selectedLabel} · 납부일 기준 내림차순 · 생성 ${generatedAt}`, '', '', '', ''],
+                [`${companyLabel} 부가세 납부 내역`, '', '', '', '', '', ''],
+                [`${quarterVatFilter.year}년 귀속 전체 · 귀속분기별 / 납부일 오름차순 · 생성 ${generatedAt}`, '', '', '', '', '', ''],
                 [],
-                ['예상 납부세액', '', '누적 납부금액', '', '남은 납부금액'],
-                [expectedPaymentAmount, '', quarterVatPaidAmount, '', remainingPaymentAmount],
+                ['예상 납부세액', '', '누적 납부금액', '', '', '남은 납부금액', ''],
+                [annualBalance.expectedAmount, '', annualBalance.paidAmount, '', '', annualBalance.remainingAmount, ''],
                 [],
-                ['납부 내역', '', '', '', ''],
-                ['No', '분기', '납부일', '납부금액', '메모'],
-                ...(paymentRows.length > 0 ? paymentRows : [['', '', '등록된 납부 내역이 없습니다.', '', '']]),
-                ['', '', '누적 납부금액', quarterVatPaidAmount, ''],
+                ['납부 내역', '', '', '', '', '', ''],
+                ['No', '귀속연도·분기', '실제 납부일', '발생금액', '납부금액', '잔액', '메모'],
+                ...(paymentRows.length > 0 ? paymentRows : [['등록된 납부 내역이 없습니다.', '', '', '', '', '', '']]),
+                ['', '', '합계', annualBalance.expectedAmount, annualBalance.paidAmount, annualBalance.remainingAmount, ''],
+                ['※ 발생금액은 조회 기준의 분기별 예상 납부세액입니다. 잔액은 귀속분기별로 계산하며, 초과 납부·환급은 「분기별 납부현황」을 확인하세요.', '', '', '', '', '', ''],
             ]) as unknown as StyledExcelWorksheet;
-            paymentSheet['!cols'] = [{ wch: 8 }, { wch: 13 }, { wch: 15 }, { wch: 18 }, { wch: 42 }];
-            mergeExcelCells(XLSX, paymentSheet, 'A1:E1');
-            mergeExcelCells(XLSX, paymentSheet, 'A2:E2');
+            paymentSheet['!cols'] = [{ wch: 8 }, { wch: 16 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 32 }];
+            mergeExcelCells(XLSX, paymentSheet, 'A1:G1');
+            mergeExcelCells(XLSX, paymentSheet, 'A2:G2');
             mergeExcelCells(XLSX, paymentSheet, 'A4:B4');
             mergeExcelCells(XLSX, paymentSheet, 'A5:B5');
-            mergeExcelCells(XLSX, paymentSheet, 'C4:D4');
-            mergeExcelCells(XLSX, paymentSheet, 'C5:D5');
-            mergeExcelCells(XLSX, paymentSheet, 'A7:E7');
-            if (paymentRows.length === 0) mergeExcelCells(XLSX, paymentSheet, 'A9:E9');
+            mergeExcelCells(XLSX, paymentSheet, 'C4:E4');
+            mergeExcelCells(XLSX, paymentSheet, 'C5:E5');
+            mergeExcelCells(XLSX, paymentSheet, 'F4:G4');
+            mergeExcelCells(XLSX, paymentSheet, 'F5:G5');
+            mergeExcelCells(XLSX, paymentSheet, 'A7:G7');
+            mergeExcelCells(XLSX, paymentSheet, `A${paymentTotalRow + 1}:G${paymentTotalRow + 1}`);
+            if (paymentRows.length === 0) mergeExcelCells(XLSX, paymentSheet, 'A9:G9');
             setExcelRowHeight(paymentSheet, 1, 30);
             setExcelRowHeight(paymentSheet, 2, 21);
             setExcelRowHeight(paymentSheet, 4, 21);
             setExcelRowHeight(paymentSheet, 5, 29);
             setExcelRowHeight(paymentSheet, 7, 22);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A1:E1', titleStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A2:E2', subtitleStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A4:E4', kpiLabelStyle);
+            setExcelRowHeight(paymentSheet, 8, 24);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A1:G1', titleStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A2:G2', subtitleStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A4:G4', kpiLabelStyle);
             applyExcelRangeStyle(XLSX, paymentSheet, 'A5:B5', kpiValueStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'C5:D5', paymentKpiStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'E5:E5', remainingKpiStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A7:E7', sectionStyle);
-            applyExcelRangeStyle(XLSX, paymentSheet, 'A8:E8', tableHeaderStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'C5:E5', paymentKpiStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'F5:G5', remainingKpiStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A7:G7', sectionStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, 'A8:G8', tableHeaderStyle);
             if (paymentRows.length === 0) {
-                applyExcelRangeStyle(XLSX, paymentSheet, 'A9:E9', { ...bodyStyle, fill: getExcelFill('F8FAFC'), alignment: { horizontal: 'center', vertical: 'center' } });
+                applyExcelRangeStyle(XLSX, paymentSheet, 'A9:G9', { ...bodyStyle, fill: getExcelFill('F8FAFC'), alignment: { horizontal: 'center', vertical: 'center' } });
             } else {
-                paymentRows.forEach((_, index) => {
+                paymentHistory.forEach((row, index) => {
                     const rowNumber = paymentDataStartRow + index;
-                    const fill = index % 2 === 0 ? 'FFFFFF' : 'F8FAFC';
-                    applyExcelRangeStyle(XLSX, paymentSheet, `A${rowNumber}:E${rowNumber}`, { ...bodyStyle, fill: getExcelFill(fill) });
+                    const fill = row.expectedAmount !== null ? 'EFF6FF' : index % 2 === 0 ? 'FFFFFF' : 'F8FAFC';
+                    applyExcelRangeStyle(XLSX, paymentSheet, `A${rowNumber}:G${rowNumber}`, { ...bodyStyle, fill: getExcelFill(fill) });
                     applyExcelRangeStyle(XLSX, paymentSheet, `A${rowNumber}:C${rowNumber}`, { ...centerBodyStyle, fill: getExcelFill(fill) });
-                    applyExcelRangeStyle(XLSX, paymentSheet, `D${rowNumber}:D${rowNumber}`, { ...amountBodyStyle, fill: getExcelFill(fill) });
-                    applyExcelRangeStyle(XLSX, paymentSheet, `E${rowNumber}:E${rowNumber}`, {
+                    applyExcelRangeStyle(XLSX, paymentSheet, `D${rowNumber}:F${rowNumber}`, { ...amountBodyStyle, fill: getExcelFill(fill) });
+                    applyExcelRangeStyle(XLSX, paymentSheet, `G${rowNumber}:G${rowNumber}`, {
                         ...bodyStyle,
                         fill: getExcelFill(fill),
                         alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
@@ -5696,9 +3393,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     setExcelRowHeight(paymentSheet, rowNumber, 28);
                 });
             }
-            applyExcelRangeStyle(XLSX, paymentSheet, `A${paymentTotalRow}:E${paymentTotalRow}`, totalStyle);
+            applyExcelRangeStyle(XLSX, paymentSheet, `A${paymentTotalRow}:G${paymentTotalRow}`, totalStyle);
             applyExcelRangeStyle(XLSX, paymentSheet, `A${paymentTotalRow}:C${paymentTotalRow}`, { ...totalStyle, alignment: { horizontal: 'center', vertical: 'center' } });
-            paymentSheet['!autofilter'] = { ref: `A8:E${paymentDataStartRow + Math.max(paymentRows.length, 1)}` };
+            setExcelRowHeight(paymentSheet, paymentTotalRow, 28);
+            applyExcelRangeStyle(XLSX, paymentSheet, `A${paymentTotalRow + 1}:G${paymentTotalRow + 1}`, {
+                ...subtitleStyle, alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
+            });
+            setExcelRowHeight(paymentSheet, paymentTotalRow + 1, 36);
+            paymentSheet['!autofilter'] = { ref: `A8:G${paymentTotalRow - 1}` };
 
             const detailRows = quarterVatReport.detailRows.map((row, index) => [
                 index + 1,
@@ -5769,6 +3471,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             });
             detailSheet['!autofilter'] = { ref: `A5:O${5 + detailRows.length}` };
 
+            const balanceSheet = XLSX.utils.aoa_to_sheet([
+                [`${companyLabel} ${quarterVatFilter.year}년 분기별 납부 현황 · 회사 전체 · ${basisLabel}`],
+                ['분기별 미납액은 다른 분기의 환급·초과납부와 상계하지 않습니다. 음수 예상세액은 환급 예상액입니다.'],
+                ['귀속분기', '예상세액', '누적 납부금액', '남은 납부금액', '초과 납부금액', '환급 예상세액', '최근 납부일', '상태'],
+                ...quarterVatBalances.map((row) => [
+                    getQuarterVatLabel(row.quarter), row.payableVat, row.paidAmount, row.remainingAmount,
+                    row.overpaidAmount, row.refundAmount, row.lastPaymentDate || '-', row.status,
+                ]),
+            ]) as unknown as StyledExcelWorksheet;
+            balanceSheet['!cols'] = Array.from({ length: 8 }, () => ({ wch: 20 }));
+            mergeExcelCells(XLSX, balanceSheet, 'A1:H1');
+            mergeExcelCells(XLSX, balanceSheet, 'A2:H2');
+            setExcelRowHeight(balanceSheet, 1, 30);
+            setExcelRowHeight(balanceSheet, 2, 25);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'A1:H1', titleStyle);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'A2:H2', subtitleStyle);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'A3:H3', tableHeaderStyle);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'A4:H7', bodyStyle);
+            applyExcelRangeStyle(XLSX, balanceSheet, 'B4:F7', amountBodyStyle);
+            XLSX.utils.book_append_sheet(workbook, balanceSheet as unknown as import('xlsx').WorkSheet, '분기별 납부현황');
             XLSX.utils.book_append_sheet(workbook, summarySheet as unknown as import('xlsx').WorkSheet, '부가세 요약');
             XLSX.utils.book_append_sheet(workbook, paymentSheet as unknown as import('xlsx').WorkSheet, '납부내역');
             XLSX.utils.book_append_sheet(workbook, detailSheet as unknown as import('xlsx').WorkSheet, '세부내역');
@@ -5789,7 +3511,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         } finally {
             setDownloadingVat(false);
         }
-    }, [companyLabel, quarterVatFilter.quarter, quarterVatFilter.year, quarterVatPaidAmount, quarterVatPayments, quarterVatReport]);
+    }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport,
+        quarterVatCompanyReport, quarterVatBalances, quarterVatBalanceTotals, quarterVatAnnualBalance, quarterVatPaymentHistory,
+        quarterVatPaymentReady, loading, savingQuarterVatPayment]);
 
     const canRegisterReceipt = summaryFilter.mode === '미수금' || summaryFilter.mode === '미지급금';
     const canOpenReceiptHistory = canRegisterReceipt;
@@ -5873,7 +3597,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     );
 
     const handlePrintQuarterVat = useCallback(() => {
-        if (quarterVatReport.detailRows.length === 0) {
+        if (loading || !quarterVatPaymentReady || savingQuarterVatPayment) return;
+        if (quarterVatReport.detailRows.length === 0 && quarterVatPayments.length === 0) {
             Swal.fire('안내', '인쇄할 분기 부가세 데이터가 없습니다.', 'info');
             return;
         }
@@ -5892,22 +3617,25 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             ? '매출·매입'
             : quarterVatFilter.detailTransactionType;
         const paidAmount = quarterVatPaidAmount;
-        const remainingPaymentAmount = Math.max(quarterVatReport.totals.payableVat - paidAmount, 0);
+        const remainingPaymentAmount = quarterVatBalanceTotals.remainingAmount;
         const metricRows = [
-            ['매출세액', quarterVatReport.totals.salesVat],
-            ['매입세액', quarterVatReport.totals.purchaseVat],
-            ['예상 납부세액', quarterVatReport.totals.payableVat],
+            ['매출세액', quarterVatCompanyReport.totals.salesVat],
+            ['매입세액', quarterVatCompanyReport.totals.purchaseVat],
+            ['예상 납부세액', quarterVatBalanceTotals.expectedAmount],
             ['누적 납부금액', paidAmount],
             ['남은 납부금액', remainingPaymentAmount],
+            ['초과 납부금액', quarterVatBalanceTotals.overpaidAmount],
+            ['환급 예상세액', quarterVatBalanceTotals.refundAmount],
         ];
-        const quarterRowsHtml = quarterVatReport.quarterRows.map((row) => `
+        const quarterRowsHtml = quarterVatBalances.map((row) => `
             <tr>
-                <td>${escapeHtml(row.label)}</td>
-                <td>${escapeHtml(row.periodLabel)}</td>
-                <td class="right">${formatNumber(row.salesVat)}</td>
-                <td class="right">${formatNumber(row.purchaseVat)}</td>
+                <td>${escapeHtml(getQuarterVatLabel(row.quarter))}</td>
                 <td class="right">${formatNumber(row.payableVat)}</td>
-                <td class="right">${formatNumber(row.entryCount)}</td>
+                <td class="right">${formatNumber(row.paidAmount)}</td>
+                <td class="right">${formatNumber(row.remainingAmount)}</td>
+                <td class="right">${formatNumber(row.overpaidAmount)}</td>
+                <td>${escapeHtml(row.lastPaymentDate || '-')}</td>
+                <td>${escapeHtml(row.status)}</td>
             </tr>
         `).join('');
         const monthlyRowsHtml = quarterVatReport.monthlyRows.map((row) => `
@@ -5934,16 +3662,18 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <td class="right">${formatNumber(row.totalAmount)}</td>
             </tr>
         `).join('');
-        const paymentRowsHtml = quarterVatPayments.length > 0
-            ? quarterVatPayments.map((payment) => `
-                <tr>
-                    <td>${escapeHtml(getQuarterVatLabel(payment.quarter))}</td>
-                    <td>${escapeHtml(payment.date)}</td>
-                    <td class="right">${formatNumber(payment.amount)}</td>
-                    <td>${escapeHtml(payment.note || '-')}</td>
+        const paymentRowsHtml = quarterVatPaymentHistory.length > 0
+            ? quarterVatPaymentHistory.map((row) => `
+                <tr${row.payment === null ? ' class="opening"' : ''}>
+                    <td>${row.year}년 ${escapeHtml(getQuarterVatLabel(row.quarter))}</td>
+                    <td>${escapeHtml(row.date || '-')}</td>
+                    <td class="right">${row.expectedAmount === null ? '-' : formatNumber(row.expectedAmount)}</td>
+                    <td class="right">${row.paymentAmount === null ? '-' : formatNumber(row.paymentAmount)}</td>
+                    <td class="right">${formatNumber(row.remainingAmount)}</td>
+                    <td>${escapeHtml(row.note || '-')}</td>
                 </tr>
             `).join('')
-            : '<tr><td colspan="4">등록된 납부 내역이 없습니다.</td></tr>';
+            : '<tr><td colspan="6">등록된 납부 내역이 없습니다.</td></tr>';
         const metricRowsHtml = metricRows.map(([label, value]) => `
             <div class="metric"><span>${escapeHtml(String(label))}</span><strong>${formatNumber(Number(value))}</strong></div>
         `).join('');
@@ -5968,21 +3698,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     th, td { border: 1px solid #cbd5e1; padding: 6px 7px; font-size: 11px; word-break: keep-all; }
                     th { background: #1e3a8a; color: white; }
                     .right { text-align: right; }
+                    .opening td { background: #eff6ff; }
+                    tfoot td { background: #e0e7ff; font-weight: 700; }
                     @media print { body { margin: 12mm; } .no-print { display: none; } }
                 </style>
             </head>
             <body>
                 <h1>${escapeHtml(companyLabel)} ${escapeHtml(selectedLabel)} 부가세</h1>
                 <div class="meta">${escapeHtml(basisLabel)} · 거래처 ${escapeHtml(quarterVatFilter.partnerName || '전체')} · 현장 ${escapeHtml(quarterVatFilter.siteName || '전체')} · 세부 ${escapeHtml(detailTransactionLabel)}</div>
+                <div class="meta">납부 현황은 회사 전체 기준입니다. 검색조건은 월별·세부 내역에 적용됩니다. 분기별 미납액은 다른 분기의 환급·초과납부와 상계하지 않습니다.</div>
                 <div class="metrics">${metricRowsHtml}</div>
-                <h2>납부 내역</h2>
+                <h2>납부 내역 · ${quarterVatFilter.year}년 귀속 전체</h2>
+                <div class="meta">귀속분기별 · 납부일 오름차순. 발생금액은 조회 기준의 분기별 예상 납부세액이며, 잔액은 귀속분기별로 계산합니다.</div>
                 <table>
-                    <thead><tr><th>분기</th><th>납부일</th><th>납부금액</th><th>메모</th></tr></thead>
+                    <thead><tr><th>귀속연도·분기</th><th>실제 납부일</th><th>발생금액</th><th>납부금액</th><th>잔액</th><th>메모</th></tr></thead>
                     <tbody>${paymentRowsHtml}</tbody>
+                    <tfoot><tr><td colspan="2">합계</td><td class="right">${formatNumber(quarterVatAnnualBalance.expectedAmount)}</td><td class="right">${formatNumber(quarterVatAnnualBalance.paidAmount)}</td><td class="right">${formatNumber(quarterVatAnnualBalance.remainingAmount)}</td><td></td></tr></tfoot>
                 </table>
-                <h2>분기 요약</h2>
+                <h2>분기별 납부 현황 · ${quarterVatFilter.year}년 회사 전체</h2>
                 <table>
-                    <thead><tr><th>분기</th><th>기간</th><th>매출세액</th><th>매입세액</th><th>예상 납부</th><th>건수</th></tr></thead>
+                    <thead><tr><th>귀속분기</th><th>예상세액</th><th>누적 납부</th><th>남은 납부</th><th>초과 납부</th><th>최근 납부일</th><th>상태</th></tr></thead>
                     <tbody>${quarterRowsHtml}</tbody>
                 </table>
                 <h2>월별 요약</h2>
@@ -6005,10 +3740,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         `);
         printWindow.document.close();
         setTimeout(() => setPrintingVat(false), 800);
-    }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport]);
+    }, [companyLabel, quarterVatFilter, quarterVatPaidAmount, quarterVatPayments, quarterVatReport,
+        quarterVatCompanyReport, quarterVatBalances, quarterVatBalanceTotals, quarterVatAnnualBalance, quarterVatPaymentHistory,
+        quarterVatPaymentReady, loading, savingQuarterVatPayment]);
 
     const handleDownloadView = useCallback(async (view: 'ledger' | 'summary') => {
-        if (downloadingView || loading || (view === 'summary' && summaryVerificationLoading)) return;
+        if (downloadingView || loading || (view === 'summary' && summaryActionsBlockedRef.current)) return;
         const isLedger = view === 'ledger';
         if ((isLedger ? ledgerRows : summaryRows).length === 0) {
             Swal.fire('안내', '다운로드할 조회 결과가 없습니다.', 'info');
@@ -6304,6 +4041,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [ledgerFilter, ledgerRows, ledgerTotals, tenantKey]);
 
     const handlePrintSummary = useCallback(() => {
+        if (summaryActionsBlockedRef.current) return;
         if (summaryRows.length === 0) {
             Swal.fire('안내', '인쇄할 조회 결과가 없습니다.', 'info');
             return;
@@ -7014,6 +4752,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [selectableSummaryRowIds]);
 
     const handleBulkPaySelectedSummaryRows = useCallback(async () => {
+        if (summaryActionsBlockedRef.current) return;
         if (summaryFilter.mode !== '미지급금') {
             Swal.fire('안내', '일괄지급은 미지급금 조회에서만 가능합니다.', 'info');
             return;
@@ -7198,6 +4937,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             ref={selectedTeamInputRef}
                             defaultValue={selectedTeam}
                             onChange={(event) => handleSelectedTeamChange(event.target.value)}
+                            disabled={saving || pendingInputCount > 0}
                             onBlur={commitSelectedTeamInput}
                             list="workbook-team-options"
                             placeholder="팀명 입력 또는 선택"
@@ -7214,6 +4954,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             pattern="[0-9]*"
                             defaultValue={baseYear}
                             onChange={(event) => handleBaseYearChange(event.target.value)}
+                            disabled={saving || pendingInputCount > 0}
                             onPaste={handleBaseYearPaste}
                             onBlur={commitBaseYearInput}
                         />
@@ -7223,7 +4964,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             type="button"
                             className="excel-button excel-button-purple"
                             onClick={handleOpenTaxInvoiceImport}
-                            disabled={saving}
+                            disabled={saving || pendingInputCount > 0}
                             data-testid="tax-invoice-ai-import-button"
                         >
                             <FontAwesomeIcon icon={faWandMagicSparkles} />
@@ -7237,7 +4978,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             disabled={saving}
                         >
                             <FontAwesomeIcon icon={saving ? faSpinner : faDatabase} spin={saving} />
-                            DB 등록
+                            {pendingInputCount > 0 ? `남은 ${pendingInputCount}건 재시도` : 'DB 등록'}
                         </button>
                         <button
                             type="button"
@@ -7283,6 +5024,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <Suspense fallback={<div className="workbook-grid-loading">Loading input grid...</div>}>
                     <WorkbookInputHotTable
                         hotRef={hotRef}
+                        readOnly={saving || pendingInputCount > 0}
                         data={inputRowsRef.current}
                         dataSchema={inputDataSchema}
                         columns={inputColumns}
@@ -7439,7 +5181,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         onClick={() => handleChangeDbPaymentMappingMode('all')}
                         disabled={dbActionLoading}
                     >
-                        전체 DB 보기
+                        미매핑 필터 해제
                     </button>
                     <button
                         type="button"
@@ -7457,6 +5199,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             </div>
 
             <div className="workbook-help-text">
+                {entryLoadScope !== 'all' && (
+                    <p role="status">
+                        현재 일부 데이터만 조회 중입니다. 필터·정렬·미매핑 건수는 불러온 항목에만 적용됩니다.
+                        <button type="button" className="workbook-toolbar-button" onClick={handleLoadAllEntries} disabled={loading}>전체 데이터에서 검색</button>
+                    </p>
+                )}
                 미수금·미지급금은 발행일 검색 기간과 별개로 오늘까지 등록된 입금·지급을 반영하며, 완납된 건은 목록에서 제외됩니다.
             </div>
 
@@ -7910,6 +5658,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const renderLedgerTab = () => (
         <section className="workbook-sheet">
             <div ref={ledgerCaptureRef}>
+                <p className="workbook-help-text">잔액은 조회 기간 내 거래와 실제 입금·지급의 차액입니다. 이전 기간 이월액은 포함하지 않으며 선수금 사용은 중복 차감하지 않습니다.</p>
                 <div className="workbook-input-panel workbook-query-panel">
                     <div className="workbook-input-panel-heading">
                         <h2>매출/매입 거래장</h2>
@@ -8005,7 +5754,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         key={transactionType}
                                         type="button"
                                         aria-pressed={ledgerDraft.transactionType === transactionType}
-                                        onClick={() => setLedgerDraft((prev) => ({ ...prev, transactionType }))}
+                                        onClick={() => {
+                                            setLedgerDraft((prev) => ({ ...prev, transactionType }));
+                                            setLedgerFilter((prev) => ({ ...prev, transactionType }));
+                                        }}
                                     >
                                         {transactionType}
                                     </button>
@@ -8013,41 +5765,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             </div>
                         </div>
 
-                        <div className="workbook-query-search">
-                            <div className="workbook-query-targets" role="group" aria-label="검색 대상">
-                                {([
-                                    { key: 'partnerName', label: '거래처' },
-                                    { key: 'siteName', label: '현장명' },
-                                    { key: 'teamName', label: '팀명' }
-                                ] as const).map((target) => (
-                                    <button
-                                        key={target.key}
-                                        type="button"
-                                        aria-pressed={ledgerSearchTarget === target.key}
-                                        onClick={() => {
-                                            ledgerSearchInputRef.current?.focus();
-                                            if (ledgerSearchTarget === target.key) return;
-                                            setLedgerSearchTarget(target.key);
-                                            setLedgerDraft((prev) => ({ ...prev, partnerName: '', siteName: '', teamName: '', [target.key]: prev[ledgerSearchTarget] }));
+                        <div className="workbook-query-search" role="group" aria-label="검색 조건">
+                            {([
+                                { key: 'partnerName', label: '거래처', placeholder: '거래처 전체' },
+                                { key: 'siteName', label: '현장명', placeholder: '현장 전체' },
+                                { key: 'teamName', label: '팀명', placeholder: '팀 전체' }
+                            ] as const).map((field) => (
+                                <label key={field.key} className="workbook-input-field">
+                                    <span>{field.label}</span>
+                                    <input
+                                        aria-label={`${field.label} 검색`}
+                                        autoComplete="off"
+                                        value={ledgerDraft[field.key]}
+                                        onChange={(event) => setLedgerDraft((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' && !event.nativeEvent.isComposing) applyLedgerFilter();
                                         }}
-                                    >
-                                        {target.label}
-                                    </button>
-                                ))}
-                            </div>
-                            <label className="workbook-input-field">
-                                <input
-                                    ref={ledgerSearchInputRef}
-                                    aria-label={ledgerSearchTarget === 'partnerName' ? '거래처 검색' : ledgerSearchTarget === 'siteName' ? '현장명 검색' : '팀명 검색'}
-                                    autoComplete="off"
-                                    value={ledgerDraft[ledgerSearchTarget]}
-                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, [ledgerSearchTarget]: event.target.value }))}
-                                    onKeyDown={(event) => {
-                                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) applyLedgerFilter();
-                                    }}
-                                    placeholder={ledgerSearchTarget === 'partnerName' ? '거래처 전체' : ledgerSearchTarget === 'siteName' ? '현장 전체' : '팀 전체'}
-                                />
-                            </label>
+                                        placeholder={field.placeholder}
+                                    />
+                                </label>
+                            ))}
                             <button type="button" className="excel-button excel-button-green workbook-query-submit" onClick={applyLedgerFilter}>
                                 <FontAwesomeIcon icon={faMagnifyingGlass} />조회</button>
                         </div>
@@ -8259,41 +5996,26 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         )}
 
 
-                        <div className="workbook-query-search">
-                            <div className="workbook-query-targets" role="group" aria-label="검색 대상">
-                                {([
-                                    { key: 'partnerName', label: '거래처' },
-                                    { key: 'siteName', label: '현장명' },
-                                    { key: 'teamName', label: '팀명' }
-                                ] as const).map((target) => (
-                                    <button
-                                        key={target.key}
-                                        type="button"
-                                        aria-pressed={summarySearchTarget === target.key}
-                                        onClick={() => {
-                                            summarySearchInputRef.current?.focus();
-                                            if (summarySearchTarget === target.key) return;
-                                            setSummarySearchTarget(target.key);
-                                            setSummaryDraft((prev) => ({ ...prev, partnerName: '', siteName: '', teamName: '', [target.key]: prev[summarySearchTarget] }));
+                        <div className="workbook-query-search" role="group" aria-label="검색 조건">
+                            {([
+                                { key: 'partnerName', label: '거래처', placeholder: '거래처 전체' },
+                                { key: 'siteName', label: '현장명', placeholder: '현장 전체' },
+                                { key: 'teamName', label: '팀명', placeholder: '팀 전체' }
+                            ] as const).map((field) => (
+                                <label key={field.key} className="workbook-input-field">
+                                    <span>{field.label}</span>
+                                    <input
+                                        aria-label={`${field.label} 검색`}
+                                        autoComplete="off"
+                                        value={summaryDraft[field.key]}
+                                        onChange={(event) => setSummaryDraft((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' && !event.nativeEvent.isComposing) applySummaryFilter();
                                         }}
-                                    >
-                                        {target.label}
-                                    </button>
-                                ))}
-                            </div>
-                            <label className="workbook-input-field">
-                                <input
-                                    ref={summarySearchInputRef}
-                                    aria-label={summarySearchTarget === 'partnerName' ? '거래처 검색' : summarySearchTarget === 'siteName' ? '현장명 검색' : '팀명 검색'}
-                                    autoComplete="off"
-                                    value={summaryDraft[summarySearchTarget]}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, [summarySearchTarget]: event.target.value }))}
-                                    onKeyDown={(event) => {
-                                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) applySummaryFilter();
-                                    }}
-                                    placeholder={summarySearchTarget === 'partnerName' ? '거래처 전체' : summarySearchTarget === 'siteName' ? '현장 전체' : '팀 전체'}
-                                />
-                            </label>
+                                        placeholder={field.placeholder}
+                                    />
+                                </label>
+                            ))}
                             <button type="button" className="excel-button excel-button-green workbook-query-submit" onClick={applySummaryFilter}>
                                 <FontAwesomeIcon icon={faMagnifyingGlass} />조회</button>
                         </div>
@@ -8303,7 +6025,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, summaryRows.length)}</div>
                     <div className="workbook-query-actions" role="group" aria-label="전체조회 작업">
 
-                        <button type="button" className="excel-button excel-button-green" onClick={() => handleDownloadView('summary')} disabled={loading || summaryVerificationLoading || downloadingView !== null || summaryRows.length === 0} title={summaryVerificationLoading ? '정산 이력 검증이 완료되면 다운로드할 수 있습니다.' : '현재 조회 조건에 해당하는 모든 페이지의 결과를 다운로드합니다.'}>
+                        <button type="button" className="excel-button excel-button-green" onClick={() => handleDownloadView('summary')} disabled={summaryActionsBlocked || downloadingView !== null || summaryRows.length === 0} title={summaryVerificationLoading ? '정산 이력 검증이 완료되면 다운로드할 수 있습니다.' : '현재 조회 조건에 해당하는 모든 페이지의 결과를 다운로드합니다.'}>
                             <FontAwesomeIcon icon={downloadingView === 'summary' ? faSpinner : faDownload} spin={downloadingView === 'summary'} />
                             엑셀 다운로드
                         </button>
@@ -8311,7 +6033,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             type="button"
                             className="excel-button excel-button-blue"
                             onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '전체 조회')}
-                            disabled={capturingView === 'summary'}
+                            disabled={summaryActionsBlocked || capturingView === 'summary'}
                         >
                             <FontAwesomeIcon icon={capturingView === 'summary' ? faSpinner : faCopy} spin={capturingView === 'summary'} />
                             화면 복사
@@ -8320,7 +6042,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             type="button"
                             className="excel-button excel-button-gray"
                             onClick={handlePrintSummary}
-                            disabled={printingSummary}
+                            disabled={summaryActionsBlocked || printingSummary}
                         >
                             <FontAwesomeIcon icon={printingSummary ? faSpinner : faPrint} spin={printingSummary} />
                             인쇄
@@ -8330,7 +6052,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             className="excel-button excel-button-green"
                             onClick={handleOpenKbPreview}
                             disabled={
-                                downloadingKb ||
+                                summaryActionsBlocked || downloadingKb ||
                                 summaryFilter.mode !== '미지급금' ||
                                 selectedSummaryRows.length === 0
                             }
@@ -8385,7 +6107,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             type="button"
                             className="excel-button excel-button-green"
                             onClick={handleBulkPaySelectedSummaryRows}
-                            disabled={saving || selectedSummaryRows.length === 0}
+                            disabled={summaryActionsBlocked || saving || selectedSummaryRows.length === 0}
                         >
                             <FontAwesomeIcon icon={saving ? faSpinner : faPenToSquare} spin={saving} />
                             선택 일괄지급
@@ -8504,7 +6226,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         type="button"
                                                         className="workbook-toolbar-button workbook-inline-button"
                                                         onClick={() => handleRegisterReceipt(row)}
-                                                        disabled={saving || row.outstandingAmount <= 0}
+                                                        disabled={summaryActionsBlocked || saving || row.outstandingAmount <= 0}
                                                     >
                                                         {summarySettlementLabels.action}
                                                     </button>
@@ -8513,7 +6235,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                             type="button"
                                                             className="workbook-toolbar-button workbook-inline-button"
                                                             onClick={() => handleApplyAdvanceToSummaryRow(row)}
-                                                            disabled={saving}
+                                                            disabled={summaryActionsBlocked || saving}
                                                             title={`사용 가능 ${summarySettlementLabels.advance} ${formatNumber(rowAvailableAdvance)}원`}
                                                         >
                                                             {summarySettlementLabels.advance}사용
@@ -8587,8 +6309,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     );
 
     const renderQuarterVatTab = () => {
-        const totals = quarterVatReport.totals;
-        const payableVat = totals.payableVat;
+        const totals = quarterVatCompanyReport.totals;
         const selectedLabel = quarterVatFilter.quarter === 'all'
             ? `${quarterVatFilter.year}년 전체`
             : `${quarterVatFilter.year}년 ${getQuarterVatLabel(quarterVatFilter.quarter)}`;
@@ -8596,16 +6317,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const detailTransactionLabel = quarterVatFilter.detailTransactionType === 'all'
             ? '매출·매입'
             : quarterVatFilter.detailTransactionType;
-        const expectedPaymentAmount = Math.max(payableVat, 0);
-        const remainingPaymentAmount = Math.max(expectedPaymentAmount - quarterVatPaidAmount, 0);
-        const overpaidAmount = Math.max(quarterVatPaidAmount - expectedPaymentAmount, 0);
+        const { expectedAmount: expectedPaymentAmount, remainingAmount: remainingPaymentAmount, overpaidAmount, refundAmount } = quarterVatBalanceTotals;
         const metricItems = [
             { label: '매출세액', value: totals.salesVat, tone: 'sales' },
             { label: '매입세액', value: totals.purchaseVat, tone: 'purchase' },
-            { label: '예상 납부세액', value: payableVat, tone: payableVat > 0 ? 'payable' : payableVat < 0 ? 'refund' : 'muted' },
-            { label: '누적 납부금액', value: quarterVatPaidAmount, tone: 'payment' },
-            { label: '남은 납부금액', value: remainingPaymentAmount, tone: remainingPaymentAmount > 0 ? 'remaining' : 'muted' },
-            ...(overpaidAmount > 0 ? [{ label: '초과 납부금액', value: overpaidAmount, tone: 'warning' }] : []),
+            { label: '예상 납부세액', value: expectedPaymentAmount, tone: expectedPaymentAmount > 0 ? 'payable' : 'muted' },
+            { label: '누적 납부금액', value: quarterVatPaidAmount, tone: 'payment', needsPayments: true },
+            { label: '남은 납부금액', value: remainingPaymentAmount, tone: remainingPaymentAmount > 0 ? 'remaining' : 'muted', needsPayments: true },
+            ...(refundAmount > 0 ? [{ label: '환급 예상세액', value: refundAmount, tone: 'refund' }] : []),
+            ...(overpaidAmount > 0 ? [{ label: '초과 납부금액', value: overpaidAmount, tone: 'warning', needsPayments: true }] : []),
         ];
 
         return (
@@ -8621,6 +6341,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <td className="sheet-value-light" colSpan={2}>
                                     <input
                                         type="number"
+                                        aria-label="부가세 조회연도"
                                         className="sheet-filter-input"
                                         value={quarterVatDraft.year}
                                         onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, year: Number(event.target.value) }))}
@@ -8629,6 +6350,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <th className="sheet-label-blue">분기</th>
                                 <td className="sheet-value-light" colSpan={2}>
                                     <select
+                                        aria-label="부가세 조회분기"
                                         className="sheet-filter-input"
                                         value={quarterVatDraft.quarter}
                                         onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, quarter: event.target.value as QuarterVatOption }))}
@@ -8642,6 +6364,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <th className="sheet-label-blue">기준</th>
                                 <td className="sheet-value-light" colSpan={2}>
                                     <select
+                                        aria-label="부가세 집계기준"
                                         className="sheet-filter-input"
                                         value={quarterVatDraft.basis}
                                         onChange={(event) => setQuarterVatDraft((prev) => ({ ...prev, basis: event.target.value as QuarterVatBasis }))}
@@ -8666,7 +6389,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         type="button"
                                         className="excel-button excel-button-gray"
                                         onClick={handlePrintQuarterVat}
-                                        disabled={printingVat}
+                                        disabled={printingVat || loading || !quarterVatPaymentReady || savingQuarterVatPayment}
                                     >
                                         <FontAwesomeIcon icon={printingVat ? faSpinner : faPrint} spin={printingVat} />
                                         인쇄
@@ -8677,7 +6400,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         type="button"
                                         className="excel-button excel-button-green"
                                         onClick={handleDownloadQuarterVat}
-                                        disabled={downloadingVat}
+                                        disabled={downloadingVat || loading || !quarterVatPaymentReady || savingQuarterVatPayment}
                                     >
                                         <FontAwesomeIcon icon={downloadingVat ? faSpinner : faDownload} spin={downloadingVat} />
                                         엑셀
@@ -8741,30 +6464,95 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         </div>
                     )}
 
-                    <div className="workbook-vat-metric-grid">
+                    <div className="workbook-vat-notice">
+                        납부 현황은 {companyLabel} 회사 전체 · {basisLabel}입니다. 거래처·현장·세부 구분 검색은 월별·세부 내역에 적용됩니다.
+                        전체 잔액은 분기별 미납액의 합계이며 다른 분기의 환급·초과납부와 상계하지 않습니다.
+                    </div>
+                    <div className="workbook-vat-metric-grid" aria-label="선택 분기 납부 현황">
                         {metricItems.map((item) => (
-                            <div key={item.label} className={`workbook-vat-metric-card workbook-vat-metric-${item.tone}`}>
+                            <div key={item.label} role="group" aria-label={item.label} className={`workbook-vat-metric-card workbook-vat-metric-${item.tone}`}>
                                 <div>{item.label}</div>
-                                <strong>{formatNumber(item.value)}</strong>
+                                <strong>{loading ? '집계 중' : item.needsPayments && !quarterVatPaymentReady ? (quarterVatPaymentError ? '확인 필요' : '조회 중') : formatNumber(item.value)}</strong>
                             </div>
                         ))}
                     </div>
 
+                    <div className="workbook-vat-panel">
+                        <div className="workbook-vat-panel-title">분기별 납부 현황 · {quarterVatFilter.year}년 회사 전체</div>
+                        <div className="sheet-table-wrapper">
+                            <table aria-label="분기별 납부 현황" className="sheet-table workbook-vat-table workbook-vat-balance-table">
+                                <thead>
+                                    <tr>
+                                        <th>분기</th>
+                                        <th>기간</th>
+                                        <th>매출세액</th>
+                                        <th>매입세액</th>
+                                        <th>예상 납부</th>
+                                        <th>누적 납부금액</th>
+                                        <th>남은 납부금액</th>
+                                        <th>초과 납부금액</th>
+                                        <th>최근 납부일</th>
+                                        <th>상태</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {quarterVatCompanyReport.quarterRows.map((row, index) => (
+                                        <tr key={row.quarter} className={quarterVatFilter.quarter === row.quarter ? 'workbook-vat-selected-row' : ''}>
+                                            <td>{row.label}</td>
+                                            <td>{row.periodLabel}</td>
+                                            <td className="align-right">{formatNumber(row.salesVat)}</td>
+                                            <td className="align-right">{formatNumber(row.purchaseVat)}</td>
+                                            <td className="align-right">{formatNumber(row.payableVat)}</td>
+                                            <td className="align-right">{quarterVatPaymentReady && !loading ? formatNumber(quarterVatBalances[index].paidAmount) : '—'}</td>
+                                            <td className="align-right">{quarterVatPaymentReady && !loading ? formatNumber(quarterVatBalances[index].remainingAmount) : '—'}</td>
+                                            <td className="align-right">{quarterVatPaymentReady && !loading ? formatNumber(quarterVatBalances[index].overpaidAmount) : '—'}</td>
+                                            <td>{quarterVatPaymentReady ? quarterVatBalances[index].lastPaymentDate || '-' : '—'}</td>
+                                            <td>{quarterVatPaymentReady && !loading ? quarterVatBalances[index].status : quarterVatPaymentError ? '확인 필요' : '조회 중'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                     <div className="workbook-vat-panel workbook-vat-payment-panel">
-                        <div className="workbook-vat-panel-title">부가세 납부 내역 · {selectedLabel}</div>
-                        {quarterVatFilter.quarter === 'all' && (
-                            <div className="workbook-vat-notice workbook-vat-notice-warning">
-                                전체 조회에서는 납부 내역과 잔액을 합산해 확인할 수 있습니다. 새 납부 내역은 분기를 선택한 뒤 등록해주세요.
+                        <div className="workbook-vat-panel-title">부가세 납부 내역 · {quarterVatFilter.year}년 귀속 전체</div>
+                        <div className="workbook-vat-notice">
+                            귀속분기는 세금이 발생한 분기, 실제 납부일은 돈을 낸 날짜입니다. 예: 1분기 세금을 8월에 납부하면 귀속분기는 1분기입니다.
+                            여러 번 나누어 납부한 금액도 합산됩니다. 부가세 납부는 매입금액에 포함되지 않습니다.
+                        </div>
+                        <div className="workbook-vat-notice">
+                            귀속분기별로 발생금액과 납부일순 잔액을 표시합니다. 발생금액은 조회 기준의 분기별 예상 납부세액입니다.
+                            초과 납부 시 잔액은 0원으로 표시하며, 초과 납부·환급액은 분기별 납부 현황에서 확인할 수 있습니다.
+                        </div>
+                        {quarterVatPaymentError && (
+                            <div className="workbook-vat-notice workbook-vat-notice-warning" role="alert">
+                                {quarterVatPaymentError}
+                                <button type="button" className="workbook-toolbar-button" onClick={() => setQuarterVatPaymentReload((value) => value + 1)}>납부 내역 다시 조회</button>
                             </div>
                         )}
                         <div className="workbook-vat-payment-form">
                             <label>
-                                <span>납부일</span>
+                                <span>귀속연도</span>
+                                <input type="number" min={2000} max={2100} value={quarterVatPaymentYearDraft}
+                                    onChange={(event) => setQuarterVatPaymentYearDraft(event.target.value)}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment} />
+                            </label>
+                            <label>
+                                <span>귀속분기</span>
+                                <select value={quarterVatPaymentQuarterDraft}
+                                    onChange={(event) => setQuarterVatPaymentQuarterDraft(event.target.value as VatQuarter)}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment}>
+                                    {QUARTER_VAT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                            </label>
+                            <label>
+                                <span>실제 납부일</span>
                                 <input
                                     type="date"
                                     value={quarterVatPaymentDateDraft}
                                     onChange={(event) => setQuarterVatPaymentDateDraft(event.target.value)}
-                                    disabled={loadingQuarterVatPayment || savingQuarterVatPayment || quarterVatFilter.quarter === 'all'}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment}
                                 />
                             </label>
                             <label>
@@ -8781,7 +6569,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         }
                                     }}
                                     placeholder="예: 10,000,000"
-                                    disabled={loadingQuarterVatPayment || savingQuarterVatPayment || quarterVatFilter.quarter === 'all'}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment}
                                 />
                             </label>
                             <label className="workbook-vat-payment-note-field">
@@ -8790,98 +6578,82 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     value={quarterVatPaymentNoteDraft}
                                     onChange={(event) => setQuarterVatPaymentNoteDraft(event.target.value)}
                                     placeholder="선택 입력"
-                                    disabled={loadingQuarterVatPayment || savingQuarterVatPayment || quarterVatFilter.quarter === 'all'}
+                                    disabled={!quarterVatPaymentReady || savingQuarterVatPayment}
                                 />
                             </label>
                             <button
                                 type="button"
                                 className="excel-button excel-button-green"
                                 onClick={handleSaveQuarterVatPayment}
-                                disabled={loadingQuarterVatPayment || savingQuarterVatPayment || quarterVatFilter.quarter === 'all'}
+                                disabled={!quarterVatPaymentReady || savingQuarterVatPayment}
                             >
                                 {savingQuarterVatPayment ? '등록 중' : '납부 내역 등록'}
                             </button>
                         </div>
                         <div className="sheet-table-wrapper workbook-vat-payment-history-wrapper">
-                            <table className="sheet-table workbook-vat-table workbook-vat-payment-history-table">
+                            <table aria-label="부가세 납부 내역" className="sheet-table workbook-vat-table workbook-vat-payment-history-table">
                                 <thead>
                                     <tr>
                                         <th>No</th>
-                                        {quarterVatFilter.quarter === 'all' && <th>분기</th>}
-                                        <th>납부일</th>
+                                        <th>귀속연도·분기</th>
+                                        <th>실제 납부일</th>
+                                        <th>발생금액</th>
                                         <th>납부금액</th>
+                                        <th>잔액</th>
                                         <th>메모</th>
                                         <th>관리</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {loadingQuarterVatPayment && (
+                                    {(loadingQuarterVatPayment || loading) && (
                                         <tr>
-                                            <td colSpan={quarterVatFilter.quarter === 'all' ? 6 : 5} className="sheet-empty-state">납부 내역을 불러오는 중입니다.</td>
+                                            <td colSpan={8} className="sheet-empty-state">납부 내역을 불러오는 중입니다.</td>
                                         </tr>
                                     )}
-                                    {!loadingQuarterVatPayment && quarterVatPayments.length === 0 && (
+                                    {quarterVatPaymentReady && !loading && quarterVatPaymentHistory.length === 0 && (
                                         <tr>
-                                            <td colSpan={quarterVatFilter.quarter === 'all' ? 6 : 5} className="sheet-empty-state">등록된 납부 내역이 없습니다.</td>
+                                            <td colSpan={8} className="sheet-empty-state">등록된 납부 내역이 없습니다.</td>
                                         </tr>
                                     )}
-                                    {!loadingQuarterVatPayment && quarterVatPayments.map((payment, index) => (
-                                        <tr key={payment.id}>
+                                    {quarterVatPaymentReady && !loading && quarterVatPaymentHistory.map((row, index) => (
+                                        <tr key={`${row.year}:${row.quarter}:${row.payment ? `payment:${row.payment.id}` : 'opening'}`}
+                                            className={row.payment === null ? 'workbook-vat-opening-row' : undefined}>
                                             <td className="align-right">{index + 1}</td>
-                                            {quarterVatFilter.quarter === 'all' && <td>{getQuarterVatLabel(payment.quarter)}</td>}
-                                            <td>{payment.date}</td>
-                                            <td className="align-right">{formatNumber(payment.amount)}</td>
-                                            <td>{payment.note || '-'}</td>
+                                            <td>{row.year}년 {getQuarterVatLabel(row.quarter)}</td>
+                                            <td>{row.date || '-'}</td>
+                                            <td className="align-right">{row.expectedAmount === null ? '-' : formatNumber(row.expectedAmount)}</td>
+                                            <td className="align-right">{row.paymentAmount === null ? '-' : formatNumber(row.paymentAmount)}</td>
+                                            <td className="align-right">{formatNumber(row.remainingAmount)}</td>
+                                            <td>{row.note || '-'}</td>
                                             <td>
-                                                <button
+                                                {row.payment && <button
                                                     type="button"
                                                     className="workbook-toolbar-button workbook-inline-button"
-                                                    onClick={() => handleDeleteQuarterVatPayment(payment)}
+                                                    onClick={() => row.payment && handleDeleteQuarterVatPayment(row.payment)}
                                                     disabled={savingQuarterVatPayment}
                                                 >
                                                     삭제
-                                                </button>
+                                                </button>}
                                             </td>
                                         </tr>
                                     ))}
                                 </tbody>
+                                {quarterVatPaymentReady && !loading && (
+                                    <tfoot>
+                                        <tr>
+                                            <td colSpan={3}>합계</td>
+                                            <td className="align-right">{formatNumber(quarterVatAnnualBalance.expectedAmount)}</td>
+                                            <td className="align-right">{formatNumber(quarterVatAnnualBalance.paidAmount)}</td>
+                                            <td className="align-right">{formatNumber(quarterVatAnnualBalance.remainingAmount)}</td>
+                                            <td colSpan={2}></td>
+                                        </tr>
+                                    </tfoot>
+                                )}
                             </table>
                         </div>
                     </div>
 
                     <div className="workbook-vat-grid">
-                        <div className="workbook-vat-panel">
-                            <div className="workbook-vat-panel-title">분기 요약</div>
-                            <div className="sheet-table-wrapper">
-                                <table className="sheet-table workbook-vat-table">
-                                    <thead>
-                                        <tr>
-                                            <th>분기</th>
-                                            <th>기간</th>
-                                            <th>매출 공급가액</th>
-                                            <th>매출세액</th>
-                                            <th>매입 공급가액</th>
-                                            <th>매입세액</th>
-                                            <th>예상 납부</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {quarterVatReport.quarterRows.map((row) => (
-                                            <tr key={row.quarter} className={quarterVatFilter.quarter === row.quarter ? 'workbook-vat-selected-row' : ''}>
-                                                <td>{row.label}</td>
-                                                <td>{row.periodLabel}</td>
-                                                <td className="align-right">{formatNumber(row.salesSupply)}</td>
-                                                <td className="align-right">{formatNumber(row.salesVat)}</td>
-                                                <td className="align-right">{formatNumber(row.purchaseSupply)}</td>
-                                                <td className="align-right">{formatNumber(row.purchaseVat)}</td>
-                                                <td className="align-right">{formatNumber(row.payableVat)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
                         <div className="workbook-vat-panel">
                             <div className="workbook-vat-panel-title">월별 요약</div>
                             <div className="sheet-table-wrapper">
@@ -8988,6 +6760,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <AppIntroScreen message={loadingMessage} />
             )}
             <div className="workbook-shell">
+                {entryLoadError && (
+                    <div className="workbook-settlement-current-notice" role="alert">
+                        <strong>조회 결과를 사용할 수 없습니다</strong>
+                        <span>{entryLoadError}</span>
+                        <button type="button" className="workbook-toolbar-button" disabled={loading}
+                            onClick={() => { void refreshPageData({ forceEntries: true, loadEntries: true, entryQuery: getEntryLoadQueryForTab(activeTab) }); }}>
+                            다시 불러오기
+                        </button>
+                    </div>
+                )}
                 <div className="workbook-titlebar">
                     <div>
                         <h1>{`${companyLabel} 매입매출`}</h1>
@@ -9013,7 +6795,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <button
                             type="button"
                             className="workbook-toolbar-button"
-                            onClick={() => refreshPageData({ forceEntries: true, forceCatalogs: true })}
+                            onClick={() => refreshPageData({ forceEntries: true, forceCatalogs: true, loadEntries: activeTab !== 'input', entryQuery: getEntryLoadQueryForTab(activeTab) })}
                             disabled={loading}
                         >
                             <FontAwesomeIcon icon={loading ? faSpinner : faRotateRight} spin={loading} />
@@ -9251,7 +7033,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="button"
                                     className="excel-button excel-button-green"
                                     onClick={handleDownloadSummaryKb}
-                                    disabled={downloadingKb}
+                                    disabled={summaryActionsBlocked || downloadingKb}
                                     style={{ minHeight: 42, padding: '0 16px', borderRadius: 14, border: '1px solid rgba(202, 138, 4, 0.7)', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#111827', fontWeight: 800 }}
                                 >
                                     <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />

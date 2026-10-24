@@ -1,0 +1,278 @@
+.monthly-payroll-scroll-hint {
+    display: none;
+}
+
+.monthly-wage-page :is(button, a, summary, [tabindex="0"]):focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+}
+
+.monthly-payroll-standard-heading,
+.monthly-payroll-standard-heading > div,
+.monthly-payroll-standard-heading > div > .flex {
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+@media screen and (max-width: 767px) {
+    .monthly-wage-page {
+        height: auto;
+        min-height: 100%;
+        overflow: visible;
+        padding: 8px 8px calc(24px + env(safe-area-inset-bottom));
+        gap: 8px;
+    }
+
+    .monthly-payroll-toolbar {
+        min-width: 0;
+        margin-bottom: 0;
+    }
+
+    .monthly-payroll-toolbar-heading {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px 10px;
+    }
+
+    .monthly-payroll-title {
+        min-width: 0;
+        grid-column: 1;
+        grid-row: 1;
+    }
+
+    .monthly-payroll-actions {
+        display: contents;
+    }
+
+    .monthly-payroll-range {
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        max-width: 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .monthly-payroll-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+
+    .monthly-payroll-actions > button {
+        justify-content: center;
+        grid-row: 3;
+    }
+
+    .monthly-payroll-feedback {
+        grid-column: 1 / -1;
+        grid-row: 4;
+        max-width: none;
+        white-space: normal;
+    }
+
+    .monthly-payroll-toolbar button,
+    .monthly-payroll-closing button,
+    .monthly-advance-ledger-font > div:first-child button {
+        min-height: 44px;
+    }
+
+    .monthly-payroll-toolbar button:not(.touch-none) {
+        touch-action: manipulation;
+    }
+
+    .monthly-payroll-period,
+    .monthly-payroll-search {
+        width: 100%;
+        min-width: 0;
+        flex-basis: 100%;
+    }
+
+    .monthly-payroll-period > div {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .monthly-payroll-period > div > button {
+        min-width: 44px;
+    }
+
+    .monthly-payroll-months {
+        flex-basis: 100%;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    .monthly-payroll-months > div:first-child > div {
+        flex-direction: column;
+    }
+
+    .monthly-payroll-months > div:first-child button {
+        min-width: 38px;
+    }
+
+    .monthly-payroll-month-grid {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 4px;
+    }
+
+    .monthly-payroll-search input {
+        height: 44px;
+        font-size: 16px;
+        padding-right: 44px;
+    }
+
+    .monthly-payroll-search button[aria-label="개인 검색 지우기"] {
+        right: 0;
+        width: 44px;
+    }
+
+    .monthly-payroll-teams section > div:first-child {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .monthly-payroll-teams section > div:first-child > div:first-child > div:last-child {
+        margin-left: auto;
+        order: 0;
+    }
+
+    .monthly-payroll-teams [role="group"] {
+        flex-basis: 100%;
+        order: 3;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+    }
+
+    /* Let the page scroll even when the settings or calculation guide expands. */
+    .monthly-payroll-ledger-panel,
+    .monthly-payroll-ledger-panel > fieldset,
+    .monthly-advance-ledger-font,
+    .monthly-payroll-standard,
+    .monthly-payroll-closing {
+        flex: none;
+        min-width: 0;
+    }
+
+    .monthly-payroll-table-scroll {
+        flex: none;
+        min-height: 260px;
+        max-height: 70vh;
+        max-height: 70dvh;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+    }
+
+    .monthly-payroll-scroll-hint {
+        display: block;
+        flex-shrink: 0;
+        padding: 8px 12px;
+        border-bottom: 1px solid #e2e8f0;
+        color: #64748b;
+        font-size: 12px;
+        line-height: 1.5;
+        background: #f8fafc;
+    }
+
+    /* Only the number and name remain pinned on narrow screens. */
+    .monthly-advance-ledger-font :is(th, td)[class*="left-["]:not([class~="left-[40px]"]) {
+        left: auto;
+    }
+
+    .monthly-advance-ledger-font thead th[class*="left-["]:not([class~="left-[40px]"]) {
+        z-index: 20;
+    }
+
+    .monthly-advance-ledger-font tbody td[class*="left-["]:not([class~="left-[40px]"]) {
+        z-index: auto;
+    }
+
+    .monthly-advance-ledger-font tfoot :is(th, td) {
+        left: auto;
+    }
+
+    .monthly-advance-ledger-font input {
+        min-height: 44px;
+        font-size: 16px;
+    }
+
+    .monthly-payroll-standard-heading {
+        align-items: stretch;
+    }
+
+    .monthly-payroll-standard-heading > div {
+        width: 100%;
+    }
+
+    .monthly-payroll-standard-heading > div:last-child {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        font-size: 13px;
+    }
+
+    .monthly-payroll-standard-heading > div:last-child > div {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .monthly-payroll-closing header > div:last-child {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+    }
+
+    .monthly-payroll-closing header > div:last-child > * {
+        justify-content: center;
+    }
+
+    .monthly-payroll-standard > .monthly-payroll-table-scroll > table {
+        min-width: 1800px;
+    }
+
+    .monthly-wage-page .monthly-payroll-table-scroll > .monthly-payroll-empty-table {
+        min-width: 0;
+    }
+
+    .monthly-payroll-empty-table thead {
+        display: none;
+    }
+
+    .monthly-payroll-standard :is(th, td)[class~="left-[40px]"] {
+        left: auto;
+        z-index: auto;
+    }
+
+    .monthly-payroll-standard :is(th, td)[class~="left-[104px]"] {
+        left: 40px;
+    }
+
+    :is(.monthly-wage-page, .monthly-payroll-workspace) > details {
+        flex-shrink: 0;
+    }
+
+    :is(.monthly-wage-page, .monthly-payroll-workspace) > details .flex {
+        flex-wrap: wrap;
+    }
+
+    :is(.monthly-wage-page, .monthly-payroll-workspace) > details input {
+        width: 100%;
+        margin: 8px 0 0;
+        min-height: 44px;
+        font-size: 16px;
+    }
+
+    .monthly-payroll-insurance-overlay {
+        padding: 12px;
+    }
+
+    .monthly-payroll-insurance-overlay [role="dialog"] {
+        max-height: calc(100dvh - 24px);
+    }
+
+    .monthly-payroll-insurance-overlay :is(input[type="number"], button) {
+        min-height: 44px;
+        font-size: 16px;
+    }
+}

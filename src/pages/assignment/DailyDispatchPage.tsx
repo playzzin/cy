@@ -26,6 +26,7 @@ import { siteService, Site } from '../../services/siteService';
 import { dispatchService, DispatchAssignment } from '../../services/dispatchService';
 import { vehicleService } from '../../services/vehicleService'; // Static import
 import { Vehicle } from '../../types/vehicle';
+import { getKoreanDateKey, shiftDateKey } from '../../utils/koreanBusinessDate';
 
 // --- Types ---
 type DraggableType = 'worker' | 'vehicle';
@@ -207,7 +208,7 @@ const SiteRow = ({ site, workers, vehicles, onRemoveWorker }: { site: Site, work
 
 // --- Main Page ---
 const DailyDispatchPage: React.FC = () => {
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [date, setDate] = useState(() => getKoreanDateKey());
     const [sites, setSites] = useState<Site[]>([]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
     const [assignments, setAssignments] = useState<Record<string, { workers: Worker[], vehicles: Vehicle[] }>>({});
@@ -291,9 +292,7 @@ const DailyDispatchPage: React.FC = () => {
     const handleCopyPreviousDay = async () => {
         if (!window.confirm('전일(어제) 배정 내역을 불러오시겠습니까? 현재 작성 중인 내용은 덮어씌워집니다.')) return;
 
-        const yesterday = new Date(date);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        const yesterdayStr = shiftDateKey(date, -1);
 
         const prevData = await dispatchService.getDispatchByDate(yesterdayStr);
         if (!prevData) {

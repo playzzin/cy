@@ -1,5 +1,6 @@
 import type { DashboardExecutiveStats } from '../../services/dashboardExecutiveService';
 import { buildTaskSlaBoard } from '../task-sla/taskSla';
+import { getReportCoverageLabel, isReportCoverageFinal } from '../daily-report-coverage/dailyReportCoverage';
 
 export type DashboardStatisticTone = 'blue' | 'teal' | 'amber' | 'red' | 'slate';
 
@@ -7,7 +8,7 @@ export interface DashboardStatisticItem {
   id: string;
   label: string;
   value: string;
-  numericValue: number;
+  numericValue: number | null;
   unit: string;
   precision: number;
   detail: string;
@@ -59,7 +60,7 @@ export const createDashboardStatistics = (
   const dayOfMonth = baseDate.getDate();
   const daysInMonth = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0).getDate();
   const monthProgressRate = clampPercent((dayOfMonth / daysInMonth) * 100);
-  const coverageRate = stats.dailyReportCoverage.coverageRate ?? stats.operations.reportCoverageRate ?? 0;
+  const coverageRate = stats.dailyReportCoverage.coverageRate;
   const taskBoard = buildTaskSlaBoard(stats.recentTasks || [], baseDate);
   const taskRiskCount = taskBoard.counts.overdue
     + taskBoard.counts.dueToday
@@ -97,13 +98,13 @@ export const createDashboardStatistics = (
     {
       id: 'report-coverage',
       label: '일보 커버리지',
-      value: `${coverageRate}%`,
-      numericValue: clampPercent(coverageRate),
+      value: coverageRate === null ? getReportCoverageLabel(stats.dailyReportCoverage) : `${coverageRate}%`,
+      numericValue: coverageRate === null ? null : clampPercent(coverageRate),
       unit: '%',
       precision: 0,
-      detail: `작성 ${stats.dailyReportCoverage.reportedSiteCount}개 / 누락 ${stats.dailyReportCoverage.missingSiteCount}개`,
-      progress: clampPercent(coverageRate),
-      tone: getCoverageTone(coverageRate),
+      detail: coverageRate === null ? stats.dailyReportCoverage.detail || '작업 일정과 제출 대상을 확인해 주세요.' : `작성 ${stats.dailyReportCoverage.reportedSiteCount}개 / ${isReportCoverageFinal(stats.dailyReportCoverage) ? '미작성' : '작성 대기'} ${stats.dailyReportCoverage.missingSiteCount}개`,
+      progress: clampPercent(coverageRate ?? 0),
+      tone: coverageRate === null || !isReportCoverageFinal(stats.dailyReportCoverage) ? 'slate' : getCoverageTone(coverageRate),
     },
     {
       id: 'task-stability',

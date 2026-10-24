@@ -1,9 +1,34 @@
 import type { AccommodationAssignment } from '../types/accommodationAssignment';
 import type { AccommodationBillingTarget } from '../types/accommodationBillingTarget';
+import { overlapsAccommodationMonth } from './accommodationMonthSummary';
 
 type DateRange = {
   startDate?: string | null;
   endDate?: string | null;
+};
+
+export const isAccommodationAssignmentInMonth = (
+  assignment: Pick<AccommodationAssignment, 'status' | 'startDate' | 'endDate'>,
+  yearMonth: string
+): boolean => (
+  // An ended assignment without its end date cannot establish historical use.
+  !(assignment.status === 'ended' && !assignment.endDate)
+  && overlapsAccommodationMonth(assignment, yearMonth)
+);
+
+export const matchesAccommodationTeamScopeForMonth = <
+  Assignment extends Pick<AccommodationAssignment, 'status' | 'startDate' | 'endDate'>,
+  BillingTarget extends Pick<AccommodationBillingTarget, 'startDate' | 'endDate'>
+>(
+  assignments: readonly Assignment[],
+  billingTargets: readonly BillingTarget[],
+  assignmentMatches: (assignment: Assignment) => boolean,
+  billingTargetMatches: (target: BillingTarget) => boolean,
+  yearMonth: string
+): boolean => {
+  const monthAssignments = assignments.filter(assignment => isAccommodationAssignmentInMonth(assignment, yearMonth));
+  if (monthAssignments.length) return monthAssignments.some(assignmentMatches);
+  return billingTargets.filter(target => overlapsAccommodationMonth(target, yearMonth)).some(billingTargetMatches);
 };
 
 const toLocalDay = (value: string): Date | null => {

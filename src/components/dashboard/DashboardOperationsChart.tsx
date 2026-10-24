@@ -51,7 +51,7 @@ export const DashboardOperationsChart: React.FC<DashboardOperationsChartProps> =
             unit: '공',
             fill: stats.operations.supportBalance >= 0 ? '#0d9488' : '#ea580c',
         },
-    ]), [stats.operations]);
+    ]).filter((item) => item.value !== null), [stats.operations]);
     const trendPoints = useMemo(() => stats.dailyTrend.slice(-dayRange), [dayRange, stats.dailyTrend]);
     const chartInsights = useMemo(() => createDashboardChartInsights(trendPoints), [trendPoints]);
     const trendData = useMemo(() => trendPoints.map((point) => ({
@@ -117,6 +117,9 @@ export const DashboardOperationsChart: React.FC<DashboardOperationsChartProps> =
                 </div>
             </div>
 
+            {stats.operations.reportCoverageRate === null && (
+                <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">일보 작성률: {stats.dailyReportCoverage.detail || '제출 대상 확인 후 표시합니다.'}</p>
+            )}
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                 <div className="h-64 w-full sm:h-72">
                     <ResponsiveContainer width="100%" height="100%">

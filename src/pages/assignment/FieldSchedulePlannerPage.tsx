@@ -63,6 +63,8 @@ import {
     DailyReportSiteSnapshot,
 } from '../../utils/dailyReportSiteSnapshot';
 import { getOpenSites } from '../../utils/siteStatus';
+import { isActiveWorker } from '../../utils/workerStatus';
+import { subscribeResourceStatusChange } from '../../utils/resourceStatusChange';
 
 type ScheduleStatus = 'draft' | 'confirmed' | 'working' | 'done';
 type DragKind = 'team' | 'worker' | 'vehicle' | 'site' | 'schedule';
@@ -521,7 +523,7 @@ const getSolidTeamColorStyle = (color?: string, fallbackColor = DEFAULT_RESOURCE
 
 const isInactiveWorker = (worker?: Worker) => {
     const status = String(worker?.status ?? '');
-    return status.includes('퇴사') || status.includes('휴무') || worker?.isActive === false;
+    return !isActiveWorker(worker) || status.includes('휴무');
 };
 
 const isUnavailableVehicle = (vehicle?: Vehicle) =>
@@ -723,7 +725,7 @@ const mapDailyReportsToSchedules = (
             const unitPrice = toFiniteNumber(reportWorker.unitPrice, worker?.unitPrice || 0);
             const workContent = toTrimmedText(reportWorker.workContent) || toTrimmedText(report.workContent);
 
-            if (worker?.id && !isInactiveWorker(worker)) {
+            if (worker?.id) {
                 const resolvedWorkerId = toTrimmedText(worker.id) || workerId;
                 workerIds.push(resolvedWorkerId);
                 workerManDays[resolvedWorkerId] = manDay;
@@ -2393,6 +2395,16 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
+    useEffect(() => subscribeResourceStatusChange(change => {
+        // 편집 중인 배정·공수는 유지하고 신규 선택 목록의 상태만 갱신합니다.
+        if (change.kind === 'site') {
+            setSites(previous => previous.map(site => site.id === change.id ? { ...site, status: change.status } : site));
+        } else {
+            setWorkers(previous => previous.map(worker => worker.id === change.id
+                ? { ...worker, status: change.status, isActive: change.isActive ?? change.status === '재직' }
+                : worker));
+        }
+    }), []);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
@@ -2528,6 +2540,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const workersById = useMemo(() => new Map(workers.map((worker) => [worker.id || '', worker])), [workers]);
     const vehiclesById = useMemo(() => new Map(vehicles.map((vehicle) => [vehicle.id, vehicle])), [vehicles]);
     const sitesById = useMemo(() => new Map(sites.map((site) => [site.id || '', site])), [sites]);
+    const inputSites = useMemo(() => getOpenSites(sites), [sites]);
     const teamsById = useMemo(() => new Map(teams.map((team) => [team.id || '', team])), [teams]);
 
     const getSiteColor = useCallback(
@@ -2548,7 +2561,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
     const buildKakaoAnalyzeContext = useCallback((): KakaoAnalyzeContext => ({
         today: date,
-        sites: sites
+        sites: inputSites
             .filter((site) => !workerAccessScope.loading && workerAccessMatchesSite(workerAccessScope, site))
             .map((site) => site.name)
             .filter(Boolean),
@@ -2557,16 +2570,18 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             .map((team) => team.name)
             .filter(Boolean),
         workers: workers
+            .filter((worker) => !isInactiveWorker(worker))
             .filter((worker) => !workerAccessScope.loading && workerAccessMatchesWorker(workerAccessScope, worker))
             .map((worker) => worker.name)
             .filter(Boolean),
-    }), [date, sites, teams, workerAccessScope, workers]);
+    }), [date, inputSites, teams, workerAccessScope, workers]);
 
     const findWorkerByAnalyzedName = useCallback((workerName?: string | null) => {
         const normalized = normalizeComparableText(workerName);
         if (!normalized) return undefined;
-        const matched = workers.find((worker) => normalizeComparableText(worker.name) === normalized) ||
-            workers.find((worker) => {
+        const candidates = workers.filter((worker) => !isInactiveWorker(worker));
+        const matched = candidates.find((worker) => normalizeComparableText(worker.name) === normalized) ||
+            candidates.find((worker) => {
                 const candidate = normalizeComparableText(worker.name);
                 return Boolean(candidate) && (candidate.includes(normalized) || normalized.includes(candidate));
             });
@@ -2582,7 +2597,11 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         let totalWorkerCount = 0;
 
         reports.forEach((report, reportIndex) => {
-            const site = findSiteInRows(sites, undefined, report.siteName);
+            const site = findSiteInRows(inputSites, undefined, report.siteName);
+            if (!site && findSiteInRows(sites, undefined, report.siteName)) {
+                skippedReportCount += 1;
+                return;
+            }
             const siteId = toTrimmedText(site?.id);
             const siteName = toTrimmedText(site?.name) || toTrimmedText(report.siteName);
             const siteSnapshot = buildDailyReportSiteSnapshot({
@@ -2700,7 +2719,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             unknownWorkerCount,
             skippedReportCount,
         };
-    }, [companies, date, findWorkerByAnalyzedName, getSiteColor, sites, teams, teamsById, workersById]);
+    }, [companies, date, findWorkerByAnalyzedName, getSiteColor, inputSites, sites, teams, teamsById, workersById]);
 
     const rosters = useMemo<TeamRoster[]>(() => {
         const activeTeams = teams
@@ -2941,7 +2960,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
     const filteredSites = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
-        return sites
+        return inputSites
             .filter((site) => {
                 if (registeredSiteKeySet.has(makeSiteSelectionKey(site))) return false;
                 if (!siteMatchesViewerScope(site)) return false;
@@ -2965,7 +2984,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         searchTerm,
         shouldApplyScheduleConfirmationScope,
         siteMatchesViewerScope,
-        sites,
+        inputSites,
         teams,
         teamsById,
         viewerTeamScope,
@@ -3266,7 +3285,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
             cleanIds(schedule.workerIds).forEach((workerId) => {
                 const worker = workersById.get(workerId);
-                if (!worker || isInactiveWorker(worker)) {
+                // 저장된 일보는 퇴사·비활성 전환 후에도 원래 작업자와 금액을 유지합니다.
+                if (!worker) {
                     skippedWorkerCount += 1;
                     return;
                 }
@@ -3406,9 +3426,10 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
             setTeams(teamRows);
             setWorkers(workerRows);
-            const visibleSiteRows = isDailyReportInput ? getOpenSites(siteRows) : siteRows;
+            const visibleSiteRows = getOpenSites(siteRows);
 
-            setSites(visibleSiteRows);
+            // 전체 현장은 과거 일보 저장에 필요하고, 신규 선택 목록만 별도로 제한합니다.
+            setSites(siteRows);
             setCompanies(companyRows);
             setVehicles(vehicleRows);
 
@@ -4774,11 +4795,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             return;
         }
 
-        const apiKey = geminiService.getKey();
-        if (!apiKey) {
-            setMessage('Gemini API 키가 설정되어 있지 않아 카톡 분석을 실행할 수 없습니다.');
-            return;
-        }
+        
+        
 
         setIsKakaoAnalyzing(true);
         setMessage('');

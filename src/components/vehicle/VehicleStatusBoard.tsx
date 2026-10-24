@@ -13,6 +13,8 @@ import {
 import { iconMap } from '../../constants/iconMap';
 import { OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 import { getContrastingTextColor } from '../../utils/color';
+import { SupportExcelDownloadButton } from '../support/SupportExcelDownloadButton';
+import type { SupportExportContext } from '../../utils/supportResourceExcelExport';
 
 interface TeamInfo {
     color: string;
@@ -20,6 +22,8 @@ interface TeamInfo {
 }
 
 interface VehicleStatusBoardProps {
+    exportButtonContainer?: HTMLElement | null;
+    exportContext?: SupportExportContext;
     vehicles: Vehicle[];
     teams?: Team[];
     workers?: Worker[];
@@ -76,17 +80,21 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
     onBillingTargetAssign,
     onFineChargeTargetChange,
     onCancelUse,
-    onRestoreUse
+    onRestoreUse,
+    exportContext,
+    exportButtonContainer
 }) => {
     const [viewMode, setViewMode] = useState<'list' | 'card'>(getInitialViewMode);
     const [statusFilter, setStatusFilter] = useState<VehicleStatusFilter>('active');
     const [billingTargets, setBillingTargets] = useState<VehicleBillingTargetRecord[]>([]);
+    const [exportReadyVehicles, setExportReadyVehicles] = useState<Vehicle[] | null>(null);
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [fineTargetOverrides, setFineTargetOverrides] = useState<Record<string, VehicleFineChargeTarget>>({});
     const [savingFineTargetVehicleId, setSavingFineTargetVehicleId] = useState('');
 
     React.useEffect(() => {
         let mounted = true;
+        setExportReadyVehicles(null);
         Promise.all([
             vehicleService.listAllVehicleBillingTargets(),
             officeStaffService.getOfficeStaff().catch(() => [] as OfficeStaff[])
@@ -95,6 +103,7 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                 if (!mounted) return;
                 setBillingTargets(records);
                 setOfficeStaffRows(officeStaffList);
+                setExportReadyVehicles(vehicles);
             })
             .catch((error) => {
                 console.error('Failed to load vehicle billing targets:', error);
@@ -549,6 +558,20 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
         return { label: '배정자와 동일', className: 'bg-emerald-50 text-emerald-700 border-emerald-100' };
     };
 
+    const handleExcelDownload = async () => {
+        const context = { ...exportContext, statusLabel: {
+            work: '확인 필요', active: '현재 관리', all: '전체', ASSIGNED: '배정됨', AVAILABLE: '대기중', MAINTENANCE: '정비중', DISPOSED: '보관/완료',
+        }[statusFilter] };
+        const exportRows = sortedVehicles.map(vehicle => ({
+            vehicle,
+            billingTarget: [getBillingTargetTypeLabel(vehicle), getBillingTargetName(vehicle)].filter(Boolean).join(' · '),
+            billingMode: getBillingModeBadge(vehicle).label,
+            fineTarget: (fineTargetOverrides[String(vehicle.id)] ?? vehicle.fineChargeTarget) === 'DRIVER' ? '운전자' : '청구대상',
+        }));
+        const { buildVehicleStatusWorkbook, downloadSupportResourceWorkbook } = await import('../../utils/supportResourceExcelExport');
+        await downloadSupportResourceWorkbook(buildVehicleStatusWorkbook(context, exportRows), '차량_배정정비현황.xlsx');
+    };
+
     if (loading) {
         return (
             <div className="h-64 flex items-center justify-center text-slate-400">
@@ -706,6 +729,8 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                         </button>
                     )}
                 </div>
+                <SupportExcelDownloadButton disabled={loading || exportReadyVehicles !== vehicles || Boolean(savingFineTargetVehicleId) || sortedVehicles.length === 0}
+                    container={exportButtonContainer} compact onDownload={handleExcelDownload} />
                 <div className="flex bg-slate-100 rounded-lg p-0.5">
                     <button
                         onClick={() => setViewMode('list')}

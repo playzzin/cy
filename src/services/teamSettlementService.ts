@@ -5,26 +5,17 @@ import {
   type CreateSystemConfigVariables,
   type UpdateSystemConfigVariables
 } from '../services/firestoreCrudCompat';
+import { getTeamScopedRows } from './teamScopedReadService';
 import { accommodationBillingService } from './accommodationBillingService';
-import { accommodationAssignmentService } from './accommodationAssignmentService';
-import { accommodationService } from './accommodationService';
 import { cardBillingService } from './cardBillingService';
-import { cardService } from './cardService';
 import { companyService } from './companyService';
 import { dailyReportService } from './dailyReportService';
-import { manpowerService } from './manpowerService';
 import { siteService, type Site } from './siteService';
 import { supportClientSiteAllocationService, type SupportClientAllocation } from './supportClientSiteAllocationService';
 import { supportRateService } from './supportRateService';
 import { teamExpenseLedgerService } from './teamExpenseLedgerService';
 import { teamService } from './teamService';
 import { vehicleBillingService } from './vehicleBillingService';
-import { vehicleService } from './vehicleService';
-import { isSupportBillingMonthEnabled } from '../utils/supportBillingPeriod';
-import {
-  getSettlementBillingRowScopeKey,
-  selectPreferredSettlementBillings
-} from '../utils/supportSettlementBilling';
 import {
   TeamSettlementDocumentSchema,
   type TeamSettlementAdditionItem,
@@ -34,7 +25,6 @@ import {
   type TeamSettlementSalesItem,
   type TeamSettlementSupportDetailSnapshot
 } from '../types/teamSettlement';
-import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../types/teamExpenseLedger';
 import { resolveHistoricalResponsibleTeam } from '../utils/dailyReportHistoricalSite';
 import {
   DEFAULT_SUPPORT_UNIT_PRICE,
@@ -45,7 +35,9 @@ import {
   type SupportMonthlyRateOverrides
 } from '../utils/teamSettlementSupportRateOverrides';
 import { getTeamSettlementConfirmationIssues } from '../utils/teamSettlementDraft';
-import { repairLegacyScopedCardBillingDuplicates } from '../utils/teamSettlementBillingSnapshot';
+import { compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
+import { buildTeamSettlementExpenseEntries } from '../utils/teamSettlementExpenses';
+import { calculateTeamSettlementOfficeExpense, TEAM_SETTLEMENT_OFFICE_RATES } from '../utils/teamSettlementOfficeExpense';
 
 export type {
   SupportMonthlyRateOverridePatch,
@@ -246,179 +238,6 @@ const getMonthRange = (yearMonth: string): { startDate: string; endDate: string;
   };
 
   return { startDate: toIsoDate(start), endDate: toIsoDate(end), year: safeYear, month: safeMonth };
-};
-
-const parseYmdDate = (value: string): Date | null => {
-  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
-  if (!matched) return null;
-
-  const year = Number(matched[1]);
-  const month = Number(matched[2]);
-  const day = Number(matched[3]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
-  return date;
-};
-
-const calculateOverlapDays = (params: {
-  monthStart: Date;
-  monthEnd: Date;
-  startDate: Date;
-  endDate?: Date | null;
-}): number => {
-  const actualStart = params.startDate.getTime() > params.monthStart.getTime() ? params.startDate : params.monthStart;
-  const rawEnd = params.endDate && Number.isFinite(params.endDate.getTime()) ? params.endDate : params.monthEnd;
-  const actualEnd = rawEnd.getTime() < params.monthEnd.getTime() ? rawEnd : params.monthEnd;
-  if (actualEnd.getTime() < actualStart.getTime()) return 0;
-
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  return Math.floor((actualEnd.getTime() - actualStart.getTime()) / oneDayMs) + 1;
-};
-
-const addDays = (date: Date, days: number): Date => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-};
-
-const selectPreferredTeamBillings = <T extends { status?: unknown }>(
-  docs: T[],
-  additionalPosted?: (doc: T) => boolean,
-  getGroupKey?: (doc: T) => unknown,
-  getScopeKey?: (doc: T) => unknown
-): T[] => {
-  return selectPreferredSettlementBillings(docs, additionalPosted, getGroupKey, getScopeKey);
-};
-
-const normalizeBillingIdentityPart = (value: unknown): string => (
-  String(value ?? '').trim().toLowerCase().replace(/\s+/g, '')
-);
-
-const firstBillingIdentityPart = (...values: unknown[]): string => {
-  for (const value of values) {
-    const normalized = normalizeBillingIdentityPart(value);
-    if (normalized) return normalized;
-  }
-  return '';
-};
-
-const getBillingRecipientIdentity = (doc: {
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  firstBillingIdentityPart(doc.teamName, doc.assignedTeamName, doc.teamId, doc.assignedTeamId),
-  normalizeBillingIdentityPart(doc.issuedToType),
-  firstBillingIdentityPart(doc.issuedToWorkerName, doc.issuedToWorkerId)
-].join('|');
-
-const getAccommodationSettlementBillingGroupKey = (doc: {
-  teamId?: unknown;
-  teamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => `accommodation|${getBillingRecipientIdentity(doc)}`;
-
-const getVehicleSettlementBillingGroupKey = (doc: {
-  vehicleId?: unknown;
-  vehiclePlate?: unknown;
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  'vehicle',
-  firstBillingIdentityPart(doc.vehiclePlate, doc.vehicleId),
-  getBillingRecipientIdentity(doc)
-].join('|');
-
-const getCardSettlementBillingGroupKey = (doc: {
-  cardId?: unknown;
-  cardLabel?: unknown;
-  teamId?: unknown;
-  assignedTeamId?: unknown;
-  teamName?: unknown;
-  assignedTeamName?: unknown;
-  issuedToType?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): string => [
-  'card',
-  firstBillingIdentityPart(doc.cardLabel, doc.cardId),
-  getBillingRecipientIdentity(doc)
-].join('|');
-
-const allowUnconfirmedLedgerFallback = false;
-
-const isVehicleLedgerClaim = (doc: { lineItems?: Array<{ sourceType?: unknown }> }): boolean =>
-  (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === 'vehicle_ledger');
-
-const isAccommodationLedgerClaim = (doc: { lineItems?: Array<{ sourceType?: unknown }> }): boolean =>
-  (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === 'utility_ledger');
-
-const isCardLedgerClaim = (doc: { lineItems?: Array<{ sourceType?: unknown }> }): boolean =>
-  (doc.lineItems ?? []).some((item) => String(item.sourceType ?? '') === 'card_ledger');
-
-const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
-  meal: '식대',
-  parking: '주차',
-  fuel: '유류',
-  toll: '통행료',
-  material: '자재',
-  tool: '공구',
-  deposit: '보증금',
-  marking: '마킹',
-  fieldGoods: '현장물품',
-  equipment: '장비비',
-  etc: '기타'
-};
-
-const getTeamExpenseCategoryLabel = (category: TeamExpenseClaimCategory): string => {
-  return teamExpenseCategoryLabels[category] ?? String(category || '기타');
-};
-
-const isPostedTeamExpenseClaim = (claim: TeamExpenseClaim): boolean => {
-  return claim.status === 'charged' || claim.status === 'settled';
-};
-
-const isTeamIssuedTo = (value: unknown): boolean => {
-  const raw = String(value ?? '').trim().toLowerCase();
-  return raw === 'team' || raw === 'team_leader';
-};
-
-const isTeamBillingTarget = (params: {
-  issuedToType?: unknown;
-  teamId?: unknown;
-  teamName?: unknown;
-  issuedToWorkerId?: unknown;
-  issuedToWorkerName?: unknown;
-}): boolean => {
-  if (isTeamIssuedTo(params.issuedToType)) return true;
-
-  const issuedType = String(params.issuedToType ?? '').trim().toLowerCase();
-  if (issuedType === 'worker') return false;
-
-  const workerId = String(params.issuedToWorkerId ?? '').trim();
-  if (workerId) return false;
-
-  const workerName = String(params.issuedToWorkerName ?? '').trim();
-  const teamName = String(params.teamName ?? '').trim();
-  if (workerName && teamName && workerName !== teamName) return false;
-
-  return (
-    String(params.teamId ?? '').trim().length > 0 ||
-    String(params.teamName ?? '').trim().length > 0
-  );
 };
 
 const buildTeamIdVariants = async (teamId: string): Promise<{ canonicalTeamId: string; teamName: string; variants: Set<string> }> => {
@@ -686,6 +505,8 @@ export const teamSettlementService = {
   },
 
   async getSupportSettlementDetailRows(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementSupportDetailRow[]> {
+    const scoped = await getTeamScopedRows<TeamSettlementSupportDetailRow>('team_settlement_support_details', params);
+    if (scoped !== null) return scoped;
     const team = await buildTeamIdVariants(params.teamId);
     const period = getMonthRange(params.yearMonth);
 
@@ -938,7 +759,7 @@ export const teamSettlementService = {
         const rateSiteId = rawSiteId || siteId;
         const configuredSupportRate = resolveConfiguredSiteRate(rateSiteId, rawSiteName || siteName);
         const sourceTeamSupportRate = toPositiveRate(resolvedSourceTeam?.supportRate);
-        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? toPositiveRate(reportWorker.unitPrice) ?? DEFAULT_SUPPORT_UNIT_PRICE;
+        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? DEFAULT_SUPPORT_UNIT_PRICE;
         const manDay = toFiniteNumberOrZero(reportWorker.manDay);
         if (manDay <= 0) return;
 
@@ -992,7 +813,7 @@ export const teamSettlementService = {
     // 확정된 구 문서도 현재 마스터 데이터로 다시 계산하지 않아 과거 정산을 보호한다.
     if (savedDoc?.sourceSnapshot || savedDoc?.confirmedAt) {
       const stableDocument = stripSupportOriginalLines(savedDoc);
-      return repairLegacyScopedCardBillingDuplicates(stableDocument).document;
+      return stableDocument;
     }
 
     const autoDoc = await this.calculateAutoSettlement({
@@ -1099,7 +920,7 @@ export const teamSettlementService = {
     await this.saveAndConfirmTeamSettlement(doc);
   },
 
-  async unconfirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<void> {
+  async unconfirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementDocument> {
     const doc = await this.getTeamSettlement(params);
     const nextDoc: TeamSettlementDocument = {
       ...doc,
@@ -1108,6 +929,7 @@ export const teamSettlementService = {
     };
     await this.saveTeamSettlement(nextDoc);
     await notifyTeamSettlementSystemMessage('teamSettlement.unconfirmed', nextDoc);
+    return nextDoc;
   },
 
   async calculateAutoSettlement(params: {
@@ -1145,7 +967,7 @@ export const teamSettlementService = {
       supportRateService.getAllSiteRates(),
       this.getSupportRateOverrides(params.yearMonth),
       supportClientSiteAllocationService.getAllocationsByMonth(params.yearMonth).catch(() => [] as SupportClientAllocation[]),
-      accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: params.yearMonth }),
+      accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: params.yearMonth, strict: true }),
       vehicleBillingService.getBillingsByMonth(params.yearMonth, { throwOnError: true }),
       cardBillingService.getBillingsByMonth(params.yearMonth),
       teamExpenseLedgerService.getClaimsByMonth(params.yearMonth)
@@ -1549,7 +1371,7 @@ export const teamSettlementService = {
         const rateSiteId = rawSiteId || siteId;
         const configuredSupportRate = resolveConfiguredSiteRate(rateSiteId, rawSiteName || siteName);
         const sourceTeamSupportRate = toPositiveRate(resolvedSourceTeam?.supportRate);
-        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? toPositiveRate(reportWorker.unitPrice) ?? DEFAULT_SUPPORT_UNIT_PRICE;
+        const baseSupportRate = configuredSupportRate ?? sourceTeamSupportRate ?? DEFAULT_SUPPORT_UNIT_PRICE;
         const manDay = toFiniteNumberOrZero(reportWorker.manDay);
         if (manDay <= 0) return;
 
@@ -1678,590 +1500,25 @@ export const teamSettlementService = {
         };
       });
 
-    let cachedWorkers: Awaited<ReturnType<typeof manpowerService.getWorkers>> | null = null;
-    let cachedWorkerTeamByAnyId: Map<string, string> | null = null;
-    let cachedWorkerTeamByName: Map<string, string> | null = null;
-
-    const getWorkersOnce = async () => {
-      if (cachedWorkers) return cachedWorkers;
-      cachedWorkers = await manpowerService.getWorkers();
-      return cachedWorkers;
-    };
-
-    const buildWorkerTeamLookups = async () => {
-      if (cachedWorkerTeamByAnyId && cachedWorkerTeamByName) {
-        return { byAnyId: cachedWorkerTeamByAnyId, byName: cachedWorkerTeamByName };
-      }
-
-      const workers = await getWorkersOnce();
-      const byAnyId = new Map<string, string>();
-      const byName = new Map<string, string>();
-
-      workers.forEach((w) => {
-        const teamId = resolveTeamIdFromAny(
-          w.teamId ? String(w.teamId) : '',
-          w.teamName ? String(w.teamName) : ''
-        );
-        if (!teamId) return;
-
-        const id = w.id ? String(w.id).trim() : '';
-        const legacyId = w.legacyId ? String(w.legacyId).trim() : '';
-        const name = w.name ? String(w.name).trim() : '';
-
-        if (id) byAnyId.set(id, teamId);
-        if (legacyId) byAnyId.set(legacyId, teamId);
-        if (name) byName.set(name, teamId);
-      });
-
-      cachedWorkerTeamByAnyId = byAnyId;
-      cachedWorkerTeamByName = byName;
-      return { byAnyId, byName };
-    };
-
-    const supportBillingEnabled = isSupportBillingMonthEnabled(params.yearMonth);
-    const [assignmentRows, utilityRecords] = supportBillingEnabled
-      ? await Promise.all([
-        accommodationAssignmentService.getAllAssignments(),
-        accommodationService.getMonthlyLedger(params.yearMonth)
-      ])
-      : [[], []] as const;
-
-    const accommodationNameById = new Map<string, string>();
-    utilityRecords
-      .filter((record) => String(record.yearMonth ?? '') === String(params.yearMonth))
-      .forEach((record) => {
-        const accommodationId = String(record.accommodationId ?? '').trim();
-        if (!accommodationId) return;
-        const accommodationName = String(record.accommodationName ?? '').trim();
-        if (accommodationName) accommodationNameById.set(accommodationId, accommodationName);
-      });
-
-    const utilityTotalByAccommodation = new Map<string, number>();
-    const monthStart = parseYmdDate(period.startDate);
-    const monthEnd = parseYmdDate(period.endDate);
-    if (monthStart && monthEnd) {
-      const teamDaysByAccommodation = new Map<string, number>();
-      const totalTeamDaysByAccommodation = new Map<string, number>();
-
-      const workerLookupsForAssignment = await buildWorkerTeamLookups();
-      assignmentRows.forEach((assignment) => {
-        const accommodationId = String(assignment.accommodationId ?? '').trim();
-        if (!accommodationId) return;
-
-        const startDate = parseYmdDate(String(assignment.startDate ?? '').trim());
-        if (!startDate) return;
-        const endDate = assignment.endDate ? parseYmdDate(String(assignment.endDate).trim()) : null;
-
-        const overlapDays = calculateOverlapDays({
-          monthStart,
-          monthEnd,
-          startDate,
-          endDate
-        });
-        if (overlapDays <= 0) return;
-
-        let assignmentTeamId = resolveTeamIdFromAny(
-          assignment.teamId ? String(assignment.teamId) : '',
-          assignment.teamName ? String(assignment.teamName) : ''
-        );
-        if (!assignmentTeamId) {
-          const workerId = String(assignment.workerId ?? '').trim();
-          const workerName = String(assignment.workerName ?? '').trim();
-          assignmentTeamId =
-            workerLookupsForAssignment.byAnyId.get(workerId) ??
-            workerLookupsForAssignment.byName.get(workerName) ??
-            '';
-        }
-        if (!assignmentTeamId) return;
-
-        totalTeamDaysByAccommodation.set(
-          accommodationId,
-          (totalTeamDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays
-        );
-
-        if (matchesTeam(assignmentTeamId)) {
-          teamDaysByAccommodation.set(
-            accommodationId,
-            (teamDaysByAccommodation.get(accommodationId) ?? 0) + overlapDays
-          );
-        }
-      });
-
-      utilityRecords
-        .filter((record) => String(record.yearMonth ?? '') === String(params.yearMonth))
-        .forEach((record) => {
-          const accommodationId = String(record.accommodationId ?? '').trim();
-          if (!accommodationId) return;
-
-          const teamDays = teamDaysByAccommodation.get(accommodationId) ?? 0;
-          const totalDays = totalTeamDaysByAccommodation.get(accommodationId) ?? 0;
-          if (teamDays <= 0 || totalDays <= 0) return;
-
-          const ratio = teamDays / totalDays;
-          const apportionedTotal =
-            Math.round(toFiniteNumberOrZero(record.costs?.rent) * ratio) +
-            Math.round(toFiniteNumberOrZero(record.costs?.electricity) * ratio) +
-            Math.round(toFiniteNumberOrZero(record.costs?.gas) * ratio) +
-            Math.round(toFiniteNumberOrZero(record.costs?.water) * ratio) +
-            Math.round(toFiniteNumberOrZero(record.costs?.internet) * ratio) +
-            Math.round(toFiniteNumberOrZero(record.costs?.maintenance) * ratio) +
-            Math.round(toFiniteNumberOrZero(record.costs?.other) * ratio);
-
-          if (apportionedTotal <= 0) return;
-          utilityTotalByAccommodation.set(
-            accommodationId,
-            (utilityTotalByAccommodation.get(accommodationId) ?? 0) + apportionedTotal
-          );
-        });
-    }
-
-    let accommodationDeductions: TeamSettlementDeductionItem[] = allowUnconfirmedLedgerFallback
-      ? Array.from(utilityTotalByAccommodation.entries())
-      .filter(([, amount]) => Number.isFinite(amount) && amount > 0)
-      .map(([accommodationId, amount]): TeamSettlementDeductionItem => ({
-        id: `accommodation_billing:${params.yearMonth}:ledger:${accommodationId}`,
-        source: 'auto',
-        origin: 'accommodation_billing',
-        category: `숙소비 (${accommodationNameById.get(accommodationId) ?? accommodationId})`,
-        amount,
-        memo: '월별 공과금 대장 자동집계'
-      }))
-      : [];
-
-    if (supportBillingEnabled && accommodationDeductions.length === 0) {
-      const teamAccommodationDocs = accommodationDocs.filter((doc) => {
-        if (!isTeamBillingTarget({
-          issuedToType: doc.issuedToType,
-          teamId: doc.teamId,
-          teamName: doc.teamName,
-          issuedToWorkerId: doc.issuedToWorkerId,
-          issuedToWorkerName: doc.issuedToWorkerName
-        })) return false;
-        const resolved = resolveTeamIdFromAny(
-          doc.teamId ? String(doc.teamId) : '',
-          doc.teamName ? String(doc.teamName) : ''
-        );
-        return resolved ? matchesTeam(resolved) : false;
-      });
-      const selectedAccommodationDocs = selectPreferredTeamBillings(
-        teamAccommodationDocs,
-        isAccommodationLedgerClaim,
-        getAccommodationSettlementBillingGroupKey
-      );
-
-      accommodationDeductions = selectedAccommodationDocs
-        .map((doc): TeamSettlementDeductionItem | null => {
-          const totalAmount = Math.round(
-            (doc.lineItems ?? []).reduce((sum, li) => sum + toFiniteNumberOrZero(li.amount), 0)
-          );
-          if (totalAmount <= 0) return null;
-
-          const targetName =
-            String(doc.teamName ?? '').trim() ||
-            String(doc.issuedToWorkerName ?? '').trim() ||
-            params.teamName ||
-            '팀';
-
-          return {
-            id: `accommodation_billing:${params.yearMonth}:${doc.id}`,
-            source: 'auto',
-            origin: 'accommodation_billing',
-            category: `숙소비 (${targetName})`,
-            amount: totalAmount
-          };
-        })
-        .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
-    }
-
-    const teamVehicleDocs = supportBillingEnabled ? vehicleDocs.filter((doc) => {
-      if (!isTeamBillingTarget({
-        issuedToType: doc.issuedToType,
-        teamId: doc.teamId ?? doc.assignedTeamId,
-        teamName: doc.teamName ?? doc.assignedTeamName,
-        issuedToWorkerId: doc.issuedToWorkerId,
-        issuedToWorkerName: doc.issuedToWorkerName
-      })) return false;
-      const resolved = resolveTeamIdFromAny(
-        doc.teamId ? String(doc.teamId) : (doc.assignedTeamId ? String(doc.assignedTeamId) : ''),
-        doc.teamName ? String(doc.teamName) : (doc.assignedTeamName ? String(doc.assignedTeamName) : '')
-      );
-      return resolved ? matchesTeam(resolved) : false;
-    }) : [];
-    const selectedVehicleDocs = selectPreferredTeamBillings(
-      teamVehicleDocs,
-      isVehicleLedgerClaim,
-      getVehicleSettlementBillingGroupKey,
-      getSettlementBillingRowScopeKey
-    );
-
-    const vehicleDeductionsFromDocs: TeamSettlementDeductionItem[] = selectedVehicleDocs
-      .map((doc): TeamSettlementDeductionItem => {
-        const lineTotal = (doc.lineItems ?? []).reduce((sum, li) => sum + toFiniteNumberOrZero(li.amount), 0);
-        const fixedCost = toFiniteNumberOrZero(doc.fixedCost);
-        const variableCost = toFiniteNumberOrZero(doc.variableCost);
-        const fallbackTotal = toFiniteNumberOrZero(doc.totalAmount);
-        const amount = Math.round(lineTotal > 0 ? lineTotal : (fixedCost + variableCost > 0 ? fixedCost + variableCost : fallbackTotal));
-
-        return {
-          id: `vehicle_billing:${params.yearMonth}:${doc.id || doc.vehicleId || doc.vehiclePlate}`,
-          source: 'auto',
-          origin: 'vehicle_billing',
-          category: `차량비 (${doc.vehiclePlate})`,
-          amount
-        };
-      })
-      .filter((d) => d.amount > 0);
-
-    let vehicleDeductions: TeamSettlementDeductionItem[] = vehicleDeductionsFromDocs;
-
-    if (supportBillingEnabled && allowUnconfirmedLedgerFallback && vehicleDeductions.length === 0) {
-      const [vehicles, expenses, workerLookups, vehicleAssignments] = await Promise.all([
-        vehicleService.getVehicles(),
-        vehicleService.getExpensesByMonth(params.yearMonth),
-        buildWorkerTeamLookups(),
-        vehicleService.listAllVehicleAssignments().catch(() => [])
-      ]);
-
-      const expenseByVehicleId = new Map<string, typeof expenses>();
-      expenses.forEach((expense) => {
-        const vehicleId = String(expense.vehicleId ?? '').trim();
-        if (!vehicleId) return;
-        const list = expenseByVehicleId.get(vehicleId) ?? [];
-        list.push(expense);
-        expenseByVehicleId.set(vehicleId, list);
-      });
-
-      const assignmentsByVehicleId = new Map<string, typeof vehicleAssignments>();
-      vehicleAssignments.forEach((assignment) => {
-        const vehicleId = String(assignment.vehicleId ?? '').trim();
-        if (!vehicleId) return;
-        const list = assignmentsByVehicleId.get(vehicleId) ?? [];
-        list.push(assignment);
-        assignmentsByVehicleId.set(vehicleId, list);
-      });
-
-      const resolveVehicleAssignmentTeamId = (assignment: { assigneeType?: unknown; assigneeId?: unknown; assigneeName?: unknown }): string => {
-        if (assignment.assigneeType === 'TEAM') {
-          return resolveTeamIdFromAny(
-            assignment.assigneeId ? String(assignment.assigneeId) : '',
-            assignment.assigneeName ? String(assignment.assigneeName) : ''
-          );
-        }
-
-        const workerId = String(assignment.assigneeId ?? '').trim();
-        const workerName = String(assignment.assigneeName ?? '').trim();
-        return workerLookups.byAnyId.get(workerId) ?? workerLookups.byName.get(workerName) ?? '';
-      };
-
-      type VehicleCostSegment = {
-        key: string;
-        teamId: string;
-        startDate: Date;
-        endDate: Date;
-        overlapDays: number;
-      };
-
-      const allocateVehicleFixedCosts = (fixedCost: number, segments: VehicleCostSegment[]): Map<string, number> => {
-        const result = new Map<string, number>();
-        if (fixedCost <= 0 || segments.length === 0) return result;
-
-        const totalDays = segments.reduce((sum, segment) => sum + Math.max(0, segment.overlapDays), 0);
-        if (totalDays <= 0) return result;
-
-        let allocated = 0;
-        segments.forEach((segment, index) => {
-          const share = index === segments.length - 1
-            ? fixedCost - allocated
-            : Math.round(fixedCost * (segment.overlapDays / totalDays));
-          allocated += share;
-          result.set(segment.key, share);
-        });
-
-        return result;
-      };
-
-      const buildVehicleCostSegments = (vehicle: Awaited<ReturnType<typeof vehicleService.getVehicles>>[number]): VehicleCostSegment[] => {
-        if (!monthStart || !monthEnd) return [];
-        const vehicleId = String(vehicle.id ?? '').trim();
-        const activeAssignments = (assignmentsByVehicleId.get(vehicleId) ?? [])
-          .map((assignment) => ({
-            assignment,
-            startDate: parseYmdDate(String(assignment.startDate ?? '').trim()),
-            endDate: assignment.endDate ? parseYmdDate(String(assignment.endDate).trim()) : null
-          }))
-          .filter((entry) => {
-            if (!entry.startDate) return false;
-            if (entry.startDate.getTime() > monthEnd.getTime()) return false;
-            if (entry.endDate && entry.endDate.getTime() < monthStart.getTime()) return false;
-            return true;
-          })
-          .sort((a, b) => (a.startDate?.getTime() ?? 0) - (b.startDate?.getTime() ?? 0));
-
-        const segments = activeAssignments.flatMap((entry, index): VehicleCostSegment[] => {
-          if (!entry.startDate) return [];
-          const teamId = resolveVehicleAssignmentTeamId(entry.assignment);
-          if (!teamId) return [];
-
-          const nextStartDate = activeAssignments[index + 1]?.startDate ?? null;
-          const explicitEndDate = entry.endDate ?? monthEnd;
-          const handoffEndDate = nextStartDate ? addDays(nextStartDate, -1) : monthEnd;
-          const startDate = entry.startDate.getTime() > monthStart.getTime() ? entry.startDate : monthStart;
-          const endDate = [explicitEndDate, handoffEndDate, monthEnd]
-            .reduce((min, date) => date.getTime() < min.getTime() ? date : min);
-          const overlapDays = calculateOverlapDays({ monthStart, monthEnd, startDate, endDate });
-          if (overlapDays <= 0) return [];
-
-          return [{
-            key: String(entry.assignment.id ?? `${vehicleId}:${index}`),
-            teamId,
-            startDate,
-            endDate,
-            overlapDays
-          }];
-        });
-
-        if (segments.length > 0) return segments;
-
-        let currentTeamId = '';
-        if (vehicle.currentAssigneeType === 'TEAM') {
-          currentTeamId = resolveTeamIdFromAny(
-            vehicle.currentAssigneeId ? String(vehicle.currentAssigneeId) : '',
-            vehicle.currentAssigneeName ? String(vehicle.currentAssigneeName) : ''
-          );
-        } else if (vehicle.currentAssigneeType === 'WORKER') {
-          const workerId = String(vehicle.currentAssigneeId ?? '').trim();
-          const workerName = String(vehicle.currentAssigneeName ?? '').trim();
-          currentTeamId = workerLookups.byAnyId.get(workerId) ?? workerLookups.byName.get(workerName) ?? '';
-        }
-
-        return currentTeamId
-          ? [{
-            key: `current:${vehicleId || vehicle.licensePlate}`,
-            teamId: currentTeamId,
-            startDate: monthStart,
-            endDate: monthEnd,
-            overlapDays: monthEnd.getDate()
-          }]
-          : [];
-      };
-
-      vehicleDeductions = vehicles
-        .flatMap((vehicle): TeamSettlementDeductionItem[] => {
-          const vehicleId = String(vehicle.id ?? '').trim();
-          const segments = buildVehicleCostSegments(vehicle);
-          if (segments.length === 0 || !monthEnd) return [];
-          const fixedCost =
-            vehicle.type === 'RENT' || vehicle.type === 'LEASE'
-              ? toFiniteNumberOrZero(vehicle.contract?.monthlyFee)
-              : 0;
-          const fixedCostBySegment = allocateVehicleFixedCosts(fixedCost, segments);
-
-          const variableCostBySegment = new Map<string, number>();
-          (expenseByVehicleId.get(vehicleId) ?? []).forEach((expense) => {
-            const expenseDate = parseYmdDate(String(expense.date ?? '').trim());
-            const targetSegment = expenseDate
-              ? segments.find((segment) =>
-                expenseDate.getTime() >= segment.startDate.getTime() &&
-                expenseDate.getTime() <= segment.endDate.getTime()
-              )
-              : undefined;
-            const segment = targetSegment ?? segments[0];
-            if (!segment) return;
-            variableCostBySegment.set(
-              segment.key,
-              (variableCostBySegment.get(segment.key) ?? 0) + toFiniteNumberOrZero(expense.amount)
-            );
-          });
-
-          return segments
-            .filter((segment) => matchesTeam(segment.teamId))
-            .map((segment): TeamSettlementDeductionItem | null => {
-              const fixedShare = Math.round(fixedCostBySegment.get(segment.key) ?? 0);
-              const variableCost = Math.round(variableCostBySegment.get(segment.key) ?? 0);
-              const totalAmount = Math.round(fixedShare + variableCost);
-              if (totalAmount <= 0) return null;
-
-              return {
-                id: `vehicle_billing:${params.yearMonth}:${vehicle.id || vehicle.licensePlate}:ledger:${segment.key}`,
-                source: 'auto',
-                origin: 'vehicle_billing',
-                category: `차량비 (${vehicle.licensePlate})`,
-                amount: totalAmount,
-                memo: `월별 차량 대장 배정일 자동배분 (${segment.overlapDays}일)`
-              };
-            })
-            .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
-        })
-        .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
-    }
-
-    const teamCardDocs = supportBillingEnabled ? cardDocs.filter((doc) => {
-      if (!isTeamBillingTarget({
-        issuedToType: doc.issuedToType,
-        teamId: doc.teamId ?? doc.assignedTeamId,
-        teamName: doc.teamName ?? doc.assignedTeamName,
-        issuedToWorkerId: doc.issuedToWorkerId,
-        issuedToWorkerName: doc.issuedToWorkerName
-      })) return false;
-      const resolved = resolveTeamIdFromAny(
-        doc.teamId ? String(doc.teamId) : (doc.assignedTeamId ? String(doc.assignedTeamId) : ''),
-        doc.teamName ? String(doc.teamName) : (doc.assignedTeamName ? String(doc.assignedTeamName) : '')
-      );
-      return resolved ? matchesTeam(resolved) : false;
-    }) : [];
-    const selectedCardDocs = selectPreferredTeamBillings(
-      teamCardDocs,
-      isCardLedgerClaim,
-      getCardSettlementBillingGroupKey,
-      getSettlementBillingRowScopeKey
-    );
-
-    const cardDeductionsFromDocs: TeamSettlementDeductionItem[] = selectedCardDocs
-      .map((doc): TeamSettlementDeductionItem => {
-        const lineTotal = (doc.lineItems ?? []).reduce((sum, li) => sum + toFiniteNumberOrZero(li.amount), 0);
-        const fallbackTotal = toFiniteNumberOrZero(doc.totalAmount);
-        const amount = Math.round(lineTotal > 0 ? lineTotal : fallbackTotal);
-
-        return {
-          id: `card_billing:${params.yearMonth}:${doc.id || doc.cardId || doc.cardLabel}`,
-          source: 'auto',
-          origin: 'card_billing',
-          category: `카드비 (${doc.cardLabel})`,
-          amount
-        };
-      })
-      .filter((d) => d.amount > 0);
-
-    let cardDeductions: TeamSettlementDeductionItem[] = cardDeductionsFromDocs;
-
-    if (supportBillingEnabled && allowUnconfirmedLedgerFallback && cardDeductions.length === 0) {
-      const [cards, txs, workerLookups] = await Promise.all([
-        cardService.getCards(),
-        cardService.getTransactionsByMonth(params.yearMonth),
-        buildWorkerTeamLookups()
-      ]);
-
-      const amountByCardId = new Map<string, number>();
-      txs.forEach((tx) => {
-        const cardId = String(tx.cardId ?? '').trim();
-        if (!cardId) return;
-        amountByCardId.set(cardId, (amountByCardId.get(cardId) ?? 0) + toFiniteNumberOrZero(tx.amount));
-      });
-
-      cardDeductions = cards
-        .map((card): TeamSettlementDeductionItem | null => {
-          let assignedTeamId = '';
-
-          if (card.currentAssigneeType === 'TEAM') {
-            assignedTeamId = resolveTeamIdFromAny(
-              card.currentAssigneeId ? String(card.currentAssigneeId) : '',
-              card.currentAssigneeName ? String(card.currentAssigneeName) : ''
-            );
-          } else if (card.currentAssigneeType === 'WORKER') {
-            const workerId = String(card.currentAssigneeId ?? '').trim();
-            const workerName = String(card.currentAssigneeName ?? '').trim();
-            assignedTeamId = workerLookups.byAnyId.get(workerId) ?? workerLookups.byName.get(workerName) ?? '';
-          }
-
-          if (!assignedTeamId || !matchesTeam(assignedTeamId)) return null;
-
-          const totalAmount = Math.round(toFiniteNumberOrZero(amountByCardId.get(String(card.id ?? '').trim())));
-          if (totalAmount <= 0) return null;
-
-          const cardLabel = `${card.name} (${card.last4})`;
-          return {
-            id: `card_billing:${params.yearMonth}:${card.id || cardLabel}:ledger`,
-            source: 'auto',
-            origin: 'card_billing',
-            category: `카드비 (${cardLabel})`,
-            amount: totalAmount,
-            memo: '월별 카드 대장 자동집계'
-          };
-        })
-        .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
-    }
-
-    const postedTeamExpenseClaims = teamExpenseClaims.filter(isPostedTeamExpenseClaim);
-    const teamExpenseDeductions: TeamSettlementDeductionItem[] = postedTeamExpenseClaims
-      .flatMap((claim): TeamSettlementDeductionItem[] => {
-        const amount = Math.round(toFiniteNumberOrZero(claim.amount));
-        if (amount <= 0) return [];
-
-        const isOtherExpense =
-          claim.claimType !== 'teamCharge' ||
-          !String(claim.chargeToTeamId ?? '').trim();
-        const payerTeamId = resolveTeamIdFromAny(claim.payerTeamId, claim.payerTeamName);
-        const chargeToTeamId = resolveTeamIdFromAny(claim.chargeToTeamId, claim.chargeToTeamName);
-        const shouldDeduct = isOtherExpense
-          ? Boolean(payerTeamId && matchesTeam(payerTeamId))
-          : Boolean(chargeToTeamId && matchesTeam(chargeToTeamId));
-
-        if (!shouldDeduct) return [];
-
-        const categoryLabel = getTeamExpenseCategoryLabel(claim.category);
-        const description = String(claim.description ?? '').trim();
-        const counterpartyName = String(claim.payerTeamName ?? '').trim();
-        const memoParts = [
-          String(claim.date ?? '').trim(),
-          String(claim.siteName ?? '').trim(),
-          String(claim.cardLabel ?? '').trim(),
-          isOtherExpense ? (claim.claimType === 'officeExpense' ? '사무실경비' : '기타청구') : `후청구: ${counterpartyName || '사용팀 미지정'}`,
-          String(claim.memo ?? '').trim()
-        ].filter(Boolean);
-
-        return [{
-          id: `team_expense_claim:${params.yearMonth}:${claim.id}:deduction`,
-          source: 'auto',
-          origin: 'team_expense_claim',
-          category: `경비(${categoryLabel}${description ? ` - ${description}` : ''})`,
-          amount,
-          memo: memoParts.join(' / ')
-        }];
-      });
-
-    const teamExpenseAdditions: TeamSettlementAdditionItem[] = postedTeamExpenseClaims
-      .flatMap((claim): TeamSettlementAdditionItem[] => {
-        if (claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim()) return [];
-        const amount = Math.round(toFiniteNumberOrZero(claim.amount));
-        if (amount <= 0) return [];
-
-        const payerTeamId = resolveTeamIdFromAny(claim.payerTeamId, claim.payerTeamName);
-        if (!payerTeamId || !matchesTeam(payerTeamId)) return [];
-
-        const categoryLabel = getTeamExpenseCategoryLabel(claim.category);
-        const description = String(claim.description ?? '').trim();
-        const chargeToName = String(claim.chargeToTeamName ?? '').trim();
-        const memoParts = [
-          String(claim.date ?? '').trim(),
-          String(claim.siteName ?? '').trim(),
-          String(claim.cardLabel ?? '').trim(),
-          `받을 후청구: ${chargeToName || '청구대상 미지정'}`,
-          String(claim.memo ?? '').trim()
-        ].filter(Boolean);
-
-        return [{
-          id: `team_expense_claim:${params.yearMonth}:${claim.id}:addition`,
-          source: 'auto',
-          origin: 'team_expense_claim',
-          category: `경비 환급(${categoryLabel}${description ? ` - ${description}` : ''})`,
-          amount,
-          memo: memoParts.join(' / ')
-        }];
-      });
-
-    const officeExpenseManDay = roundManDay(
-      dailyReportSales
-        .filter((s) => s.kind === '도급' || s.kind === '직영')
-        .reduce((sum, s) => sum + (Number.isFinite(s.manDay) ? s.manDay : 0), 0)
-    );
+    const expenseEntries = buildTeamSettlementExpenseEntries({
+      yearMonth: params.yearMonth,
+      matchesTeam: (id, name) => {
+        const resolved = resolveTeamIdFromAny(String(id ?? ''), String(name ?? ''));
+        return Boolean(resolved && matchesTeam(resolved));
+      },
+      accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims
+    });
+
+    const officeExpense = calculateTeamSettlementOfficeExpense(dailyReportSales);
 
     const officeExpenseDeduction: TeamSettlementDeductionItem = {
       id: `office_expense:${params.yearMonth}:${params.teamId}`,
       source: 'auto',
       origin: 'office_expense',
       category: '사무실비',
-      amount: Math.round(officeExpenseManDay * 10000),
-      memo: `도급+직영 총공수 ${officeExpenseManDay} * 10,000원`
+      amount: officeExpense.totalAmount,
+      officeExpenseRates: { ...TEAM_SETTLEMENT_OFFICE_RATES },
+      memo: officeExpense.memo
     };
 
     const getWorkerTeamId = (r: (typeof workerRows)[number]): string => {
@@ -2342,12 +1599,9 @@ export const teamSettlementService = {
       ...(dailyWageDeduction ? [dailyWageDeduction] : []),
       ...(monthlyWageDeduction ? [monthlyWageDeduction] : []),
       ...(serviceTeamDeduction ? [serviceTeamDeduction] : []),
-      ...accommodationDeductions,
-      ...vehicleDeductions,
-      ...cardDeductions,
-      ...teamExpenseDeductions
+      ...expenseEntries.filter(entry => entry.direction === 'deduction').map(entry => entry.item as TeamSettlementDeductionItem)
     ];
-    const additions = [...teamExpenseAdditions];
+    const additions = expenseEntries.filter(entry => entry.direction === 'addition').map(entry => entry.item as TeamSettlementAdditionItem);
     const sumAmounts = (rows: Array<{ amount: number }>): number => Math.round(
       rows.reduce((sum, row) => sum + toFiniteNumberOrZero(row.amount), 0)
     );
@@ -2402,10 +1656,10 @@ export const teamSettlementService = {
       yearMonth: params.yearMonth,
       teamId: params.teamId,
       teamName: params.teamName,
-      sales,
-      purchases,
-      deductions,
-      additions,
+      sales: sales.map(compactTeamSettlementAutoMemo),
+      purchases: purchases.map(compactTeamSettlementAutoMemo),
+      deductions: deductions.map(compactTeamSettlementAutoMemo),
+      additions: additions.map(compactTeamSettlementAutoMemo),
       summary: {
         prevCarryover: 0,
         deposit: 0

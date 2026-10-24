@@ -1,3 +1,5 @@
+import { trackedGeminiFetch } from './geminiUsageFetch';
+import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
 /**
  * AI 분석 에이전트
  * 
@@ -7,6 +9,7 @@
 
 import { manpowerAnalyticsService } from './manpowerAnalyticsService';
 import { aiSettingsService } from './aiSettingsService';
+import { getKoreanDateKey, shiftDateKey } from '../utils/koreanBusinessDate';
 
 // ===========================
 // Types
@@ -30,71 +33,44 @@ interface AnalysisResponse {
 /**
  * 현재 날짜 기준으로 기간 계산
  */
-function calculatePeriod(periodType: string): { startDate: string; endDate: string } {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const day = today.getDate();
+export function calculatePeriod(periodType: string, now: Date = new Date()): { startDate: string; endDate: string } {
+    const today = getKoreanDateKey(now);
+    const monthStart = `${today.slice(0, 7)}-01`;
+    const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
 
     switch (periodType) {
         case 'today':
-            const todayStr = today.toISOString().split('T')[0];
-            return { startDate: todayStr, endDate: todayStr };
+            return { startDate: today, endDate: today };
 
         case 'yesterday':
-            const yesterday = new Date(today);
-            yesterday.setDate(yesterday.getDate() - 1);
-            const yesterdayStr = yesterday.toISOString().split('T')[0];
-            return { startDate: yesterdayStr, endDate: yesterdayStr };
+            const yesterday = shiftDateKey(today, -1);
+            return { startDate: yesterday, endDate: yesterday };
 
         case 'this_week':
-            const thisWeekStart = new Date(today);
-            thisWeekStart.setDate(today.getDate() - today.getDay());
-            return {
-                startDate: thisWeekStart.toISOString().split('T')[0],
-                endDate: today.toISOString().split('T')[0]
-            };
+            return { startDate: shiftDateKey(today, -weekday), endDate: today };
 
         case 'last_week':
-            const lastWeekEnd = new Date(today);
-            lastWeekEnd.setDate(today.getDate() - today.getDay() - 1);
-            const lastWeekStart = new Date(lastWeekEnd);
-            lastWeekStart.setDate(lastWeekEnd.getDate() - 6);
             return {
-                startDate: lastWeekStart.toISOString().split('T')[0],
-                endDate: lastWeekEnd.toISOString().split('T')[0]
+                startDate: shiftDateKey(today, -weekday - 7),
+                endDate: shiftDateKey(today, -weekday - 1)
             };
 
         case 'this_month':
-            const thisMonthStart = new Date(year, month, 1);
-            return {
-                startDate: thisMonthStart.toISOString().split('T')[0],
-                endDate: today.toISOString().split('T')[0]
-            };
+            return { startDate: monthStart, endDate: today };
 
         case 'last_month':
-            const lastMonthStart = new Date(year, month - 1, 1);
-            const lastMonthEnd = new Date(year, month, 0);
+            const lastMonthEnd = shiftDateKey(monthStart, -1);
             return {
-                startDate: lastMonthStart.toISOString().split('T')[0],
-                endDate: lastMonthEnd.toISOString().split('T')[0]
+                startDate: `${lastMonthEnd.slice(0, 7)}-01`,
+                endDate: lastMonthEnd
             };
 
         case 'this_year':
-            const thisYearStart = new Date(year, 0, 1);
-            return {
-                startDate: thisYearStart.toISOString().split('T')[0],
-                endDate: today.toISOString().split('T')[0]
-            };
+            return { startDate: `${today.slice(0, 4)}-01-01`, endDate: today };
 
         default:
-            // 최근 7일
-            const defaultStart = new Date(today);
-            defaultStart.setDate(today.getDate() - 7);
-            return {
-                startDate: defaultStart.toISOString().split('T')[0],
-                endDate: today.toISOString().split('T')[0]
-            };
+            // 기존 범위 유지: 오늘-7일부터 오늘까지 (양 끝 포함)
+            return { startDate: shiftDateKey(today, -7), endDate: today };
     }
 }
 
@@ -110,15 +86,13 @@ function formatCurrency(amount: number): string {
  */
 async function callGemini(prompt: string): Promise<string> {
     aiSettingsService.assertCurrentPageEnabled('AI 에이전트 분석');
-    const apiKey = aiSettingsService.getApiKey();
-    if (!apiKey) {
-        throw new Error('Gemini API Key가 설정되지 않았습니다');
-    }
+    
+    
 
-    const model = aiSettingsService.getModels().textModel || 'gemini-2.5-flash';
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const model = aiSettingsService.getModels().textModel || DEFAULT_GEMINI_TEXT_MODEL;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-    const response = await fetch(
+    const response = await trackedGeminiFetch('analytics-agent')(
         endpoint,
         {
             method: 'POST',

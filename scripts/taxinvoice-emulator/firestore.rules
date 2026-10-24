@@ -1,0 +1,9 @@
+// Isolated demo emulator only. These rules are never used for deployment.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /tax_invoice_issues/{issue} {
+      allow read, write: if true;
+    }
+  }
+}

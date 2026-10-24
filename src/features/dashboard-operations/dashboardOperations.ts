@@ -1,4 +1,6 @@
 import { calculateTrendPercent } from '../../utils/dashboardKpiTrend';
+import { shiftDateKey, toKoreanDateKey } from '../../utils/koreanBusinessDate';
+import { getExpectedReportSiteCount, isReportCoverageFinal, type DailyReportCoverageSummary } from '../daily-report-coverage/dailyReportCoverage';
 
 export interface DashboardOperationReportLike {
   date?: string;
@@ -6,133 +8,98 @@ export interface DashboardOperationReportLike {
   siteId?: string | null;
   siteName?: string | null;
 }
-
 export interface DashboardDailyTrendPoint {
   date: string;
   reportCount: number;
   manDay: number;
   siteCount: number;
 }
-
-export interface DashboardOperationInsights {
-  reportCountTrendPercent: number;
-  manDayTrendPercent: number;
-  monthlyManDayRunRate: number;
-  healthScore: number;
-  healthLabel: 'critical' | 'watch' | 'stable';
+export type DashboardHealthLabel = 'critical' | 'watch' | 'stable' | 'collecting' | 'unknown' | 'unavailable' | 'no-work' | 'monitoring';
+export const dashboardHealthLabels: Record<DashboardHealthLabel, string> = {
+  critical: '위험', watch: '주의', stable: '양호', collecting: '집계 중',
+  unknown: '평가 보류', unavailable: '조회 확인 필요', 'no-work': '작업 예정 없음', monitoring: '작성 현황',
+};
+export interface DashboardHealthDeduction {
+  label: string;
+  points: number;
+  detail: string;
+  route: string;
 }
-
+export interface DashboardOperationInsights {
+  reportCountTrendPercent: number | null;
+  manDayTrendPercent: number | null;
+  monthlyManDayRunRate: number;
+  healthScore: number | null;
+  healthLabel: DashboardHealthLabel;
+  healthReason?: string;
+  healthDeductions?: DashboardHealthDeduction[];
+}
 export interface BuildDashboardOperationsInput {
   reports: DashboardOperationReportLike[];
   today?: Date | string;
-  reportCoverageRate: number;
-  activeSiteCount: number;
-  supportBalance: number;
+  coverage?: DailyReportCoverageSummary;
 }
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-
-const toDate = (date: Date | string): Date => {
-  if (date instanceof Date) return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const [year, month, day] = String(date).slice(0, 10).split('-').map(Number);
-  if (!year || !month || !day) return toDate(new Date());
-  return new Date(year, month - 1, day);
-};
-
-const toDateKey = (date: Date | string): string => {
-  const normalized = toDate(date);
-  const year = normalized.getFullYear();
-  const month = String(normalized.getMonth() + 1).padStart(2, '0');
-  const day = String(normalized.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-const addDays = (date: Date, days: number): Date => new Date(date.getTime() + days * MS_PER_DAY);
-
 const toNumber = (value: unknown): number => {
-  const numberValue = Number(value ?? 0);
-  return Number.isFinite(numberValue) ? numberValue : 0;
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
-
 const getReportDateKey = (report: DashboardOperationReportLike): string => String(report.date || '').slice(0, 10);
-
 const getReportManDay = (report: DashboardOperationReportLike): number => toNumber(report.totalManDay);
-
-const uniqueSiteKey = (report: DashboardOperationReportLike): string => {
-  const siteId = String(report.siteId || '').trim();
-  const siteName = String(report.siteName || '').trim().replace(/\s+/g, '').toLowerCase();
-  return siteId || siteName || 'unknown';
+const uniqueSiteKey = (report: DashboardOperationReportLike): string => String(report.siteId || report.siteName || 'unknown').trim();
+const buildPoint = (reports: DashboardOperationReportLike[], date: string): DashboardDailyTrendPoint => {
+  const rows = reports.filter((report) => getReportDateKey(report) === date);
+  return { date, reportCount: rows.length,
+    manDay: Math.round(rows.reduce((sum, report) => sum + getReportManDay(report), 0) * 10) / 10,
+    siteCount: new Set(rows.map(uniqueSiteKey)).size };
 };
-
-const buildPoint = (reports: DashboardOperationReportLike[], dateKey: string): DashboardDailyTrendPoint => {
-  const dayReports = reports.filter((report) => getReportDateKey(report) === dateKey);
-  return {
-    date: dateKey,
-    reportCount: dayReports.length,
-    manDay: Math.round(dayReports.reduce((sum, report) => sum + getReportManDay(report), 0) * 10) / 10,
-    siteCount: new Set(dayReports.map(uniqueSiteKey)).size,
-  };
-};
+export const formatDashboardTrend = (value: number | null): string => value === null || !Number.isFinite(value)
+  ? '비교 자료 없음' : `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
 
 export const buildDashboardDailyTrend = (
-  reports: DashboardOperationReportLike[],
-  today: Date | string = new Date(),
-  dayCount = 7
+  reports: DashboardOperationReportLike[], today: Date | string = new Date(), dayCount = 7
 ): DashboardDailyTrendPoint[] => {
-  const normalizedToday = toDate(today);
-  return Array.from({ length: Math.max(1, dayCount) }, (_, index) => {
-    const date = addDays(normalizedToday, index - (Math.max(1, dayCount) - 1));
-    return buildPoint(reports, toDateKey(date));
-  });
-};
-
-const getMonthBounds = (date: Date) => ({
-  monthKey: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
-  dayOfMonth: date.getDate(),
-  daysInMonth: new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate(),
-});
-
-const clampScore = (score: number): number => Math.max(0, Math.min(100, Math.round(score)));
-
-const getHealthLabel = (score: number): DashboardOperationInsights['healthLabel'] => {
-  if (score < 60) return 'critical';
-  if (score < 80) return 'watch';
-  return 'stable';
+  const date = toKoreanDateKey(today);
+  const length = Math.max(1, dayCount);
+  return Array.from({ length }, (_, index) => buildPoint(reports, shiftDateKey(date, index - length + 1)));
 };
 
 export const buildDashboardOperationInsights = ({
-  reports,
-  today = new Date(),
-  reportCoverageRate,
-  activeSiteCount,
-  supportBalance,
+  reports, today = new Date(), coverage,
 }: BuildDashboardOperationsInput): DashboardOperationInsights => {
-  const normalizedToday = toDate(today);
-  const todayKey = toDateKey(normalizedToday);
-  const yesterdayKey = toDateKey(addDays(normalizedToday, -1));
-  const todayPoint = buildPoint(reports, todayKey);
-  const yesterdayPoint = buildPoint(reports, yesterdayKey);
-  const { monthKey, dayOfMonth, daysInMonth } = getMonthBounds(normalizedToday);
+  const date = toKoreanDateKey(today);
+  const todayPoint = buildPoint(reports, date);
+  const yesterdayPoint = buildPoint(reports, shiftDateKey(date, -1));
+  const calendarDate = new Date(`${date}T00:00:00Z`);
+  const daysInMonth = new Date(Date.UTC(calendarDate.getUTCFullYear(), calendarDate.getUTCMonth() + 1, 0)).getUTCDate();
   const thisMonthManDay = reports
-    .filter((report) => getReportDateKey(report).startsWith(monthKey))
+    .filter((report) => getReportDateKey(report).startsWith(date.slice(0, 7)) && getReportDateKey(report) <= date)
     .reduce((sum, report) => sum + getReportManDay(report), 0);
+  const hasBothDays = todayPoint.reportCount > 0 && yesterdayPoint.reportCount > 0;
+  const reportCountTrendPercent = hasBothDays ? calculateTrendPercent(todayPoint.reportCount, yesterdayPoint.reportCount) : null;
+  const manDayTrendPercent = hasBothDays && yesterdayPoint.manDay > 0
+    ? calculateTrendPercent(todayPoint.manDay, yesterdayPoint.manDay) : null;
 
-  const monthlyManDayRunRate = dayOfMonth > 0
-    ? Math.round((thisMonthManDay / dayOfMonth) * daysInMonth * 10) / 10
-    : 0;
-
-  const reportCountTrendPercent = calculateTrendPercent(todayPoint.reportCount, yesterdayPoint.reportCount);
-  const manDayTrendPercent = calculateTrendPercent(todayPoint.manDay, yesterdayPoint.manDay);
-  const activeSitePenalty = activeSiteCount > 0 && todayPoint.siteCount === 0 ? 15 : 0;
-  const supportPenalty = Math.min(20, Math.abs(supportBalance) * 0.5);
-  const momentumBonus = Math.max(-10, Math.min(10, manDayTrendPercent / 10));
-  const healthScore = clampScore(reportCoverageRate * 0.7 + 25 + momentumBonus - activeSitePenalty - supportPenalty);
-
+  const expected = coverage ? getExpectedReportSiteCount(coverage) : 0;
+  const canScore = coverage && isReportCoverageFinal(coverage) && expected > 0 && coverage.coverageRate !== null;
+  // Only an observed submission failure affects the score. Volume changes and
+  // support transfers are contextual signals, not evidence of an operational failure.
+  const healthScore = canScore ? Math.max(0, Math.min(100, Math.floor(coverage.reportedSiteCount / expected * 100))) : null;
+  const healthLabel: DashboardHealthLabel = healthScore !== null
+    ? healthScore < 60 ? 'critical' : healthScore < 80 ? 'watch' : 'stable'
+    : coverage?.status === 'collecting' ? 'collecting'
+      : coverage?.status === 'no-work' ? 'no-work'
+        : coverage?.status === 'unavailable' ? 'unavailable'
+          : coverage?.status === 'monitoring' ? 'monitoring' : 'unknown';
+  const healthDeductions: DashboardHealthDeduction[] = healthScore !== null && healthScore < 100 ? [{
+    label: '마감 후 일보 미작성',
+    points: 100 - healthScore,
+    detail: `제출 대상 ${expected}개 중 ${coverage!.missingSiteCount}개 현장의 일보가 없습니다.`,
+    route: `/reports/daily?tab=list-v2&date=${encodeURIComponent(date)}`,
+  }] : [];
   return {
-    reportCountTrendPercent,
-    manDayTrendPercent,
-    monthlyManDayRunRate,
-    healthScore,
-    healthLabel: getHealthLabel(healthScore),
+    reportCountTrendPercent, manDayTrendPercent,
+    monthlyManDayRunRate: Math.round(thisMonthManDay / calendarDate.getUTCDate() * daysInMonth * 10) / 10,
+    healthScore, healthLabel, healthDeductions,
+    healthReason: coverage?.detail || '제출 대상과 마감 상태를 확인한 뒤 평가합니다.',
   };
 };

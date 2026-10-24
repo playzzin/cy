@@ -5,6 +5,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPenToSquare, faTrash, faImages, faUsers, faUser, faDownload } from '@fortawesome/free-solid-svg-icons';
 import { storage } from '../../config/firebase';
 import { ref, getDownloadURL } from 'firebase/storage';
+import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 
 interface Column {
     id: string;
@@ -85,8 +86,10 @@ const WorkerTable: React.FC<WorkerTableProps> = ({
             const safeIdNumber = worker.idNumber || '미등록';
             const filename = `${worker.name}_${safeIdNumber}.${ext}`;
             triggerDownloadFromUrl(url, filename);
+            void recordIdentityDocumentLog({ action: 'download_image', status: 'success', workerId: worker.id, personNames: [worker.name], fileCount: 1 });
         } catch (error) {
             console.error('Download failed', error);
+            void recordIdentityDocumentLog({ action: 'download_image', status: 'failure', workerId: worker.id, personNames: [worker.name], fileCount: 1, reason: 'processing_failed' });
             alert(getStorageErrorMessage(error));
         }
     };

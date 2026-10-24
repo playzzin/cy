@@ -14,9 +14,11 @@ import {
     type DocumentData,
     type Unsubscribe
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, functions } from '../config/firebase';
 import type {
     Notice,
+    NoticeBoardAccess,
     NoticeAuthor,
     NoticeCategory,
     NoticePriority,
@@ -91,6 +93,10 @@ const normalizeNotice = (id: string, data: DocumentData): Notice => {
         body: String(data.body || ''),
         category: normalizeText(data.category) || DEFAULT_CATEGORY,
         targetPositions: uniqueStrings(data.targetPositions || []),
+        audience: data.audience || 'positions',
+        teamId: data.teamId || null,
+        teamName: data.teamName || null,
+        canManage: data.canManage === true,
         priority: normalizePriority(data.priority),
         status: normalizeStatus(data.status),
         pinned: Boolean(data.pinned),
@@ -99,7 +105,9 @@ const normalizeNotice = (id: string, data: DocumentData): Notice => {
         createdAt: asTimestamp(data.createdAt, now),
         updatedAt: asTimestamp(data.updatedAt, now),
         publishedAt: asOptionalTimestamp(data.publishedAt),
-        expiresAt: asOptionalTimestamp(data.expiresAt)
+        expiresAt: asOptionalTimestamp(data.expiresAt),
+        requiresConfirmation: data.requiresConfirmation === true,
+        confirmationDueAt: asOptionalTimestamp(data.confirmationDueAt)
     };
 };
 
@@ -139,6 +147,8 @@ const isExpired = (notice: Notice): boolean =>
     Boolean(notice.expiresAt && notice.expiresAt.toMillis() < Date.now());
 
 const prepareInput = (input: UpsertNoticeInput) => ({
+    audience: input.audience || 'positions',
+    teamId: input.audience === 'team' ? input.teamId || null : null,
     title: input.title.trim(),
     body: input.body.trim(),
     category: input.category.trim() || DEFAULT_CATEGORY,
@@ -179,18 +189,36 @@ export const noticeService = {
 
     subscribeNotices: (
         callback: (notices: Notice[]) => void,
-        onError?: (error: Error) => void
+        onError?: (error: Error) => void,
+        onAccess?: (access: NoticeBoardAccess) => void
     ): Unsubscribe => {
-        return onSnapshot(
-            collection(db, COLLECTION_NAME),
-            (snapshot) => {
-                callback(sortNotices(snapshot.docs.map((docSnap) => normalizeNotice(docSnap.id, docSnap.data()))));
-            },
-            (error) => {
-                console.error('[noticeService] subscription failed:', error);
-                onError?.(error);
+        let cancelled = false;
+        let pending = false;
+        const refresh = async () => {
+            if (cancelled || pending) return;
+            pending = true;
+            try {
+                await auth.authStateReady();
+                if (cancelled) return;
+                const account = auth.currentUser;
+                const response = await httpsCallable<void, { notices: DocumentData[]; access: NoticeBoardAccess }>(functions, 'getNoticeBoard')();
+                if (cancelled || auth.currentUser !== account) return;
+                onAccess?.(response.data.access);
+                callback(sortNotices(response.data.notices.map(item => normalizeNotice(item.id, item))));
+            } catch (error) {
+                if (!cancelled) {
+                    callback([]);
+                    onAccess?.({ isManager: false, isTeamLeader: false, teams: [] });
+                    onError?.(error instanceof Error ? error : new Error('공지 조회 실패'));
+                }
+            } finally {
+                pending = false;
             }
-        );
+        };
+        void refresh();
+        const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void refresh(); }, 30000);
+        window.addEventListener('focus', refresh);
+        return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('focus', refresh); };
     },
 
     subscribeCategories: (
@@ -301,13 +329,14 @@ export const noticeService = {
 
     deleteNotice: async (noticeId: string): Promise<void> => {
         if (!noticeId) return;
-        await deleteDoc(doc(db, COLLECTION_NAME, noticeId));
+        await httpsCallable(functions, 'deleteNotice')({ noticeId });
     },
 
     isAllPositionsNotice,
 
     isNoticeVisibleToPositions: (notice: Notice, positions: string[], isAdmin = false): boolean => {
         if (isAdmin) return true;
+        if (notice.status !== 'published') return false;
         if (isExpired(notice)) return false;
         if (isAllPositionsNotice(notice.targetPositions)) return true;
 

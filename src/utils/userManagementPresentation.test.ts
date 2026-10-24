@@ -13,10 +13,10 @@ const staff = [{ id: 'office-1', name: '예시 직원', role: '사무직', depar
 const company = [{ id: 'company-1', legacyId: 'legacy-company', name: '예시 회사', type: '협력사' }] as Company[];
 
 it('직책 이름이 아닌 설정된 권한을 적용하고 중복 추가 직책을 제거한다', () => {
-    const extras = ['사장', '지원담당', '지원담당'];
-    expect(selectPositionAccess({ name: '사장', systemRole: UserRole.GENERAL } as Position, extras))
-        .toEqual({ position: '사장', role: 'user', additionalPositions: ['지원담당'] });
-    expect(extras).toEqual(['사장', '지원담당', '지원담당']);
+    const extras = ['CEO', '지원담당', '지원담당'];
+    expect(selectPositionAccess({ name: 'CEO', systemRole: UserRole.GENERAL } as Position, extras))
+        .toEqual({ position: 'CEO', role: 'user', additionalPositions: ['지원담당'] });
+    expect(extras).toEqual(['CEO', '지원담당', '지원담당']);
     expect(selectPositionAccess({ name: '총괄', systemRole: UserRole.MANAGER } as Position, []).role).toBe('manager');
 });
 

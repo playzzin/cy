@@ -111,6 +111,10 @@ export const freelancerFirestoreService = {
         //Note: This expects freelancerId to be the new random ID from Firestore
 
         for (const row of modifiedData) {
+            const reportingTeam = {
+                teamId: String(row.teamId || ''),
+                teamName: String(row.teamName || ''),
+            };
             const yearlyInfo = {
                 performanceBonus: Number(row.performanceBonus || 0),
                 reportingBalance: Number(row.reportingBalance || 0),
@@ -141,6 +145,7 @@ export const freelancerFirestoreService = {
                 if (paymentId) {
                     const paymentRef = doc(db, PAYMENTS_COLLECTION, paymentId);
                     batch.update(paymentRef, {
+                        ...reportingTeam,
                         amount,
                         isManualTaxOverride,
                         updatedAt: serverTimestamp(),
@@ -149,6 +154,7 @@ export const freelancerFirestoreService = {
                     const newPaymentRef = doc(collection(db, PAYMENTS_COLLECTION));
                     batch.set(newPaymentRef, {
                         freelancerId: row.id,
+                        ...reportingTeam,
                         year,
                         month: m,
                         amount,
@@ -166,6 +172,7 @@ export const freelancerFirestoreService = {
             if (m12Id) {
                 const m12Ref = doc(db, PAYMENTS_COLLECTION, m12Id);
                 batch.update(m12Ref, {
+                    ...reportingTeam,
                     ...yearlyInfo,
                     updatedAt: serverTimestamp(),
                 });
@@ -173,6 +180,7 @@ export const freelancerFirestoreService = {
                 const newM12Ref = doc(collection(db, PAYMENTS_COLLECTION));
                 batch.set(newM12Ref, {
                     freelancerId: row.id,
+                    ...reportingTeam,
                     year,
                     month: 12,
                     amount: 0,

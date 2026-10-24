@@ -13,15 +13,6 @@ export interface FileInfo {
 export const projectFiles: FileInfo[] = [
     // Pages - Report
     {
-        id: 'daily-report-list',
-        name: 'DailyReportList.tsx',
-        path: 'src/pages/report/DailyReportList.tsx',
-        category: 'page',
-        description: '일보 목록 조회 및 필터링',
-        tags: ['일보', '리스트', '필터'],
-        lines: 484
-    },
-    {
         id: 'daily-report-grid',
         name: 'DailyReportGridInput.tsx',
         path: 'src/pages/report/DailyReportGridInput.tsx',
@@ -114,17 +105,6 @@ export const projectFiles: FileInfo[] = [
         description: 'Firebase 회사 데이터 관리',
         tags: ['회사', 'Firebase'],
         lines: 200
-    },
-
-    // Components - Layout
-    {
-        id: 'bottom-panel',
-        name: 'BottomPanel.tsx',
-        path: 'src/components/layout/BottomPanel.tsx',
-        category: 'component',
-        description: '하단 슬라이드 패널 (빠른등록)',
-        tags: ['레이아웃', '패널'],
-        lines: 180
     },
 
     // Hooks

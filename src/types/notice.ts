@@ -2,6 +2,12 @@ import type { Timestamp } from 'firebase/firestore';
 
 export type NoticePriority = 'normal' | 'important' | 'urgent';
 export type NoticeStatus = 'draft' | 'published' | 'archived';
+export type NoticeAudience = 'all' | 'teamLeaders' | 'team' | 'positions';
+export interface NoticeBoardAccess {
+    isManager: boolean;
+    isTeamLeader: boolean;
+    teams: Array<{ id: string; name: string }>;
+}
 
 export interface NoticeAuthor {
     uid: string;
@@ -24,6 +30,10 @@ export interface Notice {
     body: string;
     category: string;
     targetPositions: string[];
+    audience?: NoticeAudience;
+    teamId?: string | null;
+    teamName?: string | null;
+    canManage?: boolean;
     priority: NoticePriority;
     status: NoticeStatus;
     pinned: boolean;
@@ -33,9 +43,13 @@ export interface Notice {
     updatedAt: Timestamp;
     publishedAt?: Timestamp | null;
     expiresAt?: Timestamp | null;
+    requiresConfirmation?: boolean;
+    confirmationDueAt?: Timestamp | null;
 }
 
 export interface UpsertNoticeInput {
+    audience?: NoticeAudience;
+    teamId?: string | null;
     title: string;
     body: string;
     category: string;
@@ -44,6 +58,8 @@ export interface UpsertNoticeInput {
     status?: NoticeStatus;
     pinned: boolean;
     expiresAt?: Timestamp | null;
+    requiresConfirmation?: boolean;
+    confirmationDueAt?: Timestamp | null;
 }
 
 export interface UpsertNoticeCategoryInput {

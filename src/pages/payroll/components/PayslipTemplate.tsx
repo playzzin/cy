@@ -3,7 +3,7 @@ import { formatPayrollPaymentDate } from '../utils/paymentDate';
 import {
     PAYSLIP_ISSUE_RULE_VERSION,
     buildPayslipPayComponents,
-    maskAccountNumber,
+    hasPayslipTaxRates,
     maskResidentId,
 } from '../utils/payslipIssue';
 
@@ -235,8 +235,8 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
 
     const totalWorkManDay = workEntries.reduce((sum: number, entry: WorkerWorkEntry) => sum + entry.manDay, 0);
 
-    const formatRatePercent = (rate: number, maxFractionDigits: number = 3): string => {
-        if (!Number.isFinite(rate)) return '-';
+    const formatRatePercent = (rate: number | undefined, maxFractionDigits: number = 3): string => {
+        if (typeof rate !== 'number' || !Number.isFinite(rate)) return '세율 없음';
         const percent = rate * 100;
         const text = percent.toLocaleString('ko-KR', {
             minimumFractionDigits: 0,
@@ -252,12 +252,12 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
         const prefixed = label.match(/^\[(\d+(?:\.\d+)?)%\]/);
         if (prefixed) return `${prefixed[1]}%`;
 
-        if (!snapshot) return '-';
+        if (!snapshot) return '세율 없음';
 
         if (label.startsWith('[4대보험]')) {
             if (label.includes('국민연금')) return formatRatePercent(snapshot.pensionRate, 2);
             if (label.includes('건강보험')) return formatRatePercent(snapshot.healthRate, 3);
-            if (label.includes('장기요양')) return formatRatePercent(snapshot.careRateOfHealth ?? 0, 2);
+            if (label.includes('장기요양')) return formatRatePercent(snapshot.careRateOfHealth, 2);
             if (label.includes('고용보험')) return formatRatePercent(snapshot.employmentRate, 3);
         }
         if (label.startsWith('[원천세]') || label.startsWith('[세금]')) {
@@ -266,13 +266,14 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
             if (label.includes('근로소득세') || label.includes('갑근세')) return incomeRate;
             if (label.includes('지방소득세') || label.includes('지방세')) return residentRate;
         }
-        if (label.includes('사업소득세')) return formatRatePercent(snapshot.businessIncomeTaxRate ?? 0, 1);
-        if (label.includes('소득세')) return formatRatePercent(snapshot.businessResidentTaxRate ?? 0, 1);
+        if (label.includes('사업소득세')) return formatRatePercent(snapshot.businessIncomeTaxRate, 1);
+        if (label.includes('소득세')) return formatRatePercent(snapshot.businessResidentTaxRate, 1);
 
         return '-';
     };
 
     const resolveWithholdingDetailText = (snapshot?: TaxRateSnapshot): string => {
+        if (!hasPayslipTaxRates(snapshot)) return '세율 정보가 없습니다.';
         const deduction = Math.max(0, Math.floor(Number(snapshot?.withholdingBaseDeduction ?? 150000))).toLocaleString('ko-KR');
         const incomeRate = formatRatePercent(Number(snapshot?.incomeTaxRate ?? 0.06), 2);
         const taxCredit = formatRatePercent(Number(snapshot?.withholdingIncomeBaseMultiplier ?? 0.55), 2);
@@ -283,7 +284,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
     const paymentDateText = formatPayrollPaymentDate(data.month || month);
     const payComponents = buildPayslipPayComponents(data);
     const maskedWorkerIdentifier = maskResidentId(data.idNumber || data.workerId);
-    const maskedAccountNumber = maskAccountNumber(data.accountNumber);
+    const accountNumberText = data.accountNumber?.trim() || '계좌번호가 없습니다.';
 
     return (
         <div ref={ref} className="payslip-template-card bg-white border-2 border-slate-200 rounded-xl shadow-sm w-full max-w-none mx-auto text-slate-900 mb-8 page-break-inside-avoid">
@@ -323,8 +324,11 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                     <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">입금은행</div>
                     <div className="border-r border-b border-slate-200 p-2 text-center">{data.bankName || '-'}</div>
                     <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">계좌번호</div>
-                    <div className="border-b border-slate-200 p-2 text-center font-mono">{maskedAccountNumber}</div>
+                    <div className="border-b border-slate-200 p-2 text-center font-mono break-all">{accountNumberText}</div>
                 </div>
+                {!hasPayslipTaxRates(data.taxRateSnapshot) && (
+                    <div className="px-3 py-2 text-xs text-amber-800 bg-amber-50">세율 정보가 없습니다.</div>
+                )}
             </section>
 
             {/* Summary Grid */}

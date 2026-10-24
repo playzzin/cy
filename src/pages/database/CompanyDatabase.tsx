@@ -343,7 +343,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
             {!hideHeader && (
                 <div className="bg-white border-b border-slate-200 px-4 pt-2 flex-shrink-0">
                     <div className="flex justify-between items-end">
-                        <div className="flex space-x-2">
+                        <div className="flex flex-wrap gap-2">
                             <TabButton id="all" label="전체" icon={faList} />
                             <TabButton id="company" label="시공" icon={faBuilding} />
                             <TabButton id="partner" label="협력" icon={faHandshake} />
@@ -370,7 +370,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                     </h2>
                 </div>
 
-                <div className="flex items-center gap-2 w-full xl:w-auto justify-end">
+                <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto justify-end">
                     <div className="relative">
                         <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input
@@ -444,7 +444,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
             <div className="flex-1 overflow-auto p-4 md:p-6 bg-slate-50">
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className={`min-h-[500px] ${isStickyHeader ? 'overflow-auto h-[calc(100vh-300px)]' : 'overflow-x-auto'}`}>
-                        <table className="w-full text-sm text-left text-slate-500 border-collapse">
+                        <table className="min-w-[960px] w-full text-sm text-left text-slate-500 border-collapse">
                             <thead className={`text-xs uppercase bg-slate-900 text-white ${isStickyHeader ? 'sticky top-0 z-10' : ''}`}>
                                 <tr>
                                     <th className="px-6 py-3 w-4 border border-slate-700">

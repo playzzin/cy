@@ -86,6 +86,10 @@ export const TeamSettlementDeductionItemSchema = z.object({
   origin: TeamSettlementDeductionOriginSchema,
   category: z.string().min(1),
   amount: NonNegativeNumberSchema,
+  officeExpenseRates: z.object({
+    contract: NonNegativeNumberSchema,
+    direct: NonNegativeNumberSchema
+  }).optional(),
   memo: z.string().optional()
 });
 export type TeamSettlementDeductionItem = z.infer<typeof TeamSettlementDeductionItemSchema>;

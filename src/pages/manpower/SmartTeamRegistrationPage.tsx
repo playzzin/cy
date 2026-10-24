@@ -1,142 +1,66 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPaste, faSave, faCheckCircle, faExclamationTriangle, faSpinner, faArrowRight } from '@fortawesome/free-solid-svg-icons';
 import { teamService } from '../../services/teamService';
 import Swal from 'sweetalert2';
-
-// Field Mapping Configuration
-const FIELD_MAPPING: { [key: string]: string[] } = {
-    name: ['팀명', '팀이름', '팀'],
-    type: ['팀구분', '유형', '구분', '성격', '팀성격'],
-    leaderName: ['팀장', '팀장명', '대표'],
-    companyName: ['소속회사', '회사명', '회사'],
-    parentTeamName: ['상위팀', '원청팀']
-};
-
-const FIELD_LABELS: { [key: string]: string } = {
-    name: '팀명',
-    type: '팀구분',
-    leaderName: '팀장명',
-    companyName: '소속회사',
-    parentTeamName: '상위팀'
-};
+import { companyService } from '../../services/companyService';
+import { manpowerService } from '../../services/manpowerService';
+import { parseTeamImport, resolveTeamImportRow, TEAM_IMPORT_LABELS as FIELD_LABELS, TeamImportField, TeamImportRow } from '../../features/team-registration/teamImport';
 
 const SmartTeamRegistrationPage: React.FC = () => {
     const [pasteData, setPasteData] = useState('');
-    const [parsedData, setParsedData] = useState<any[]>([]);
+    const [parsedData, setParsedData] = useState<TeamImportRow[]>([]);
     const [headers, setHeaders] = useState<string[]>([]);
-    const [mappedFields, setMappedFields] = useState<{ [index: number]: string }>({});
+    const [mappedFields, setMappedFields] = useState<Partial<Record<number, TeamImportField>>>({});
     const [loading, setLoading] = useState(false);
+    const saving = useRef(false);
 
     const handlePaste = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const text = e.target.value;
+        const parsed = parseTeamImport(text);
         setPasteData(text);
-        parseData(text);
-    };
-
-    const parseData = (text: string) => {
-        const lines = text.trim().split('\n');
-        if (lines.length === 0) return;
-
-        // Detect delimiter based on the first line
-        const firstLine = lines[0];
-        let delimiter = '\t';
-        if (!firstLine.includes('\t') && firstLine.match(/\s{2,}/)) {
-            delimiter = '   '; // Use a regex or special marker for multiple spaces
-        }
-
-        const rows = lines.map(row => {
-            if (delimiter === '   ') {
-                return row.split(/\s{2,}/);
-            }
-            return row.split(delimiter);
-        });
-        if (rows.length === 0) return;
-
-        // Assume first row is header
-        const headerRow = rows[0];
-        setHeaders(headerRow);
-
-        // Auto-map headers
-        const newMapping: { [index: number]: string } = {};
-        headerRow.forEach((header, index) => {
-            const cleanHeader = header.trim().replace(/\s+/g, '');
-            for (const [field, synonyms] of Object.entries(FIELD_MAPPING)) {
-                if (synonyms.some(s => cleanHeader.includes(s))) {
-                    newMapping[index] = field;
-                    break;
-                }
-            }
-        });
-        setMappedFields(newMapping);
-
-        // Parse data rows
-        const dataRows = rows.slice(1).map((row, _index) => {
-            const rowData: any = { _valid: true, _errors: [] };
-
-            // Map values to fields
-            Object.entries(newMapping).forEach(([colIndex, field]) => {
-                const val = row[parseInt(colIndex)]?.trim() || '';
-                rowData[field] = val;
-            });
-
-            // Validation
-            if (!rowData.name) {
-                rowData._valid = false;
-                rowData._errors.push('팀명 누락');
-            }
-
-            return rowData;
-        });
-
-        setParsedData(dataRows);
+        setHeaders(parsed.headers);
+        setMappedFields(parsed.mappedFields);
+        setParsedData(parsed.rows);
     };
 
     const handleSave = async () => {
-        const validRows = parsedData.filter(r => r._valid);
-        if (validRows.length === 0) {
-            Swal.fire('Error', '저장할 유효한 데이터가 없습니다.', 'error');
-            return;
-        }
-
+        if (saving.current || !parsedData.length || parsedData.some(row => !row._valid)) return;
+        saving.current = true;
         setLoading(true);
-        let successCount = 0;
-        let failCount = 0;
-
         try {
-            for (const row of validRows) {
-                try {
-                    await teamService.addTeam({
-                        name: row.name,
-                        type: row.type || '시공팀',
-                        leaderId: '', // ID lookup not implemented yet, saving name only
-                        leaderName: row.leaderName || '',
-                        companyName: row.companyName || '',
-                        parentTeamName: row.parentTeamName || ''
-                    } as any);
-                    successCount++;
-                } catch (error) {
-                    console.error("Failed to add team:", row.name, error);
-                    failCount++;
-                }
-            }
-
-            Swal.fire({
-                title: '완료',
-                text: `성공: ${successCount}건, 실패: ${failCount}건`,
-                icon: failCount > 0 ? 'warning' : 'success'
+            const [teams, workers, companies] = await Promise.all([
+                teamService.getTeams(),
+                parsedData.some(row => row.leaderName) ? manpowerService.getWorkers() : Promise.resolve([]),
+                parsedData.some(row => row.companyName) ? companyService.getCompanies() : Promise.resolve([]),
+            ]);
+            const references = { teams, workers, companies };
+            const prepared = parsedData.map(row => {
+                try { return { row, payload: resolveTeamImportRow(row, references) }; }
+                catch (error) { return { row: { ...row, _valid: false, _errors: [error instanceof Error ? error.message : '연결 정보를 확인해 주세요.'] }, payload: null }; }
             });
-
-            if (successCount > 0) {
-                setPasteData('');
-                setParsedData([]);
-                setHeaders([]);
+            if (prepared.some(item => !item.payload)) {
+                setParsedData(prepared.map(item => item.row));
+                return;
             }
-
-        } catch (error) {
-            console.error("Batch save error:", error);
-            Swal.fire('Error', '저장 중 오류가 발생했습니다.', 'error');
+            const failed: TeamImportRow[] = [];
+            for (const { row, payload } of prepared) {
+                try { await teamService.addTeam(payload!); }
+                catch { failed.push({ ...row, _errors: ['저장하지 못했습니다. 연결 상태를 확인하고 다시 시도해 주세요.'] }); }
+            }
+            setParsedData(failed);
+            setPasteData(failed.length ? [headers.join('\t'), ...failed.map(row => headers.map((_, index) => {
+                const field = mappedFields[index];
+                return field ? row[field] || '' : '';
+            }).join('\t'))].join('\n') : '');
+            if (!failed.length) setHeaders([]);
+            await Swal.fire({ title: failed.length ? '일부 등록 실패' : '등록 완료',
+                text: '성공: ' + (prepared.length - failed.length) + '건, 실패: ' + failed.length + '건. 실패한 행은 화면에 남겨두었습니다.',
+                icon: failed.length ? 'warning' : 'success' });
+        } catch {
+            await Swal.fire('조회 실패', '기존 팀과 연결 정보를 불러오지 못했습니다. 등록하지 않았으니 잠시 후 다시 시도해 주세요.', 'error');
         } finally {
+            saving.current = false;
             setLoading(false);
         }
     };
@@ -151,7 +75,7 @@ const SmartTeamRegistrationPage: React.FC = () => {
                     </div>
                     <button
                         onClick={handleSave}
-                        disabled={loading || parsedData.length === 0}
+                        disabled={loading || parsedData.length === 0 || parsedData.some(row => !row._valid)}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-bold shadow-sm flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {loading ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faSave} />}
@@ -168,6 +92,10 @@ const SmartTeamRegistrationPage: React.FC = () => {
                     </ul>
                 </div>
 
+                {parsedData.some(row => row._errors.length) && <div role="alert" className="mb-4 rounded-lg bg-red-50 p-4 text-sm text-red-700">
+                    {parsedData.map((row, index) => row._errors.length ? <p key={index}>{index + 1}행: {row._errors.join(' ')}</p> : null)}
+                    <p>입력 내용을 수정한 후 다시 등록해 주세요.</p>
+                </div>}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
                     {/* Input Area */}
                     <div className="lg:col-span-1 flex flex-col gap-2">
@@ -176,6 +104,8 @@ const SmartTeamRegistrationPage: React.FC = () => {
                             데이터 붙여넣기
                         </label>
                         <textarea
+                            aria-label="팀 등록 데이터"
+                            disabled={loading}
                             className="w-full h-full p-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none font-mono text-sm"
                             placeholder={`엑셀에서 헤더를 포함하여 복사 후 붙여넣으세요.\n\n[예시]\n팀명\t팀구분\t팀장명\nA팀\t시공팀\t김반장`}
                             value={pasteData}
@@ -202,7 +132,7 @@ const SmartTeamRegistrationPage: React.FC = () => {
                                                         <span className="font-bold text-slate-700">{header}</span>
                                                         {mappedFields[idx] ? (
                                                             <span className="text-blue-600 text-xs bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
-                                                                → {FIELD_LABELS[mappedFields[idx]]}
+                                                                → {FIELD_LABELS[mappedFields[idx]!]}
                                                             </span>
                                                         ) : (
                                                             <span className="text-slate-400 text-xs">무시됨</span>

@@ -9,6 +9,8 @@ const FIXED_REGIONS = [
   '[data-preserve-font-size]',
 ].join(',');
 const GUARD = `:where(:not(html,body,svg,svg *,i,.svg-inline--fa,.svg-inline--fa *,${FIXED_REGIONS},:is(${FIXED_REGIONS}) *,:has(:is(${FIXED_REGIONS}))))`;
+// The guard is identical for every rule. Clone its AST instead of reparsing it.
+const GUARD_NODE = selectorParser().astSync(GUARD).first.first;
 
 function readableSelector(selector) {
   const parsed = selectorParser().astSync(selector);
@@ -23,7 +25,7 @@ function readableSelector(selector) {
     if (hasPseudoElement) {
       branch.remove();
     } else {
-      branch.append(selectorParser().astSync(GUARD).first.first.clone());
+      branch.append(GUARD_NODE.clone());
     }
   });
   return parsed.toString();

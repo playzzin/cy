@@ -1,0 +1,51 @@
+import React from 'react';
+import '@testing-library/jest-dom';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import GeminiUsageLogPage from './GeminiUsageLogPage';
+import { geminiUsageLogService } from '../../services/geminiUsageLogService';
+import { geminiEvent, estimateGeminiCost } from '../../utils/geminiUsage';
+jest.mock('../../services/geminiUsageLogService', () => ({ geminiUsageLogService: { list: jest.fn() }, GEMINI_USAGE_CHANGED: 'test-usage' }));
+jest.mock('../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
+const makeLog = (id: string, unknown = false) => {
+  const event = geminiEvent('gemini-3.8-flash', 'excel-conversion', { usageMetadata: unknown ? {} : { promptTokenCount: 1000, candidatesTokenCount: 100, thoughtsTokenCount: 200 } }, 100);
+  return { ...event, ...estimateGeminiCost(event.model, event.usage), id, createdAt: new Date().toISOString(), actorName: `사용자 ${id}`, actorUid: id, source: 'server', path: '' };
+};
+beforeEach(() => { (geminiUsageLogService.list as jest.Mock).mockReset().mockResolvedValue({ logs: [makeLog('a'), makeLog('b', true)], nextCursor: null }); });
+it('waits for explicit date submission and deduplicates StrictMode reads', async () => {
+  render(<React.StrictMode><GeminiUsageLogPage embedded /></React.StrictMode>);
+  await screen.findByText('사용자 a');
+  expect(geminiUsageLogService.list).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByLabelText('조회 시작일'), { target: { value: '2026-10-01' } });
+  fireEvent.change(screen.getByLabelText('조회 종료일'), { target: { value: '2026-10-31' } });
+  expect(geminiUsageLogService.list).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: '조회' }));
+  await waitFor(() => expect(geminiUsageLogService.list).toHaveBeenLastCalledWith('2026-10-01', '2026-10-31', undefined));
+  expect(geminiUsageLogService.list).toHaveBeenCalledTimes(2);
+});
+it('shows unknown cost separately, includes thinking tokens, and filters by actor', async () => {
+  render(<GeminiUsageLogPage />);
+  await screen.findByText('사용자 a');
+  expect(within(screen.getByRole('group', { name: '예상 비용 (USD)' })).getByText('비용 미확인 1건 제외')).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '출력 사용량' })).toHaveTextContent('300');
+  fireEvent.change(screen.getByLabelText('사용 기록 검색'), { target: { value: '사용자 a' } });
+  expect(screen.queryByText('사용자 b')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('달러당 원화 환율'), { target: { value: '1400' } });
+  expect(screen.getByText(/입력 환율 1,400원\/USD/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'a 상세' }));
+  expect(screen.getByText(/사용자 ID: a/)).toBeInTheDocument();
+});
+it('appends earlier pages once and does not show permission failures as an empty ledger', async () => {
+  const list = geminiUsageLogService.list as jest.Mock;
+  list.mockResolvedValueOnce({ logs: [makeLog('a')], nextCursor: { id: 'a', seconds: 1, nanoseconds: 0 } });
+  render(<GeminiUsageLogPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '이전 기록 더 보기' }));
+  await screen.findByText('사용자 b');
+  expect(screen.getAllByText('사용자 a')).toHaveLength(1);
+  list.mockRejectedValueOnce(new Error('permission denied'));
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+  await screen.findByRole('alert');
+  expect(screen.queryByText('조건에 맞는 사용 기록이 없습니다.')).not.toBeInTheDocument();
+  list.mockResolvedValue({ logs: [], nextCursor: null });
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+  await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+});

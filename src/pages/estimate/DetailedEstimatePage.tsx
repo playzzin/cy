@@ -914,7 +914,7 @@ const DetailedEstimateManagePage: React.FC = () => {
         <div className="flex h-screen flex-col overflow-hidden bg-slate-50 font-sans text-slate-900">
             <style>{PRINT_STYLES}</style>
 
-            <header className="z-30 flex flex-none items-center justify-between border-b bg-white px-6 py-4 shadow-sm print:hidden">
+            <header className="z-30 flex flex-wrap gap-3 flex-none items-center justify-between border-b bg-white px-6 py-4 shadow-sm print:hidden">
                 <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-700 shadow-lg">
                         <FontAwesomeIcon icon={faCalculator} className="text-lg text-white" />
@@ -929,7 +929,7 @@ const DetailedEstimateManagePage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <button
                         onClick={resetPage}
                         className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-2.5 text-[12px] font-black text-slate-600 transition-all hover:border-indigo-500 hover:text-indigo-600 hover:shadow-md"
