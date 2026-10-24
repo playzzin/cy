@@ -3,8 +3,9 @@ import type { FreelancerPayment } from '../../src/types/freelancer';
 import type { MonthlyPayrollSettlement } from '../../src/services/monthlyPayrollSettlementService';
 
 const teams = [
-    { id: 'a', name: '검증 A팀', companyId: 'company', companyName: '청연 검증' },
-    { id: 'b', name: '검증 B팀', companyId: 'company', companyName: '청연 검증' },
+    { id: 'a', name: '검증 A팀', color: '#000000', companyId: 'company', companyName: '청연 검증' },
+    { id: 'b', name: '검증 B팀', color: '#7c3aed', companyId: 'company', companyName: '청연 검증' },
+    { id: 'c', name: '검증 C팀', color: '#0f766e', companyId: 'company', companyName: '청연 검증' },
 ];
 const master = { teams, companies: [{ id: 'company', name: '청연 검증' }], loading: false };
 export const useMasterData = () => master;
@@ -19,11 +20,14 @@ export const freelancerService = {
     async getFreelancerYearlyData(year: number) {
         if (new URLSearchParams(window.location.search).has('error')) throw new Error('9월 수기 신고 내역에 팀 정보가 없어 귀속을 확인해야 합니다.');
         return { freelancers: buildFreelancerYearlyRows(year, [
-            { id: 'moved', name: '검증 이동자', teamId: 'a', status: 'active' },
+            { id: 'moved', name: '검증 이동자', teamId: 'b', status: 'active' },
             { id: 'shared', name: '검증 복수팀', teamId: 'b', status: 'active' },
+            { id: 'purple', name: '검증 보라팀이동', teamId: 'c', status: 'active' },
+            { id: 'stable', name: '검증 이동없음', teamId: 'c', status: 'active' },
         ], [], teams, [
             saved(year, 8, 'a', 1000000, 'moved', '검증 이동자'), saved(year, 9, 'b', 2000000, 'moved', '검증 이동자'),
             saved(year, 9, 'a', 300000, 'shared', '검증 복수팀'), saved(year, 9, 'b', 400000, 'shared', '검증 복수팀'),
+            saved(year, 8, 'b', 500000, 'purple', '검증 보라팀이동'), saved(year, 10, 'c', 600000, 'purple', '검증 보라팀이동'),
         ], payments), companies: [] };
     },
     async saveYearlyPayments(year: number, rows: any[]) {
