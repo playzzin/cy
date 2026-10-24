@@ -1,3 +1,5 @@
+import type { PrimaryAccountSetting } from '../../../services/primaryAccountService';
+
 export type KBAmountType =
     | 'totalAmount'
     | 'invoiceNet'
@@ -125,3 +127,16 @@ export const summarizeKBTransferRows = (
         excludedCount,
     };
 };
+
+export const formatKBPrimaryAccountLabel = (account: PrimaryAccountSetting): string => (
+    [
+        account.sourceName,
+        account.bankName,
+        account.accountNumber,
+        account.accountHolder ? `(${account.accountHolder})` : '',
+    ].filter(Boolean).join(' · ')
+);
+
+export const getKBValidationMessages = (row: { validationErrors: KBTransferValidationError[] }): string => (
+    row.validationErrors.map(getKBValidationErrorLabel).join(', ')
+);

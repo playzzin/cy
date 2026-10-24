@@ -666,14 +666,7 @@ export type KBPreviewSnapshot = {
     criteria: KBPreviewCriteria;
 };
 
-export const formatKBPrimaryAccountLabel = (account: PrimaryAccountSetting): string => (
-    [
-        account.sourceName,
-        account.bankName,
-        account.accountNumber,
-        account.accountHolder ? `(${account.accountHolder})` : '',
-    ].filter(Boolean).join(' · ')
-);
+export { formatKBPrimaryAccountLabel } from './utils/kbTransferExport';
 
 export const DEFAULT_PAYSLIP_CONTRACTOR_NAME = '(주)청연이엔지';
 

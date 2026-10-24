@@ -198,6 +198,49 @@ it('현재 세후 미리보기의 대표계좌와 원계좌·표시문구를 같
     }
 });
 
+it('오류 계좌는 다운로드에서 제외하고 전체 선택의 대표계좌 적용·원계좌 복원을 출력에 반영한다', async () => {
+    (usePagePrimaryAccount as jest.Mock).mockReturnValue({
+        account: { bankName: '신한은행', accountNumber: '000987654321', accountHolder: '검증대표계좌' },
+    });
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue(
+        ['월급제', '일급제', '용역팀'].map((payType, index) => ({
+            id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
+            bankName: '국민은행', accountNumber: index === 1 ? '' : '000123456789', accountHolder: `검증${index}`,
+        }))
+    );
+    render(<MonthlyWageDraftPage />);
+    await ready();
+    await waitFor(() => expect(screen.getByRole('button', { name: '은행 이체' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '은행 이체' }));
+    const preview = screen.getByRole('region', { name: '국민은행용 엑셀 미리보기' });
+    const download = within(preview).getByRole('button', { name: '국민은행용 다운로드' });
+    expect(within(preview).getByText(/검증 오류로 다운로드 제외 1건/)).toBeInTheDocument();
+    await waitFor(() => expect(download).toBeEnabled());
+    fireEvent.click(download);
+    const original = (XLSX.writeFile as jest.Mock).mock.calls[0][0].Sheets['국민은행용'];
+    expect(original['!ref']).toBe('A1:E3');
+    expect(original.B2.v).toBe('000123456789');
+
+    fireEvent.click(within(preview).getByRole('checkbox', { name: '작업자 선택' }));
+    fireEvent.click(within(preview).getByRole('button', { name: '선택 → 대표계좌' }));
+    expect(within(preview).queryByText(/검증 오류로 다운로드 제외/)).not.toBeInTheDocument();
+    await waitFor(() => expect(download).toBeEnabled());
+    fireEvent.click(download);
+    const applied = (XLSX.writeFile as jest.Mock).mock.calls[1][0].Sheets['국민은행용'];
+    expect(applied['!ref']).toBe('A1:E4');
+    for (const index of [2, 3, 4]) {
+        expect(applied[`A${index}`].v).toBe('088');
+        expect(applied[`B${index}`].v).toBe('000987654321');
+        expect(applied[`C${index}`].v).toBe(1105000);
+    }
+
+    fireEvent.click(within(preview).getByRole('button', { name: '원계좌 복원' }));
+    await waitFor(() => expect(download).toBeEnabled());
+    fireEvent.click(download);
+    expect((XLSX.writeFile as jest.Mock).mock.calls[2][0].Sheets['국민은행용']).toEqual(original);
+    expect(monthlyPayrollSettlementService.saveSettlements).not.toHaveBeenCalled();
+});
+
 it('재조회와 작업자 변경 후에도 선택한 세금을 모든 급여 유형에 다시 계산한다', async () => {
     render(<MonthlyWageDraftPage />);
     await ready();
