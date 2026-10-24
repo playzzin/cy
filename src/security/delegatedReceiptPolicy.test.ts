@@ -27,5 +27,11 @@ it('서버 재무 분류에 등록하여 일반 사용자 fallback 접근을 차
   const lockedBody = rules.match(/function isLockedCollection\(collectionId\)\s*\{([\s\S]*?)\n {4}\}/)?.[1];
   expect(financeBody).toContain(`'${collection}'`);
   expect(lockedBody).toContain('isFinanceCollection(collectionId)');
-  expect(rules).toContain('allow read, write: if hasActiveUserProfile() && !isLockedCollection(collectionId);');
+  // Root and nested fallbacks must both retain the finance lock and preview guards.
+  const normalized = rules.replace(/\s+/g, ' ');
+  const guardedRead = 'allow read: if (hasActiveUserProfile() && !isLockedCollection(collectionId)) && previewReadsAllowed();';
+  const guardedWrite = 'allow write: if !isPreviewIdentity() && (hasActiveUserProfile() && !isLockedCollection(collectionId));';
+  expect(normalized.split(guardedRead)).toHaveLength(3);
+  expect(normalized.split(guardedWrite)).toHaveLength(3);
+  expect(normalized).not.toContain('allow read, write: if hasActiveUserProfile() && !isLockedCollection(collectionId);');
 });
