@@ -53,6 +53,7 @@ const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, 
   const locked = Boolean(saved && saved.phase !== 'saved');
   const state = getDepositState(claim);
   const accountLabels = getRecipientLabels(claim, directory);
+  const delegation = getDelegation(claim);
   const total = getClaimTotals(claim);
   const save = async (edit: ClaimListEdit) => {
     if (!canWrite || busy.current) return;
@@ -90,6 +91,10 @@ const WorkerAccordion = React.memo(function WorkerAccordion({ claim, directory, 
             <WorkerIdentity claim={claim} directory={directory} /><ChevronDown className={open ? 'dr-accordion-chevron-open' : ''} size={16} />
           </button>
         </div>
+        {excel && <div className="dr-worker-payment-summary" role="group" aria-label={`${claim.workerName} 계좌 구분`}>
+          <span className={`dr-payment-kind dr-payment-${delegation}`}>{delegation === 'unknown' ? '방법 미확인' : delegationLabels[delegation]}</span>
+          <span className={`dr-payment-account${state.recipient === 'personal' ? ' dr-payment-personal' : ''}`}>{state.recipient === 'unknown' ? '계좌 미확인' : recipientLabel(state.recipient, accountLabels)}</span>
+        </div>}
         <div id={paymentPanelId} className="dr-worker-payment-details" hidden={excel && !open}>
           {control('delegation')}
           {control('recipient')}
@@ -224,7 +229,7 @@ export default React.memo(function DelegatedWorkerLedger({ claims, directory, ca
     grid.scrollBy({ left: direction * ((site?.getBoundingClientRect().width ?? 300) + 10), behavior: 'smooth' });
   };
   return <div className={`dr-worker-ledger${excel ? ' dr-ledger-excel' : ''}`} role="region" aria-label="현장별 작업자 내역">
-    {excel && <div className="dr-excel-guide"><div><strong>{groups.length}개 현장<span className="dr-excel-sheet-count"> · {sheetCount}개 카드</span> · 15개씩<span className="dr-excel-layout-count"> · 한 줄에 5개씩</span></strong><span>작업자 이름을 눌러 입금방법·받는 계좌 {canWrite ? '확인 및 수정' : '확인'}</span></div>{(scrollEdges.left || scrollEdges.right) && <div className="dr-excel-scroll-actions"><span>좌우로 보기</span><button type="button" aria-label="현장 목록 왼쪽으로" disabled={!scrollEdges.left} onClick={() => scrollSites(-1)}><ArrowLeft size={16} /></button><button type="button" aria-label="현장 목록 오른쪽으로" disabled={!scrollEdges.right} onClick={() => scrollSites(1)}><ArrowRight size={16} /></button></div>}</div>}
+    {excel && <div className="dr-excel-guide"><div><strong>{groups.length}개 현장<span className="dr-excel-sheet-count"> · {sheetCount}개 카드</span> · 15개씩<span className="dr-excel-layout-count"> · 한 줄에 5개씩</span></strong><span>각 행에 입금방법·받는 계좌 표시 · 이름을 눌러 {canWrite ? '수정' : '상세 확인'}</span></div>{(scrollEdges.left || scrollEdges.right) && <div className="dr-excel-scroll-actions"><span>좌우로 보기</span><button type="button" aria-label="현장 목록 왼쪽으로" disabled={!scrollEdges.left} onClick={() => scrollSites(-1)}><ArrowLeft size={16} /></button><button type="button" aria-label="현장 목록 오른쪽으로" disabled={!scrollEdges.right} onClick={() => scrollSites(1)}><ArrowRight size={16} /></button></div>}</div>}
     <div className="dr-accordion-toolbar">{canWrite && <label className="dr-select-all"><SelectionCheckbox label="현재 목록 선택" checked={claims.length > 0 && currentSelected === claims.length} partial={currentSelected > 0 && currentSelected < claims.length} onChange={() => { setSelectionError(''); onSelect(currentSelected === Math.min(claims.length, 400) ? [] : claims.slice(0, 400).map(claim => claim.id)); }} />현재 목록 선택 {claims.length > 400 && '(앞 400건)'}</label>}<div><button onClick={() => setExpandCommand(value => ({ expanded: true, version: value.version + 1, excel }))}>현장 모두 펼치기</button><button onClick={() => setExpandCommand(value => ({ expanded: false, version: value.version + 1, excel }))}>모두 접기</button></div></div>
     {selectionError && <p className="dr-site-memo-error" role="alert">{selectionError}</p>}
     {memoError && <p className="dr-site-memo-error" role="alert">현장 메모를 불러오지 못했습니다. <button onClick={() => setRetry(value => value + 1)}>현장 메모 다시 조회</button></p>}

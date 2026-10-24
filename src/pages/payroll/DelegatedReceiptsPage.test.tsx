@@ -136,27 +136,53 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
     expect(draft).toHaveValue('검증 팀장 별도계좌');
     fireEvent.keyDown(draft, { key: 'Enter' });
     await waitFor(() => expect(information.getByRole('combobox', { name: `${base.workerName} 받는 계좌` })).toHaveTextContent('검증 팀장 별도계좌'));
+    const paymentSummary = within(screen.getByRole('group', { name: `${base.workerName} 계좌 구분` }));
+    expect(paymentSummary.getByText('직불')).toBeVisible();
+    expect(paymentSummary.getByText('검증 팀장 별도계좌')).toBeVisible();
     expect(delegatedReceiptService.updateListField).toHaveBeenNthCalledWith(1, base.id, expect.objectContaining({ change: { field: 'delegation', value: 'direct' } }));
     expect(delegatedReceiptService.updateListField).toHaveBeenNthCalledWith(2, base.id, expect.objectContaining({ change: { field: 'recipient', value: 'custom:검증 팀장 별도계좌' } }));
     fireEvent.click(screen.getByRole('button', { name: `${base.workerName} 새 메모` }));
     expect(screen.getByRole('dialog', { name: `${base.workerName} 메모` })).toBeVisible();
   });
 
-  it('읽기 전용에서도 작업자를 펼칠 때만 입금방법·받는 계좌를 보여준다', () => {
+  it('읽기 전용에서도 작업자를 펼치지 않고 입금방법·받는 계좌를 확인한다', () => {
     rawRender(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, delegationType: 'direct', sourceStatus: '개인통장' }]} canWrite={false} />);
     fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
     const information = within(screen.getByRole('group', { name: `${base.workerName} 입금 정보` }));
     const expand = information.getByRole('button', { name: `${base.workerName} 작업자` });
+    const summary = within(screen.getByRole('group', { name: `${base.workerName} 계좌 구분` }));
     expect(expand).toHaveAttribute('aria-expanded', 'false');
-    expect(information.getByText('직불')).not.toBeVisible();
-    expect(information.getByText('개인통장')).not.toBeVisible();
+    expect(summary.getByText('직불')).toBeVisible();
+    expect(summary.getByText('개인통장')).toBeVisible();
     fireEvent.click(expand);
-    expect(information.getByText('직불')).toBeVisible();
-    expect(information.getByText('개인통장')).toBeVisible();
+    expect(summary.getByText('직불')).toBeVisible();
+    expect(summary.getByText('개인통장')).toBeVisible();
     expect(information.queryByRole('combobox')).not.toBeInTheDocument();
     fireEvent.click(expand);
-    expect(information.getByText('직불')).not.toBeVisible();
-    expect(information.getByText('개인통장')).not.toBeVisible();
+    expect(summary.getByText('직불')).toBeVisible();
+    expect(summary.getByText('개인통장')).toBeVisible();
+  });
+
+  it.each([true, false])('계좌 구분은 최종 확인·입금방법 수정값을 우선하며 미확인은 추정하지 않는다 (수정권한 %s)', canWrite => {
+    rawRender(<DelegatedReceiptsWorkspace canWrite={canWrite} initialClaims={[
+      { ...base, id: 'personal', workerName: '개인 작업자', sourceStatus: '개인통장', delegationType: 'unknown' },
+      { ...base, id: 'delegated', workerName: '위임 작업자', sourceStatus: '이재욱 위임 입금완료' },
+      { ...base, id: 'confirmed', workerName: '수정 작업자', sourceStatus: '개인통장', delegationOverride: 'direct', confirmation: { id: 'confirmed', recipient: 'custom:확인된 별도 계좌', status: 'pending', recordedAt: base.updatedAt, note: '' } },
+      { ...base, id: 'unknown', workerName: '미확인 작업자', sourceStatus: '', delegationType: 'unknown' },
+    ]} />);
+    expect(screen.getByRole('heading', { name: '노무 입금 확인' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
+    const summary = (name: string) => within(screen.getByRole('group', { name: `${name} 계좌 구분` }));
+    expect(summary('개인 작업자').getByText('개인통장')).toBeVisible();
+    expect(summary('개인 작업자').getByText('방법 미확인')).toBeVisible();
+    expect(summary('위임 작업자').getByText('위임')).toBeVisible();
+    expect(summary('위임 작업자').getByText('이재욱 위임')).toBeVisible();
+    expect(summary('수정 작업자').getByText('직불')).toBeVisible();
+    expect(summary('수정 작업자').getByText('확인된 별도 계좌')).toBeVisible();
+    expect(summary('수정 작업자').queryByText('개인통장')).not.toBeInTheDocument();
+    expect(summary('미확인 작업자').getByText('방법 미확인')).toBeVisible();
+    expect(summary('미확인 작업자').getByText('계좌 미확인')).toBeVisible();
+    expect(within(screen.getByRole('region', { name: '현장별 작업자 내역' })).queryByRole('combobox', { name: /받는 계좌$/ })).not.toBeInTheDocument();
   });
 
   it('기본 목록을 유지하고 엑셀형에서 다섯 현장을 넘는 모든 현장과 별도 항목을 표시한다', () => {
@@ -291,7 +317,7 @@ it('메모는 버튼으로 표시하고 누르면 넓은 스티커 편집창에�
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
-describe('위임금 입금 확인 화면', () => {
+describe('노무 입금 확인 화면', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (receiptDirectoryService.load as jest.Mock).mockResolvedValue({ teams: [], sites: [] });
