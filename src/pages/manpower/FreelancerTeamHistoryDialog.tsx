@@ -35,7 +35,7 @@ export default function FreelancerTeamHistoryDialog({ name, year, teamId, histor
             {history.reports.map(report => <section key={report.teamId} className="freelancer-history-team"
                 aria-label={`${report.teamName} 신고 내역`}>
                 <div className="freelancer-history-team-heading">
-                    <h3>{report.teamName}</h3>
+                    <h3 className="freelancer-history-team-chip" style={{ background: report.background, color: report.textColor }}>{report.teamName}</h3>
                     <span>{report.teamId === teamId ? '지금 보고 있는 팀' : report.teamId === history.previousTeamId ? '이전 신고팀' : '다른 신고팀'}</span>
                 </div>
                 <dl>{report.months.map(entry => <div key={entry.month}>

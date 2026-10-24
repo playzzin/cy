@@ -32,11 +32,12 @@ it('새 팀의 이름에 이전 신고팀의 검정 배경과 흰 글씨를 표�
     expect(history.get(key('b'))?.title).toContain('8월 1,000,000원');
     expect(history.get(key('b'))?.title).toContain('9월 2,000,000원');
     expect(history.get(key('b'))?.label).toBe('이전: 검증 A팀');
-    expect(history.get(key('b'))?.reports).toEqual([
+    expect(history.get(key('b'))?.reports).toMatchObject([
         { teamId: 'b', teamName: '검증 B팀', months: [{ month: 9, amount: 2000000 }], bonus: 0, total: 2000000 },
         { teamId: 'a', teamName: '검증 A팀', months: [{ month: 8, amount: 1000000 }], bonus: 0, total: 1000000 },
     ]);
-    expect(history.get(key('a'))?.background).toBeUndefined();
+    expect(history.get(key('a'))).toMatchObject({ background: '#7c3aed', textColor: '#ffffff' });
+    expect(history.get(key('a'))?.previousTeamId).toBeUndefined();
     expect(history.get(key('a'))?.label).toBe('다른 팀 신고 있음');
 });
 
@@ -64,6 +65,38 @@ it('동월 복수 신고를 팀 이동으로 단정하지 않고 이력만 안�
     expect(history.get(key('c'))?.title).toContain('같은 월에 여러 팀');
     expect(history.get(key('b'))?.label).toBe('같은 달 여러 팀 신고');
     expect(history.get(key('b'))?.sharedMonths).toEqual([9]);
+    expect(history.get(key('c'))?.otherTeams).toEqual([
+        { teamId: 'a', teamName: '검증 A팀', background: '#000000', textColor: '#ffffff' },
+        { teamId: 'b', teamName: '검증 B팀', background: '#7c3aed', textColor: '#ffffff' },
+    ]);
+});
+
+it('다른 팀 신고가 하나면 같은 달 신고와 성과급만 있는 신고도 해당 팀 색으로 표시한다', () => {
+    const history = buildFreelancerTeamHistory([
+        { id: 'worker', teamId: 'a', m09: 100 },
+        { id: 'worker', teamId: 'b', m09: 200 },
+        { id: 'bonus', teamId: 'a', performanceBonus: 100 },
+        { id: 'bonus', teamId: 'b' },
+    ], teams, 2026);
+    expect(history.get(key('a'))).toMatchObject({ background: '#7c3aed', label: '같은 달 여러 팀 신고' });
+    expect(history.get(key('b'))).toMatchObject({ background: '#000000', label: '같은 달 여러 팀 신고' });
+    expect(history.get(key('b', 'bonus'))).toMatchObject({ background: '#000000', label: '다른 팀 신고 있음' });
+    expect(history.get(key('b', 'bonus'))?.previousTeamId).toBeUndefined();
+});
+
+it('여러 다른 신고팀의 색을 빠짐없이 제공하고 현재 팀과 0원 팀은 색상표에서 제외한다', () => {
+    const history = buildFreelancerTeamHistory([
+        { id: 'worker', teamId: 'a', m06: 100 },
+        { id: 'worker', teamId: 'b', m07: 200 },
+        { id: 'worker', teamId: 'c', m10: 300 },
+        { id: 'worker', teamId: 'empty', m10: 0 },
+    ], teams, 2026);
+    expect(history.get(key('a'))?.otherTeams.map(team => [team.teamId, team.background])).toEqual([
+        ['b', '#7c3aed'], ['c', '#fef08a'],
+    ]);
+    expect(history.get(key('a'))?.background).toBeUndefined();
+    expect(history.get(key('c'))?.otherTeams.map(team => team.teamId)).toEqual(['a', 'b']);
+    expect(history.get(key('c'))?.reports[2]).toMatchObject({ background: '#fef08a', textColor: '#0f172a' });
 });
 
 it('이전 팀이 확인되어도 같은 달 여러 팀 신고가 있으면 함께 표시한다', () => {

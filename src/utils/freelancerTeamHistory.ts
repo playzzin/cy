@@ -37,6 +37,13 @@ export function freelancerTeamBackground(team: { name: string; color?: string },
     return TEAM_COLORS[index % TEAM_COLORS.length];
 }
 
+interface ReportTeamColor {
+    teamId: string;
+    teamName: string;
+    background?: string;
+    textColor?: string;
+}
+
 export interface FreelancerTeamHistory {
     background?: string;
     textColor?: string;
@@ -44,9 +51,8 @@ export interface FreelancerTeamHistory {
     previousTeamName?: string;
     label: string;
     sharedMonths: number[];
-    reports: Array<{
-        teamId: string;
-        teamName: string;
+    otherTeams: ReportTeamColor[];
+    reports: Array<ReportTeamColor & {
         months: Array<{ month: number; amount: number }>;
         bonus: number;
         total: number;
@@ -60,11 +66,27 @@ const amount = (value: unknown): number => {
 };
 const won = (value: number): string => `${value.toLocaleString('ko-KR')}원`;
 
+const readableText = (background: string): string => {
+    const colors = (background.match(/#(?:[0-9a-f]{6}|[0-9a-f]{3})\b/ig) || ['#64748b'])
+        .map(color => color.length === 4 ? `#${color.slice(1).split('').map(channel => channel + channel).join('')}` : color);
+    const contrast = (text: string) => Math.min(...colors.map(color => getContrastRatio(text, color)));
+    return contrast('#ffffff') >= contrast('#0f172a') ? '#ffffff' : '#0f172a';
+};
+
 /** 선택 연도의 실제 신고 월로 이전 팀을 찾는다. 동월 복수 팀은 이동 순서를 추정하지 않는다. */
 export function buildFreelancerTeamHistory(
     rows: ReportRow[], teams: TeamTheme[], year: number,
 ): Map<string, FreelancerTeamHistory> {
     const themes = new Map(teams.map(team => [team.id, team]));
+    const reportColor = (row: ReportRow): ReportTeamColor => {
+        const theme = themes.get(row.teamId || '');
+        return {
+            teamId: row.teamId || '',
+            teamName: theme?.name || row.teamName || '소속 없음',
+            background: theme?.background,
+            textColor: theme ? readableText(theme.background) : undefined,
+        };
+    };
     const histories = rows.map(row => {
         const months = Array.from({ length: 12 }, (_, index) => ({
             month: index + 1,
@@ -73,7 +95,7 @@ export function buildFreelancerTeamHistory(
         const bonus = amount(row.performanceBonus);
         return {
             row, months, bonus,
-            teamName: themes.get(row.teamId || '')?.name || row.teamName || '소속 없음',
+            ...reportColor(row),
             total: months.reduce((sum, entry) => sum + entry.amount, bonus),
         };
     });
@@ -89,7 +111,8 @@ export function buildFreelancerTeamHistory(
     histories.forEach(current => {
         const workerHistory = byWorker.get(current.row.id || '') || [];
         const reports = workerHistory.filter(history => history.months.length > 0 || history.bonus !== 0);
-        if (!reports.some(history => history.row.teamId !== current.row.teamId)) return;
+        const otherReports = reports.filter(history => history.row.teamId !== current.row.teamId);
+        if (otherReports.length === 0) return;
         const sharedMonths = Array.from({ length: 12 }, (_, index) => index + 1)
             .filter(month => new Set(reports.filter(history => history.months.some(entry => entry.month === month))
                 .map(history => history.row.teamId)).size > 1);
@@ -103,15 +126,11 @@ export function buildFreelancerTeamHistory(
         const latestMonth = Math.max(0, ...previous.map(entry => entry.month));
         const latestTeams = previous.filter(entry => entry.month === latestMonth);
         const previousTeam = latestTeams.length === 1 ? latestTeams[0].history : undefined;
-        const theme = previousTeam ? themes.get(previousTeam.row.teamId || '') : undefined;
-        // 미지정 팀 색상은 탭과 같은 그라데이션을 사용한다.
-        const contrastColors = (theme?.background.match(/#(?:[0-9a-f]{6}|[0-9a-f]{3})\b/ig) || ['#64748b'])
-            .map(color => color.length === 4 ? `#${color.slice(1).split('').map(channel => channel + channel).join('')}` : color);
-        const contrast = (textColor: string) => Math.min(...contrastColors.map(color => getContrastRatio(textColor, color)));
-        const textColor = contrast('#ffffff') >= contrast('#0f172a') ? '#ffffff' : '#0f172a';
+        // 다른 신고팀이 하나면 시점과 무관하게 그 색을 채운다. 여러 팀은 각각의 색상표로 모두 안내한다.
+        const nameColor = previousTeam || (otherReports.length === 1 ? otherReports[0] : undefined);
         const title = [
             ...(previousTeam ? [`이전 신고팀: ${previousTeam.teamName} (${latestMonth}월)`] : []),
-            ...(latestTeams.length > 1 ? ['같은 월에 여러 팀의 신고가 있어 이전 팀 색상을 표시하지 않습니다.'] : []),
+            ...(latestTeams.length > 1 ? ['같은 월에 여러 팀의 신고가 있어 이동 순서를 알 수 없습니다.'] : []),
             `${year}년 팀별 신고 내역`,
             ...reports.flatMap(history => [
                 `${history.teamName} · 합계 ${won(history.total)}`,
@@ -120,15 +139,16 @@ export function buildFreelancerTeamHistory(
             ]),
         ].join('\n');
         result.set(freelancerReportRowKey(current.row), {
-            background: theme?.background,
-            textColor: theme ? textColor : undefined,
+            background: nameColor?.background,
+            textColor: nameColor?.textColor,
             previousTeamId: previousTeam?.row.teamId,
             previousTeamName: previousTeam?.teamName,
             label: previousTeam ? `이전: ${previousTeam.teamName}`
                 : sharedMonths.length > 0 ? '같은 달 여러 팀 신고' : '다른 팀 신고 있음',
             sharedMonths,
+            otherTeams: otherReports.map(history => reportColor(history.row)),
             reports: reports.map(history => ({
-                teamId: history.row.teamId || '', teamName: history.teamName,
+                ...reportColor(history.row),
                 months: history.months, bonus: history.bonus, total: history.total,
             })),
             title,

@@ -24,10 +24,13 @@ export const freelancerService = {
             { id: 'shared', name: '검증 복수팀', teamId: 'b', status: 'active' },
             { id: 'purple', name: '검증 보라팀이동', teamId: 'c', status: 'active' },
             { id: 'stable', name: '검증 이동없음', teamId: 'c', status: 'active' },
+            { id: 'multi', name: '검증 세팀신고', teamId: 'c', status: 'active' },
         ], [], teams, [
             saved(year, 8, 'a', 1000000, 'moved', '검증 이동자'), saved(year, 9, 'b', 2000000, 'moved', '검증 이동자'),
             saved(year, 9, 'a', 300000, 'shared', '검증 복수팀'), saved(year, 9, 'b', 400000, 'shared', '검증 복수팀'),
             saved(year, 8, 'b', 500000, 'purple', '검증 보라팀이동'), saved(year, 10, 'c', 600000, 'purple', '검증 보라팀이동'),
+            saved(year, 6, 'a', 100000, 'multi', '검증 세팀신고'), saved(year, 7, 'b', 100000, 'multi', '검증 세팀신고'),
+            saved(year, 10, 'c', 100000, 'multi', '검증 세팀신고'),
         ], payments), companies: [] };
     },
     async saveYearlyPayments(year: number, rows: any[]) {

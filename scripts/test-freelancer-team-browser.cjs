@@ -47,6 +47,16 @@ const XLSX = require('xlsx');
         assert.equal((await values('검증 이동자'))[11], '');
         assert.equal((await values('검증 복수팀'))[11], '300,000');
         checks.push('A팀: 이동 전 8월 금액 유지, 이동 후 9월 0원');
+        assert.equal((await nameStyle('검증 이동자')).background, 'rgb(124, 58, 237)');
+        assert.equal((await nameStyle('검증 이동자')).previousTeam, undefined);
+        assert.deepEqual(await historyButton('검증 세팀신고').locator('.freelancer-history-team-chip').evaluateAll(chips => chips.map(chip => ({
+            teamId: chip.dataset.teamId, background: getComputedStyle(chip).backgroundColor, color: getComputedStyle(chip).color,
+        }))), [
+            { teamId: 'b', background: 'rgb(124, 58, 237)', color: 'rgb(255, 255, 255)' },
+            { teamId: 'c', background: 'rgb(15, 118, 110)', color: 'rgb(255, 255, 255)' },
+        ]);
+        assert.equal(await historyButton('검증 세팀신고').evaluate(button => button.getBoundingClientRect().bottom <= button.closest('td').getBoundingClientRect().bottom), true);
+        checks.push('이후 다른 팀 신고도 이름에 색상 표시, 여러 다른 팀의 색상·팀명 모두 표시');
         await page.screenshot({ path: path.join(output, 'team-a.png'), fullPage: true });
 
         await chooseTeam('검증 B팀');
@@ -55,6 +65,7 @@ const XLSX = require('xlsx');
             title: '이전 신고팀: 검증 A팀 (8월)\n' + new Date().getFullYear() + '년 팀별 신고 내역\n검증 A팀 · 합계 1,000,000원\n  8월 1,000,000원\n검증 B팀 · 합계 2,000,000원\n  9월 2,000,000원',
         });
         assert.equal((await nameStyle('검증 복수팀')).previousTeam, undefined);
+        assert.equal((await nameStyle('검증 복수팀')).background, 'rgb(0, 0, 0)');
         checks.push('이전 검정 팀 배경·흰 글씨 및 팀별 금액 안내, 동월 복수팀은 이동으로 표시하지 않음');
         assert.equal((await values('검증 이동자'))[10], '');
         assert.equal((await values('검증 이동자'))[11], '2,000,000');
@@ -70,6 +81,7 @@ const XLSX = require('xlsx');
         assert.match(await dialog.getByRole('region', { name: '검증 A팀 신고 내역' }).innerText(), /8월[\s\S]*1,000,000원/);
         assert.match(await dialog.getByRole('region', { name: '검증 B팀 신고 내역' }).innerText(), /9월[\s\S]*2,000,000원/);
         assert.match(await dialog.locator('footer').innerText(), /3,000,000원/);
+        assert.deepEqual(await dialog.locator('h3.freelancer-history-team-chip').evaluateAll(chips => chips.map(chip => getComputedStyle(chip).backgroundColor)), ['rgb(0, 0, 0)', 'rgb(124, 58, 237)']);
         assert.equal(await page.locator('body').getAttribute('data-saved-payments'), null);
         await page.screenshot({ path: path.join(output, 'history-details.png'), fullPage: true });
         await dialog.getByRole('button', { name: '신고 내역 닫기' }).click();
