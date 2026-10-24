@@ -187,6 +187,7 @@ test('현장정보는 급여 없이 연도별 월 공수와 누적공수를 표�
         ].filter(row => row.date >= startDate && row.date <= endDate);
     });
     render(<SiteResponsibleDetailPage view="siteInfo" />);
+    for (let month = new Date().getMonth(); month > 0; month--) fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
     const summary = await screen.findByRole('region', { name: '월별 누적공수' });
     await waitFor(() => expect(within(summary).getByRole('row', { name: /^1월/ })).toHaveTextContent('1.25'));
     const february = within(summary).getByRole('row', { name: /^2월/ });
@@ -214,9 +215,56 @@ test('현장정보 연간 조회 실패 시 이전 누적공수를 숨긴다', a
     await within(summary).findByRole('table');
     (dailyReportService.getWorkerRows as jest.Mock).mockRejectedValueOnce(new Error('test failure'));
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
-    expect(await within(summary).findByRole('alert')).toHaveTextContent('새로고침해 주세요');
-    expect(within(summary).queryByRole('table')).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('새로고침해 주세요');
+    expect(screen.queryByRole('region', { name: '월별 누적공수' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /가상 가현장.*진행중/ })).not.toBeInTheDocument();
     log.mockRestore();
+});
+
+test('팀장 현장정보는 조회월의 실제 내 팀 투입 현장만 세고 0공수·이전월·타팀 지원만 있는 현장은 제외한다', async () => {
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const previousMonth = `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}`;
+    (siteService.getSites as jest.Mock).mockResolvedValue([
+        { id: 'site-a', name: '이번달현장', responsibleTeamId: 'a', status: 'active' },
+        { id: 'old', name: '지난달현장', responsibleTeamId: 'a', status: 'active' },
+        { id: 'zero', name: '영공수현장', responsibleTeamId: 'a', status: 'active' },
+        { id: 'closed', name: '종료현장', responsibleTeamId: 'a', status: 'completed' },
+        { id: 'support', name: '타팀만투입현장', responsibleTeamId: 'a', status: 'active' },
+        { id: 'modern', legacyId: 'legacy', name: '이전코드현장', responsibleTeamId: 'a', status: 'active' },
+    ]);
+    const rows = [
+        { siteId: 'site-a', date: `${month}-01`, manDay: 1 },
+        { siteId: 'old', date: `${previousMonth}-01`, manDay: 2 },
+        { siteId: 'zero', date: `${month}-01`, manDay: 0 },
+        { siteId: 'closed', date: `${month}-01`, manDay: 1 },
+        { siteId: 'support', date: `${month}-01`, manDay: 3, isSiteSupport: true },
+        { siteId: 'legacy', date: `${month}-01`, manDay: 0.5 },
+    ].map(row => ({ teamId: 'a', responsibleTeamId: 'a', ...row }));
+    (dailyReportService.getWorkerRows as jest.Mock).mockImplementation(async ({ startDate, endDate }) => rows.filter(row => row.date >= startDate && row.date <= endDate));
+    render(<SiteResponsibleDetailPage view="siteInfo" />);
+    await screen.findByRole('button', { name: /이번달현장.*진행중/ });
+    expect(screen.getByRole('button', { name: /이전코드현장.*진행중/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '진행중 현장 (2)' })).toBeInTheDocument();
+    for (const name of ['지난달현장', '영공수현장', '종료현장', '타팀만투입현장']) {
+        expect(screen.queryByRole('button', { name: new RegExp(`${name}.*(진행중|종료)`) })).not.toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
+    await screen.findByRole('button', { name: /지난달현장.*진행중/ });
+    expect(screen.queryByRole('button', { name: /이번달현장.*진행중/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '진행중 현장 (1)' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
+    expect(await screen.findByText('선택한 달에 조건에 맞는 투입 현장이 없습니다.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /지난달현장.*진행중/ })).not.toBeInTheDocument();
+});
+
+test('사무실 현장정보는 투입 전 현장도 관리할 수 있다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([]);
+    render(<SiteResponsibleDetailPage view="siteInfo" />);
+    await screen.findByRole('button', { name: /가상 가현장.*진행중/ });
+    expect(screen.getByRole('button', { name: /가상 나현장.*진행중/ })).toBeInTheDocument();
 });
 
 test('지원 인원은 현장 달력에 포함되며 지원 개인 급여를 0원으로 표시하지 않는다', async () => {

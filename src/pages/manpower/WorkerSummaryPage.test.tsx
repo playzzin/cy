@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import WorkerSummaryPage from './WorkerSummaryPage';
 import { manpowerService } from '../../services/manpowerService';
 import html2canvas from 'html2canvas';
@@ -40,24 +40,31 @@ beforeEach(() => {
     ]);
 });
 
-test('팀장은 서버에서 허용한 팀만 선택·요약하며 다른 팀과 미배정 작업자는 제외한다', async () => {
+test('팀장은 같은 회사의 다른 팀 인원을 섞어 명단을 만들고 서류 권한은 내 팀에 유지한다', async () => {
     (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
-    (getTeamScopedRows as jest.Mock).mockImplementation(async collection => collection === 'teams'
-        ? [{ id: 'a', legacyId: 'legacy-a', name: '가상 A팀', companyName: '다른 회사' }]
-        : [
+    (getTeamScopedRows as jest.Mock).mockResolvedValue([{
+        teams: [{ id: 'a', legacyId: 'legacy-a', name: '가상 A팀' }, { id: 'b', name: '가상 B팀' }],
+        workers: [
             { id: 'one', name: '가상가', teamId: 'a', status: '재직' },
             { id: 'two', name: '가상나', teamId: 'legacy-a', status: '재직' },
-            { id: 'other', name: '다른 팀 인원', teamId: 'b', teamName: '가상 A팀' },
+            { id: 'other', name: '다른 팀 인원', teamId: 'b' },
             { id: 'unassigned', name: '미배정 인원' },
-        ]);
+            { id: 'retired', name: '퇴사 인원', teamId: 'b', status: '퇴사' },
+        ], documentWorkerIds: ['one', 'two'],
+    }]);
     await openPage();
+    expect(getTeamScopedRows).toHaveBeenCalledWith('worker_summary_directory');
     expect(manpowerService.getWorkers).not.toHaveBeenCalled();
-    expect(screen.getByRole('option', { name: '내 팀 작업자 (2명)' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /가상 A팀/ })).toBeInTheDocument();
-    expect(screen.queryByText('다른 팀 인원')).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '전체 팀 보기 (3명)' })).toBeInTheDocument();
     expect(screen.queryByText('미배정 인원')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox', { name: /목록 전체 선택/ }));
+    expect(screen.queryByText('퇴사 인원')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '가상가 선택' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '소속 팀' }), { target: { value: 'b' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '다른 팀 인원 선택' }));
     expect(screen.getByRole('status')).toHaveTextContent('2명 선택');
+    expect(screen.getByRole('table')).toHaveTextContent('가상가');
+    expect(screen.getByRole('table')).toHaveTextContent('다른 팀 인원');
+    expect(screen.getByText(/서류 공유·등록은 선택한 내 팀 인원 1명/)).toBeInTheDocument();
 });
 
 test('팀 조회 권한을 확인하지 못하면 전체 작업자 조회로 대체하지 않는다', async () => {
@@ -127,7 +134,10 @@ test('검색 결과가 없어도 선택은 보존되며 검색어만 지울 수 
     expect(screen.getByRole('checkbox', { name: '가상가 선택' })).toBeChecked();
 });
 
-test('모바일 카드와 분리된 표 형식으로 이미지를 만들고 신분증 숨김도 반영한다', async () => {
+test.each(['PC 공유', '모바일 공유'])('%s는 신분증·통장사본 사진을 제외한 명단만 만든다', async action => {
+    const share = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
     const write = jest.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write } });
     Object.defineProperty(window, 'ClipboardItem', { configurable: true, value: jest.fn() });
@@ -137,15 +147,19 @@ test('모바일 카드와 분리된 표 형식으로 이미지를 만들고 신�
         expect(clone).toHaveAttribute('data-export', 'true');
         expect(clone.style.width).toBe('1080px');
         expect(clone.textContent).not.toContain('신분증');
+        expect(clone.textContent).not.toContain('통장사본');
+        expect(within(clone).queryByRole('img')).not.toBeInTheDocument();
         expect(options.windowWidth).toBe(1280);
         expect(table).not.toHaveAttribute('data-export');
         return { toBlob: (callback: BlobCallback) => callback(new Blob(['synthetic'], { type: 'image/png' })) };
     });
     await openPage();
     fireEvent.click(screen.getByRole('checkbox', { name: '가상가 선택' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: '신분증 보기' }));
-    fireEvent.click(screen.getByRole('button', { name: 'PC 공유' }));
-    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('checkbox', { name: '신분증 보기' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: '신분증' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    await waitFor(() => expect(action === 'PC 공유' ? write : share).toHaveBeenCalledTimes(1));
+    expect(share.mock.calls.map(([data]) => data.files.length)).toEqual(action === '모바일 공유' ? [1] : []);
 });
 
 test('작업자 요약에서 통장사본을 별도로 등록한 뒤 계좌정보 수정 없이 공유할 수 있다', async () => {

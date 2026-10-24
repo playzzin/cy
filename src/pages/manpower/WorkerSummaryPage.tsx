@@ -4,14 +4,10 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCopy, faSearch, faFilter, faImage, faDownload, faPaperPlane, faXmark, faArrowRight, faUsers } from '@fortawesome/free-solid-svg-icons';
+import { faCopy, faSearch, faFilter, faPaperPlane, faXmark, faArrowRight, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { toast } from '../../utils/swal';
-import { storage } from '../../config/firebase';
-import { ref, getDownloadURL } from 'firebase/storage';
 import html2canvas from 'html2canvas';
-import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
 import WorkerIdImageShare from './WorkerIdImageShare';
@@ -382,14 +378,12 @@ const WorkerSummaryPage: React.FC = () => {
     const [mobileView, setMobileView] = useState<'select' | 'summary'>('select');
     const [selectedOnly, setSelectedOnly] = useState(false);
     const [selectedWorkerIds, setSelectedWorkerIds] = useState<Set<string>>(new Set());
-    const [showIdCards, setShowIdCards] = useState(true);
     const [isSendingImage, setIsSendingImage] = useState(false);
     const selectionHeadingRef = React.useRef<HTMLHeadingElement>(null);
     const summaryHeadingRef = React.useRef<HTMLHeadingElement>(null);
     const selectAllRef = React.useRef<HTMLInputElement>(null);
 
-    // Store resolved image download URLs
-    const [idCardUrls, setIdCardUrls] = useState<Record<string, string>>({});
+    const [documentWorkerIds, setDocumentWorkerIds] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         let cancelled = false;
@@ -400,10 +394,15 @@ const WorkerSummaryPage: React.FC = () => {
                 setWorkers([]);
                 setTeams([]);
                 setSelectedWorkerIds(new Set());
-                setIdCardUrls({});
+                setDocumentWorkerIds(new Set());
+                const directory = restricted
+                    ? (await getTeamScopedRows<{ workers: Worker[]; teams: Team[]; documentWorkerIds: string[] }>('worker_summary_directory'))?.[0]
+                    : null;
+                if (restricted && (!directory || !Array.isArray(directory.workers) || !Array.isArray(directory.teams)
+                    || !Array.isArray(directory.documentWorkerIds))) throw new Error('작업자 명단 조회 권한을 확인하지 못했습니다.');
                 const [allWorkers, allTeams, allCompanies] = await Promise.all([
-                    restricted ? getTeamScopedRows<Worker>('workers') : manpowerService.getWorkers(),
-                    restricted ? getTeamScopedRows<Team>('teams') : teamService.getTeams(),
+                    directory ? Promise.resolve(directory.workers) : manpowerService.getWorkers(),
+                    directory ? Promise.resolve(directory.teams) : teamService.getTeams(),
                     restricted ? Promise.resolve([]) : companyService.getCompanies()
                 ]);
                 if (cancelled) return;
@@ -438,6 +437,7 @@ const WorkerSummaryPage: React.FC = () => {
                     .sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR'));
 
                 setWorkers(activeWorkers);
+                setDocumentWorkerIds(new Set(directory?.documentWorkerIds ?? activeWorkers.map(worker => worker.id!)));
                 setTeams(allowedTeams);
                 setSelectedTeam((prev) => {
                     if (!prev) return '';
@@ -518,6 +518,10 @@ const WorkerSummaryPage: React.FC = () => {
         () => workers.filter(w => selectedWorkerIds.has(w.id!)),
         [workers, selectedWorkerIds]
     );
+    const selectedDocumentWorkers = useMemo(
+        () => selectedWorkers.filter(worker => documentWorkerIds.has(worker.id!)),
+        [selectedWorkers, documentWorkerIds]
+    );
     const visibleSelectedCount = filteredWorkers.filter(w => selectedWorkerIds.has(w.id!)).length;
     const allVisibleSelected = filteredWorkers.length > 0 && visibleSelectedCount === filteredWorkers.length;
 
@@ -533,38 +537,6 @@ const WorkerSummaryPage: React.FC = () => {
             (view === 'select' ? selectionHeadingRef : summaryHeadingRef).current?.focus({ preventScroll: true });
         });
     };
-
-    // Fetch ID Card Images
-    useEffect(() => {
-        const fetchImages = async () => {
-            const urlMap: Record<string, string> = {};
-            // Filter workers who have a file name saved
-            const workersWithId = workers.filter(w => w.fileNameSaved);
-
-            await Promise.all(workersWithId.map(async (w) => {
-                if (!w.fileNameSaved) return;
-                try {
-                    // Check if we already have it to avoid re-fetching (simple optimization)
-                    if (idCardUrls[w.id!]) return;
-
-                    const storageRef = ref(storage, w.fileNameSaved);
-                    const url = await getDownloadURL(storageRef);
-                    urlMap[w.id!] = url;
-                } catch (error) {
-                    // If file doesn't exist or permission denied
-                    console.warn(`Failed to fetch ID card for ${w.name}:`, error);
-                }
-            }));
-
-            if (Object.keys(urlMap).length > 0) {
-                setIdCardUrls(prev => ({ ...prev, ...urlMap }));
-            }
-        };
-
-        if (workers.length > 0) {
-            fetchImages();
-        }
-    }, [workers]);
 
     // Handle Selection
     const toggleSelection = (id: string) => {
@@ -718,101 +690,6 @@ const WorkerSummaryPage: React.FC = () => {
         }
     };
 
-    const handleDownloadIDCards = async () => {
-        if (selectedWorkerIds.size === 0) {
-            toast.warning('선택된 작업자가 없습니다.');
-            return;
-        }
-
-        const selectedWorkers = workers.filter(w => selectedWorkerIds.has(w.id!));
-        const workerswithImages = selectedWorkers.filter(w => w.id && idCardUrls[w.id]);
-
-        if (workerswithImages.length === 0) {
-            toast.warning('선택된 작업자 중 신분증 이미지가 있는 작업자가 없습니다.');
-            return;
-        }
-
-        try {
-            toast.info('신분증 이미지 다운로드 중...');
-            const zip = new JSZip();
-            let downloaded = 0;
-
-            const promises = workerswithImages.map(async (w) => {
-                const url = idCardUrls[w.id!];
-                try {
-                    // Fetch image as blob
-                    const response = await fetch(url, { mode: 'cors' });
-                    if (!response.ok) throw new Error('Network response was not ok');
-                    const blob = await response.blob();
-
-                    // File name: Name_IDNumber(first 6).png or similar
-                    const idNum = w.idNumber ? w.idNumber.substring(0, 6) : 'unknown';
-                    const cleanName = w.name.replace(/[0-9]/g, '');
-                    const fileName = `${cleanName}_${idNum}.png`; // Assuming PNG or standard image
-
-                    zip.file(fileName, blob);
-                    downloaded++;
-                } catch (err) {
-                    console.error(`Failed to download image for ${w.name}`, err);
-                }
-            });
-
-            await Promise.all(promises);
-
-            if (downloaded === 0) throw new Error('다운로드 가능한 신분증 이미지가 없습니다.');
-
-            const content = await zip.generateAsync({ type: "blob" });
-            const dateStr = new Date().toISOString().split('T')[0];
-            saveAs(content, `작업자_신분증_모음_${dateStr}.zip`);
-            void recordIdentityDocumentLog({ action: 'download_zip', source: 'worker_summary', status: downloaded === workerswithImages.length ? 'success' : 'partial',
-                personNames: workerswithImages.map((worker) => worker.name), personCount: workerswithImages.length, fileCount: downloaded,
-                ...(downloaded < workerswithImages.length ? { reason: 'processing_failed' as const } : {}) });
-            toast.success('신분증 압축 파일이 다운로드되었습니다.');
-
-        } catch (error) {
-            console.error('ZIP Process Error:', error);
-            void recordIdentityDocumentLog({ action: 'download_zip', source: 'worker_summary', status: 'failure',
-                personNames: workerswithImages.map((worker) => worker.name), personCount: workerswithImages.length, fileCount: 0, reason: 'processing_failed' });
-            toast.error('압축 파일 생성에 실패했습니다.');
-        }
-    };
-
-    const handleSingleIdCardCopy = async (workerName: string, url: string) => {
-        try {
-            // Create a temporary image to draw on canvas
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.src = url;
-
-            await new Promise((resolve, reject) => {
-                img.onload = resolve;
-                img.onerror = reject;
-            });
-
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error('이미지 변환 실패');
-
-            ctx.drawImage(img, 0, 0);
-
-            const blob = await new Promise<Blob>((resolve, reject) => {
-                canvas.toBlob((result) => result ? resolve(result) : reject(new Error('이미지 변환 실패')), 'image/png');
-            });
-            const item = new ClipboardItem({ 'image/png': blob });
-            await navigator.clipboard.write([item]);
-            void recordIdentityDocumentLog({ action: 'copy_image', source: 'worker_summary', status: 'success', personNames: [workerName], fileCount: 1 });
-            const cleanName = workerName.replace(/[0-9]/g, '');
-            toast.success(`${cleanName}님의 신분증이 복사되었습니다.`);
-
-        } catch (error) {
-            console.error('Single ID Copy Error:', error);
-            void recordIdentityDocumentLog({ action: 'copy_image', source: 'worker_summary', status: 'failure', personNames: [workerName], fileCount: 1, reason: 'processing_failed' });
-            toast.error('이미지 복사 실패 (CORS 문제일 수 있습니다)');
-        }
-    };
-
     if (loading) return <LoadingOverlay>데이터 로딩 중...</LoadingOverlay>;
     if (loadError) return <p role="alert" className="p-6">작업자 정보를 불러오지 못했습니다. 소속 팀 연결과 조회 권한을 확인한 뒤 새로고침해 주세요.</p>;
 
@@ -843,7 +720,7 @@ const WorkerSummaryPage: React.FC = () => {
                             value={selectedTeam}
                             onChange={(e) => setSelectedTeam(e.target.value)}
                         >
-                            <option value="">{restricted ? '내 팀 작업자' : '전체 팀 보기'} ({workers.length}명)</option>
+                            <option value="">전체 팀 보기 ({workers.length}명)</option>
                             {teams.map(team => {
                                 const teamKey = getTeamKey(team);
                                 const teamColor = normalizeHexColor(team.color);
@@ -938,27 +815,14 @@ const WorkerSummaryPage: React.FC = () => {
                             <span>{selectedWorkerIds.size}명 선택됨</span>
                         </HeaderTitle>
                         <ActionButtons className="ws-actions">
-                            <label className="ws-id-toggle">
-                                <input
-                                    type="checkbox"
-                                    checked={showIdCards}
-                                    onChange={(e) => setShowIdCards(e.target.checked)}
-                                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                />
-                                신분증 보기
-                            </label>
-                            <ActionButton onClick={handleDownloadIDCards} className="secondary ws-zip" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
-                                <FontAwesomeIcon icon={faDownload} />
-                                신분증 ZIP
-                            </ActionButton>
-                            <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedWorkers} disabled={isSendingImage} />
-                            <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedWorkers} disabled={isSendingImage}
+                            <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedDocumentWorkers} disabled={isSendingImage} />
+                            <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedDocumentWorkers} disabled={isSendingImage}
                                 onSaved={updates => setWorkers(previous => previous.map(worker => {
                                     const update = updates.find(item => item.workerId === worker.id);
                                     return update ? { ...worker, bankPhotoId: update.bankPhotoId } : worker;
                                 }))} />
-                            <WorkerIdImageShare key={restricted ? 'team-bank' : 'office-bank'} workers={selectedWorkers} disabled={isSendingImage} kind="bank" />
-                            <ActionButton onClick={handleCopyImage} title="작업자 요약 이미지를 복사한 뒤 PC 카카오톡에 붙여넣기" className="ws-copy" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
+                            <WorkerIdImageShare key={restricted ? 'team-bank' : 'office-bank'} workers={selectedDocumentWorkers} disabled={isSendingImage} kind="bank" />
+                            <ActionButton onClick={handleCopyImage} title="서류 사진 없이 명단만 복사한 뒤 PC 카카오톡에 붙여넣기" className="ws-copy" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
                                 <FontAwesomeIcon icon={faCopy} />
                                 PC 공유
                             </ActionButton>
@@ -966,13 +830,16 @@ const WorkerSummaryPage: React.FC = () => {
                                 onClick={handleSendKakao}
                                 className="kakao"
                                 disabled={selectedWorkerIds.size === 0 || isSendingImage}
-                                title="모바일 공유창에서 카카오톡 등을 선택해 작업자 요약 보내기"
+                                title="모바일 공유창에서 카카오톡 등을 선택해 서류 사진 없이 명단만 보내기"
                             >
                                 <FontAwesomeIcon icon={faPaperPlane} />
                                 {isSendingImage ? '준비 중' : '모바일 공유'}
                             </ActionButton>
                         </ActionButtons>
                     </CardHeader>
+                    <p className="ws-share-guide">PC·모바일 공유는 명단만 보냅니다. 신분증·통장사본은 별도 공유 버튼을 이용해 주세요.
+                        {restricted && selectedDocumentWorkers.length < selectedWorkers.length && <span> 서류 공유·등록은 선택한 내 팀 인원 {selectedDocumentWorkers.length}명에게 적용됩니다.</span>}
+                    </p>
                     {selectedWorkerIds.size === 0 ? (
                         <div className="ws-empty ws-summary-empty">
                             <FontAwesomeIcon icon={faUsers} />
@@ -992,7 +859,6 @@ const WorkerSummaryPage: React.FC = () => {
                                         {/* <th className="px-6 py-3 font-semibold text-slate-600">소속팀</th> */}
                                         <th className="px-6 py-3 font-semibold text-slate-600 text-center">주소</th>
                                         <th className="px-4 py-3 font-semibold text-slate-600 w-20 text-center">혈액형</th>
-                                        {showIdCards && <th className="px-6 py-3 font-semibold text-slate-600 w-24 text-center">신분증</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 bg-white">
@@ -1033,25 +899,6 @@ const WorkerSummaryPage: React.FC = () => {
                                                         </span>
                                                     ) : '-'}
                                                 </td>
-                                                {showIdCards && (
-                                                    <td data-label="신분증" className="px-6 py-3 align-middle text-center">
-                                                        <span className="ws-field-label" data-html2canvas-ignore>신분증</span>
-                                                        <div className="flex justify-center items-center h-full">
-                                                            {idCardUrls[w.id!] ? (
-                                                                <button type="button" className="ws-id-image" aria-label={`${w.name} 신분증 이미지 복사`}
-                                                                    onClick={() => handleSingleIdCardCopy(w.name, idCardUrls[w.id!])}
-                                                                >
-                                                                    <img src={idCardUrls[w.id!]} alt={`${w.name} 신분증`} crossOrigin="anonymous" loading="lazy" />
-                                                                </button>
-                                                            ) : (
-                                                                <span className="text-slate-300 text-xs">
-                                                                    <FontAwesomeIcon icon={faImage} className="mr-1" />
-                                                                    없음
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                )}
                                                 <td className="ws-remove-cell" data-html2canvas-ignore>
                                                     <button type="button" aria-label={`${w.name} 선택 해제`} onClick={() => toggleSelection(w.id!)}>
                                                         <FontAwesomeIcon icon={faXmark} />

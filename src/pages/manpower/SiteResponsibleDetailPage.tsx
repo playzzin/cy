@@ -296,6 +296,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
     const [refreshRevision, setRefreshRevision] = useState(0);
     const restrictedTeam = useRestrictedTeamWorkflow();
     const detailView = view ?? (restrictedTeam ? 'siteInfo' : selectedDetailView);
+    const monthlySitesOnly = restrictedTeam && detailView === 'siteInfo';
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
     const selectedYear = selectedMonth.slice(0, 4);
@@ -437,6 +438,14 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
 
     const visibleSites = useMemo(() => {
         if (accessScope.loading) return [];
+        if (monthlySitesOnly) {
+            if (loadingOutput || outputError) return [];
+            // A responsible-team link is not proof of attendance this month.
+            // Match legacy IDs/names through the same resolver as site details.
+            const workedRows = scopedOutputRows.filter(row => !row.isSiteSupport
+                && asNumber(row.manDay) > 0 && workerAccessMatchesReportRow(accessScope, row));
+            return sites.filter(site => workedRows.some(row => rowMatchesSite(row, site)));
+        }
         if (accessScope.mode === 'all') return sites;
 
         if (accessScope.mode === 'team') {
@@ -447,7 +456,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         }
 
         return sites.filter(site => scopedOutputSiteKeys.has(getSitePrimaryKey(site)));
-    }, [accessScope, scopedOutputSiteKeys, sites]);
+    }, [accessScope, loadingOutput, monthlySitesOnly, outputError, scopedOutputRows, scopedOutputSiteKeys, sites]);
 
     const responsibleGroups = useMemo<ResponsibleGroup[]>(() => {
         const groupMap = new Map<string, {
@@ -488,12 +497,15 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         });
 
         scopedOutputRows.forEach(row => {
+            if (monthlySitesOnly && !visibleSites.some(site => rowMatchesSite(row, site))) return;
             if (!isCheongyeonResponsible(row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName, teamByKey)) return;
             const key = rowResponsibleKey(row);
             const name = getResponsibleName(row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName, teamByKey);
             const color = getTeamColor(teamByKey, row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName);
             const group = ensureGroup(key, name, color);
-            const siteKey = makeSiteKey(row.siteId, row.siteName);
+            const rowSiteKey = makeSiteKey(row.siteId, row.siteName);
+            const matchedSite = siteByKey.get(rowSiteKey) ?? siteByKey.get(makeSiteKey(null, row.siteName));
+            const siteKey = matchedSite ? getSitePrimaryKey(matchedSite) : rowSiteKey;
             if (siteKey) group.siteKeys.add(siteKey);
             group.totalManDay += asNumber(row.manDay);
             group.totalAmount += getReportRowAmount(row);
@@ -514,7 +526,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                 if (leftUnassigned !== rightUnassigned) return leftUnassigned ? 1 : -1;
                 return left.name.localeCompare(right.name, 'ko-KR');
             });
-    }, [scopedOutputRows, teamByKey, visibleSites]);
+    }, [monthlySitesOnly, scopedOutputRows, siteByKey, teamByKey, visibleSites]);
 
     useEffect(() => {
         if (responsibleGroups.length === 0) {
@@ -535,8 +547,9 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
     );
 
     const selectedResponsibleRows = useMemo(
-        () => scopedOutputRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey),
-        [scopedOutputRows, selectedResponsibleKey]
+        () => scopedOutputRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey
+            && (!monthlySitesOnly || visibleSites.some(site => rowMatchesSite(row, site)))),
+        [monthlySitesOnly, scopedOutputRows, selectedResponsibleKey, visibleSites]
     );
 
     const selectedResponsibleSiteKeys = useMemo(
@@ -873,6 +886,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
             </section>
 
             <div className="sr-filter-summary" aria-live="polite">
+                {monthlySitesOnly && <span>{selectedMonth} 내 팀 투입 현장</span>}
                 <span>전체 {selectedResponsibleStatusCounts.all.toLocaleString('ko-KR')}개</span>
                 <span>진행 {selectedResponsibleStatusCounts.active.toLocaleString('ko-KR')}개</span>
                 <span>예정 {selectedResponsibleStatusCounts.planned.toLocaleString('ko-KR')}개</span>
@@ -954,10 +968,10 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                                 </span>
                                 <ChevronDown size={18} className={isResponsiblePickerOpen ? 'tw-team-picker-button__chevron tw-team-picker-button__chevron--open' : 'tw-team-picker-button__chevron'} />
                             </button>
-                            {loadingMaster || accessScope.loading ? (
+                            {loadingMaster || accessScope.loading || (monthlySitesOnly && loadingOutput) ? (
                                 <div className="tw-empty-state">현장담당 데이터를 불러오는 중입니다.</div>
                             ) : responsibleGroups.length === 0 ? (
-                                <div className="tw-empty-state">청연이엔지 소속 현장담당 팀이 없습니다.</div>
+                                <div className="tw-empty-state">{monthlySitesOnly ? '선택한 달에 투입된 현장담당 팀이 없습니다.' : '청연이엔지 소속 현장담당 팀이 없습니다.'}</div>
                             ) : isResponsiblePickerOpen && (
                                 <div className="tw-team-picker-menu">
                                     {responsibleGroups.map(renderResponsibleItem)}
@@ -965,11 +979,13 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                             )}
                         </div>
 
-                        <div className="tw-list-block-title tw-list-block-title--workers">현장 목록</div>
-                        {loadingMaster || accessScope.loading ? (
+                        <div className="tw-list-block-title tw-list-block-title--workers">{monthlySitesOnly ? '선택월 투입 현장' : '현장 목록'}</div>
+                        {loadingMaster || accessScope.loading || (monthlySitesOnly && loadingOutput) ? (
                             <div className="tw-empty-state">현장 데이터를 불러오는 중입니다.</div>
+                        ) : monthlySitesOnly && outputError ? (
+                            <div className="tw-empty-state" role="alert">{outputError}</div>
                         ) : selectedResponsibleSites.length === 0 ? (
-                            <div className="tw-empty-state">조건에 맞는 현장이 없습니다.</div>
+                            <div className="tw-empty-state">{monthlySitesOnly ? '선택한 달에 조건에 맞는 투입 현장이 없습니다.' : '조건에 맞는 현장이 없습니다.'}</div>
                         ) : (
                             selectedResponsibleSites.map(site => {
                                 const siteKey = getSitePrimaryKey(site);

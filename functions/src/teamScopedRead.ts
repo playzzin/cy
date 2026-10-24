@@ -13,8 +13,10 @@ import { readTeamSettlementSupportDetails } from './teamSettlementSupportRead';
 import { readTeamSettlementIncoming } from './teamSettlementRead';
 import { projectSiteWorkReports, responsibleSites, validateSiteWorkRange } from './siteWorkReports';
 import { readWhiteboardParticipation } from './whiteboardParticipation';
+import { readWorkerSummaryDirectory } from './workerSummaryDirectory';
 
 const COLLECTIONS = new Set([
+    'worker_summary_directory',
     'vehicle_oil_summary',
     'site_work_reports',
     'message_recipients',
@@ -152,7 +154,7 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     if (teamIds.length > 30) throw new functions.https.HttpsError('failed-precondition', '팀 연결 수를 확인해 주세요.');
     resolvedTeamIds = teamIds;
     scope.teamIds = teamIds;
-    const needsWorkers = requests.some(request => !['teams', 'materials', 'whiteboard_participation'].includes(text(request.collection)));
+    const needsWorkers = requests.some(request => !['teams', 'materials', 'whiteboard_participation', 'worker_summary_directory'].includes(text(request.collection)));
     const requiresSites = (request: any) => ['site_work_reports', 'sites', 'companies', 'materialInbounds', 'materialOutbounds', 'materialPhotoBatches'].includes(text(request.collection))
         || (request.collection === 'system_configs' && (!text(request.filters?.configId) || request.filters.configId === 'support_site_rates'));
     const needsSites = requests.some(requiresSites);
@@ -168,6 +170,9 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     const resolveRows = async (request: any) => {
         const collection = text(request.collection);
         const filters = request.filters || {};
+        if (collection === 'worker_summary_directory') {
+            return { rows: serialize([await readWorkerSummaryDirectory(db, teams, metrics)]) };
+        }
         if (collection === 'vehicle_oil_summary') {
             // Ignore client-supplied team/vehicle IDs and never return the shared map.
             const vehicles = await byIds('vehicles', ['currentAssigneeId', 'billingTargetId'], [...scope.teamIds, ...scope.workerIds]);
