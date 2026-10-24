@@ -81,7 +81,9 @@ const normalizeMessage = (id: string, data: DocumentData): ErpMessage => {
     actionUrl: data.actionUrl ? String(data.actionUrl) : null,
     createdAt: asTimestamp(data.createdAt, now),
     updatedAt: asTimestamp(data.updatedAt, now),
-    expiresAt: data.expiresAt ? asTimestamp(data.expiresAt) : null
+    expiresAt: data.expiresAt ? asTimestamp(data.expiresAt) : null,
+    requiresConfirmation: data.requiresConfirmation === true,
+    dueAt: data.dueAt ? asTimestamp(data.dueAt) : null
   };
 };
 

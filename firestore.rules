@@ -830,6 +830,7 @@ service cloud.firestore {
       return collectionId in [
         'office_staff_payroll',
         'gemini_usage_logs',
+        'notification_user_states', 'notification_preferences', 'notice_notification_outbox', 'notices', 'notice_categories',
         'team_expense_requests',
         'team_worker_requests',
           'constructionPlans',
@@ -1272,6 +1273,10 @@ service cloud.firestore {
       return data is map && data.get('senderId', '') == 'system:smart-memo-reminder';
     }
 
+    function isNoticeSystemMessage(data) {
+      return data is map && data.get('senderId', '') == 'system:notice-notification';
+    }
+
     function isTaskNotificationMessage(data) {
       return data is map && data.get('senderId', '') == 'system:task-notification';
     }
@@ -1295,6 +1300,7 @@ service cloud.firestore {
           || (!isBankSystemMessage(resource.data)
             && !isMemoReminderMessage(resource.data)
             && !isTaskNotificationMessage(resource.data)
+        && !isNoticeSystemMessage(resource.data)
             && resource.data.recipientScope == 'all')
         )
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -1608,8 +1614,35 @@ service cloud.firestore {
       allow write: if !isPreviewIdentity() && (false);
     }
 
-    // Team leaders can read messages and acknowledge their own receipts, but cannot author them.
-    // Server-authored bank alerts stay restricted to their configured recipients.
+    // General ERP messages retain their existing signed-in behavior, while
+    // server-authored bank alerts are visible only to configured recipients
+    // and may only receive the current recipient's read receipt.
+    match /notification_preferences/{uid} {
+      allow read: if (hasActiveUserProfile() && viewerUid() == uid) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
+    }
+    match /notification_user_states/{stateId} {
+      allow read: if (hasActiveUserProfile() && resource.data.userId == viewerUid()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
+    }
+    match /notice_notification_outbox/{jobId} {
+      allow read: if (false) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (false);
+    }
+    match /notice_categories/{categoryId} {
+      allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
+      allow write: if !isPreviewIdentity() && (hasActiveUserProfile() && (isAdmin() || hasAnyRole(['manager', '매니저'])));
+    }
+    match /notices/{noticeId} {
+      // Non-manager reads go through getNoticeBoard, which checks current
+      // account links and team membership before returning any notice body.
+      allow read: if (hasActiveUserProfile() && (isAdmin() || hasAnyRole(['manager', '매니저']))) && previewReadsAllowed();
+      allow create: if !isPreviewIdentity() && (false);
+      allow update: if !isPreviewIdentity() && (hasActiveUserProfile() && (isAdmin() || hasAnyRole(['manager', '매니저']))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['category', 'updatedAt']));
+      allow delete: if !isPreviewIdentity() && (hasActiveUserProfile() && (isAdmin() || hasAnyRole(['manager', '매니저'])));
+    }
+
     match /smart_memo_reminders/{reminderId} {
       allow read: if (hasActiveUserProfile() && resource.data.userId == viewerUid()) && previewReadsAllowed();
       allow write: if !isPreviewIdentity() && (false);
@@ -1628,6 +1661,7 @@ service cloud.firestore {
         && !isBankSystemMessage(request.resource.data)
         && !isMemoReminderMessage(request.resource.data)
         && !isTaskNotificationMessage(request.resource.data)
+        && !isNoticeSystemMessage(request.resource.data)
         && request.resource.data.senderId == viewerUid()
         && request.resource.data.type in ['direct', 'broadcast']);
       allow update: if !isPreviewIdentity() && (hasActiveUserProfile()
@@ -1640,7 +1674,9 @@ service cloud.firestore {
             && !isMemoReminderMessage(resource.data)
             && !isMemoReminderMessage(request.resource.data)
             && !isTaskNotificationMessage(resource.data)
+        && !isNoticeSystemMessage(resource.data)
             && !isTaskNotificationMessage(request.resource.data)
+        && !isNoticeSystemMessage(request.resource.data)
             && request.resource.data.type in ['direct', 'broadcast']
             && (
               isAdmin()
@@ -1654,6 +1690,7 @@ service cloud.firestore {
         && !isBankSystemMessage(resource.data)
         && !isMemoReminderMessage(resource.data)
         && !isTaskNotificationMessage(resource.data)
+        && !isNoticeSystemMessage(resource.data)
         && (isAdmin() || ('senderId' in resource.data && resource.data.senderId == viewerUid())));
     }
 
@@ -2004,3 +2041,4 @@ service cloud.firestore {
     }
   }
 }
+

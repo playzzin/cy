@@ -68,3 +68,8 @@ it('does not replay an existing notification after it temporarily disappears fro
     act(() => mockSubscriptions[0].next([msg('old'), msg('new')]));
     expect(vibrate).toHaveBeenCalledTimes(1);
 });
+
+jest.mock('./useNotificationCenter', () => ({ useNotificationCenter: () => ({
+    preferences: { sound: true, sources: { notice: true, memo: true, task: true, message: true }, quietEnabled: false, quietStart: '22:00', quietEnd: '08:00', digestMinutes: 0 },
+    states: {}, now: Date.now(), loading: false, error: null,
+}) }));

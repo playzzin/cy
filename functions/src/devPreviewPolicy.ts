@@ -15,7 +15,7 @@ export function previewDevRole(profile: any, positions: Array<{ id: string; name
 
 // Explicitly audited read operations. New endpoints fail closed until reviewed.
 const reads = new Set(['getTeamScopedData', 'listGeminiUsageLogs', 'getCardExpenseAuditDashboard', 'listCardStatementFiles', 'getCardStatementFileDetail',
-    'getMyAccountLinkCandidate', 'getMyAccountLinkStatus', 'searchAccountLinkCompanies', 'getWelfareGameConfig', 'getNoticeDeliveryReport', 'getCardStatementImportJobStatus']);
+    'getMyAccountLinkCandidate', 'getMyAccountLinkStatus', 'searchAccountLinkCompanies', 'getWelfareGameConfig', 'getNoticeDeliveryReport', 'getNoticeBoard', 'getCardStatementImportJobStatus']);
 const readActions: Record<string, string[]> = {
     teamExpenseRequests: ['list', 'receipt'],
     teamWorkerRequests: ['list', 'document'],

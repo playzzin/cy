@@ -29,6 +29,8 @@ export interface ErpMessage {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   expiresAt?: Timestamp | null;
+  requiresConfirmation?: boolean;
+  dueAt?: Timestamp | null;
 }
 
 export interface CreateErpMessageInput {

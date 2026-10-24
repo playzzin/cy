@@ -175,3 +175,7 @@ export { issueTaxInvoiceApi, getTaxInvoiceListApi, getTaxInvoiceStatusApi } from
 export { teamMaterialTransactions } from './teamMaterialTransactions';
 
 export { updateTeamResourceStatus } from './teamResourceStatus';
+
+export { getNoticeBoard, deleteNotice } from './noticeBoard';
+export { saveNoticeWithNotification, setPersonalNotification, saveNotificationPreferences, getNoticeDeliveryReport,
+    retryNoticeDelivery, dispatchNoticeNotification, recoverNotificationDeliveries, archiveDeletedNoticeNotifications } from './notificationCenter';
