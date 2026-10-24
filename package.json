@@ -104,7 +104,7 @@
     "staging:config": "node scripts/staging-project.cjs config",
     "staging:deploy": "node scripts/deploy-staging.cjs",
     "test:functions": "node scripts/run-functions-tests.cjs",
-    "lint:improvements": "eslint src/features/team-registration src/services/geminiGatewayClient.ts src/services/geminiUsageFetch.ts src/pages/taxinvoice/utils/taxInvoiceLedgerExport.ts src/pages/taxinvoice/WorkbookLedgerModel.ts src/pages/payroll/MonthlyWageModel.ts src/pages/payroll/MonthlyWageStyles.ts src/pages/payroll/SupportClientSiteModel.ts src/pages/payroll/SupportClientStatementPanels.tsx src/pages/taxinvoice/TaxInvoiceLedgerPage.tsx --ext .ts,.tsx --max-warnings=0"
+    "lint:improvements": "eslint src/features/team-registration src/services/geminiGatewayClient.ts src/services/geminiUsageFetch.ts src/pages/taxinvoice/utils/taxInvoiceLedgerExport.ts src/pages/taxinvoice/WorkbookLedgerModel.ts src/pages/payroll/MonthlyWageModel.ts src/pages/payroll/MonthlyWageStyles.ts src/pages/payroll/SupportClientSiteModel.ts src/pages/payroll/SupportClientStatementPanels.tsx src/pages/taxinvoice/TaxInvoiceLedgerPage.tsx src/pages/taxinvoice/printing --ext .ts,.tsx --max-warnings=0"
   },
   "eslintConfig": {
     "extends": [
@@ -127,7 +127,8 @@
           "src/pages/payroll/MonthlyWageStyles.ts",
           "src/pages/payroll/SupportClientSiteModel.ts",
           "src/pages/payroll/SupportClientStatementPanels.tsx",
-          "src/pages/taxinvoice/TaxInvoiceLedgerPage.tsx"
+          "src/pages/taxinvoice/TaxInvoiceLedgerPage.tsx",
+          "src/pages/taxinvoice/printing/**/*.{ts,tsx}"
         ],
         "rules": {
           "@typescript-eslint/no-unused-vars": "error",
