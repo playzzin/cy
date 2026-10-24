@@ -411,7 +411,6 @@ const FreelancerPage: React.FC = () => {
 
     const closeHistoryDetails = useCallback(() => setHistoryDetails(null), []);
     useEffect(() => { closeHistoryDetails(); }, [selectedTeamId, year, closeHistoryDetails]);
-    const historyCount = displayData.filter(row => !row.isEmpty && !row.isFooter && teamHistory.has(freelancerReportRowKey(row))).length;
 
     const selectedTeamTheme = useMemo(() => {
         const selectedIndex = visibleTeams.findIndex((team: any) => team.id === selectedTeamId);
@@ -461,27 +460,16 @@ const FreelancerPage: React.FC = () => {
                     const detailsButton = document.createElement('button');
                     detailsButton.type = 'button';
                     detailsButton.className = 'freelancer-history-button';
-                    detailsButton.setAttribute('aria-label', `${value} · ${history.label} · ${history.otherTeams.map(team => team.teamName).join(', ')} · 신고 내역 보기`);
-                    const label = document.createElement('span');
-                    label.textContent = history.previousTeamId ? '이전 팀 신고 내역 ›' : `${history.label} ›`;
-                    detailsButton.append(label);
+                    detailsButton.setAttribute('aria-label', `${value} · ${history.otherTeams.map(team => team.teamName).join(', ')} · 신고 내역 보기`);
                     history.otherTeams.forEach(team => {
                         const chip = document.createElement('span');
                         chip.className = 'freelancer-history-team-chip';
                         chip.dataset.teamId = team.teamId;
-                        chip.textContent = `${team.teamId === history.previousTeamId ? '이전: ' : ''}${team.teamName}`;
+                        chip.textContent = team.teamName;
                         if (team.background) chip.style.background = team.background;
                         if (team.textColor) chip.style.color = team.textColor;
                         detailsButton.append(chip);
                     });
-                    if (history.sharedMonths.length > 0 && history.previousTeamId) {
-                        const shared = document.createElement('span');
-                        shared.className = 'freelancer-history-shared-label';
-                        shared.textContent = '같은 달 여러 팀 신고';
-                        detailsButton.append(shared);
-                    } else if (history.sharedMonths.length > 0) {
-                        detailsButton.classList.add('is-shared');
-                    }
                     detailsButton.onmousedown = event => event.stopPropagation();
                     detailsButton.ondblclick = event => event.stopPropagation();
                     detailsButton.onkeydown = event => event.stopPropagation();
@@ -1129,8 +1117,7 @@ const FreelancerPage: React.FC = () => {
             </div>
 
             <p className="freelancer-team-history-hint">
-                {historyCount > 0 ? <><strong>다른 팀 신고 이력 {historyCount}명</strong> 이름 아래에 신고한 다른 팀의 색상과 팀명을 모두 표시합니다. 누르면 팀별 금액을 볼 수 있습니다.</>
-                    : '팀 변경이나 여러 팀 신고가 있으면 이름 아래에 표시됩니다.'}
+                이름 아래 팀명을 누르면 팀별 신고 내역을 볼 수 있습니다.
             </p>
 
             {historyDetails && <FreelancerTeamHistoryDialog
@@ -1202,7 +1189,7 @@ const FreelancerPage: React.FC = () => {
                         rowHeights={row => {
                             const data = displayData[row];
                             const history = data && !data.isEmpty && !data.isFooter ? teamHistory.get(freelancerReportRowKey(data)) : undefined;
-                            return history ? 56 + history.otherTeams.length * 28 + (history.previousTeamId && history.sharedMonths.length > 0 ? 20 : 0) : 26;
+                            return history ? 28 + history.otherTeams.length * 28 : 26;
                         }}
                         manualColumnResize={true}
                         contextMenu={true}

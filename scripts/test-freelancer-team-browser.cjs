@@ -56,6 +56,7 @@ const XLSX = require('xlsx');
             { teamId: 'c', background: 'rgb(15, 118, 110)', color: 'rgb(255, 255, 255)' },
         ]);
         assert.equal(await historyButton('검증 세팀신고').evaluate(button => button.getBoundingClientRect().bottom <= button.closest('td').getBoundingClientRect().bottom), true);
+        assert.equal(await historyButton('검증 세팀신고').innerText(), '검증 B팀\n검증 C팀');
         checks.push('이후 다른 팀 신고도 이름에 색상 표시, 여러 다른 팀의 색상·팀명 모두 표시');
         await page.screenshot({ path: path.join(output, 'team-a.png'), fullPage: true });
 
@@ -73,7 +74,8 @@ const XLSX = require('xlsx');
         checks.push('B팀: 9월 귀속 및 동월 복수 팀 분리');
         await page.screenshot({ path: path.join(output, 'team-b.png'), fullPage: true });
 
-        assert.match(await historyButton('검증 이동자').innerText(), /이전: 검증 A팀/);
+        assert.equal(await historyButton('검증 이동자').innerText(), '검증 A팀');
+        assert.doesNotMatch(await page.locator('.ht_master tbody').innerText(), /다른 팀 신고 있음|이전 팀 신고 내역|이전:|같은 달 여러 팀 신고/);
         await historyButton('검증 이동자').click();
         const dialog = page.getByRole('dialog');
         await dialog.waitFor();
@@ -86,7 +88,7 @@ const XLSX = require('xlsx');
         await page.screenshot({ path: path.join(output, 'history-details.png'), fullPage: true });
         await dialog.getByRole('button', { name: '신고 내역 닫기' }).click();
         await dialog.waitFor({ state: 'detached' });
-        assert.match(await historyButton('검증 복수팀').innerText(), /같은 달 여러 팀 신고/);
+        assert.equal(await historyButton('검증 복수팀').innerText(), '검증 A팀');
         await historyButton('검증 복수팀').click();
         await dialog.waitFor();
         assert.match(await dialog.locator('.freelancer-history-notice').innerText(), /9월에는 여러 팀에서 신고/);
@@ -97,14 +99,14 @@ const XLSX = require('xlsx');
         await page.keyboard.press('Escape');
         await dialog.waitFor({ state: 'detached' });
         await page.setViewportSize({ width: 2200, height: 1000 });
-        checks.push('이전 팀·같은 달 여러 팀 표시, 클릭 상세 월별 금액·합계, 모바일 화면 및 닫기 검증');
+        checks.push('목록은 색상과 팀명만 표시, 클릭 상세 월별 금액·합계·동월 안내, 모바일 화면 및 닫기 검증');
 
         // An edit must update the visible exception marker without a save or team switch.
         await workerRow('검증 복수팀').locator('td').nth(11).dblclick();
         await page.locator('textarea.handsontableInput:visible').fill('0');
         await page.locator('textarea.handsontableInput:visible').press('Enter');
         await page.waitForFunction(() => Array.from(document.querySelectorAll('.ht_clone_inline_start button'))
-            .some(button => button.getAttribute('aria-label')?.includes('검증 복수팀') && button.textContent.includes('이전: 검증 A팀')), null, { timeout: 2000 });
+            .some(button => button.getAttribute('aria-label')?.includes('검증 복수팀') && button.closest('td')?.dataset.previousTeamId === 'a'), null, { timeout: 2000 });
         await historyButton('검증 복수팀').focus();
         await page.keyboard.press('Enter');
         await dialog.waitFor();
@@ -116,8 +118,13 @@ const XLSX = require('xlsx');
         await page.locator('textarea.handsontableInput:visible').fill('400000');
         await page.locator('textarea.handsontableInput:visible').press('Enter');
         await page.waitForFunction(() => Array.from(document.querySelectorAll('.ht_clone_inline_start button'))
-            .some(button => button.getAttribute('aria-label')?.includes('검증 복수팀') && button.textContent.includes('같은 달 여러 팀 신고')));
-        checks.push('0원 수정·되돌리기 직후 안내 갱신, 키보드 상세보기 및 현재 팀 미신고 안내');
+            .some(button => button.getAttribute('aria-label')?.includes('검증 복수팀') && !button.closest('td')?.dataset.previousTeamId));
+        await historyButton('검증 복수팀').click();
+        await dialog.waitFor();
+        assert.match(await dialog.locator('.freelancer-history-notice').innerText(), /9월에는 여러 팀에서 신고/);
+        assert.match(await dialog.locator('footer').innerText(), /700,000원/);
+        await dialog.getByRole('button', { name: '신고 내역 닫기' }).click();
+        checks.push('0원 수정·복원 후 상세 갱신, 팀명 키보드 상세보기 및 현재 팀 미신고 안내');
 
         await workerRow('검증 이동자').locator('td').nth(11).dblclick();
         const editor = page.locator('textarea.handsontableInput:visible');

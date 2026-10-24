@@ -171,20 +171,14 @@
 	font-size: 12px;
 }
 
-.freelancer-team-history-hint strong {
-	display: inline-block;
-	margin-right: 8px;
-	color: #1e40af;
-}
-
 .custom-ledger-grid .freelancer-history-button {
 	display: block;
 	width: calc(100% - 8px);
 	margin: 3px 4px;
-	padding: 3px 5px;
-	border: 1px solid currentColor;
+	padding: 0;
+	border: 0;
 	border-radius: 5px;
-	background: rgba(255, 255, 255, 0.12);
+	background: transparent;
 	color: inherit;
 	font: inherit;
 	font-size: 11px;
@@ -194,22 +188,14 @@
 	cursor: pointer;
 }
 
-.custom-ledger-grid .freelancer-history-button:hover {
-	background: rgba(148, 163, 184, 0.25);
+.custom-ledger-grid .freelancer-history-button:hover .freelancer-history-team-chip {
+	box-shadow: inset 0 0 0 1px currentColor;
 }
 
 .custom-ledger-grid .freelancer-history-button:focus-visible {
 	outline: 2px solid #2563eb;
 	outline-offset: 1px;
 }
-
-.custom-ledger-grid .freelancer-history-button.is-shared,
-.freelancer-history-shared-label {
-	background: #fff7ed;
-	color: #9a3412;
-}
-
-.freelancer-history-shared-label { display: block; border-radius: 3px; margin-top: 3px; }
 
 .freelancer-history-team-chip {
 	display: block;
