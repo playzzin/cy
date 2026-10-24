@@ -672,6 +672,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         '/support/expense-claims',
         '/support/expense-claim-input',
         '/support/vehicles',
+        '/support/vehicles/oil-cycle',
         '/support/accommodation',
         '/support/cards',
     ].includes(location.pathname);

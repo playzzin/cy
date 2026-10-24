@@ -22,6 +22,7 @@ import { supportSharedDataService } from '../../services/supportSharedDataServic
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
 import { saveTeamVehicleOil } from '../../services/teamVehicleOilService';
+import './EngineOilCyclePage.css';
 
 type OilStatusType = 'danger' | 'warning' | 'normal';
 type OilFilterType = OilStatusType | 'all';
@@ -637,19 +638,19 @@ const EngineOilCyclePage: React.FC = () => {
     ];
 
     return (
-        <div className="min-h-screen w-[calc(100vw-30px)] max-w-full overflow-x-hidden bg-slate-50 px-3 py-4 text-slate-900 sm:w-full sm:p-6 xl:p-8">
+        <div className="engine-oil-page min-h-screen w-full min-w-0 max-w-full bg-slate-50 px-3 py-4 text-slate-900 sm:p-6 xl:p-8">
             <div className="mx-auto flex max-w-[1500px] flex-col gap-4">
-                <header className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <header className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="flex min-w-0 items-start gap-3">
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-xl text-white shadow-lg shadow-blue-100">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-lg text-white shadow-lg shadow-blue-100 sm:h-12 sm:w-12 sm:text-xl">
                                 <FontAwesomeIcon icon={faOilCan} />
                             </div>
                             <div className="min-w-0">
-                                <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-4xl">
+                                <h1 className="break-keep text-xl font-black tracking-tight text-slate-950 sm:text-4xl">
                                     엔진오일 교체주기 관제표
                                 </h1>
-                                <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-slate-500">
+                                <p className="mt-2 max-w-3xl text-xs font-medium leading-5 text-slate-500 sm:text-sm sm:leading-6">
                                     차량번호와 팀은 차량 관리 데이터에서 자동으로 가져오고, 엔진오일 거리 기록만 차량별로 저장합니다.
                                 </p>
                             </div>
@@ -679,21 +680,22 @@ const EngineOilCyclePage: React.FC = () => {
                     </div>
                 </header>
 
-                <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <section aria-label="차량 상태 요약" className="grid grid-cols-4 gap-1.5 sm:gap-3">
                     {summaryCards.map((card) => (
                         <button
                             type="button"
                             key={card.filter}
                             onClick={() => setActiveFilter(card.filter)}
-                            className={`rounded-2xl border bg-white p-4 text-left shadow-sm transition-transform hover:-translate-y-0.5 ${card.className} ${
+                            aria-pressed={activeFilter === card.filter}
+                            className={`min-w-0 rounded-xl border bg-white px-1 py-2 text-center shadow-sm transition-colors sm:px-3 sm:text-left ${card.className} ${
                                 activeFilter === card.filter ? 'ring-2 ring-blue-500/70' : ''
                             }`}
                         >
-                            <span className="flex items-center gap-2 text-sm font-bold text-slate-500">
-                                <FontAwesomeIcon icon={card.icon} />
+                            <span className="flex items-center justify-center gap-2 whitespace-nowrap text-xs font-bold text-slate-500 sm:justify-start sm:text-sm">
+                                <FontAwesomeIcon icon={card.icon} className="hidden sm:inline" />
                                 {card.label}
                             </span>
-                            <strong className="mt-2 block text-3xl font-black tracking-tight text-slate-950">
+                            <strong className="mt-0.5 block text-xl font-black tabular-nums tracking-tight text-slate-950 sm:text-2xl">
                                 {card.value.toLocaleString('ko-KR')}
                             </strong>
                         </button>
@@ -719,7 +721,7 @@ const EngineOilCyclePage: React.FC = () => {
                             <button type="button" onClick={() => setActiveFilter('normal')} className={filterButtonClassName('normal')}>정상</button>
                         </div>
 
-                        {!restricted && <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                        {!restricted && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                             <span className="whitespace-nowrap text-xs font-black text-slate-500">전체교체주기</span>
                             <select
                                 aria-label="전체교체주기"
@@ -802,19 +804,19 @@ const EngineOilCyclePage: React.FC = () => {
                         </section>
                     )}
 
-                    <div className="support-scroll-x mt-4 rounded-2xl border border-slate-200">
-                        <table className="min-w-[980px] w-full border-collapse bg-white text-sm">
-                            <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600">
-                                <tr>
-                                    <th className="px-3 py-3 text-left text-xs font-black">상태</th>
-                                    <th className="px-3 py-3 text-left text-xs font-black">차량번호</th>
-                                    <th className="px-3 py-3 text-left text-xs font-black">팀</th>
-                                    <th className="px-3 py-3 text-right text-xs font-black">현재거리</th>
-                                    <th className="px-3 py-3 text-right text-xs font-black">최근교체</th>
-                                    <th className="px-3 py-3 text-right text-xs font-black">다음교체</th>
-                                    <th className="px-3 py-3 text-right text-xs font-black">남은거리</th>
-                                    <th className="px-3 py-3 text-right text-xs font-black">교체주기</th>
-                                    <th className="px-3 py-3 text-right text-xs font-black">관리</th>
+                    <div className="engine-oil-table-container mt-4 lg:overflow-x-auto lg:rounded-2xl lg:border lg:border-slate-200">
+                        <table role="table" aria-label="차량별 엔진오일 교체주기" className="engine-oil-table w-full border-collapse bg-white text-sm lg:min-w-[980px]">
+                            <thead className="hidden bg-slate-100 text-slate-600 lg:sticky lg:top-0 lg:z-10 lg:table-header-group">
+                                <tr role="row">
+                                    <th scope="col" className="px-3 py-3 text-left text-xs font-black">상태</th>
+                                    <th scope="col" className="px-3 py-3 text-left text-xs font-black">차량번호</th>
+                                    <th scope="col" className="px-3 py-3 text-left text-xs font-black">팀</th>
+                                    <th scope="col" className="px-3 py-3 text-right text-xs font-black">현재거리</th>
+                                    <th scope="col" className="px-3 py-3 text-right text-xs font-black">최근교체</th>
+                                    <th scope="col" className="px-3 py-3 text-right text-xs font-black">다음교체</th>
+                                    <th scope="col" className="px-3 py-3 text-right text-xs font-black">남은거리</th>
+                                    <th scope="col" className="px-3 py-3 text-right text-xs font-black">교체주기</th>
+                                    <th scope="col" className="px-3 py-3 text-right text-xs font-black">관리</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -839,20 +841,21 @@ const EngineOilCyclePage: React.FC = () => {
                                     const classes = statusClasses[status.type];
 
                                     return (
-                                        <tr key={record.id} className={`${classes.row} border-b border-white`}>
-                                            <td className={`px-3 py-2 ${classes.firstCell}`}>
+                                        <tr role="row" key={record.id} className={`engine-oil-record ${classes.row} border-b border-white`}>
+                                            <td role="cell" className={`engine-oil-status px-3 py-2 ${classes.firstCell}`}>
                                                 <span className={`inline-flex min-w-[88px] items-center justify-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-black ${classes.badge}`}>
                                                     <FontAwesomeIcon icon={statusIcon[status.type]} className="text-[11px]" />
                                                     {status.label}
                                                 </span>
                                             </td>
-                                            <td className="px-3 py-2 font-black text-slate-900">
+                                            <td role="cell" className="engine-oil-plate px-3 py-2 font-black text-slate-900">
                                                 <span className="inline-flex items-center gap-2">
                                                     <FontAwesomeIcon icon={faCar} className="text-slate-400" />
                                                     {record.plate}
                                                 </span>
                                             </td>
-                                            <td className="px-3 py-2 font-bold text-slate-800">
+                                            <td role="cell" className="engine-oil-field px-3 py-2 font-bold text-slate-800">
+                                                <span className="engine-oil-field-label">팀</span>
                                                 <span className="inline-flex items-center gap-2">
                                                     <span
                                                         className="inline-block h-5 w-1.5 rounded-full shadow-sm"
@@ -862,36 +865,43 @@ const EngineOilCyclePage: React.FC = () => {
                                                     {record.team}
                                                 </span>
                                             </td>
-                                            <td className="px-3 py-2 text-right">
+                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right">
+                                                <span className="engine-oil-field-label">현재거리 <span className="font-normal">(km)</span></span>
                                                 <input
                                                     aria-label={`${record.plate} 현재거리`}
                                                     value={draft.currentKm}
                                                     type="number"
+                                                    inputMode="numeric"
                                                     onChange={(event) => setDraftValue(record.id, 'currentKm', event.target.value)}
                                                     onKeyDown={(event) => handleInlineKeyDown(event, record.id)}
                                                     className={inputClassName(changed)}
                                                 />
                                             </td>
-                                            <td className="px-3 py-2 text-right">
+                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right">
+                                                <span className="engine-oil-field-label">최근교체 <span className="font-normal">(km)</span></span>
                                                 <input
                                                     aria-label={`${record.plate} 최근교체거리`}
                                                     value={draft.lastOilKm}
                                                     type="number"
+                                                    inputMode="numeric"
                                                     onChange={(event) => setDraftValue(record.id, 'lastOilKm', event.target.value)}
                                                     onKeyDown={(event) => handleInlineKeyDown(event, record.id)}
                                                     className={inputClassName(changed)}
                                                 />
                                             </td>
-                                            <td className="px-3 py-2 text-right font-mono font-bold text-slate-800">
-                                                {formatKm(status.nextKm)}
+                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right font-mono font-bold text-slate-800">
+                                                <span className="engine-oil-field-label">다음교체</span>
+                                                <span>{formatKm(status.nextKm)}</span>
                                             </td>
-                                            <td className={`px-3 py-2 text-right font-mono font-black ${classes.text}`}>
-                                                {formatKm(status.remainKm)}
+                                            <td role="cell" className={`engine-oil-field px-3 py-2 text-right font-mono font-black ${classes.text}`}>
+                                                <span className="engine-oil-field-label">남은거리</span>
+                                                <span>{formatKm(status.remainKm)}</span>
                                             </td>
-                                            <td className="px-3 py-2 text-right font-mono font-bold text-slate-700">
-                                                {formatKm(record.cycleKm)}
+                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right font-mono font-bold text-slate-700">
+                                                <span className="engine-oil-field-label">교체주기</span>
+                                                <span>{formatKm(record.cycleKm)}</span>
                                             </td>
-                                            <td className="px-3 py-2">
+                                            <td role="cell" className="engine-oil-actions px-3 py-2">
                                                 <div className="flex justify-end">
                                                     <button
                                                         type="button"
