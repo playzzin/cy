@@ -533,14 +533,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     return map;
   }, [workers]);
 
-  const getWorkerBankInfo = (row: RowState) => {
+  const getWorkerDirectBankInfo = (row: RowState) => {
     const worker = (row.workerId ? workerById.get(row.workerId) : undefined)
       ?? (row.workerName ? workerByName.get(row.workerName) : undefined);
 
     return {
-      bankName: worker?.bankName ?? '',
-      bankOwner: worker?.accountHolder ?? '',
-      bankAccount: worker?.accountNumber ?? ''
+      bankName: worker?.directPayBankName ?? '',
+      bankOwner: worker?.directPayAccountHolder ?? '',
+      bankAccount: worker?.directPayAccountNumber ?? ''
     };
   };
 
@@ -555,7 +555,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       return saved;
     }
 
-    return getWorkerBankInfo(row);
+    return getWorkerDirectBankInfo(row);
   };
 
   const addPayTypeAutoWarning = useCallback((workerLabel: string) => {
@@ -670,9 +670,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const fallbackWorkerName = fallbackName || (workerKey ? String(workerKey) : '');
     const workerName = w?.name ?? fallbackWorkerName;
     const directBank = {
-      bankName: w?.bankName ?? '',
-      bankOwner: w?.accountHolder ?? '',
-      bankAccount: w?.accountNumber ?? ''
+      bankName: w?.directPayBankName ?? '',
+      bankOwner: w?.directPayAccountHolder ?? '',
+      bankAccount: w?.directPayAccountNumber ?? ''
     };
     const payType = getWorkerPayTypeOrWarn(w, workerName);
 
@@ -830,9 +830,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         const masterWorker = w.workerId ? workerById.get(w.workerId) : workerByName.get(w.name);
         const entry = map[w.key];
         const directBank = {
-          bankName: masterWorker?.bankName ?? '',
-          bankOwner: masterWorker?.accountHolder ?? '',
-          bankAccount: masterWorker?.accountNumber ?? ''
+          bankName: masterWorker?.directPayBankName ?? '',
+          bankOwner: masterWorker?.directPayAccountHolder ?? '',
+          bankAccount: masterWorker?.directPayAccountNumber ?? ''
         };
         const payType = useWorkerMasterPayType
           ? getWorkerMasterLaborStatementPayType(masterWorker)
