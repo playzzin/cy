@@ -138,6 +138,19 @@
 .as-empty { display: flex; align-items: center; flex-direction: column; gap: 10px; border: 1px dashed #cbd5e1; border-radius: 10px; background: white; padding: 55px 20px; text-align: center; font-size: 14px; color: #475569; }
 .as-empty p { font-size: 12px; color: #64748b; }
 .as-error { border-color: #fca5a5; color: #b91c1c; }
+/* Tables keep their original size in the shared type scale; match the receipt ledger on screen. */
+@media screen {
+    .as-team table { font-size: 14px; line-height: 1.5; }
+    .as-team thead th { font-size: 13px; }
+    .as-team tbody th { font-weight: 700; }
+    .as-deposit-select { font-size: 14px; }
+    .as-row-total > span:first-child, .as-advance-items { font-size: 12px; }
+    .as-team .as-money, .as-advance-items dd { font-weight: 650; }
+    .as-advance-items dd { flex-shrink: 0; white-space: nowrap; }
+    .as-col-name { width: 96px; }
+    .as-col-amount { width: 160px; }
+    .as-col-deposit { width: 112px; }
+}
 @media (max-width: 700px) {
     .advance-summary-page { padding: 8px 8px 24px; }
     .as-header { gap: 14px; }
@@ -169,6 +182,11 @@
     .as-team-jumps b { display: none; }
     .as-team-heading { padding: 10px; gap: 8px; }
     .as-team-heading-total { gap: 3px 6px; }
+}
+@media screen and (max-width: 700px) {
+    .as-deposit-select { font-size: 15px; }
+    .as-row-total > span:last-child { font-size: 18px; }
+    .as-col-amount { width: 190px; }
 }
 @media print {
     .as-report { color: #17243a; font-family: sans-serif; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
