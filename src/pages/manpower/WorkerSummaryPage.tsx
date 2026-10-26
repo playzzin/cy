@@ -365,6 +365,18 @@ const isActiveWorker = (worker: Worker) => {
     return worker.isActive !== false && status !== '퇴사' && status !== 'inactive' && status !== '출입금지';
 };
 
+const DocumentStatus: React.FC<{ document: string; registered: boolean; canView: boolean }> = ({ document, registered, canView }) => {
+    const status = !canView ? 'unavailable' : registered ? 'registered' : 'missing';
+    const label = !canView ? '확인 불가' : registered ? '등록' : '미등록';
+    return (
+        <span className={`ws-document-status ws-document-status--${status}`} aria-label={`${document} ${label}`}
+            title={canView ? `${document} ${label}` : '내 팀 작업자의 서류 등록 여부만 확인할 수 있습니다.'}>
+            <span className="ws-document-symbol" aria-hidden="true">{!canView ? '−' : registered ? '○' : '×'}</span>
+            {label}
+        </span>
+    );
+};
+
 const WorkerSummaryPage: React.FC = () => {
     const restricted = useRestrictedTeamWorkflow();
     const summaryRef = React.useRef<HTMLTableElement>(null);
@@ -819,7 +831,7 @@ const WorkerSummaryPage: React.FC = () => {
                             <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedDocumentWorkers} disabled={isSendingImage}
                                 onSaved={updates => setWorkers(previous => previous.map(worker => {
                                     const update = updates.find(item => item.workerId === worker.id);
-                                    return update ? { ...worker, bankPhotoId: update.bankPhotoId } : worker;
+                                    return update ? { ...worker, directPayBankPhotoId: update.directPayBankPhotoId } : worker;
                                 }))} />
                             <WorkerIdImageShare key={restricted ? 'team-bank' : 'office-bank'} workers={selectedDocumentWorkers} disabled={isSendingImage} kind="bank" />
                             <ActionButton onClick={handleCopyImage} title="서류 사진 없이 명단만 복사한 뒤 PC 카카오톡에 붙여넣기" className="ws-copy" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
@@ -837,7 +849,7 @@ const WorkerSummaryPage: React.FC = () => {
                             </ActionButton>
                         </ActionButtons>
                     </CardHeader>
-                    <p className="ws-share-guide">PC·모바일 공유는 명단만 보냅니다. 신분증·통장사본은 별도 공유 버튼을 이용해 주세요.
+                    <p className="ws-share-guide">PC·모바일 공유는 명단만 보냅니다. 신분증·직불용 통장사본은 별도 공유 버튼을 이용해 주세요.
                         {restricted && selectedDocumentWorkers.length < selectedWorkers.length && <span> 서류 공유·등록은 선택한 내 팀 인원 {selectedDocumentWorkers.length}명에게 적용됩니다.</span>}
                     </p>
                     {selectedWorkerIds.size === 0 ? (
@@ -858,6 +870,10 @@ const WorkerSummaryPage: React.FC = () => {
                                         <th className="px-2 py-3 font-semibold text-slate-600 w-32 text-center">연락처</th>
                                         {/* <th className="px-6 py-3 font-semibold text-slate-600">소속팀</th> */}
                                         <th className="px-6 py-3 font-semibold text-slate-600 text-center">주소</th>
+                                        <th scope="col" className="ws-document-column px-4 py-3 font-semibold text-slate-600 text-center" data-html2canvas-ignore>신분증</th>
+                                        <th scope="col" className="ws-document-column px-4 py-3 font-semibold text-slate-600 text-center" data-html2canvas-ignore>
+                                            통장사본<span className="ws-document-subtitle">직불용</span>
+                                        </th>
                                         <th className="px-4 py-3 font-semibold text-slate-600 w-20 text-center">혈액형</th>
                                     </tr>
                                 </thead>
@@ -890,6 +906,14 @@ const WorkerSummaryPage: React.FC = () => {
                                                 <td data-label="주소" className="px-6 py-3 text-slate-600 whitespace-pre-wrap break-words align-middle">
                                                     <span className="ws-field-label" data-html2canvas-ignore>주소</span>
                                                     {w.address || '-'}
+                                                </td>
+                                                <td data-label="신분증" className="ws-document-cell px-4 py-3 text-center align-middle" data-html2canvas-ignore>
+                                                    <span className="ws-field-label">신분증</span>
+                                                    <DocumentStatus document="신분증" registered={!!w.fileNameSaved?.trim()} canView={documentWorkerIds.has(w.id!)} />
+                                                </td>
+                                                <td data-label="통장사본" className="ws-document-cell px-4 py-3 text-center align-middle" data-html2canvas-ignore>
+                                                    <span className="ws-field-label">통장사본<span className="ws-document-subtitle">직불용</span></span>
+                                                    <DocumentStatus document="직불용 통장사본" registered={!!w.directPayBankPhotoId?.trim()} canView={documentWorkerIds.has(w.id!)} />
                                                 </td>
                                                 <td data-label="혈액형" className="px-4 py-3 text-slate-600 text-center align-middle">
                                                     <span className="ws-field-label" data-html2canvas-ignore>혈액형</span>

@@ -169,7 +169,8 @@ const LaborCheckPage: React.FC = () => {
     const [inactiveCellEditingEnabled, setInactiveCellEditingEnabled] = useState(false);
     const [selectedWorkerKeys, setSelectedWorkerKeys] = useState<Set<string>>(new Set());
     const [payStatusFilter, setPayStatusFilter] = useState<'all' | 'direct'>('all');
-    const [showRetired, setShowRetired] = useState(false);
+    // 현재 퇴사 상태여도 조회 월의 출역 이력은 기본 표시한다. 출역 없는 달은 기존 필터가 제외한다.
+    const [showRetired, setShowRetired] = useState(true);
     const [isTwoLineView, setIsTwoLineView] = useState(false);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);

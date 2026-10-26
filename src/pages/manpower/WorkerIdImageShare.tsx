@@ -11,13 +11,13 @@ import { copyWindowsPhotos, openWindowsPhotoWindow, WindowsPhotoClipboardError, 
 import { readWorkerBankPhoto } from '../../services/workerBankPhotoService';
 import './WorkerIdImageShare.css';
 
-type IdWorker = Pick<Worker, 'id' | 'name' | 'fileNameSaved' | 'bankPhotoId'>;
+type IdWorker = Pick<Worker, 'id' | 'name' | 'fileNameSaved' | 'bankPhotoId' | 'directPayBankPhotoId'>;
 type PreparedImage = { worker: IdWorker; file: File; url: string };
 type Prepared = { workers: IdWorker[]; images: PreparedImage[]; failed: string[]; missing: string[] };
 
 const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean; kind?: 'identity' | 'bank' }> = ({ workers, disabled, kind = 'identity' }) => {
-    const documentLabel = kind === 'bank' ? '통장사본' : '신분증';
-    const shareTitle = kind === 'bank' ? '통장사본 공유' : '신분증 공유';
+    const documentLabel = kind === 'bank' ? '직불용 통장사본' : '신분증';
+    const shareTitle = kind === 'bank' ? '직불용 통장사본 공유' : '신분증 공유';
     // Keep the existing identity audit accurate; bank registrations are audited by the server.
     const recordPhotoLog: typeof recordIdentityDocumentLog = input => kind === 'identity' ? recordIdentityDocumentLog(input) : Promise.resolve();
     const isWindows = /Windows/i.test(navigator.userAgent) || /^Win/i.test(navigator.platform);
@@ -83,7 +83,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean; ki
                 try {
                     const name = `${String(index + 1).padStart(2, '0')}_${worker.name}_${documentLabel}`;
                     const file = kind === 'bank'
-                        ? await readWorkerBankPhoto(worker.id!, name, controller.signal)
+                        ? await readWorkerBankPhoto(worker.id!, name, controller.signal, 'directPay')
                         : await imageFileFromUrl(await getDownloadURL(ref(storage, worker.fileNameSaved)), name, controller.signal);
                     if (!file) { missing.push(worker.name); continue; }
                     if (controller.signal.aborted) break;
@@ -98,7 +98,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean; ki
                 return;
             }
             setPrepared({ workers, images, failed, missing });
-            setMessage(images.length ? `사진 ${images.length}장을 준비했습니다. 아래 사진을 확인한 뒤 공유하세요.` : kind === 'bank' ? '공유할 통장사본이 없습니다. 통장사본 등록에서 원본을 등록해 주세요.' : '공유할 신분증 사진이 없습니다.');
+            setMessage(images.length ? `사진 ${images.length}장을 준비했습니다. 아래 사진을 확인한 뒤 공유하세요.` : kind === 'bank' ? '공유할 직불용 통장사본이 없습니다. 직불용 통장사본 등록에서 원본을 등록해 주세요.' : '공유할 신분증 사진이 없습니다.');
         } finally {
             if (request === requestRef.current) { busyRef.current = false; setBusy(false); }
         }
@@ -166,7 +166,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean; ki
         const selected = prepared.images;
         try {
             if (format === 'folder') {
-                const result = await saveImageFolder(selected.map(image => image.file), controller.signal, kind === 'bank' ? '통장사본' : '신분증');
+                const result = await saveImageFolder(selected.map(image => image.file), controller.signal, kind === 'bank' ? '직불용 통장사본' : '신분증');
                 const savedImages = selected.filter(image => result.saved.includes(image.file));
                 if (savedImages.length) void recordPhotoLog({ action: 'download_image', source: 'worker_summary',
                     status: result.saved.length === selected.length ? 'success' : 'partial',
@@ -175,7 +175,7 @@ const WorkerIdImageShare: React.FC<{ workers: IdWorker[]; disabled?: boolean; ki
                 setMessage(result.saved.length ? `사진 ${result.saved.length}장을 선택한 위치의 “${result.folderName}” 폴더에 저장했습니다. 폴더 안의 사진을 모두 선택해 카카오톡 대화방에 첨부하세요.` : '저장된 사진이 없습니다. ZIP 저장을 이용해 주세요.');
                 if (result.failed.length) setError(`사진 ${result.failed.length}장 저장 실패: ${selected.filter(image => result.failed.includes(image.file)).map(image => image.worker.name).join(', ')}. 해당 사진을 개별 저장하거나 ZIP 저장을 이용해 주세요.`);
             } else {
-                const zip = await zipImageFiles(selected.map(image => image.file), kind === 'bank' ? '통장사본' : '신분증');
+                const zip = await zipImageFiles(selected.map(image => image.file), kind === 'bank' ? '직불용 통장사본' : '신분증');
                 if (request !== requestRef.current || controller.signal.aborted || prepared.workers !== currentWorkers.current) return;
                 saveAs(zip, zip.name);
                 void recordPhotoLog({ action: 'download_zip', source: 'worker_summary', status: 'success',

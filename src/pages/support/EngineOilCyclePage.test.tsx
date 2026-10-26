@@ -35,7 +35,7 @@ test('팀장은 서버의 현재 팀 차량만 집계하고 공용 DB와 브라�
     expect(vehicleService.getVehicles).not.toHaveBeenCalled();
     expect(supportSharedDataService.load).not.toHaveBeenCalled();
     expect(supportSharedDataService.save).not.toHaveBeenCalled();
-    expect(screen.getByRole('spinbutton', { name: `${record.plate} 현재거리` })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: `${record.plate} 현재거리` })).toBeInTheDocument();
     for (const name of ['전체 적용', '오일기록 초기화', '차량 관리']) {
         expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     }
@@ -48,11 +48,47 @@ test('팀장 개별 저장은 수정한 차량만 전송하며 공용 데이터 
     (getTeamScopedRows as jest.Mock).mockResolvedValue([record, { ...record, id: 'second', plate: '가상 22가2222' }]);
     openPage();
     await screen.findByText('조회 2 / 2대');
-    fireEvent.change(screen.getByRole('spinbutton', { name: `${record.plate} 현재거리` }), { target: { value: '19500' } });
-    fireEvent.keyDown(screen.getByRole('spinbutton', { name: `${record.plate} 현재거리` }), { key: 'Enter' });
+    const current = screen.getByRole('textbox', { name: `${record.plate} 현재거리` });
+    expect(current).toHaveValue('19,000');
+    expect(screen.getByRole('textbox', { name: `${record.plate} 최근교체거리` })).toHaveValue('10,000');
+    fireEvent.change(current, { target: { value: '19,500' } });
+    expect(current).toHaveValue('19,500');
+    fireEvent.keyDown(screen.getByRole('textbox', { name: `${record.plate} 현재거리` }), { key: 'Enter' });
     await waitFor(() => expect(saveTeamVehicleOil).toHaveBeenCalledWith([{ id: 'own', currentKm: 19500, lastOilKm: 10000, cycleKm: 10000 }]));
     expect(supportSharedDataService.save).not.toHaveBeenCalled();
     expect(localStorage.getItem('engine_oil_vehicle_metrics_v2')).toBeNull();
+});
+
+test('거리 입력은 빈 값과 붙여넣기를 지원하고 일괄 저장에는 쉼표 없는 숫자를 전달한다', async () => {
+    openPage();
+    await screen.findByText('조회 1 / 1대');
+    const current = screen.getByRole('textbox', { name: `${record.plate} 현재거리` });
+    const last = screen.getByRole('textbox', { name: `${record.plate} 최근교체거리` });
+    fireEvent.change(current, { target: { value: '' } });
+    expect(current).toHaveValue('');
+    fireEvent.change(current, { target: { value: '123456' } });
+    expect(current).toHaveValue('123,456');
+    fireEvent.change(last, { target: { value: '120,000' } });
+    expect(last).toHaveValue('120,000');
+    fireEvent.change(last, { target: { value: '120,00x' } });
+    expect(last).toHaveValue('120,000');
+    fireEvent.click(screen.getByRole('button', { name: '변경 1건 저장' }));
+    await waitFor(() => expect(saveTeamVehicleOil).toHaveBeenCalledWith([
+        { id: 'own', currentKm: 123456, lastOilKm: 120000, cycleKm: 10000 }
+    ]));
+    expect(current).toHaveValue('123,456');
+    expect(last).toHaveValue('120,000');
+    expect(await screen.findByText('130,000km')).toBeInTheDocument();
+    expect(screen.getByText('6,544km')).toBeInTheDocument();
+});
+
+test('쉼표로 표시한 최근교체거리가 현재거리보다 크면 저장을 막는다', async () => {
+    openPage();
+    await screen.findByText('조회 1 / 1대');
+    fireEvent.change(screen.getByRole('textbox', { name: `${record.plate} 최근교체거리` }), { target: { value: '20,000' } });
+    fireEvent.click(screen.getByRole('button', { name: '변경 1건 저장' }));
+    expect(screen.getByText(/최근교체거리는 현재거리보다 클 수 없습니다/)).toBeInTheDocument();
+    expect(saveTeamVehicleOil).not.toHaveBeenCalled();
 });
 
 test('차량 저장 권한이 거절되면 성공으로 표시하지 않고 전체 저장으로 대체하지 않는다', async () => {
@@ -60,7 +96,7 @@ test('차량 저장 권한이 거절되면 성공으로 표시하지 않고 전�
     (saveTeamVehicleOil as jest.Mock).mockRejectedValueOnce(new Error('permission-denied'));
     openPage();
     await screen.findByText('조회 1 / 1대');
-    fireEvent.change(screen.getByRole('spinbutton', { name: `${record.plate} 현재거리` }), { target: { value: '20000' } });
+    fireEvent.change(screen.getByRole('textbox', { name: `${record.plate} 현재거리` }), { target: { value: '20000' } });
     fireEvent.click(screen.getByRole('button', { name: '변경 1건 저장' }));
     await screen.findByText(/저장하지 못했습니다/);
     expect(screen.queryByText('1건 저장되었습니다.')).not.toBeInTheDocument();

@@ -9,21 +9,23 @@ import { companyService } from '../../services/companyService';
 import { accountDirectoryService } from '../../services/accountDirectoryService';
 import { primaryAccountService } from '../../services/primaryAccountService';
 import { geminiService } from '../../services/geminiService';
+import * as XLSX from 'xlsx';
 
 jest.mock('../../components/accounts/PagePrimaryAccountManager', () => () => null);
-jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn(), updateWorker: jest.fn() } }));
+jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn(), updateWorker: jest.fn(), updateWorkersBatch: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.fn(), updateTeam: jest.fn() } }));
 jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: jest.fn(), updateCompany: jest.fn() } }));
 jest.mock('../../services/accountDirectoryService', () => ({ accountDirectoryService: { getEntries: jest.fn().mockResolvedValue([]), updateEntry: jest.fn() } }));
 jest.mock('../../services/geminiService', () => ({ geminiService: { analyzeBankBook: jest.fn() } }));
 jest.mock('../../services/aiSettingsService', () => ({ aiSettingsService: {} }));
+jest.mock('../../services/workerBankPhotoService', () => ({ BANK_PHOTO_ACCEPT: 'image/png', readWorkerBankPhoto: jest.fn(), saveWorkerBankPhoto: jest.fn(), validateWorkerBankPhoto: jest.fn() }));
 jest.mock('../../services/primaryAccountService', () => ({
     primaryAccountService: {
         subscribe: jest.fn(() => () => undefined),
         getPrimaryAccount: jest.fn().mockResolvedValue(null),
     },
 }));
-jest.mock('xlsx', () => ({}));
+jest.mock('xlsx', () => ({ ...jest.requireActual('xlsx'), writeFile: jest.fn() }));
 
 const worker = (id: string, overrides: Partial<Worker> = {}): Worker => ({
     id, name: `검증-${id}`, status: '재직', isActive: true,
@@ -164,15 +166,30 @@ it('distinguishes a load failure from an empty list and allows retry', async () 
     }
 });
 
-it.each(['worker', 'team', 'company', 'custom'] as const)('registers a photo to the selected %s without requiring the recipient name to equal the account holder', async kind => {
+it('미등록 필터에 직불용 계좌가 없는 작업자도 포함하고 직불 계좌로 검색한다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
+        worker('missing-direct', { accountNumber: '001111222233' }),
+        worker('complete', { bankName: '기본은행', accountNumber: '001111222233', accountHolder: '가상예금주', directPayBankName: '직불검색은행', directPayAccountNumber: '009999888877', directPayAccountHolder: '가상예금주' }),
+    ]);
+    await openPage();
+    fireEvent.click(screen.getByRole('checkbox', { name: '계좌 미등록만 보기' }));
+    expect(screen.getByText('검증-missing-direct')).toBeVisible();
+    expect(screen.queryByText('검증-complete')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '계좌 미등록만 보기' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '계좌번호 관리 검색' }), { target: { value: '직불검색은행' } });
+    expect(screen.getByText('검증-complete')).toBeVisible();
+    expect(screen.queryByText('검증-missing-direct')).not.toBeInTheDocument();
+});
+
+it.each(['worker', 'workerDirectPay', 'team', 'company', 'custom'] as const)('registers a photo to the selected %s without requiring the recipient name to equal the account holder', async kind => {
     URL.createObjectURL = jest.fn(() => 'blob:synthetic-bank');
     URL.revokeObjectURL = jest.fn();
     const fields = { bankName: '검증은행', accountNumber: '001234567890', accountHolder: '타인명의검증' };
     (geminiService.analyzeBankBook as jest.Mock).mockResolvedValue(fields);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([worker('recipient')]);
     (accountDirectoryService.getEntries as jest.Mock).mockResolvedValue([{ id: 'custom-id', name: '검증 매입', category: 'purchase', status: 'active' }]);
-    const id = { worker: 'recipient', team: 'team', company: 'company', custom: 'custom-id' }[kind];
-    const writers = { worker: manpowerService.updateWorker, team: teamService.updateTeam, company: companyService.updateCompany, custom: accountDirectoryService.updateEntry };
+    const id = { worker: 'recipient', workerDirectPay: 'recipient', team: 'team', company: 'company', custom: 'custom-id' }[kind];
+    const writers = { worker: manpowerService.updateWorker, workerDirectPay: manpowerService.updateWorker, team: teamService.updateTeam, company: companyService.updateCompany, custom: accountDirectoryService.updateEntry };
     await openPage();
     fireEvent.click(screen.getByRole('button', { name: '계좌번호 등록 (사진 분석)' }));
     fireEvent.change(screen.getByLabelText('계좌 사진 선택'), { target: { files: [new File(['synthetic'], 'bank.png', { type: 'image/png' })] } });
@@ -183,7 +200,57 @@ it.each(['worker', 'team', 'company', 'custom'] as const)('registers a photo to 
     fireEvent.click(screen.getByRole('checkbox', { name: '등록할 대상과 은행·전체 계좌번호·예금주를 확인했습니다.' }));
     fireEvent.click(screen.getByRole('button', { name: '확인한 계좌 1건 저장' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(writers[kind]).toHaveBeenCalledWith(id, fields);
-    Object.entries(writers).filter(([key]) => key !== kind).forEach(([, writer]) => expect(writer).not.toHaveBeenCalled());
+    expect(writers[kind]).toHaveBeenCalledWith(id, kind === 'workerDirectPay' ? {
+        directPayBankName: fields.bankName, directPayAccountNumber: fields.accountNumber, directPayAccountHolder: fields.accountHolder,
+    } : fields);
+    Object.values(writers).filter(writer => writer !== writers[kind]).forEach(writer => expect(writer).not.toHaveBeenCalled());
     expect(screen.getByText('검증-recipient')).toBeVisible();
+});
+
+const uploadAccountWorkbook = (sheets: Record<string, Record<string, unknown>[]>) => {
+    const book = XLSX.utils.book_new();
+    Object.entries(sheets).forEach(([name, rows]) => XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(rows), name));
+    const bytes = XLSX.write(book, { type: 'array', bookType: 'xlsx' });
+    const file = new File([bytes], 'synthetic-accounts.xlsx');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes });
+    fireEvent.change(screen.getByLabelText('계좌 엑셀 파일 선택'), { target: { files: [file] } });
+};
+
+it('다운로드 양식에 기본·직불용 계좌를 앞자리 0과 함께 보존한다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([worker('export', { accountNumber: '001234567890', directPayBankName: '직불은행', directPayAccountNumber: '009876543210', directPayAccountHolder: '가상예금주' })]);
+    await openPage();
+    fireEvent.click(screen.getByRole('button', { name: '현재 탭 다운로드' }));
+    const book = (XLSX.writeFile as jest.Mock).mock.calls[0][0];
+    const rows = XLSX.utils.sheet_to_json(book.Sheets['작업자계좌']);
+    expect(rows[0]).toMatchObject({ 계좌번호: '001234567890', '직불용 은행': '직불은행', '직불용 계좌번호': '009876543210', '직불용 예금주': '가상예금주' });
+});
+
+it('직불용 엑셀을 미리본 뒤 반영하며 잘못된 ID의 행은 저장하지 않는다', async () => {
+    const alert = jest.spyOn(window, 'alert').mockImplementation(() => undefined);
+    try {
+        (manpowerService.getWorkers as jest.Mock).mockResolvedValue([worker('import', { teamName: '검증팀', bankName: '기본은행', accountNumber: '001234567890', accountHolder: '기본예금주' })]);
+        await openPage();
+        uploadAccountWorkbook({ 작업자계좌: [
+            { id: 'import', '직불용 은행': '직불은행', '직불용 계좌번호': '009876543210', '직불용 예금주': '직불예금주' },
+            { id: 'invalid', 이름: '검증-import', 팀명: '검증팀', 은행: '잘못된은행', 계좌번호: '001111222233', 예금주: '가상예금주' },
+        ] });
+        await screen.findByText('import / - · 직불용 계좌');
+        expect(manpowerService.updateWorkersBatch).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: '미리보기 반영' }));
+        await waitFor(() => expect(manpowerService.updateWorkersBatch).toHaveBeenCalledWith([{ id: 'import', updates: { directPayBankName: '직불은행', directPayAccountNumber: '009876543210', directPayAccountHolder: '직불예금주' } }]));
+        await waitFor(() => expect(screen.queryByRole('button', { name: '미리보기 반영' })).not.toBeInTheDocument());
+    } finally { alert.mockRestore(); }
+});
+
+it('여러 시트에 중복된 작업자와 숫자형 계좌번호만 있는 파일은 반영을 차단한다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
+        worker('duplicate', { bankName: '기본은행', accountNumber: '001234567890', accountHolder: '기본예금주' }), worker('numeric'),
+    ]);
+    await openPage();
+    uploadAccountWorkbook({ 작업자계좌: [{ id: 'duplicate', 은행: '변경은행1' }, { id: 'numeric', 은행: '검증은행', 계좌번호: 123456789, 예금주: '가상예금주' }], 작업자추가계좌: [{ id: 'duplicate', 은행: '변경은행2' }] });
+    const apply = await screen.findByRole('button', { name: '미리보기 반영' });
+    expect(apply).toBeDisabled();
+    expect(screen.getAllByText(/같은 작업자가 중복/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/텍스트 셀로 입력해 주세요/).length).toBeGreaterThan(0);
+    expect(manpowerService.updateWorkersBatch).not.toHaveBeenCalled();
 });

@@ -11,7 +11,7 @@ export function PagePrimaryAccountSettings({ scope, showPageLink = false, compac
 }
 
 export default function PagePrimaryAccountManager() {
-    return <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
+    return <details open={false} className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
         <summary className="flex cursor-pointer list-none items-center gap-3 rounded-2xl px-4 py-3 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 [&::-webkit-details-marker]:hidden">
             <h2 className="text-sm font-bold text-slate-900">페이지별 대표계좌</h2>
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">{PRIMARY_ACCOUNT_PAGES.length}개 페이지</span>

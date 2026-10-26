@@ -59,6 +59,26 @@ test('원본 보존·권한·동시 변경·재시도·서버 전용 저장을 �
         assert.equal((await call({ action: 'read', workerId: 'one' }) as any).photo.base64, png);
         assert.equal((await db.doc('workers/one').get()).data()!.bankPhotoId, nextId);
         assert.equal((await bucket.file(bankPhotoPath('one', photoId)).exists())[0], false);
+        // Two purposes may use identical bytes and IDs, but have independent paths and versions.
+        const directSave = { ...save, action: 'saveDirectPay', photoId: nextId, expectedPhotoId: '' };
+        assert.deepEqual(await call({ action: 'readDirectPay', workerId: 'one' }), { photo: null });
+        await assert.rejects(call({ ...directSave, workerId: 'other' }), denied('permission-denied'));
+        await assert.rejects(call(directSave, 'ordinary'), denied('permission-denied'));
+        await call(directSave);
+        await call(directSave);
+        assert.equal((await call({ action: 'readDirectPay', workerId: 'one' }) as any).photo.base64, png);
+        assert.equal((await db.doc('workers/one').get()).data()!.bankPhotoId, nextId);
+        assert.equal((await db.doc('workers/one').get()).data()!.directPayBankPhotoId, nextId);
+        assert.notEqual(bankPhotoPath('one', nextId), bankPhotoPath('one', nextId, true));
+        await assert.rejects(call({ ...directSave, photoId, expectedPhotoId: '' }), denied('aborted'));
+        await call({ ...directSave, photoId, expectedPhotoId: nextId });
+        assert.equal((await bucket.file(bankPhotoPath('one', nextId, true)).exists())[0], false);
+        assert.equal((await bucket.file(bankPhotoPath('one', nextId)).exists())[0], true);
+        await call({ ...save, photoId, expectedPhotoId: nextId });
+        assert.equal((await call({ action: 'readDirectPay', workerId: 'one' }) as any).photo.photoId, photoId);
+        assert.equal((await bucket.file(bankPhotoPath('one', photoId, true)).exists())[0], true);
+        assert.equal((await db.doc('workers/one').get()).data()!.accountNumber, 'new-number');
+        await assert.rejects(call({ ...save, action: 'unknown' }), denied('invalid-argument'));
         await call({ ...save, workerId: 'two', photoId: 'c'.repeat(32) });
         // A real authenticated browser is still unable to read or overwrite this private namespace.
         const signUp = await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-key`, {

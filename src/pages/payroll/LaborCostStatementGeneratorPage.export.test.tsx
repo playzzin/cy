@@ -144,3 +144,78 @@ it.each([false, true])('실제 엑셀 저장에서 날짜 합계 0을 빈칸 표
     expect(zero.numFmt.split(';')[2]).toBe('');
     expect(sheet.getRow(sheet.rowCount).getCell(5).numFmt.split(';')[2]).toBe('');
 });
+
+describe('작업자 직불용 계좌 연결', () => {
+    const worker = {
+        id: 'direct-worker', name: '직불검증작업자',
+        bankName: '기본검증은행', accountNumber: 'BASIC-ACCOUNT', accountHolder: '기본검증예금주',
+        directPayBankName: '직불검증은행', directPayAccountNumber: '000-DIRECT-ACCOUNT', directPayAccountHolder: '직불검증예금주',
+        laborStatementPayType: 'direct',
+    };
+    const prepare = (patch = {}) => {
+        jest.clearAllMocks();
+        localStorage.removeItem('payroll-labor-statement-defaults');
+        (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ ...worker, ...patch }]);
+        (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValue([{
+            id: 'test-report', date: '2026-10-01', siteId: 'test-site', siteName: '검증현장',
+            workers: [{ workerId: worker.id, name: worker.name, manDay: 1, unitPrice: 100000 }],
+        }]);
+        render(<MemoryRouter initialEntries={['/payroll/labor-cost-statement-generator?month=2026-10']}><LaborCostStatementGeneratorPage /></MemoryRouter>);
+    };
+    const loadAll = async () => {
+        await screen.findByRole('option', { name: new RegExp(worker.name) });
+        fireEvent.click(screen.getByRole('button', { name: '자동채우기' }));
+        const name = await screen.findByDisplayValue(worker.name);
+        return name.closest('tr')!;
+    };
+
+    it.each(['direct', 'delegate'])('DB 지급구분 %s에서 직불 선택 시 직불 계좌를 화면과 엑셀에 사용한다', async laborStatementPayType => {
+        prepare({ laborStatementPayType });
+        const row = within(await loadAll());
+        act(() => mockAccountReceiver({ sourceType: 'custom', sourceId: '', sourceName: '검증', bankName: '위임검증은행', accountHolder: '위임검증예금주', accountNumber: 'DELEGATE-ACCOUNT' }));
+        fireEvent.click(row.getByRole('radio', { name: '위임' }));
+        expect(row.getByPlaceholderText('계좌번호')).toHaveValue('DELEGATE-ACCOUNT');
+        fireEvent.click(row.getByRole('radio', { name: '직불' }));
+        expect(row.getByPlaceholderText('은행')).toHaveValue(worker.directPayBankName);
+        expect(row.getByPlaceholderText('예금주')).toHaveValue(worker.directPayAccountHolder);
+        expect(row.getByPlaceholderText('계좌번호')).toHaveValue(worker.directPayAccountNumber);
+        fireEvent.click(screen.getByRole('button', { name: '엑셀 저장' }));
+        await waitFor(() => expect(saveAs).toHaveBeenCalledTimes(1));
+        const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as ArrayBuffer);
+            reader.onerror = reject;
+            reader.readAsArrayBuffer((saveAs as unknown as jest.Mock).mock.calls[0][0]);
+        });
+        const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(bytes);
+        const values = JSON.stringify(workbook.getWorksheet('노무내역서')!.getSheetValues());
+        expect(values).toContain(worker.directPayBankName);
+        expect(values).toContain(worker.directPayAccountHolder);
+        expect(values).toContain(worker.directPayAccountNumber);
+        expect(values).not.toContain(worker.accountNumber);
+    });
+
+    it.each([undefined, '직불검증은행'])('직불 계좌 미등록·일부등록 항목을 기본계좌로 채우지 않는다 (%s)', async directPayBankName => {
+        prepare({ directPayBankName, directPayAccountHolder: undefined, directPayAccountNumber: undefined });
+        const row = within(await loadAll());
+        fireEvent.click(row.getByRole('radio', { name: '위임' }));
+        fireEvent.click(row.getByRole('radio', { name: '직불' }));
+        expect(row.getByPlaceholderText('은행')).toHaveValue(directPayBankName ?? '');
+        expect(row.getByPlaceholderText('예금주')).toHaveValue('');
+        expect(row.getByPlaceholderText('계좌번호')).toHaveValue('');
+    });
+
+    it('개별 불러오기에서도 직불 계좌를 사용하고 수동 수정 후 위임 왕복 시 유지한다', async () => {
+        prepare();
+        await screen.findByRole('option', { name: new RegExp(worker.name) });
+        fireEvent.change(screen.getByRole('combobox'), { target: { value: worker.id } });
+        fireEvent.click(screen.getByRole('button', { name: '추가' }));
+        const name = await screen.findByDisplayValue(worker.name);
+        const row = within(name.closest('tr')!);
+        expect(row.getByPlaceholderText('계좌번호')).toHaveValue(worker.directPayAccountNumber);
+        fireEvent.change(row.getByPlaceholderText('계좌번호'), { target: { value: 'MANUAL-DIRECT' } });
+        fireEvent.click(row.getByRole('radio', { name: '위임' }));
+        fireEvent.click(row.getByRole('radio', { name: '직불' }));
+        expect(row.getByPlaceholderText('계좌번호')).toHaveValue('MANUAL-DIRECT');
+    });
+});

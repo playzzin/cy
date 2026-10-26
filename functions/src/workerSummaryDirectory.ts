@@ -51,7 +51,7 @@ export async function readWorkerSummaryDirectory(db: admin.firestore.Firestore, 
         teams: allowedTeams.map(team => pick(team, ['id', 'legacyId', 'name', 'color', 'companyId', 'companyName'])),
         workers: workers.map(worker => pick(worker, ['id', 'legacyId', 'name', 'teamId', 'teamName', 'color',
             'idNumber', 'contact', 'address', 'bloodType', 'status', 'isActive',
-            ...(ownIds.has(text(worker.teamId)) ? ['fileNameSaved', 'bankPhotoId'] : [])])),
+            ...(ownIds.has(text(worker.teamId)) ? ['fileNameSaved', 'bankPhotoId', 'directPayBankPhotoId'] : [])])),
         documentWorkerIds,
     };
 }

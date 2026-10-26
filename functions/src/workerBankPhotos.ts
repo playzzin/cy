@@ -13,7 +13,7 @@ const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-zA
 const photoIdValid = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{32}$/.test(id);
 const active = (row: any) => row && row.isActive !== false && !['퇴사', 'inactive', 'retired', 'archived', '출입금지'].includes(text(row.status));
 // This namespace is already excluded from all browser Storage fallback rules.
-export const bankPhotoPath = (workerId: string, photoId: string) => `team-worker-documents/account-photos/${workerId}/${photoId}`;
+export const bankPhotoPath = (workerId: string, photoId: string, directPay = false) => `team-worker-documents/account-photos/${workerId}/${directPay ? 'direct-pay/' : ''}${photoId}`;
 
 export function validateBankPhoto(encoded: unknown): { bytes: Buffer; contentType: string } {
     if (typeof encoded !== 'string' || encoded.length > Math.ceil(MAX_BYTES / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) fail('invalid-argument', '계좌사진은 JPG·PNG·WEBP 원본을 5MB 이하로 올려 주세요.');
@@ -52,30 +52,33 @@ async function authorize(transaction: FirebaseFirestore.Transaction, uid: string
 export async function handleWorkerBankPhotos(input: any, context: functions.https.CallableContext) {
     if (context.auth && isPreviewIdentity(context.auth.uid, context.auth.token)) fail('permission-denied', '미리보기에서는 계좌사진을 처리할 수 없습니다.');
     const { uid } = requireCallableAuth(context);
-    if (!validId(input?.workerId) || !['read', 'save'].includes(input?.action)) fail('invalid-argument', '작업자와 요청을 확인해 주세요.');
+    if (!validId(input?.workerId) || !['read', 'save', 'readDirectPay', 'saveDirectPay'].includes(input?.action)) fail('invalid-argument', '작업자와 요청을 확인해 주세요.');
     const workerId: string = input.workerId, db = admin.firestore(), bucket = admin.storage().bucket();
-    if (input.action === 'read') {
+    const directPay = input.action === 'readDirectPay' || input.action === 'saveDirectPay';
+    const photoField = directPay ? 'directPayBankPhotoId' : 'bankPhotoId';
+    const updatedField = directPay ? 'directPayBankPhotoUpdatedAt' : 'bankPhotoUpdatedAt';
+    if (input.action === 'read' || input.action === 'readDirectPay') {
         const { row } = await db.runTransaction(tx => authorize(tx, uid, workerId));
-        const photoId = row.bankPhotoId;
+        const photoId = row[photoField];
         if (!photoId) return { photo: null };
         if (!photoIdValid(photoId)) fail('failed-precondition', '등록된 계좌사진을 확인해 주세요.');
-        const file = bucket.file(bankPhotoPath(workerId, photoId));
+        const file = bucket.file(bankPhotoPath(workerId, photoId, directPay));
         const [metadata] = await file.getMetadata();
         if (Number(metadata.size) > MAX_BYTES) fail('failed-precondition', '계좌사진 크기를 확인해 주세요.');
         const [bytes] = await file.download();
         const validated = validateBankPhoto(bytes.toString('base64'));
         const current = await db.runTransaction(tx => authorize(tx, uid, workerId));
-        if (current.row.bankPhotoId !== photoId) fail('aborted', '계좌사진이 변경됐습니다. 다시 준비해 주세요.');
+        if (current.row[photoField] !== photoId) fail('aborted', '계좌사진이 변경됐습니다. 다시 준비해 주세요.');
         return { photo: { photoId, contentType: validated.contentType, base64: bytes.toString('base64') } };
     }
     if (!photoIdValid(input.photoId) || (input.expectedPhotoId !== '' && !photoIdValid(input.expectedPhotoId))) fail('invalid-argument', '사진 등록 정보를 확인해 주세요.');
     const { bytes, contentType } = validateBankPhoto(input.base64);
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const checkVersion = (row: any) => {
-        if ((row.bankPhotoId || '') !== input.expectedPhotoId && row.bankPhotoId !== input.photoId) fail('aborted', '다른 곳에서 계좌사진을 변경했습니다. 새로고침 후 다시 등록해 주세요.');
+        if ((row[photoField] || '') !== input.expectedPhotoId && row[photoField] !== input.photoId) fail('aborted', '다른 곳에서 계좌사진을 변경했습니다. 새로고침 후 다시 등록해 주세요.');
     };
     const before = await db.runTransaction(async tx => { const result = await authorize(tx, uid, workerId); checkVersion(result.row); return result; });
-    const file = bucket.file(bankPhotoPath(workerId, input.photoId));
+    const file = bucket.file(bankPhotoPath(workerId, input.photoId, directPay));
     const sameOriginal = async () => {
         try {
             const [metadata] = await file.getMetadata();
@@ -96,15 +99,15 @@ export async function handleWorkerBankPhotos(input: any, context: functions.http
     await db.runTransaction(async tx => {
         const { ref, row } = await authorize(tx, uid, workerId);
         checkVersion(row);
-        if (row.bankPhotoId === input.photoId) return;
-        tx.update(ref, { bankPhotoId: input.photoId, bankPhotoUpdatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+        if (row[photoField] === input.photoId) return;
+        tx.update(ref, { [photoField]: input.photoId, [updatedField]: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() });
         tx.create(db.collection('audit_logs').doc(), {
             category: 'WORKER_BANK_PHOTO', action: 'REGISTER', actorId: uid, targetId: workerId,
-            timestamp: new Date().toISOString(), details: JSON.stringify({ fileCount: 1, replaced: Boolean(row.bankPhotoId) }),
+            timestamp: new Date().toISOString(), details: JSON.stringify({ fileCount: 1, purpose: directPay ? 'directPay' : 'default', replaced: Boolean(row[photoField]) }),
         });
     });
-    if (photoIdValid(before.row.bankPhotoId) && before.row.bankPhotoId !== input.photoId) {
-        await bucket.file(bankPhotoPath(workerId, before.row.bankPhotoId)).delete({ ignoreNotFound: true }).catch(() => undefined);
+    if (photoIdValid(before.row[photoField]) && before.row[photoField] !== input.photoId) {
+        await bucket.file(bankPhotoPath(workerId, before.row[photoField], directPay)).delete({ ignoreNotFound: true }).catch(() => undefined);
     }
     return { photoId: input.photoId };
 }

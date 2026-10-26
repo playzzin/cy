@@ -39,8 +39,15 @@
 .worker-summary-page .ws-worker-item span { overflow-wrap: anywhere; }
 .worker-summary-page .ws-worker-item:focus-within { outline: 2px solid #228be6; outline-offset: 1px; }
 .worker-summary-page .ws-summary-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.worker-summary-page .ws-summary-table { min-width: 720px; }
+.worker-summary-page .ws-summary-table { min-width: 920px; }
 .worker-summary-page .ws-summary-table td { overflow-wrap: anywhere; }
+.worker-summary-page .ws-document-column { width: 112px; min-width: 112px; white-space: nowrap; }
+.worker-summary-page .ws-document-subtitle { display: block; margin-top: 2px; color: #64748b; font-size: 11px; font-weight: 400; line-height: 1.3; }
+.worker-summary-page .ws-document-status { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 78px; padding: 4px 9px; border: 1px solid; border-radius: 6px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.worker-summary-page .ws-document-status--registered { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+.worker-summary-page .ws-document-status--missing { color: #be123c; background: #fff1f2; border-color: #fecdd3; }
+.worker-summary-page .ws-document-status--unavailable { color: #64748b; background: #f8fafc; border-color: #e2e8f0; }
+.worker-summary-page .ws-document-symbol { font-size: 17px; font-weight: 700; line-height: 18px; }
 .worker-summary-page .ws-id-image { display: inline-flex; align-items: center; min-height: 44px; padding: 2px; border-radius: 6px; }
 .worker-summary-page .ws-id-image img { width: 64px; height: 40px; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 4px; }
 .worker-summary-page .ws-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 40px 16px; text-align: center; color: #64748b; font-size: 14px; }
@@ -104,6 +111,7 @@
     .worker-summary-page .ws-summary-table:not([data-export]) td { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 10px; width: auto; padding: 7px 0; font-size: 14px; text-align: left; line-height: 1.5; color: #334155; }
     .worker-summary-page .ws-summary-table:not([data-export]) .ws-field-label { display: block; color: #64748b; font-size: 12px; padding-top: 2px; }
     .worker-summary-page .ws-summary-table:not([data-export]) td[data-label="혈액형"] > span { justify-self: start; }
+    .worker-summary-page .ws-summary-table:not([data-export]) .ws-document-status { justify-self: start; }
     .worker-summary-page .ws-summary-table:not([data-export]) .ws-number { display: none; }
     .worker-summary-page .ws-summary-table:not([data-export]) .ws-name { display: flex; flex-direction: column; gap: 3px; padding: 0 40px 12px 0; margin-bottom: 6px; border-bottom: 1px solid #f1f5f9; }
     .worker-summary-page .ws-name strong { font-size: 17px; color: #0f172a; }

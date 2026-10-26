@@ -26,6 +26,11 @@ import BankBookAnalysisModal from '../../components/manpower/BankBookAnalysisMod
 import IdCardAnalysisModal from '../../components/manpower/IdCardAnalysisModal';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import WorkerModal from '../manpower/WorkerModal';
+import WorkerIdCardRegistrationModal from '../../components/manpower/WorkerIdCardRegistrationModal';
+import WorkerAccountSummary from '../../components/accounts/WorkerAccountSummary';
+import WorkerAccountRegistrationModal from '../../components/accounts/WorkerAccountRegistrationModal';
+import type { WorkerAccountPurpose } from '../../utils/workerAccount';
+import { normalizeBankAccountFields } from '../../services/bankAccountPhotoService';
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
@@ -59,17 +64,21 @@ const WORKER_COLUMNS = [
     { key: 'companyName', label: '소속회사' },
     { key: 'status', label: '상태' },
     { key: 'unitPrice', label: '단가' },
-    { key: 'bankName', label: '은행' },
-    { key: 'accountNumber', label: '계좌번호' },
-    { key: 'accountHolder', label: '예금주' },
+    { key: 'bankName', label: '기본 은행' },
+    { key: 'accountNumber', label: '기본 계좌번호' },
+    { key: 'accountHolder', label: '기본 예금주' },
+    { key: 'directPayBankName', label: '직불용 은행' },
+    { key: 'directPayAccountNumber', label: '직불용 계좌번호' },
+    { key: 'directPayAccountHolder', label: '직불용 예금주' },
     { key: 'signature', label: '서명' },
     { key: 'bloodType', label: '혈액형' },
     { key: 'totalManDay', label: '누적공수' },
 ];
 
-const QUICK_VIEW_PERSONAL_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'idNumber', 'contact', 'address', 'unitPrice', 'bankName', 'accountNumber', 'accountHolder'];
+const ACCOUNT_COLUMN_KEYS = ['bankName', 'accountNumber', 'accountHolder', 'directPayBankName', 'directPayAccountNumber', 'directPayAccountHolder'];
+const QUICK_VIEW_PERSONAL_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'idNumber', 'contact', 'address', 'unitPrice', ...ACCOUNT_COLUMN_KEYS];
 const QUICK_VIEW_WORK_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'role', 'salaryModel', 'teamName', 'companyName', 'status', 'totalManDay'];
-const QUICK_VIEW_ACCOUNT_COLUMNS = ['name', 'teamName', 'bankName', 'accountNumber', 'accountHolder'];
+const QUICK_VIEW_ACCOUNT_COLUMNS = ['name', 'teamName', ...ACCOUNT_COLUMN_KEYS];
 const UNASSIGNED_TEAM_FILTER_ID = '__unassigned_team__';
 const UNASSIGNED_COMPANY_FILTER_ID = '__unassigned_company__';
 const COMPANY_NAME_FILTER_PREFIX = '__company_name__:';
@@ -123,25 +132,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         showColumnSettings,
         setShowColumnSettings,
         resetColumns
-    } = useColumnSettings('worker_registration_visible_columns', [
-        { key: WORKER_LABOR_PAY_TYPE_COLUMN_KEY, label: '직불여부' },
-        { key: 'name', label: '이름' },
-        { key: 'idNumber', label: '주민번호' },
-        { key: 'contact', label: '연락처' },
-        { key: 'address', label: '주소' },
-        { key: 'role', label: '직책' },
-        { key: 'salaryModel', label: '구분' },
-        { key: 'teamName', label: '팀명' },
-        { key: 'companyName', label: '회사' },
-        { key: 'status', label: '상태' },
-        { key: 'unitPrice', label: '단가' },
-        { key: 'bankName', label: '은행' },
-        { key: 'accountNumber', label: '계좌번호' },
-        { key: 'accountHolder', label: '예금주' },
-        { key: 'signature', label: '서명' },
-        { key: 'bloodType', label: '혈액형' },
-        { key: 'totalManDay', label: '누적공수' },
-    ]);
+    } = useColumnSettings('worker_registration_visible_columns', WORKER_COLUMNS);
 
     const [quickColumnView, setQuickColumnView] = useState<'personal' | 'work' | 'accounts' | ''>('');
 
@@ -174,6 +165,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     const [isIdCardAnalysisModalOpen, setIsIdCardAnalysisModalOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentWorker, setCurrentWorker] = useState<Worker | null>(null);
+    const [idCardTarget, setIdCardTarget] = useState<Worker | null>(null);
+    const [accountTarget, setAccountTarget] = useState<{ worker: Worker; purpose: WorkerAccountPurpose } | null>(null);
     const [isEditMode, setIsEditMode] = useState(false);
     const [showInactive, setShowInactive] = useState(false); // Default: Hide inactive workers
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
@@ -216,6 +209,16 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     };
 
     const handleWorkerBlur = async (id: string, field: keyof Worker, value: any) => {
+        if (field === 'accountNumber' || field === 'directPayAccountNumber') {
+            const normalized = normalizeBankAccountFields({ accountNumber: value }).accountNumber;
+            if (String(value ?? '').trim() && !normalized) {
+                alert('계좌번호는 앞자리 0을 포함한 숫자 6~20자리로 입력해 주세요.');
+                await fetchWorkers();
+                return;
+            }
+            value = normalized;
+            handleWorkerChange(id, field, value);
+        }
         try {
             await manpowerService.updateWorker(id, { [field]: value });
         } catch (error) {
@@ -549,7 +552,9 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             String(worker.idNumber ?? '').toLowerCase().includes(lowerSearch) ||
             String(worker.contact ?? '').toLowerCase().includes(lowerSearch) ||
             String(worker.teamName ?? '').toLowerCase().includes(lowerSearch) ||
-            resolvedCompany.name.toLowerCase().includes(lowerSearch)
+            resolvedCompany.name.toLowerCase().includes(lowerSearch) ||
+            [worker.bankName, worker.accountNumber, worker.accountHolder, worker.directPayBankName, worker.directPayAccountNumber, worker.directPayAccountHolder]
+                .some(value => String(value ?? '').toLowerCase().includes(lowerSearch))
         );
     });
 
@@ -1250,7 +1255,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                     type="text"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    placeholder="이름, 주민번호, 연락처, 회사 검색"
+                                    placeholder="이름, 주민번호, 연락처, 회사, 계좌 검색"
                                     className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-64"
                                 />
                             </div>
@@ -1348,7 +1353,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                 ? 'text-center'
                                                 : 'text-left';
                                         return (
-                                            <th key={col.key} className={`px-4 py-3 ${alignClass} font-medium text-white border border-slate-700`}>
+                                            <th key={col.key} className={`px-4 py-3 ${alignClass} whitespace-nowrap font-medium text-white border border-slate-700 ${col.key.startsWith('directPay') ? 'bg-indigo-900' : ''}`}>
                                                 {col.label}
                                             </th>
                                         );
@@ -1767,64 +1772,41 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                 </td>
                                                             );
                                                         case 'bankName':
-                                                            return (
-                                                                <td key={key} className="px-4 py-3 text-gray-600 border border-slate-200">
-                                                                    <InputPopover
-                                                                        value={worker.bankName || ''}
-                                                                        placeholder="은행"
-                                                                        onChange={(val) => {
-                                                                            handleWorkerChange(worker.id!, 'bankName', String(val));
-                                                                            handleWorkerBlur(worker.id!, 'bankName', String(val));
-                                                                        }}
-                                                                        minimal={!isEditMode}
-                                                                        formatDisplay={(val) => (
-                                                                            <span className={`text-xs ${isEditMode ? '' : 'font-bold text-slate-700'}`}>{val || '-'}</span>
-                                                                        )}
-                                                                    />
-                                                                </td>
-                                                            );
                                                         case 'accountNumber':
+                                                        case 'accountHolder':
+                                                        case 'directPayBankName':
+                                                        case 'directPayAccountNumber':
+                                                        case 'directPayAccountHolder': {
+                                                            const directPay = key.startsWith('directPay');
+                                                            const accountNumber = key === 'accountNumber' || key === 'directPayAccountNumber';
+                                                            const label = WORKER_COLUMNS.find(column => column.key === key)!.label;
                                                             return (
-                                                                <td key={key} className="px-4 py-3 text-gray-600 border border-slate-200">
-                                                                    <div className="flex flex-col items-start gap-1.5">
+                                                                <td key={key} aria-label={label} className={`px-3 py-3 text-gray-600 border border-slate-200 whitespace-nowrap ${directPay ? 'bg-indigo-50/40' : ''}`}>
+                                                                    <div className="flex items-center gap-1">
                                                                         <InputPopover
-                                                                            value={worker.accountNumber || ''}
-                                                                            placeholder="계좌번호"
+                                                                            value={worker[key] || ''}
+                                                                            placeholder={label}
                                                                             onChange={(val) => {
-                                                                                handleWorkerChange(worker.id!, 'accountNumber', String(val));
-                                                                                handleWorkerBlur(worker.id!, 'accountNumber', String(val));
+                                                                                handleWorkerChange(worker.id!, key, String(val));
+                                                                                handleWorkerBlur(worker.id!, key, String(val));
                                                                             }}
                                                                             minimal={!isEditMode}
-                                                                            formatDisplay={(val) => <span className="text-xs">{val || '-'}</span>}
+                                                                            formatDisplay={(val) => <span className={`text-xs ${accountNumber ? 'font-mono' : ''}`}>{val || '-'}</span>}
                                                                         />
-                                                                        <button
+                                                                        {key === 'accountNumber' && <button
                                                                             type="button"
                                                                             aria-label={`${worker.name} 계좌번호 등록 (사진 분석)`}
+                                                                            title="기본 계좌번호 등록 (사진 분석)"
                                                                             onClick={() => openBankBookModal(worker.id)}
                                                                             disabled={!worker.id || loading}
-                                                                            className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 disabled:opacity-50 whitespace-nowrap"
+                                                                            className="shrink-0 rounded p-1 text-orange-600 hover:bg-orange-100 disabled:opacity-50"
                                                                         >
                                                                             <FontAwesomeIcon icon={faImages} />
-                                                                            계좌번호 등록 (사진 분석)
-                                                                        </button>
+                                                                        </button>}
                                                                     </div>
                                                                 </td>
                                                             );
-                                                        case 'accountHolder':
-                                                            return (
-                                                                <td key={key} className="px-4 py-3 text-gray-600 border border-slate-200">
-                                                                    <InputPopover
-                                                                        value={worker.accountHolder || ''}
-                                                                        placeholder="예금주"
-                                                                        onChange={(val) => {
-                                                                            handleWorkerChange(worker.id!, 'accountHolder', String(val));
-                                                                            handleWorkerBlur(worker.id!, 'accountHolder', String(val));
-                                                                        }}
-                                                                        minimal={!isEditMode}
-                                                                        formatDisplay={(val) => <span className="text-xs">{val || '-'}</span>}
-                                                                    />
-                                                                </td>
-                                                            );
+                                                        }
                                                         case 'signature':
                                                             return (
                                                                 <td key={key} className="px-4 py-3 text-center border border-slate-200">
@@ -1883,6 +1865,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                 })}
 
                                                 <td className="px-4 py-3 text-center border border-slate-200">
+                                                    <WorkerAccountSummary worker={worker} disabled={loading}
+                                                        onRegister={purpose => setAccountTarget({ worker: { ...worker }, purpose })} />
                                                     <div className="flex items-center justify-center gap-2">
                                                         {worker.fileNameSaved ? (
                                                             <button
@@ -1894,8 +1878,25 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                 <span>신분증</span>
                                                             </button>
                                                         ) : (
-                                                            <span className="text-xs text-gray-400 p-1.5">미등록</span>
+                                                            <button
+                                                                type="button"
+                                                                aria-label={`${worker.name} 신분증 등록`}
+                                                                title="미등록 · 신분증 사진 등록"
+                                                                disabled={loading || !worker.id}
+                                                                onClick={() => setIdCardTarget(worker)}
+                                                                className="p-1.5 text-xs font-medium border border-dashed border-indigo-300 text-indigo-700 rounded hover:bg-indigo-50 disabled:opacity-50 whitespace-nowrap"
+                                                            >
+                                                                <FontAwesomeIcon icon={faPlus} className="mr-1" />신분증 등록
+                                                            </button>
                                                         )}
+                                                        {worker.fileNameSaved && <button
+                                                            type="button"
+                                                            aria-label={`${worker.name} 신분증 교체`}
+                                                            title="신분증 사진 교체"
+                                                            disabled={loading || !worker.id}
+                                                            onClick={() => setIdCardTarget(worker)}
+                                                            className="p-1.5 text-xs text-slate-600 rounded hover:bg-slate-100 disabled:opacity-50 whitespace-nowrap"
+                                                        >교체</button>}
                                                         <button
                                                             onClick={() => {
                                                                 setCurrentWorker(worker);
@@ -1926,6 +1927,16 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             </div >
 
             {/* Modals */}
+            {idCardTarget && <WorkerIdCardRegistrationModal
+                worker={idCardTarget}
+                onSaved={storagePath => setWorkers(previous => previous.map(worker => worker.id === idCardTarget.id ? { ...worker, fileNameSaved: storagePath } : worker))}
+                onClose={() => setIdCardTarget(null)}
+            />}
+            {accountTarget && <WorkerAccountRegistrationModal
+                worker={accountTarget.worker} purpose={accountTarget.purpose}
+                onSaved={updates => setWorkers(previous => previous.map(worker => worker.id === accountTarget.worker.id ? { ...worker, ...updates } : worker))}
+                onClose={() => setAccountTarget(null)}
+            />}
             {isModalOpen && (
                 <WorkerModal
                     isOpen={isModalOpen}

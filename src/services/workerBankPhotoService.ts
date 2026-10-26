@@ -2,6 +2,7 @@ import { httpsCallable } from 'firebase/functions';
 import { auth, functions } from '../config/firebase';
 import { invalidateWorkerCache } from '../utils/workerCacheRevision';
 import { invalidateTeamScopedCache } from './teamScopedReadService';
+import type { WorkerAccountPurpose } from '../utils/workerAccount';
 
 export const BANK_PHOTO_ACCEPT = 'image/jpeg,image/png,image/webp';
 export const validateWorkerBankPhoto = (file: File) => {
@@ -24,8 +25,8 @@ const call = async <T>(data: Record<string, unknown>, signal?: AbortSignal): Pro
     return result.data;
 };
 const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
-export const readWorkerBankPhoto = async (workerId: string, name: string, signal?: AbortSignal): Promise<File | null> => {
-    const result = await call<{ photo: { base64: string; contentType: string; photoId: string } | null }>({ action: 'read', workerId }, signal);
+export const readWorkerBankPhoto = async (workerId: string, name: string, signal?: AbortSignal, purpose: WorkerAccountPurpose = 'default'): Promise<File | null> => {
+    const result = await call<{ photo: { base64: string; contentType: string; photoId: string } | null }>({ action: purpose === 'directPay' ? 'readDirectPay' : 'read', workerId }, signal);
     if (!result.photo) return null;
     const { base64, contentType } = result.photo;
     if (!extensions[contentType] || base64.length > 6990510) throw new Error('계좌사진 형식을 확인하지 못했습니다.');
@@ -33,7 +34,7 @@ export const readWorkerBankPhoto = async (workerId: string, name: string, signal
     const safeName = Array.from(name).map(char => char.charCodeAt(0) < 32 || /[\\/:*?"<>|]/.test(char) ? '_' : char).join('');
     return new File([bytes], `${safeName}.${extensions[contentType]}`, { type: contentType });
 };
-export const saveWorkerBankPhoto = async (workerId: string, file: File, photoId: string, expectedPhotoId: string) => {
+export const saveWorkerBankPhoto = async (workerId: string, file: File, photoId: string, expectedPhotoId: string, purpose: WorkerAccountPurpose = 'default') => {
     const user = requireUser();
     validateWorkerBankPhoto(file);
     const base64 = await new Promise<string>((resolve, reject) => {
@@ -43,7 +44,7 @@ export const saveWorkerBankPhoto = async (workerId: string, file: File, photoId:
         reader.readAsDataURL(file);
     });
     if (auth.currentUser !== user) throw new Error('로그인 계정이 변경되었습니다.');
-    const result = await call<{ photoId: string }>({ action: 'save', workerId, photoId, expectedPhotoId, base64 });
+    const result = await call<{ photoId: string }>({ action: purpose === 'directPay' ? 'saveDirectPay' : 'save', workerId, photoId, expectedPhotoId, base64 });
     invalidateWorkerCache(); invalidateTeamScopedCache();
     return result.photoId;
 };

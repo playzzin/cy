@@ -6,6 +6,14 @@ jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
 jest.mock('./teamScopedReadService', () => ({ invalidateTeamScopedCache: jest.fn() }));
 jest.mock('../utils/workerCacheRevision', () => ({ invalidateWorkerCache: jest.fn() }));
 const call = jest.fn();
+test('직불용 사진은 구버전 서버가 기본 사진으로 처리할 수 없는 별도 액션을 사용한다', async () => {
+    call.mockResolvedValueOnce({ data: { photoId: 'new-direct' } }).mockResolvedValueOnce({ data: { photo: null } });
+    const file = new File(['original-bytes'], 'raw.jpg', { type: 'image/jpeg' });
+    await saveWorkerBankPhoto('one', file, 'new-direct', 'old-direct', 'directPay');
+    await readWorkerBankPhoto('one', 'direct', undefined, 'directPay');
+    expect(call).toHaveBeenNthCalledWith(1, { action: 'saveDirectPay', workerId: 'one', photoId: 'new-direct', expectedPhotoId: 'old-direct', base64: btoa('original-bytes') });
+    expect(call).toHaveBeenNthCalledWith(2, { action: 'readDirectPay', workerId: 'one' });
+});
 beforeEach(() => { jest.clearAllMocks(); (auth as any).currentUser = { uid: 'test' }; (httpsCallable as jest.Mock).mockReturnValue(call); });
 test('원본 바이트를 업로드하고 워커·예상 버전 외 다른 작업자 필드는 보내지 않는다', async () => {
     call.mockResolvedValue({ data: { photoId: 'new' } });

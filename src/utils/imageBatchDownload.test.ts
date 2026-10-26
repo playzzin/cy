@@ -84,10 +84,11 @@ test('선택창 취소와 권한 오류를 숨기지 않으며 미지원 브라�
     await expect(saveImageFolder(files, new AbortController().signal)).rejects.toThrow('folder-save-unavailable');
 });
 
-test('ZIP 압축을 풀면 각각의 원본 파일명과 바이트가 유지된다', async () => {
-    const output = await zipImageFiles(files);
+test.each(['신분증', '직불용 통장사본'] as const)('%s ZIP 압축을 풀면 원본 파일명과 바이트가 유지된다', async label => {
+    const output = await zipImageFiles(files, label);
     const zip = await JSZip.loadAsync(output);
     expect(output.type).toBe('application/zip');
+    expect(output.name.startsWith(`${label}_사진_`)).toBe(true);
     expect(Object.keys(zip.files)).toEqual(files.map(file => file.name));
     expect(await zip.file(files[0].name)!.async('string')).toBe('jpeg-original');
     expect(await zip.file(files[1].name)!.async('string')).toBe('png-original');

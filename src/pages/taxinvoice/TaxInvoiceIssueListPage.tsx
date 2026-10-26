@@ -191,7 +191,7 @@ const ISSUE_CAPTURE_STATUS_STYLES: Record<IssueStatus, { background: string; acc
 
 const ISSUE_CAPTURE_WIDTH = ISSUE_CAPTURE_COLUMNS.reduce((total, column) => total + column.width, 0);
 
-const createIssueCaptureTable = (issues: TaxInvoiceIssue[]): HTMLDivElement => {
+const createIssueCaptureTable = (issues: TaxInvoiceIssue[], scope: 'visible' | 'selected'): HTMLDivElement => {
     const root = document.createElement('div');
     root.dataset.taxInvoiceCaptureRoot = 'true';
     root.setAttribute('aria-hidden', 'true');
@@ -275,6 +275,34 @@ const createIssueCaptureTable = (issues: TaxInvoiceIssue[]): HTMLDivElement => {
         tbody.appendChild(row);
     });
     table.appendChild(tbody);
+
+    const totalSupply = issues.reduce((total, issue) => total + (Number(issue.supplyAmount) || 0), 0);
+    const totalManDays = issues.reduce((total, issue) => total + (Number(issue.manDays) || 0), 0);
+    const footerRow = table.createTFoot().insertRow();
+    [
+        { text: `${scope === 'visible' ? '조회' : '선택'} 합계 (${issues.length}건)`, span: 5, align: 'left' },
+        { text: fmt(totalSupply), span: 1, align: 'right' },
+        { text: '', span: 1, align: 'left' },
+        { text: String(Math.round(totalManDays * 10) / 10), span: 1, align: 'right' },
+        { text: '', span: 6, align: 'left' },
+    ].forEach(({ text, span, align }) => {
+        const cell = footerRow.insertCell();
+        cell.textContent = text;
+        cell.colSpan = span;
+        cell.style.cssText = [
+            'box-sizing:border-box',
+            'padding:12px 10px',
+            'border:1px solid #cbd5e1',
+            'border-top:2px solid #cbd5e1',
+            'background:#f8fafc',
+            'color:#334155',
+            'font-size:16px',
+            'font-weight:900',
+            'line-height:1.5',
+            `text-align:${align}`,
+            'overflow-wrap:anywhere',
+        ].join(';');
+    });
     root.appendChild(table);
 
     return root;
@@ -1079,8 +1107,8 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     const [loadedMonth, setLoadedMonth] = useState<string | null>(null);
     const [loadError, setLoadError] = useState<string | null>(null);
     const writeBlocked = loading || loadedMonth !== yearMonth;
-    const [isCopyingSelection, setIsCopyingSelection] = useState(false);
-    const copyingSelectionRef = useRef(false);
+    const [copyingScope, setCopyingScope] = useState<'visible' | 'selected' | null>(null);
+    const copyingRef = useRef(false);
     const [isExporting, setIsExporting] = useState(false);
     const exportingRef = useRef(false);
     const [saving, setSaving] = useState<Set<string>>(new Set());
@@ -1527,14 +1555,15 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }
     };
 
-    const handleCopySelected = async () => {
-        if (copyingSelectionRef.current) return;
-        if (selectedIssues.length === 0) {
-            toast.warning('복사할 항목을 선택해주세요.');
+    const handleCopyIssues = async (scope: 'visible' | 'selected') => {
+        if (copyingRef.current) return;
+        const sourceRows = scope === 'visible' ? filteredIssues : selectedIssues;
+        if (sourceRows.length === 0) {
+            toast.warning(scope === 'visible' ? '현재 화면에 복사할 목록이 없습니다.' : '복사할 항목을 선택해주세요.');
             return;
         }
 
-        const rows = getOutputIssues(selectedIssues);
+        const rows = getOutputIssues(sourceRows);
         if (!rows) return;
         const clipboardReservation = reserveImageClipboardWrite();
         if (!clipboardReservation) {
@@ -1542,11 +1571,11 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             return;
         }
 
-        copyingSelectionRef.current = true;
-        setIsCopyingSelection(true);
+        copyingRef.current = true;
+        setCopyingScope(scope);
         let captureRoot: HTMLDivElement | null = null;
         try {
-            captureRoot = createIssueCaptureTable(rows);
+            captureRoot = createIssueCaptureTable(rows, scope);
             document.body.appendChild(captureRoot);
             await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
             if (document.fonts?.ready) await document.fonts.ready;
@@ -1575,16 +1604,16 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             clipboardReservation.complete(await canvasToPngBlob(canvas));
             const outcome = await clipboardReservation.result;
             if (!outcome.ok) throw outcome.error;
-            toast.success(`선택한 ${rows.length}개 행을 이미지로 클립보드에 복사했습니다.`);
+            toast.success(`${scope === 'visible' ? '현재 목록의' : '선택한'} ${rows.length}개 행을 이미지로 클립보드에 복사했습니다.`);
         } catch (error) {
             clipboardReservation.cancel(error);
             await clipboardReservation.result;
-            console.error('선택 항목 클립보드 복사 실패:', error);
+            console.error('발행리스트 클립보드 복사 실패:', error);
             toast.error('이미지를 클립보드에 복사하지 못했습니다. 브라우저 권한을 확인해주세요.');
         } finally {
             captureRoot?.remove();
-            copyingSelectionRef.current = false;
-            if (mountedRef.current) setIsCopyingSelection(false);
+            copyingRef.current = false;
+            if (mountedRef.current) setCopyingScope(null);
         }
     };
 
@@ -2098,15 +2127,26 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                             {isExporting ? '엑셀 생성 중...' : '엑셀'}
                         </button>
 
+                        <button
+                            type="button"
+                            onClick={() => handleCopyIssues('visible')}
+                            disabled={filteredIssues.length === 0 || copyingScope !== null || writeBlocked || mutation !== null || hasInvalidDrafts || hasComposingDrafts || hasSaveConflicts}
+                            title={`검색·필터·정렬이 적용된 현재 목록 ${filteredIssues.length}건만 이미지로 복사합니다.`}
+                            className="flex min-h-10 items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 transition-all hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            <FontAwesomeIcon icon={copyingScope === 'visible' ? faRotateRight : faCopy} className={copyingScope === 'visible' ? 'animate-spin' : ''} />
+                            {copyingScope === 'visible' ? '화면 복사 중...' : '화면 복사'}
+                        </button>
+
                         {selectedIds.size > 0 && (
                             <button
                                 type="button"
-                                onClick={handleCopySelected}
-                                disabled={isCopyingSelection || writeBlocked || mutation !== null || hasInvalidDrafts || hasComposingDrafts || hasSaveConflicts}
+                                onClick={() => handleCopyIssues('selected')}
+                                disabled={copyingScope !== null || writeBlocked || mutation !== null || hasInvalidDrafts || hasComposingDrafts || hasSaveConflicts}
                                 className="flex min-h-10 items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 transition-all hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-95 disabled:cursor-wait disabled:opacity-60"
                             >
-                                <FontAwesomeIcon icon={isCopyingSelection ? faRotateRight : faCopy} className={isCopyingSelection ? 'animate-spin' : ''} />
-                                {isCopyingSelection ? '이미지 생성 중...' : `선택 이미지 복사 (${selectedIssues.length})`}
+                                <FontAwesomeIcon icon={copyingScope === 'selected' ? faRotateRight : faCopy} className={copyingScope === 'selected' ? 'animate-spin' : ''} />
+                                {copyingScope === 'selected' ? '이미지 생성 중...' : `선택 이미지 복사 (${selectedIssues.length})`}
                             </button>
                         )}
 

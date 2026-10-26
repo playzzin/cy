@@ -31,8 +31,8 @@ test('팀장 명단은 같은 회사 여러 팀을 포함하지만 급여·타�
         'teams/b': { name: '다른내부팀', companyId: 'legacy-cy' },
         'teams/c': { name: '외부팀', companyId: 'external' },
         'workers/leader': { name: '가상팀장', teamId: 'a', role: '팀장' },
-        'workers/own': { name: '가상작업자', teamId: 'legacy-a', fileNameSaved: 'own-id', bankPhotoId: 'own-bank', salary: 111 },
-        'workers/other': { name: '가상다른팀', teamId: 'b', idNumber: 'synthetic-id', contact: 'synthetic-phone', address: '가상주소', bloodType: 'A', fileNameSaved: 'private-id', bankPhotoId: 'private-bank', salary: 999, bankAccount: 'private-account', notes: 'secret' },
+        'workers/own': { name: '가상작업자', teamId: 'legacy-a', fileNameSaved: 'own-id', bankPhotoId: 'own-bank', directPayBankPhotoId: 'own-direct-bank', salary: 111 },
+        'workers/other': { name: '가상다른팀', teamId: 'b', idNumber: 'synthetic-id', contact: 'synthetic-phone', address: '가상주소', bloodType: 'A', fileNameSaved: 'private-id', bankPhotoId: 'private-bank', directPayBankPhotoId: 'private-direct-bank', salary: 999, bankAccount: 'private-account', notes: 'secret' },
         'workers/retired': { name: '가상퇴사', teamId: 'b', status: '퇴사' },
         'workers/inactive': { name: '가상비활성', teamId: 'b', isActive: false },
         'workers/external': { name: '가상외부', teamId: 'c' },
@@ -50,6 +50,8 @@ test('팀장 명단은 같은 회사 여러 팀을 포함하지만 급여·타�
         const other = directory.workers.find((worker: any) => worker.id === 'other');
         assert.deepEqual(other, { id: 'other', name: '가상다른팀', teamId: 'b', idNumber: 'synthetic-id', contact: 'synthetic-phone', address: '가상주소', bloodType: 'A' });
         assert.equal(directory.workers.find((worker: any) => worker.id === 'own').fileNameSaved, 'own-id');
+        assert.equal(directory.workers.find((worker: any) => worker.id === 'own').directPayBankPhotoId, 'own-direct-bank');
+        assert.equal(JSON.stringify(directory).includes('private-direct-bank'), false);
         assert.equal(JSON.stringify(directory).includes('secret'), false);
         assert.equal(JSON.stringify(directory).includes('salary'), false);
         assert.deepEqual((await call('workers')).rows.map((worker: any) => worker.id), ['leader', 'own']);

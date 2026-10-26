@@ -381,9 +381,123 @@ test('선택 이미지에는 검색으로 숨겨진 정상 입력도 반영하�
     await waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
     expect(capturedText).toContain('입력 중인 합성 공급사');
     expect(capturedText).not.toContain('합성 A');
+    const selectedTotal = within((html2canvas as jest.Mock).mock.calls[0][0]).getByRole('row', { name: '선택 합계 (1건) 100 1', hidden: true });
+    expect(within(selectedTotal).getAllByRole('cell', { hidden: true }).map(cell => cell.textContent)).toEqual(['선택 합계 (1건)', '100', '', '1', '']);
     expect((html2canvas as jest.Mock).mock.calls[0][0]).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '변경사항 저장 (1)' })).toBeEnabled();
     expect(service.updateIssuesBatch).not.toHaveBeenCalled();
+});
+
+test('화면 복사는 검색된 목록의 정렬과 현재 입력을 반영하고 숨긴 선택 행과 도구는 제외한다', async () => {
+    (service.getIssuesByMonth as jest.Mock).mockResolvedValue([
+        row('A'), { ...row('B', 2), teamName: '나팀', note: '화면대상' },
+        { ...row('C', 3), teamName: '가팀', note: '화면대상' },
+    ]);
+    const complete = jest.fn();
+    (reserveImageClipboardWrite as jest.Mock).mockReturnValue({ complete, cancel: jest.fn(), result: Promise.resolve({ ok: true }) });
+    let capture: HTMLElement;
+    let recipients: string[] = [];
+    let text = '';
+    (html2canvas as jest.Mock).mockImplementation(async root => {
+        capture = root;
+        recipients = within(root).getAllByRole('row', { hidden: true }).slice(1, -1)
+            .map(tr => within(tr).getAllByRole('cell', { hidden: true })[3].textContent || '');
+        text = root.textContent;
+        return { toBlob: (callback: (blob: Blob) => void) => callback(new Blob(['image'], { type: 'image/png' })) };
+    });
+    mount(); await ready();
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: '1번 합성 A 항목 선택' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: '발행리스트 통합검색' }), { target: { value: '화면대상' } });
+    fireEvent.click(screen.getByRole('button', { name: '팀별 정렬' }));
+    startEdit('품목', '아직 저장하지 않은 품목');
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    await waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+    expect(recipients).toEqual(['합성 C', '합성 B']);
+    expect(text).toContain('아직 저장하지 않은 품목');
+    expect(text).not.toContain('합성 A');
+    expect(within(capture!).queryAllByRole('button', { hidden: true })).toHaveLength(0);
+    expect(within(capture!).queryAllByRole('checkbox', { hidden: true })).toHaveLength(0);
+    expect(within(capture!).queryAllByRole('navigation', { hidden: true })).toHaveLength(0);
+    expect(within(capture!).getAllByRole('columnheader', { hidden: true })).toHaveLength(14);
+    expect(within(capture!).getByRole('row', { name: '조회 합계 (2건) 200 2', hidden: true })).toBeDefined();
+    expect(capture!).not.toBeInTheDocument();
+    expect(toast.success).toHaveBeenCalledWith('현재 목록의 2개 행을 이미지로 클립보드에 복사했습니다.');
+    expect(screen.getByRole('button', { name: '변경사항 저장 (1)' })).toBeEnabled();
+    expect(service.saveIssuesWithConflictCheck).not.toHaveBeenCalled();
+});
+
+test.each([
+    ['공급가', '-1,234.5', '-1,134.5', '0.3'],
+    ['공수', '2.2', '1,100', '2.4'],
+])('화면 복사 합계는 필터된 행의 저장 전 %s 입력을 포함한다', async (field, value, supply, manDays) => {
+    (service.getIssuesByMonth as jest.Mock).mockResolvedValue([
+        { ...row('A'), supplyAmount: 1000, manDays: 0.1, note: '합계대상' },
+        { ...row('B', 2), manDays: 0.2, note: '합계대상' },
+        { ...row('C', 3), supplyAmount: 9999, manDays: 9 },
+    ]);
+    const complete = jest.fn();
+    (reserveImageClipboardWrite as jest.Mock).mockReturnValue({ complete, cancel: jest.fn(), result: Promise.resolve({ ok: true }) });
+    (html2canvas as jest.Mock).mockImplementation(async root => {
+        const total = within(root).getByRole('row', { name: `조회 합계 (2건) ${supply} ${manDays}`, hidden: true });
+        const cells = within(total).getAllByRole('cell', { hidden: true });
+        expect(cells.map(cell => cell.textContent)).toEqual(['조회 합계 (2건)', supply, '', manDays, '']);
+        expect(cells.map(cell => cell.getAttribute('colspan'))).toEqual(['5', '1', '1', '1', '6']);
+        return { toBlob: (callback: (blob: Blob) => void) => callback(new Blob(['image'], { type: 'image/png' })) };
+    });
+    mount(); await ready();
+    fireEvent.change(screen.getByRole('searchbox', { name: '발행리스트 통합검색' }), { target: { value: '합계대상' } });
+    startEdit(field, value);
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    await waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: '변경사항 저장 (1)' })).toBeEnabled();
+    expect(service.saveIssuesWithConflictCheck).not.toHaveBeenCalled();
+});
+
+test('화면 복사는 목록 로딩과 빈 검색 결과에서 비활성화된다', async () => {
+    const loading = deferred<TaxInvoiceIssue[]>();
+    (service.getIssuesByMonth as jest.Mock).mockReturnValueOnce(loading.promise);
+    mount();
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeDisabled();
+    await act(async () => loading.resolve([row('A')]));
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeEnabled();
+    fireEvent.change(screen.getByRole('searchbox', { name: '발행리스트 통합검색' }), { target: { value: '없는 행' } });
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeDisabled();
+    expect(reserveImageClipboardWrite).not.toHaveBeenCalled();
+});
+
+test('화면 복사 중 다른 복사를 차단하고 권한 거부 후 임시 이미지를 정리하여 재시도한다', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    const result = deferred<{ ok: false; error: Error }>();
+    const complete = jest.fn();
+    const cancel = jest.fn();
+    (reserveImageClipboardWrite as jest.Mock).mockReturnValue({ complete, cancel, result: result.promise });
+    (html2canvas as jest.Mock).mockResolvedValue({ toBlob: (callback: (blob: Blob) => void) => callback(new Blob(['image'], { type: 'image/png' })) });
+    mount(); await ready();
+    fireEvent.click(screen.getByRole('checkbox', { name: '1번 합성 A 항목 선택' }));
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    await waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('button', { name: '화면 복사 중...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '선택 이미지 복사 (1)' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '선택 이미지 복사 (1)' }));
+    expect(reserveImageClipboardWrite).toHaveBeenCalledTimes(1);
+    await act(async () => result.resolve({ ok: false, error: new Error('permission denied') }));
+    expect(toast.error).toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect((html2canvas as jest.Mock).mock.calls[0][0]).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeEnabled();
+    (reserveImageClipboardWrite as jest.Mock).mockReturnValue({ complete, cancel, result: Promise.resolve({ ok: true }) });
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('현재 목록의 2개 행을 이미지로 클립보드에 복사했습니다.'));
+});
+
+test('이미지 클립보드를 지원하지 않으면 안내하고 캡처를 시작하지 않는다', async () => {
+    (reserveImageClipboardWrite as jest.Mock).mockReturnValue(null);
+    mount(); await ready();
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    expect(toast.error).toHaveBeenCalledWith('이 브라우저에서는 이미지 클립보드 복사를 지원하지 않습니다.');
+    expect(html2canvas).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeEnabled();
 });
 
 test('글자 조합 중에는 내보내기를 차단하고 완료 후 정상 입력을 사용한다', async () => {
@@ -393,6 +507,7 @@ test('글자 조합 중에는 내보내기를 차단하고 완료 후 정상 입
     fireEvent.compositionStart(input);
     expect(screen.getByRole('button', { name: '엑셀' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '선택 이미지 복사 (1)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeDisabled();
     fireEvent.compositionEnd(input);
     fireEvent.click(screen.getByRole('button', { name: '엑셀' }));
     await waitFor(() => expect(exportIssuesToExcel).toHaveBeenCalledWith([expect.objectContaining({ id: 'A', item: '한' }), expect.objectContaining({ id: 'B' })], month));

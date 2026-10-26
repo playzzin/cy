@@ -2,6 +2,7 @@ import { trackedGeminiFetch } from './geminiUsageFetch';
 import { DEFAULT_GEMINI_TEXT_MODEL, DEFAULT_GEMINI_LITE_MODEL, geminiTextGenerationOptions } from './geminiModelPolicy';
 import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 import { analyzeBankAccountPhoto } from './bankAccountPhotoService';
+import { analyzeIdCardImage } from './idCardAnalysisService';
 
 export interface AnalyzedIdCard {
     name?: string;
@@ -121,26 +122,6 @@ const getTextModelCandidates = (): string[] => {
 const shouldRetryWithFallbackModel = (status: number, message: string): boolean => {
     if (![400, 403, 404, 429].includes(status)) return false;
     return /denied|permission|quota|resource_exhausted|not found|not supported|model|access/i.test(message);
-};
-
-const ID_CARD_JSON_SCHEMA = {
-    type: 'object',
-    properties: {
-        name: {
-            type: 'string',
-            description: '신분증에 적힌 이름. 읽을 수 없으면 빈 문자열.'
-        },
-        idNumber: {
-            type: 'string',
-            description: '주민등록번호 또는 외국인등록번호. 가능하면 000000-0000000 형식. 읽을 수 없으면 빈 문자열.'
-        },
-        address: {
-            type: 'string',
-            description: '신분증에 적힌 거주지 주소. 교육증 주소 등 다른 카드의 주소는 제외. 읽을 수 없으면 빈 문자열.'
-        }
-    },
-    required: ['name', 'idNumber', 'address'],
-    propertyOrdering: ['name', 'idNumber', 'address']
 };
 
 const RECEIPT_JSON_SCHEMA = {
@@ -521,38 +502,7 @@ export const geminiService = {
         });
     },
 
-    analyzeImage: async (file: File): Promise<AnalyzedIdCard> => {
-        assertAiAnalysisEnabled();
-
-        const base64Data = await geminiService.fileToBase64(file);
-        const base64Content = base64Data.split(',')[1];
-        const mimeType = file.type || 'image/jpeg';
-
-        const prompt = `
-Analyze this image which may contain multiple cards.
-Focus specifically on Korean identity documents such as:
-- Resident Registration Card (주민등록증)
-- Driver's License (운전면허증)
-- Foreigner Registration Card (외국인등록증)
-
-Ignore other cards like safety training certificates if they do not contain the person's legal ID number and residential address.
-
-Extract:
-1. Name (이름)
-2. Resident/foreigner registration number (주민등록번호/외국인등록번호, 13 digits, format 000000-0000000 when possible)
-3. Address (주소) from the identity document
-
-Return empty strings for fields that are not visible.`;
-
-        return fetchGeminiStructuredJson<AnalyzedIdCard>(
-            [
-                { text: prompt },
-                { inlineData: { mimeType, data: base64Content } }
-            ],
-            ID_CARD_JSON_SCHEMA,
-            'ID card analysis'
-        );
-    },
+    analyzeImage: analyzeIdCardImage,
 
     analyzeReceiptImage: async (file: File): Promise<AnalyzedReceipt> => {
         assertAiAnalysisEnabled();
@@ -849,6 +799,10 @@ Return empty strings for fields that are not visible.`;
 
     parseJSON: (text: string): any => {
         try {
+            // Parse the complete JSON first: brackets in an address are string content.
+            try {
+                return JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
+            } catch { /* Legacy responses may include prose around the JSON. */ }
             const jsonStart = text.indexOf('[');
             const jsonEnd = text.lastIndexOf(']');
             if (jsonStart !== -1 && jsonEnd !== -1) {

@@ -151,6 +151,70 @@ describe('LaborCheckPage', () => {
         </MemoryRouter>
     );
 
+    it.each([
+        { status: '퇴사', isActive: true },
+        { status: 'inactive', isActive: true },
+        { status: '재직', isActive: false },
+    ])('퇴사 처리 후에도 이전 달과 퇴사월의 출역을 기본 표시하고 출역 없는 다음 달에는 제외한다: %j', async (retiredStatus) => {
+        (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{
+            id: 'worker-1', name: '검증 퇴사자', teamId: 'team-1', teamName: '김효동팀', ...retiredStatus,
+        }]);
+        const history = ['2026-07', '2026-08', '2026-09'].map(month => output('worker-1', `${month}-02`));
+        (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue(history);
+        (dailyReportService.getReportWorkerRowsByRange as jest.Mock).mockImplementation(({ startDate, endDate }) => (
+            Promise.resolve(history.filter(row => row.date >= startDate && row.date <= endDate))
+        ));
+        renderSeptember();
+
+        await screen.findByText('검증 퇴사자 (퇴사)');
+        expect(cell('검증 퇴사자', 2)).toHaveClass('bg-white');
+        expect(screen.getByRole('button', { name: '퇴사자 숨기기' })).toHaveAttribute('aria-pressed', 'true');
+        for (const month of ['2026-08', '2026-07']) {
+            fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
+            await screen.findByText('검증 퇴사자 (퇴사)');
+            expect(dailyReportService.getReportWorkerRowsByRange).toHaveBeenLastCalledWith(expect.objectContaining({ startDate: `${month}-01` }));
+            expect(cell('검증 퇴사자', 2)).toHaveClass('bg-white');
+        }
+        for (let index = 0; index < 2; index += 1) {
+            fireEvent.click(screen.getByRole('button', { name: '다음 달' }));
+            await screen.findByText('검증 퇴사자 (퇴사)');
+        }
+        fireEvent.click(screen.getByRole('button', { name: '다음 달' }));
+        await screen.findByText('선택한 달의 출역 기록이 없습니다.');
+        expect(screen.queryByText('검증 퇴사자 (퇴사)')).toBeNull();
+        fireEvent.click(screen.getByRole('checkbox', { name: '이번 달 출역자만' }));
+        expect(screen.queryByText('검증 퇴사자 (퇴사)')).toBeNull();
+    });
+
+    it('재직자를 퇴사 처리한 뒤 새로고침해도 출역 색상과 저장된 신고 현장을 유지한다', async () => {
+        (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([output('worker-1', '2026-08-01')]);
+        (dailyReportService.getReportWorkerRowsByRange as jest.Mock).mockResolvedValue([
+            output('worker-1', '2026-09-02'), output('worker-1', '2026-09-03', 1, '계산서'),
+        ]);
+        (dailyWorkerReportSiteService.getByDateRange as jest.Mock).mockResolvedValue([
+            { workerKey: 'worker-1', date: '2026-09-03', reportedSiteName: '기존 신고 현장' },
+        ]);
+        renderSeptember();
+        await screen.findByText('김효동');
+        (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{
+            id: 'worker-1', name: '김효동', teamId: 'team-1', teamName: '김효동팀', status: '퇴사', isActive: false,
+        }]);
+        fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+        await screen.findByText('김효동 (퇴사)');
+        expect(cell('김효동', 1)).toHaveClass('bg-yellow-200');
+        expect(cell('김효동', 2)).toHaveClass('bg-white');
+        expect(cell('김효동', 3)).toHaveClass('bg-sky-200');
+        expect(within(cell('김효동', 3)).getByText('기존 신고 현장')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '김효동 2026-09-03 대체 현장명' })).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: '퇴사자 숨기기' }));
+        expect(screen.queryByText('김효동 (퇴사)')).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: '출역 퇴사자 보기' }));
+        expect(screen.getByText('김효동 (퇴사)')).toBeInTheDocument();
+        expect(dailyWorkerReportSiteService.save).not.toHaveBeenCalled();
+        expect(dailyWorkerReportSiteService.delete).not.toHaveBeenCalled();
+    });
+
     it('기존 인원은 오래전 다른 팀 출역 이력도 반영해 월초부터 미출역 색상과 입력을 활성화한다', async () => {
         (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([
             { ...output('worker-1', '2025-12-31'), workerTeamId: 'old-team', workerTeamName: '이전 팀' },

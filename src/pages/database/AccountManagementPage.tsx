@@ -1,6 +1,10 @@
 import PagePrimaryAccountManager from '../../components/accounts/PagePrimaryAccountManager';
 import AccountPhotoRegistrationModal from '../../components/accounts/AccountPhotoRegistrationModal';
-import { BankAccountFields } from '../../services/bankAccountPhotoService';
+import WorkerAccountRegistrationModal from '../../components/accounts/WorkerAccountRegistrationModal';
+import { hasMissingWorkerAccount, WorkerAccountPurpose, workerAccountPatch } from '../../utils/workerAccount';
+import { planWorkerAccountImport } from '../../utils/workerAccountImport';
+import { workerAccountLabel } from '../../utils/workerAccount';
+import { BankAccountFields, isCompleteBankAccount, normalizeBankAccountFields } from '../../services/bankAccountPhotoService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -440,6 +444,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [uploadPreviewSections, setUploadPreviewSections] = useState<UploadPreviewSection[]>([]);
     const [applyingUpload, setApplyingUpload] = useState(false);
     const [photoRegistrationOpen, setPhotoRegistrationOpen] = useState(false);
+    const [workerAccountTarget, setWorkerAccountTarget] = useState<{ worker: Worker; purpose: WorkerAccountPurpose } | null>(null);
 
     useEffect(() => {
         writeHiddenAccountKeys(hiddenAccountKeys);
@@ -703,7 +708,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             const { teamKey, teamName, teamType, companyName } = getWorkerTeamMeta(worker);
             if (!showHiddenAccounts && isWorkerHiddenByAccountScope(worker)) return false;
             if (selectedWorkerTeamKey !== 'all' && teamKey !== selectedWorkerTeamKey) return false;
-            if (onlyMissing && hasAccountNumber(worker.accountNumber)) return false;
+            if (onlyMissing && !hasMissingWorkerAccount(worker)) return false;
             if (!normalizedSearchTerm) return true;
 
             return [
@@ -714,6 +719,9 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 worker.accountHolder,
                 worker.accountNumber,
                 worker.bankName,
+                worker.directPayBankName,
+                worker.directPayAccountNumber,
+                worker.directPayAccountHolder,
                 worker.role,
                 getWorkerEmploymentLabel(worker),
                 getWorkerSalaryLabel(worker),
@@ -791,7 +799,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                     ...section,
                     groups: groupWorkersByTeam(items),
                     workerCount: items.length,
-                    missingCount: items.filter((worker) => !hasAccountNumber(worker.accountNumber)).length,
+                    missingCount: items.filter(hasMissingWorkerAccount).length,
                 };
             })
             .filter((section) => section.workerCount > 0 || workerSalaryFilter === section.key);
@@ -945,7 +953,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         [customAccounts, isCustomAccountHidden, showHiddenAccounts]
     );
     const workerMissingCount = useMemo(
-        () => visibleCheongyeonWorkersForStats.filter((item) => !hasAccountNumber(item.accountNumber)).length,
+        () => visibleCheongyeonWorkersForStats.filter(hasMissingWorkerAccount).length,
         [visibleCheongyeonWorkersForStats]
     );
     const teamMissingCount = useMemo(() => visibleTeamsForStats.filter((item) => !hasAccountNumber(item.accountNumber)).length, [visibleTeamsForStats]);
@@ -971,6 +979,9 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         ...visibleCheongyeonWorkersForStats.filter(item => item.id).map(item => ({
             id: `worker:${item.id}`, label: `작업자 · ${item.name} · ${item.teamName || '미배정'}${item.companyName ? ` · ${item.companyName}` : ''}`,
         })),
+        ...visibleCheongyeonWorkersForStats.filter(item => item.id).map(item => ({
+            id: `workerDirectPay:${item.id}`, label: `작업자 직불용 · ${item.name} · ${item.teamName || '미배정'}`,
+        })),
         ...visibleTeamsForStats.filter(item => item.id).map(item => ({ id: `team:${item.id}`, label: `팀 · ${item.name}` })),
         ...visibleCompaniesForStats.filter(item => item.id).map(item => ({ id: `company:${item.id}`, label: `회사 · ${item.name}` })),
         ...visibleCustomAccountsForStats.filter(item => item.id).map(item => ({ id: `custom:${item.id}`, label: `매입/기타 · ${item.name}` })),
@@ -981,9 +992,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         const separator = targetId.indexOf(':');
         const kind = targetId.slice(0, separator);
         const id = targetId.slice(separator + 1);
-        if (kind === 'worker') {
-            await manpowerService.updateWorker(id, fields);
-            setWorkers(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
+        if (kind === 'worker' || kind === 'workerDirectPay') {
+            const updates = workerAccountPatch(fields, kind === 'workerDirectPay' ? 'directPay' : 'default');
+            await manpowerService.updateWorker(id, updates);
+            setWorkers(previous => previous.map(item => item.id === id ? { ...item, ...updates } : item));
         } else if (kind === 'team') {
             await teamService.updateTeam(id, fields);
             setTeams(previous => previous.map(item => item.id === id ? { ...item, ...fields } : item));
@@ -1000,15 +1012,16 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const saveWorkerAccount = async (workerId: string) => {
         const target = workers.find((worker) => worker.id === workerId);
         if (!target) return;
+        const fields = { bankName: target.bankName || '', accountNumber: target.accountNumber || '', accountHolder: target.accountHolder || '' };
+        if (!isCompleteBankAccount(fields)) {
+            alert('기본 은행·계좌번호(숫자 6~20자리)·예금주를 모두 입력해 주세요. 계좌 삭제는 삭제 버튼을 이용해 주세요.');
+            return;
+        }
 
         const key = `worker:${workerId}`;
         setSaving(key, true);
         try {
-            await manpowerService.updateWorker(workerId, {
-                bankName: toNullableText(target.bankName),
-                accountNumber: toNullableText(target.accountNumber),
-                accountHolder: toNullableText(target.accountHolder),
-            });
+            await manpowerService.updateWorker(workerId, normalizeBankAccountFields(fields));
             clearRowControl(key);
             await loadData();
         } catch (error) {
@@ -1022,7 +1035,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const clearWorkerAccount = async (workerId: string) => {
         const target = workers.find((worker) => worker.id === workerId);
         if (!target || !target.id) return;
-        if (!window.confirm(`"${target.name}" 작업자의 계좌정보를 삭제하시겠습니까? 작업자 자체는 삭제되지 않습니다.`)) return;
+        if (!window.confirm(`"${target.name}" 작업자의 기본 계좌정보를 삭제하시겠습니까? 직불용 계좌와 계좌사진은 유지됩니다.`)) return;
 
         const key = `worker:${workerId}`;
         setSaving(key, true);
@@ -1317,39 +1330,14 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         const mismatchRows: UploadPreviewRow[] = [];
 
         if (target === 'workers') {
-            rows.forEach((row) => {
-                const importedId = getImportedCellText(row, ['id', 'ID', '작업자ID']);
-                const importedName = getImportedCellText(row, ['이름', '작업자명']);
-                const importedTeamName = getImportedCellText(row, ['팀명']);
-                const bankName = getImportedCellText(row, ['은행', 'bankName']);
-                const accountNumber = getImportedCellText(row, ['계좌번호', 'accountNumber']);
-                const accountHolder = getImportedCellText(row, ['예금주', 'accountHolder']);
-                const matched =
-                    workers.find((worker) => worker.id === importedId) ||
-                    workers.find((worker) => normalizeText(worker.name) === importedName && normalizeText(worker.teamName) === importedTeamName);
-
-                if (matched?.id) {
+            planWorkerAccountImport(rows, workers).forEach(plan => {
+                if (plan.error) {
+                    const mismatch: UploadPreviewRow = { keyText: plan.keyText, bankName: '', accountNumber: '', accountHolder: '', status: 'skipped', reason: plan.error };
+                    previewRows.push(mismatch); mismatchRows.push(mismatch);
+                } else {
                     updateCount += 1;
-                    previewRows.push({
-                        keyText: `${importedName || '(이름없음)'} / ${importedTeamName || '-'}`,
-                        bankName,
-                        accountNumber,
-                        accountHolder,
-                        status: 'matched',
-                    });
-                    return;
+                    plan.accounts.forEach(account => previewRows.push({ keyText: `${plan.keyText} · ${workerAccountLabel(account.purpose)}`, ...account.fields, status: 'matched' }));
                 }
-
-                const mismatch: UploadPreviewRow = {
-                    keyText: `${importedName || '(이름없음)'} / ${importedTeamName || '-'}`,
-                    bankName,
-                    accountNumber,
-                    accountHolder,
-                    status: 'skipped',
-                    reason: '대상 작업자 미매칭',
-                };
-                previewRows.push(mismatch);
-                mismatchRows.push(mismatch);
             });
         }
 
@@ -1518,6 +1506,9 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 은행: '국민은행',
                 계좌번호: '12345678901234',
                 예금주: '홍길동',
+                '직불용 은행': '국민은행',
+                '직불용 계좌번호': '001234567890',
+                '직불용 예금주': '홍길동',
             },
         ]);
         const teamSample = XLSX.utils.json_to_sheet([
@@ -1603,6 +1594,9 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                     은행: worker.bankName || '',
                     계좌번호: worker.accountNumber || '',
                     예금주: worker.accountHolder || '',
+                    '직불용 은행': worker.directPayBankName || '',
+                    '직불용 계좌번호': worker.directPayAccountNumber || '',
+                    '직불용 예금주': worker.directPayAccountHolder || '',
                 };
             });
             sheetName = '작업자계좌';
@@ -1676,8 +1670,19 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 const target = detectUploadTarget(sheetName, rows, activeTab);
                 if (!target) return;
 
-                nextSections.push(buildUploadPreviewSection(target, rows, sheetName));
+                const importRows = target === 'workers'
+                    ? XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '', raw: true }) : rows;
+                nextSections.push(buildUploadPreviewSection(target, importRows, sheetName));
             });
+
+            const workerSections = nextSections.filter(section => section.target === 'workers');
+            if (workerSections.length > 1) {
+                const combined = buildUploadPreviewSection('workers', workerSections.flatMap(section => section.rows), workerSections.map(section => section.sheetName).join(', '));
+                for (let index = nextSections.length - 1; index >= 0; index--) {
+                    if (nextSections[index].target === 'workers') nextSections.splice(index, 1);
+                }
+                nextSections.unshift(combined);
+            }
 
             if (nextSections.length === 0) {
                 alert('인식 가능한 업로드 시트가 없습니다. 샘플(전체) 양식을 사용해 주세요.');
@@ -1708,26 +1713,9 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
             for (const section of uploadPreviewSections) {
                 if (section.target === 'workers') {
-                    const updates: Array<{ id: string; updates: Partial<Worker> }> = [];
-
-                    section.rows.forEach((row) => {
-                        const importedId = getImportedCellText(row, ['id', 'ID', '작업자ID']);
-                        const importedName = getImportedCellText(row, ['이름', '작업자명']);
-                        const importedTeamName = getImportedCellText(row, ['팀명']);
-                        const target =
-                            workers.find((worker) => worker.id === importedId) ||
-                            workers.find((worker) => normalizeText(worker.name) === importedName && normalizeText(worker.teamName) === importedTeamName);
-                        if (!target?.id) return;
-
-                        updates.push({
-                            id: target.id,
-                            updates: {
-                                bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
-                                accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
-                                accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
-                            },
-                        });
-                    });
+                    const updates = planWorkerAccountImport(section.rows, workers)
+                        .filter(plan => !plan.error && plan.workerId)
+                        .map(plan => ({ id: plan.workerId!, updates: plan.updates }));
 
                     if (updates.length > 0) {
                         await manpowerService.updateWorkersBatch(updates);
@@ -1930,12 +1918,14 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                         <div className="text-sm font-semibold text-slate-800">계좌 엑셀 업로드 / 다운로드</div>
                         <div className="mt-1 text-xs text-slate-500">
                             현재 탭 양식 다운로드 또는 샘플(전체) 다운로드 후 수정 → 업로드 → 미리보기 확인 후 반영하세요.
+                            작업자 계좌번호는 텍스트 셀로 입력하세요. 빈 셀은 기존 정보를 유지합니다.
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <input
                             ref={fileInputRef}
                             type="file"
+                            aria-label="계좌 엑셀 파일 선택"
                             accept=".xlsx,.xls,.csv"
                             onChange={handleUploadFile}
                             className="hidden"
@@ -2039,7 +2029,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                             <button
                                 type="button"
                                 onClick={handleApplyUploadPreview}
-                                disabled={loading || applyingUpload}
+                                disabled={loading || applyingUpload || !uploadPreviewSections.some(section => section.updateCount + section.createCount > 0)}
                                 className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                             >
                                 <FontAwesomeIcon icon={faFloppyDisk} />
@@ -2391,9 +2381,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         <th className="w-[220px] border-b border-slate-700 px-4 py-3 text-left">소속</th>
                                                         <th className="w-[160px] border-b border-slate-700 px-4 py-3 text-left">작업자</th>
                                                         <th className="w-[170px] border-b border-slate-700 px-4 py-3 text-left">직책 / 상태</th>
-                                                        <th className="w-[140px] border-b border-slate-700 px-4 py-3 text-left">은행</th>
-                                                        <th className="w-[240px] border-b border-slate-700 px-4 py-3 text-left">계좌번호</th>
-                                                        <th className="w-[150px] border-b border-slate-700 px-4 py-3 text-left">예금주</th>
+                                                        <th className="w-[140px] border-b border-slate-700 px-4 py-3 text-left">기본 은행</th>
+                                                        <th className="w-[240px] border-b border-slate-700 px-4 py-3 text-left">기본 계좌번호</th>
+                                                        <th className="w-[150px] border-b border-slate-700 px-4 py-3 text-left">기본 예금주</th>
+                                                        <th className="w-[240px] border-b border-slate-700 px-4 py-3 text-left">직불용 계좌 / 사진</th>
                                                         <th className="w-[228px] border-b border-slate-700 px-4 py-3 text-left">관리</th>
                                                     </tr>
                                                 </thead>
@@ -2406,7 +2397,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                             const isPrimary = isPrimaryAccount('worker', worker.id);
                                                             const accountHolderMismatch = hasAccountHolderNameMismatch(worker.name, worker.accountHolder);
                                                             const isEditing = true;
-                                                            const accountMissing = !hasAccountNumber(worker.accountNumber);
+                                                            const accountMissing = hasMissingWorkerAccount(worker);
                                                             const accountKey = getWorkerAccountKey(worker);
                                                             const isManuallyHidden = isAccountKeyHidden(accountKey);
                                                             const isRetiredWorker = getWorkerEmploymentStatus(worker) === 'retired';
@@ -2512,7 +2503,17 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                         )}
                                                                     </td>
                                                                     <td className="px-4 py-3 align-top">
+                                                                        <div className="min-w-[200px] space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
+                                                                            <div className="text-sm font-semibold text-slate-800">{worker.directPayBankName || '직불용 계좌 미등록'}</div>
+                                                                            {worker.directPayAccountNumber && <div className="flex items-center gap-2"><span className="break-all font-mono text-sm">{worker.directPayAccountNumber}</span><AccountNumberCopyButton value={worker.directPayAccountNumber} /></div>}
+                                                                            {worker.directPayAccountHolder && <div className="text-sm text-slate-600">{worker.directPayAccountHolder}</div>}
+                                                                            <div className="text-xs text-slate-500">사진 {worker.directPayBankPhotoId ? '등록됨' : '미등록'}</div>
+                                                                            <button type="button" disabled={!worker.id || !!savingKeys[savingKey]} aria-label={`${worker.name} 직불용 계좌·사진 등록`} onClick={() => setWorkerAccountTarget({ worker: { ...worker }, purpose: 'directPay' })} className={rowActionSecondaryClass}>직불용 계좌·사진 등록</button>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 align-top">
                                                                         <div className="flex flex-wrap gap-2">
+                                                                            <button type="button" disabled={!worker.id || !!savingKeys[savingKey]} aria-label={`${worker.name} 기본 계좌·사진 등록`} onClick={() => setWorkerAccountTarget({ worker: { ...worker }, purpose: 'default' })} className={rowActionSecondaryClass}>기본 계좌·사진 {worker.bankPhotoId ? '수정' : '등록'}</button>
                                                                             <button
                                                                                 type="button"
                                                                                 disabled={!worker.id || !!savingKeys[savingKey]}
@@ -3068,6 +3069,12 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                     )}
                 </>
             )}
+            {workerAccountTarget && <WorkerAccountRegistrationModal
+                worker={workerAccountTarget.worker}
+                purpose={workerAccountTarget.purpose}
+                onSaved={updates => setWorkers(previous => previous.map(worker => worker.id === workerAccountTarget.worker.id ? { ...worker, ...updates } : worker))}
+                onClose={() => setWorkerAccountTarget(null)}
+            />}
             {photoRegistrationOpen && <AccountPhotoRegistrationModal
                 targets={photoTargets}
                 onSave={savePhotoAccount}

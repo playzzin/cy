@@ -6,7 +6,7 @@ type DirectoryPickerWindow = Window & {
 
 export const canSaveImageFolder = (): boolean => typeof (window as DirectoryPickerWindow).showDirectoryPicker === 'function';
 
-type ImageBatchLabel = '신분증' | '계좌' | '통장사본';
+type ImageBatchLabel = '신분증' | '계좌' | '통장사본' | '직불용 통장사본';
 
 const batchName = (label: ImageBatchLabel): string => {
     const timestamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
