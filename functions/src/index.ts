@@ -166,6 +166,7 @@ export { teamOffDutyRequests } from './teamOffDutyRequests';
 
 export { workerSignatures } from './workerSignatures';
 export { workerBankPhotos } from './workerBankPhotos';
+export { supportTeamDocuments } from './supportTeamDocuments';
 
 export { aiWorkspace } from './aiWorkspace';
 export { dailyReportAnalyticsAi } from './dailyReportAnalyticsAi';

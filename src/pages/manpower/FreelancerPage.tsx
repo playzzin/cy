@@ -9,11 +9,12 @@ import { buildFreelancerTaxExcelRows } from '../../utils/freelancerTaxExcel';
 import { freelancerReportRowKey } from '../../utils/freelancerYearlyData';
 import { buildFreelancerTeamHistory, freelancerTeamBackground } from '../../utils/freelancerTeamHistory';
 import type { FreelancerTeamHistory } from '../../utils/freelancerTeamHistory';
+import { normalizeHexColor } from '../../utils/color';
 import FreelancerTeamHistoryDialog from './FreelancerTeamHistoryDialog';
 
 import { addYears, subYears } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronLeft, faChevronRight, faFileExcel, faSave, faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faChevronLeft, faChevronRight, faFileExcel, faSave, faSpinner, faUsers } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import './FreelancerPage.css';
 
@@ -24,6 +25,9 @@ registerAllModules();
 
 // Register Korean language dictionary for better IME support
 registerLanguageDictionary(koKR);
+
+const freelancerAccentColor = (team: { name: string; color?: string }, index: number): string =>
+    normalizeHexColor(freelancerTeamBackground(team, index).match(/#(?:[0-9a-f]{6}|[0-9a-f]{3})\b/i)?.[0]);
 
 const FreelancerPage: React.FC = () => {
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -415,15 +419,9 @@ const FreelancerPage: React.FC = () => {
     const selectedTeamTheme = useMemo(() => {
         const selectedIndex = visibleTeams.findIndex((team: any) => team.id === selectedTeamId);
         if (selectedIndex < 0) {
-            return {
-                background: '#1a1a1a',
-                borderColor: '#111111'
-            };
+            return '#0b8d69';
         }
-        return {
-            background: freelancerTeamBackground(visibleTeams[selectedIndex], selectedIndex),
-            borderColor: '#0f172a'
-        };
+        return freelancerAccentColor(visibleTeams[selectedIndex], selectedIndex);
     }, [selectedTeamId, visibleTeams]);
 
     const columns = useMemo((): any[] => [
@@ -431,6 +429,7 @@ const FreelancerPage: React.FC = () => {
         {
             data: 'name', title: '이     름', type: 'text', width: 170, renderer: (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) => {
                 centerRenderer(instance, td, row, col, prop, value, cellProperties);
+                td.classList.add('freelancer-name-cell');
                 // Handsontable은 팀 전환/스크롤 시 셀을 재사용한다.
                 td.style.removeProperty('--previous-team-background');
                 td.style.removeProperty('--previous-team-text');
@@ -440,8 +439,6 @@ const FreelancerPage: React.FC = () => {
                 td.removeAttribute('aria-label');
                 td.removeAttribute('data-previous-team-id');
                 if (cellProperties.isFooter) {
-                    td.style.fontWeight = '900';
-                    td.style.color = '#ff0000';
                     td.style.textAlign = 'center';
                     td.innerText = value;
                     return td;
@@ -466,8 +463,7 @@ const FreelancerPage: React.FC = () => {
                         chip.className = 'freelancer-history-team-chip';
                         chip.dataset.teamId = team.teamId;
                         chip.textContent = team.teamName;
-                        if (team.background) chip.style.background = team.background;
-                        if (team.textColor) chip.style.color = team.textColor;
+                        chip.style.setProperty('--freelancer-history-color', normalizeHexColor(team.background?.match(/#(?:[0-9a-f]{6}|[0-9a-f]{3})\b/i)?.[0]));
                         detailsButton.append(chip);
                     });
                     detailsButton.onmousedown = event => event.stopPropagation();
@@ -484,25 +480,25 @@ const FreelancerPage: React.FC = () => {
                 return td;
             }
         },
-        { data: 'total', title: '합     계', readOnly: true, width: 110, renderer: currencyRedRenderer },
+        { data: 'total', title: '합     계', readOnly: true, width: 130, renderer: currencyRedRenderer },
 
-        { data: 'm01', title: '01월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm02', title: '02월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm03', title: '03월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm04', title: '04월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm05', title: '05월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm06', title: '06월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm07', title: '07월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm08', title: '08월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm09', title: '09월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm10', title: '10월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm11', title: '11월', type: 'numeric', width: 85, renderer: currencyRenderer },
-        { data: 'm12', title: '12월', type: 'numeric', width: 85, renderer: currencyRenderer },
+        { data: 'm01', title: '01월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm02', title: '02월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm03', title: '03월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm04', title: '04월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm05', title: '05월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm06', title: '06월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm07', title: '07월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm08', title: '08월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm09', title: '09월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm10', title: '10월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm11', title: '11월', type: 'numeric', width: 112, renderer: currencyRenderer },
+        { data: 'm12', title: '12월', type: 'numeric', width: 112, renderer: currencyRenderer },
 
         { data: 'performanceBonus', title: '성 과 급', type: 'numeric', width: 100, renderer: currencyRenderer },
-        { data: 'reportingBalance', title: '신고 잔액', type: 'numeric', readOnly: true, width: 110, className: 'col-green-bg', renderer: currencyRenderer },
+        { data: 'reportingBalance', title: '신고 잔액', type: 'numeric', readOnly: true, width: 130, className: 'col-green-bg', renderer: currencyRenderer },
         { data: 'reportableAmount', title: '신고 가능 금액', type: 'numeric', width: 120, className: 'col-orange-bg', renderer: glowRenderer },
-        { data: 'depositDate', title: '입금 날짜', type: 'date', dateFormat: 'YYYY-MM-DD', width: 110, className: 'htCenter htMiddle' },
+        { data: 'depositDate', title: '입금 날짜', type: 'date', dateFormat: 'YYYY-MM-DD', width: 130, className: 'htCenter htMiddle' },
         { data: 'paymentMemo', title: '비     고', type: 'text', width: 180, className: 'htMiddle px-3' }
     ], [centerRenderer, currencyRedRenderer, currencyRenderer, glowRenderer, teamHistory, readGridHistory]);
 
@@ -1064,6 +1060,10 @@ const FreelancerPage: React.FC = () => {
 
     return (
         <div className="freelancer-page-container">
+            <header className="freelancer-page-header">
+                <h1><FontAwesomeIcon icon={faUsers} />프리랜서 관리</h1>
+                <span>{year}년 사업소득세 신고 내역</span>
+            </header>
             {loadError && <div role="alert" className="p-3 text-red-700 bg-red-50">
                 신고 자료를 표시할 수 없습니다. {loadError}
                 <button type="button" onClick={fetchData} className="ml-3 underline">다시 불러오기</button>
@@ -1071,39 +1071,40 @@ const FreelancerPage: React.FC = () => {
             {/* 상단 팀 내비게이션 */}
             <div className="team-tab-navigation">
                 {/* 년도 조절기 (전체보기 버튼 대신 위치) */}
-                <div className="year-picker-container bg-white border border-gray-300 rounded px-3 py-1 flex items-center shadow-inner mr-4">
-                    <button className="hover:bg-gray-100 p-1 rounded" onClick={() => handleYearChange(-1)}>
+                <div className="freelancer-year-filter">
+                    <span className="freelancer-filter-label">조회 연도</span>
+                    <div className="year-picker-container">
+                    <button aria-label="이전 연도" onClick={() => handleYearChange(-1)}>
                         <FontAwesomeIcon icon={faChevronLeft} className="text-gray-400" />
                     </button>
-                    <span className="font-bold text-lg min-w-[80px] text-center text-blue-900 mx-2">
+                    <span>
                         {year}년
                     </span>
-                    <button className="hover:bg-gray-100 p-1 rounded" onClick={() => handleYearChange(1)}>
+                    <button aria-label="다음 연도" onClick={() => handleYearChange(1)}>
                         <FontAwesomeIcon icon={faChevronRight} className="text-gray-400" />
                     </button>
+                    </div>
                 </div>
 
+                <div className="freelancer-team-buttons" role="group" aria-label="팀 선택">
                 {visibleTeams.map((team: any, idx: number) => (
                     <button
                         key={team.id}
                         onClick={() => handleTeamChange(team.id)}
                         className={`team-tab-btn ${selectedTeamId === team.id ? 'active' : ''}`}
-                        style={{ ['--tab-color' as any]: freelancerTeamBackground(team, idx) }}
+                        aria-pressed={selectedTeamId === team.id}
+                        style={{ '--tab-color': freelancerAccentColor(team, idx) } as React.CSSProperties}
                     >
-                        {team.name}
+                        <span className="freelancer-team-dot" aria-hidden="true" />{team.name}
                     </button>
                 ))}
+                </div>
             </div>
 
-            {/* 검은색 타이틀 바 */}
-            <div
-                className="black-title-bar"
-                style={{
-                    background: selectedTeamTheme.background,
-                    borderBottom: `2px solid ${selectedTeamTheme.borderColor}`
-                }}
-            >
-                {selectedTeamId ? visibleTeams.find((t: any) => t.id === selectedTeamId)?.name : '청연팀 전체'} 사업소득세 신고
+            <section className="freelancer-ledger" style={{ '--freelancer-team-color': selectedTeamTheme } as React.CSSProperties} aria-label="사업소득세 신고 내역">
+            <div className="freelancer-ledger-heading">
+                <h2>{selectedTeamId ? visibleTeams.find((t: any) => t.id === selectedTeamId)?.name : '청연팀 전체'}</h2>
+                <span>{year}년 사업소득세 신고</span>
             </div>
 
             <div className="freelancer-salary-legend">
@@ -1111,7 +1112,7 @@ const FreelancerPage: React.FC = () => {
                 <span className="freelancer-salary-legend-chip is-daily">일급제</span>
                 <span className="freelancer-salary-legend-chip is-monthly">월급제</span>
                 <span className="freelancer-salary-legend-chip is-agency">용역팀</span>
-                <span className="ml-3 text-xs font-semibold text-slate-600">
+                <span className="freelancer-ledger-description">
                     월별 금액은 전체법인 정산에 저장된 세전 금액입니다. 팀을 이동해도 이전 신고액은 당시 팀에서 조회하며, 수정값은 선택한 팀에만 반영됩니다.
                 </span>
             </div>
@@ -1128,7 +1129,7 @@ const FreelancerPage: React.FC = () => {
                 <div className="relative freelancer-table-shell" ref={tableWrapRef}>
                     {loading && (
                         <div className="absolute inset-0 bg-white/40 backdrop-blur-sm z-[100] flex items-center justify-center">
-                            <div className="text-blue-900 font-black text-xl">데이터 로딩 중...</div>
+                            <div className="freelancer-loading" role="status"><FontAwesomeIcon icon={faSpinner} spin />데이터 로딩 중...</div>
                         </div>
                     )}
                     <HotTable
@@ -1185,11 +1186,12 @@ const FreelancerPage: React.FC = () => {
                         height={tableHeight}
                         licenseKey="non-commercial-and-evaluation"
                         stretchH="all"
+                        columnHeaderHeight={38}
                         fixedColumnsLeft={2}
                         rowHeights={row => {
                             const data = displayData[row];
                             const history = data && !data.isEmpty && !data.isFooter ? teamHistory.get(freelancerReportRowKey(data)) : undefined;
-                            return history ? 28 + history.otherTeams.length * 28 : 26;
+                            return history ? 38 + history.otherTeams.length * 32 : 38;
                         }}
                         manualColumnResize={true}
                         contextMenu={true}
@@ -1212,13 +1214,13 @@ const FreelancerPage: React.FC = () => {
                     />
                 </div>
 
-                <div className="flex flex-wrap justify-end gap-3 mt-4">
+                <div className="freelancer-actions">
                     <select
                         value={taxExcelMonth}
                         onChange={(event) => setTaxExcelMonth(Number(event.target.value))}
                         disabled={loading || !!loadError || downloadingTaxExcel}
                         aria-label="세무용 엑셀 월 선택"
-                        className="rounded border border-emerald-300 bg-white px-3 py-3 font-bold text-emerald-800 shadow-sm disabled:opacity-60"
+                        className="freelancer-export-month"
                     >
                         {Array.from({ length: 12 }, (_, index) => index + 1).map((month) => (
                             <option key={month} value={month}>{month}월</option>
@@ -1227,7 +1229,7 @@ const FreelancerPage: React.FC = () => {
                     <button
                         onClick={handleDownloadTaxExcel}
                         disabled={loading || !!loadError || downloadingTaxExcel}
-                        className="flex items-center gap-2 px-6 py-3 bg-teal-700 text-white rounded font-black shadow-lg hover:bg-teal-800 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="freelancer-action"
                     >
                         <FontAwesomeIcon icon={downloadingTaxExcel ? faSpinner : faFileExcel} spin={downloadingTaxExcel} />
                         세무서 제출 자료
@@ -1235,7 +1237,7 @@ const FreelancerPage: React.FC = () => {
                     <button
                         onClick={handleDownloadExcel}
                         disabled={loading || !!loadError || downloadingExcel}
-                        className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded font-black shadow-lg hover:bg-emerald-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="freelancer-action"
                     >
                         <FontAwesomeIcon icon={downloadingExcel ? faSpinner : faFileExcel} spin={downloadingExcel} />
                         엑셀 다운로드
@@ -1243,13 +1245,14 @@ const FreelancerPage: React.FC = () => {
                     <button
                         onClick={handleSave}
                         disabled={loading || !!loadError}
-                        className="flex items-center gap-2 px-8 py-3 bg-[#1e40af] text-white rounded font-black shadow-lg hover:bg-[#1e3a8a] transition-all"
+                        className="freelancer-action freelancer-action--primary"
                     >
                         <FontAwesomeIcon icon={faSave} />
                         {year}년 변경 내용 저장하기
                     </button>
                 </div>
             </main>
+            </section>
         </div>
     );
 };
