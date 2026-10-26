@@ -627,7 +627,7 @@ const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): M
 
     const next: MenuItem = {
         ...base,
-        text: normalizedText,
+        text: normalizedText === '위임금 입금 확인' ? '노무 입금 확인' : normalizedText,
         id: normalizedId,
         path: normalizedPath,
         sub: normalizedSub

@@ -174,3 +174,8 @@ export { aiWorkspaceReports, generateScheduledWorkspaceReports } from './aiWorks
 
 export { teamMaterialTransactions } from './teamMaterialTransactions';
 export { updateTeamResourceStatus } from './teamResourceStatus';
+
+// Retain existing production integrations.
+export { parseManpowerDbQuestionWithGemini } from './manpowerDbAiSearch';
+export { sendKakaoAlimtalk, sendFriendTalk, getKakaoManagementUrl } from './kakao';
+export { issueTaxInvoiceApi, getTaxInvoiceListApi, getTaxInvoiceStatusApi } from './legacyTaxInvoice';

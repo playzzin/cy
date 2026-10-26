@@ -276,10 +276,22 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
         durationMs: Date.now() - startedAt,
     });
     const confirmScopeUnchanged = async () => {
-        const current = (await db.doc(`users/${auth.uid}`).get()).data();
-        const currentAnchors = linkedIds.length ? await db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : [];
-        const signature = (row: any) => JSON.stringify([row?.status, row?.isActive, row?.teamId, row?.role, row?.uid]);
-        if (JSON.stringify(current) !== JSON.stringify(user) || currentAnchors.some((doc, index) => signature(doc.data()) !== signature(linked[index].data()))) {
+        const [currentProfile, currentMenu, currentAnchors] = await Promise.all([
+            db.doc(`users/${auth.uid}`).get(),
+            db.doc('settings/menus_v12').get(),
+            linkedIds.length ? db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : Promise.resolve([]),
+        ]);
+        // Session timestamps and display fields cannot change access. Compare
+        // the actual authorization inputs, including menu-defined role names.
+        const values = (items: any[]) => [...new Set(items.map(text).filter(Boolean))].sort();
+        const profileSignature = (profile: any, settings: any) => JSON.stringify([
+            Boolean(profile), profile?.status,
+            values(resolvedRoleNames(profile, settings)),
+            values(Array.isArray(profile?.linkedWorkerIds) ? profile.linkedWorkerIds : []),
+        ]);
+        const signature = (row: any) => JSON.stringify([Boolean(row), row?.status, row?.isActive, row?.teamId, row?.role, row?.uid]);
+        if (profileSignature(currentProfile.data(), currentMenu.data()) !== profileSignature(user, menu)
+            || currentAnchors.some((doc, index) => signature(doc.data()) !== signature(linked[index].data()))) {
             throw new functions.https.HttpsError('permission-denied', '조회 중 권한 또는 소속이 변경되었습니다. 다시 조회해 주세요.');
         }
     };

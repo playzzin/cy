@@ -1,7 +1,6 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-
     // A reserved, short-lived identity reads as the selected user, never writes.
     function isPreviewIdentity() {
       return request.auth != null && (request.auth.uid.matches('^cy-preview-.*')

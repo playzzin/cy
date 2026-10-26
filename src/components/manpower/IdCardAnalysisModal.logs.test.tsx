@@ -4,7 +4,7 @@ import IdCardAnalysisModal from './IdCardAnalysisModal';
 import { geminiService } from '../../services/geminiService';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 
-jest.mock('../../services/geminiService', () => ({ geminiService: { getKey: () => 'test', analyzeImage: jest.fn() } }));
+jest.mock('../../services/geminiService', () => ({ geminiService: { getKey: () => null, analyzeImage: jest.fn() } }));
 jest.mock('../../services/identityDocumentLogService', () => ({ recordIdentityDocumentLog: jest.fn() }));
 
 beforeEach(() => {

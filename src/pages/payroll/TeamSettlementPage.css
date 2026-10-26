@@ -202,3 +202,10 @@
     .team-settlement-page__workspace-bar > div:last-child button { min-height: 36px; padding: 6px 9px; font-size: 12px; }
 }
 @media print { .team-settlement-page__workspace-bar { position: static !important; } .team-settlement-page__sticky-month button { display: none; } }
+
+@media (max-width: 768px) {
+  .team-settlement-page #team-settlement-team-select { margin-top: 4px; padding: 4px 8px; min-height: 34px; }
+  .team-settlement-page__selector-card:has(#team-settlement-team-select) {
+    display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px;
+  }
+}

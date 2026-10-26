@@ -1,7 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     // A reserved, short-lived identity reads as the selected user, never writes.
     function isPreviewIdentity() {
       return request.auth != null && (request.auth.uid.matches('^cy-preview-.*')
@@ -635,10 +634,10 @@ service cloud.firestore {
 
     function isFinanceCollection(collectionId) {
       return collectionId in [
+        'delegated_receipt_claims',
         'advance_payments',
         'advance_requests',
         'monthly_payroll_settlements',
-        'delegated_receipt_claims',
         'payments',
         'tax_invoices',
         'receivables',

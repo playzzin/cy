@@ -61,4 +61,4 @@ export async function handleTeamOffDutyRequest(input: any, context: functions.ht
     });
 }
 
-export const teamOffDutyRequests = protectedRegion.https.onCall(handleTeamOffDutyRequest);
+export const teamOffDutyRequests = protectedRegion.runWith({ memory: '1GB' }).https.onCall(handleTeamOffDutyRequest);
