@@ -73,7 +73,7 @@ test('보기 방식을 바꿔도 모든 내역과 합계를 유지하고 팀 바
         record, { ...record, id: 'entry-b', teamId: 'team-b', workerId: 'worker-b', workerName: '다른 작업자' },
     ]);
     renderPage();
-    const compact = await screen.findByRole('button', { name: '빈 공간 채우기' });
+    const compact = await screen.findByRole('button', { name: '엑셀형 · 3개씩' });
     expect(compact).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: '한 팀씩 넓게' }));
     expect(compact).toHaveAttribute('aria-pressed', 'false');
@@ -248,6 +248,7 @@ test('비고를 수정해 저장하면 표와 새로 조회한 화면에 반영�
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(advancePaymentMemoService.save).toHaveBeenCalledWith([{ id: 'entry', expectedMemo: '검증용 비고', memo: '새 비고\n둘째 줄' }]);
     expect(screen.getByText('새 비고 둘째 줄')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '검증 A팀 검증 작업자 비고 수정' })).toHaveClass('as-memo-filled');
     expect(within(screen.getByLabelText('조회 결과 합계')).getByText('150,000')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
     expect(await screen.findByText('새 비고 둘째 줄')).toBeInTheDocument();

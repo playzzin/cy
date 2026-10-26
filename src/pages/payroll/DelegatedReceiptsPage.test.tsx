@@ -19,6 +19,8 @@ jest.mock('../../features/delegated-receipts/siteMemoService', () => ({ siteMemo
 beforeEach(() => { (siteMemoService.list as jest.Mock).mockImplementation(() => new Promise(() => {})); });
 const render = (ui: React.ReactElement) => {
   const view = rawRender(ui);
+  const list = screen.queryByRole('button', { name: '기본 목록' });
+  if (list) fireEvent.click(list);
   const expand = screen.queryByRole('button', { name: '현장 모두 펼치기' });
   if (expand) fireEvent.click(expand);
   return view;
@@ -56,13 +58,13 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
     const invoice: DelegatedClaim = { ...base, id: 'split-invoice', workerName: '별도 계산서', entryKind: 'invoice' };
     const directory = { teams: [{ id: 'split-team', name: '검증팀', color: '#336699' }], sites: [{ id: 'split-site', name: base.siteName, responsibleTeamId: 'split-team' }] };
     render(<DelegatedReceiptsWorkspace initialClaims={[...workers, invoice, fixtures[1]]} initialDirectory={directory} />);
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
-    const grid = within(screen.getByRole('region', { name: '현장 5개씩 가로 목록' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    const grid = within(screen.getByRole('region', { name: '현장 4개씩 가로 목록' }));
     const sheets = [1, 2, 3].map(index => within(grid.getByRole('region', { name: `${base.siteName} 내역 (${index}/3)` })));
     expect(grid.getAllByText('검증팀')).toHaveLength(3);
     expect([1, 2, 3].map(index => within(grid.getByRole('region', { name: `${base.siteName} 내역 (${index}/3)` })).getAllByRole('article').length)).toEqual([15, 15, 2]);
     expect(grid.getAllByRole('article')).toHaveLength(33);
-    expect(sheets[2].getByRole('button', { name: '별도 계산서 계산서' })).toBeVisible();
+    expect(sheets[2].getByText('별도 계산서')).toBeVisible();
     expect(sheets[1].getByText('16–30 / 32건')).toBeVisible();
     fireEvent.click(sheets[1].getByRole('checkbox', { name: `${base.siteName} 현장 전체 선택 · 이어서 2` }));
     expect(screen.getByText('32건 선택')).toBeVisible();
@@ -74,7 +76,7 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
     fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
     expect(screen.getByRole('textbox', { name: '분할16 세전 금액' })).toBe(amount);
     expect(screen.getAllByRole('checkbox', { name: /현장 전체 선택/ })).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
     expect(screen.getByRole('textbox', { name: '분할16 세전 금액' })).toHaveValue('345678');
     const memo = sheets[2].getByRole('button', { name: `${base.siteName} 현장 · 이어서 3 새 메모` });
     await waitFor(() => expect(memo).toBeEnabled());
@@ -85,8 +87,8 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
   it('15개인 현장은 한 카드에 끝나며 검색한 나머지 내역도 중복 없이 표시한다', () => {
     const claims = Array.from({ length: 15 }, (_, index) => ({ ...base, id: `limit-${index}`, workerName: `경계${String(index + 1).padStart(2, '0')}` }));
     render(<DelegatedReceiptsWorkspace initialClaims={claims} />);
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
-    const grid = within(screen.getByRole('region', { name: '현장 5개씩 가로 목록' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    const grid = within(screen.getByRole('region', { name: '현장 4개씩 가로 목록' }));
     expect(grid.getAllByRole('region')).toHaveLength(1);
     expect(grid.getAllByRole('article')).toHaveLength(15);
     fireEvent.change(screen.getByRole('textbox', { name: '작업자 검색' }), { target: { value: '경계15' } });
@@ -94,7 +96,7 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
     expect(grid.getByText('1–1 / 1건')).toBeVisible();
   });
 
-  it('작업자를 펼쳐 입금방법·계좌를 수정하고 접기와 보기 전환에도 직접 입력 초안을 유지한다', async () => {
+  it('작업자를 펼치지 않고 입금방법·계좌를 수정하고 보기 전환에도 직접 입력 초안을 유지한다', async () => {
     let saved = { ...base };
     (delegatedReceiptService.updateListField as jest.Mock).mockImplementation(async (_id, edit) => {
       const change = edit.change;
@@ -103,17 +105,13 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
       return saved;
     });
     render(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
     const information = within(screen.getByRole('group', { name: `${base.workerName} 입금 정보` }));
-    const expand = information.getByRole('button', { name: `${base.workerName} 작업자` });
-    expect(expand).toHaveAttribute('aria-expanded', 'false');
-    expect(information.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(information.queryByRole('button', { name: `${base.workerName} 작업자` })).not.toBeInTheDocument();
+    expect(information.getAllByRole('combobox')).toHaveLength(3);
     expect(screen.getByRole('textbox', { name: `${base.workerName} 세전 금액` })).toBeVisible();
     expect(screen.getByRole('combobox', { name: `${base.workerName} 입금여부` })).toBeVisible();
     expect(screen.getByRole('button', { name: `${base.workerName} 새 메모` })).toBeVisible();
-    fireEvent.click(expand);
-    expect(expand).toHaveAttribute('aria-expanded', 'true');
-    expect(information.getAllByRole('combobox')).toHaveLength(2);
     fireEvent.click(information.getByRole('combobox', { name: `${base.workerName} 입금방법` }));
     fireEvent.click(screen.getByRole('option', { name: '직불' }));
     await waitFor(() => expect(information.getByRole('combobox', { name: `${base.workerName} 입금방법` })).toHaveTextContent('직불'));
@@ -122,16 +120,14 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
     fireEvent.click(screen.getByRole('option', { name: '직접 입력…' }));
     const draft = information.getByRole('textbox', { name: `${base.workerName} 받는 계좌 직접 입력` });
     fireEvent.change(draft, { target: { value: '검증 팀장 별도계좌' } });
-    fireEvent.click(expand);
-    expect(draft).not.toBeVisible();
-    expect(information.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(draft).toBeVisible();
+    expect(information.getAllByRole('combobox')).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
     expect(screen.getByRole('textbox', { name: `${base.workerName} 받는 계좌 직접 입력` })).toBe(draft);
     expect(draft).toBeVisible();
     expect(draft).toHaveValue('검증 팀장 별도계좌');
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
-    expect(draft).not.toBeVisible();
-    fireEvent.click(expand);
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    expect(draft).toBeVisible();
     expect(information.getByRole('textbox', { name: `${base.workerName} 받는 계좌 직접 입력` })).toBe(draft);
     expect(draft).toHaveValue('검증 팀장 별도계좌');
     fireEvent.keyDown(draft, { key: 'Enter' });
@@ -147,20 +143,13 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
 
   it('읽기 전용에서도 작업자를 펼치지 않고 입금방법·받는 계좌를 확인한다', () => {
     rawRender(<DelegatedReceiptsWorkspace initialClaims={[{ ...base, delegationType: 'direct', sourceStatus: '개인통장' }]} canWrite={false} />);
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
     const information = within(screen.getByRole('group', { name: `${base.workerName} 입금 정보` }));
-    const expand = information.getByRole('button', { name: `${base.workerName} 작업자` });
     const summary = within(screen.getByRole('group', { name: `${base.workerName} 계좌 구분` }));
-    expect(expand).toHaveAttribute('aria-expanded', 'false');
-    expect(summary.getByText('직불')).toBeVisible();
-    expect(summary.getByText('개인통장')).toBeVisible();
-    fireEvent.click(expand);
+    expect(information.queryByRole('button')).not.toBeInTheDocument();
     expect(summary.getByText('직불')).toBeVisible();
     expect(summary.getByText('개인통장')).toBeVisible();
     expect(information.queryByRole('combobox')).not.toBeInTheDocument();
-    fireEvent.click(expand);
-    expect(summary.getByText('직불')).toBeVisible();
-    expect(summary.getByText('개인통장')).toBeVisible();
   });
 
   it.each([true, false])('계좌 구분은 최종 확인·입금방법 수정값을 우선하며 미확인은 추정하지 않는다 (수정권한 %s)', canWrite => {
@@ -171,41 +160,39 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
       { ...base, id: 'unknown', workerName: '미확인 작업자', sourceStatus: '', delegationType: 'unknown' },
     ]} />);
     expect(screen.getByRole('heading', { name: '노무 입금 확인' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
     const summary = (name: string) => within(screen.getByRole('group', { name: `${name} 계좌 구분` }));
     expect(summary('개인 작업자').getByText('개인통장')).toBeVisible();
-    expect(summary('개인 작업자').getByText('방법 미확인')).toBeVisible();
+    expect(summary('개인 작업자').getByText('미확인')).toBeVisible();
     expect(summary('위임 작업자').getByText('위임')).toBeVisible();
     expect(summary('위임 작업자').getByText('이재욱 위임')).toBeVisible();
     expect(summary('수정 작업자').getByText('직불')).toBeVisible();
     expect(summary('수정 작업자').getByText('확인된 별도 계좌')).toBeVisible();
     expect(summary('수정 작업자').queryByText('개인통장')).not.toBeInTheDocument();
-    expect(summary('미확인 작업자').getByText('방법 미확인')).toBeVisible();
-    expect(summary('미확인 작업자').getByText('계좌 미확인')).toBeVisible();
-    expect(within(screen.getByRole('region', { name: '현장별 작업자 내역' })).queryByRole('combobox', { name: /받는 계좌$/ })).not.toBeInTheDocument();
+    expect(summary('미확인 작업자').getByText('미확인')).toBeVisible();
+    expect(within(screen.getByRole('region', { name: '현장별 작업자 내역' })).queryAllByRole('combobox', { name: /받는 계좌$/ })).toHaveLength(canWrite ? 4 : 0);
   });
 
-  it('기본 목록을 유지하고 엑셀형에서 다섯 현장을 넘는 모든 현장과 별도 항목을 표시한다', () => {
+  it('엑셀형을 기본으로 네 현장을 넘는 모든 내역을 표시하고 목록형 전환·검색을 유지한다', () => {
     const claims = Array.from({ length: 7 }, (_, index) => ({ ...base, id: `site-${index}`, siteName: `검증현장 ${index + 1}`, workerName: `검증인원 ${index + 1}` }));
     claims.push({ ...claims[0], id: 'invoice-grid', workerName: '검증 계산서', entryKind: 'invoice' } as DelegatedClaim);
     rawRender(<DelegatedReceiptsWorkspace initialClaims={claims} />);
-    expect(screen.getByRole('button', { name: '기본 목록' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByRole('article', { name: / 내역$/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
-    const grid = within(screen.getByRole('region', { name: '현장 5개씩 가로 목록' }));
+    expect(screen.getByRole('button', { name: '엑셀형 · 4개씩' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '기본 목록' })).toHaveAttribute('aria-pressed', 'false');
+    const grid = within(screen.getByRole('region', { name: '현장 4개씩 가로 목록' }));
     expect(grid.getAllByRole('region')).toHaveLength(7);
     expect(grid.getAllByRole('article')).toHaveLength(8);
-    expect(grid.getByRole('button', { name: '검증 계산서 계산서' })).toBeVisible();
+    expect(grid.getByText('검증 계산서')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
     expect(screen.queryByRole('article', { name: / 내역$/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '검증현장 1 현장' })).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
     fireEvent.change(screen.getByRole('textbox', { name: '작업자 검색' }), { target: { value: '검증인원 7' } });
     expect(screen.getAllByRole('article', { name: / 내역$/ })).toHaveLength(1);
     fireEvent.change(screen.getByRole('textbox', { name: '작업자 검색' }), { target: { value: '검색 결과 없음' } });
     expect(screen.getByText('선택한 조건의 내역이 없습니다')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '작업자 검색 지우기' }));
-    expect(screen.getByRole('button', { name: '엑셀형 · 5개씩' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '엑셀형 · 4개씩' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getAllByRole('article', { name: / 내역$/ })).toHaveLength(8);
   });
 
@@ -215,7 +202,7 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
     const amount = screen.getByRole('textbox', { name: `${base.workerName} 세전 금액` });
     fireEvent.change(amount, { target: { value: '250000' } });
     fireEvent.click(screen.getByRole('checkbox', { name: `${base.siteName} 현장 전체 선택` }));
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
     expect(screen.getByRole('textbox', { name: `${base.workerName} 세전 금액` })).toBe(amount);
     expect(amount).toHaveValue('250000');
     expect(screen.getByRole('checkbox', { name: `${base.siteName} 현장 전체 선택` })).toBeChecked();
@@ -232,7 +219,7 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
     const updated = { ...base, confirmation: { ...getDepositState(base), status: 'pending', id: 'grid-edit', recordedAt: base.updatedAt, note: '' } } as DelegatedClaim;
     (delegatedReceiptService.updateListField as jest.Mock).mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(updated);
     const { unmount } = rawRender(<DelegatedReceiptsWorkspace initialClaims={[base]} />);
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
     fireEvent.change(screen.getByRole('combobox', { name: `${base.workerName} 입금여부` }), { target: { value: 'pending' } });
     await screen.findByText('저장 확인 실패');
     fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
@@ -245,8 +232,8 @@ describe('기본 목록과 엑셀형 보기 연결', () => {
     expect(screen.getByRole('combobox', { name: `${base.workerName} 입금여부` })).toHaveValue('pending');
     unmount();
     rawRender(<DelegatedReceiptsWorkspace initialClaims={[updated]} canWrite={false} />);
-    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 5개씩' }));
-    const grid = within(screen.getByRole('region', { name: '현장 5개씩 가로 목록' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀형 · 4개씩' }));
+    const grid = within(screen.getByRole('region', { name: '현장 4개씩 가로 목록' }));
     expect(grid.queryByRole('textbox')).not.toBeInTheDocument();
     expect(grid.queryByRole('checkbox')).not.toBeInTheDocument();
     expect(grid.getByText('입금 전')).toBeVisible();
@@ -267,33 +254,31 @@ it('작업자와 별도 내역을 구분하고 현장 설정에서 선택 재계
   fireEvent.click(screen.getByRole('button', { name: '세율 저장 · 1건 재계산' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(tax.save).toHaveBeenCalledWith(expect.objectContaining({ selected: [{ id: 'invoice', updatedAt: base.updatedAt }] }));
-  fireEvent.click(screen.getByRole('button', { name: '가상 계산서 계산서' }));
-  expect(screen.getByRole('article', { name: '가상 계산서 내역' })).toHaveTextContent('96,700원');
+  expect(screen.getByRole('region', { name: '입금 요약' })).toHaveTextContent('196,700원');
   fireEvent.click(screen.getByRole('button', { name: '직접 추가' }));
   fireEvent.change(screen.getByRole('combobox', { name: '추가할 현장' }), { target: { value: 's1' } });
   fireEvent.click(screen.getByRole('button', { name: '계산서 직접 입력' }));
   expect(screen.getByRole('textbox', { name: '1행 세율' })).toHaveValue('3.3');
 });
 
-it('현장을 펼치면 작업자가 접혀 있어도 입금 항목을 바로 수정하고 초안을 유지한다', () => {
+it('작업자 이름은 펼치기 없이 표시하고 현장 접기에도 입금 항목의 수정 초안을 유지한다', () => {
   const directory = { teams: [{ id: 't1', name: '가상팀', color: '#336699' }], sites: [{ id: 's1', name: base.siteName, responsibleTeamId: 't1' }] };
   rawRender(<DelegatedReceiptsWorkspace initialClaims={fixtures} initialDirectory={directory} />);
+  fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
   const ledger = within(screen.getByRole('region', { name: '현장별 작업자 내역' }));
   const site = ledger.getByRole('button', { name: base.siteName + ' 현장' });
   expect(site).toHaveAttribute('aria-expanded', 'false');
   expect(ledger.queryByRole('article')).not.toBeInTheDocument();
   fireEvent.click(site);
-  const worker = ledger.getByRole('button', { name: base.workerName + ' 작업자' });
-  expect(worker).toHaveAttribute('aria-expanded', 'false');
+  const worker = ledger.getByText(base.workerName);
+  expect(ledger.queryByRole('button', { name: base.workerName + ' 작업자' })).not.toBeInTheDocument();
   const amount = ledger.getByRole('textbox', { name: base.workerName + ' 세전 금액' });
   expect(amount).toBeVisible();
   ['입금방법', '받는 계좌', '입금여부'].forEach(field => expect(ledger.getByRole('combobox', { name: `${base.workerName} ${field}` })).toBeVisible());
   fireEvent.change(amount, { target: { value: '250000' } });
   fireEvent.click(worker);
   expect(amount).toBeVisible();
-  fireEvent.click(worker);
-  expect(amount).toBeVisible();
-  expect(worker).toHaveAttribute('aria-expanded', 'false');
+  expect(ledger.queryByText(/기록된 입금액|받을 예정/)).not.toBeInTheDocument();
   fireEvent.click(site); fireEvent.click(site);
   expect(amount).toHaveValue('250000');
   expect(amount).toBeVisible();
@@ -309,6 +294,8 @@ it('메모는 버튼으로 표시하고 누르면 넓은 스티커 편집창에�
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.queryByText('확인한 메모')).not.toBeInTheDocument();
   const toggle = screen.getByRole('button', { name: base.workerName + ' 메모 있음' });
+  expect(toggle).not.toHaveTextContent(/메모/);
+  expect(toggle).toHaveClass('dr-memo-icon', 'dr-memo-toggle');
   fireEvent.click(toggle);
   const dialog = screen.getByRole('dialog', { name: base.workerName + ' 메모' });
   expect(dialog).toHaveTextContent('확인한 메모');
@@ -388,7 +375,7 @@ describe('노무 입금 확인 화면', () => {
     fireEvent.click(screen.getByRole('option', { name: base.siteName }));
     fireEvent.click(screen.getByRole('button', { name: '다음 달' }));
     fireEvent.click(await screen.findByRole('button', { name: next.siteName + ' 현장' }));
-    expect(screen.getByRole('button', { name: next.workerName + ' 작업자' })).toBeInTheDocument();
+    expect(screen.getByText(next.workerName)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '현장' })).toHaveTextContent('전체 현장');
   });
 
@@ -503,6 +490,7 @@ it('원본 공동 완료를 금액 미설정이어도 표시하고 계좌 수단
 });
 it('현장 전체 선택은 접힌 상태에서도 동작하고 일부 선택 상태를 표시한다', () => {
   rawRender(<DelegatedReceiptsWorkspace initialClaims={fixtures} />);
+  fireEvent.click(screen.getByRole('button', { name: '기본 목록' }));
   const site = screen.getByRole('checkbox', { name: base.siteName + ' 현장 전체 선택' });
   fireEvent.click(site);
   expect(site).toBeChecked();

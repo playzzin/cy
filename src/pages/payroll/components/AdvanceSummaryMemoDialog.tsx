@@ -56,7 +56,7 @@ export default function AdvanceSummaryMemoDialog({ workerName, context, sources,
     return <Dialog.Root open onOpenChange={open => { if (!open) close(); }}>
         <Dialog.Portal>
         <Dialog.Overlay className="cy-detail-dialog__overlay" />
-        <Dialog.Content className="cy-detail-dialog" onCloseAutoFocus={event => {
+        <Dialog.Content className="cy-detail-dialog as-memo-dialog" onCloseAutoFocus={event => {
             event.preventDefault();
             if (returnFocus.current?.isConnected) returnFocus.current.focus();
         }}>

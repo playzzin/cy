@@ -1,15 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Pencil, Plus, StickyNote, Trash2, X } from 'lucide-react';
+import { Check, Pencil, StickyNote, Trash2, X } from 'lucide-react';
 import { SiteMemoConflictError } from '../../features/delegated-receipts/siteMemoService';
 
 export const MemoButton = React.memo(function MemoButton({ label, memo, canWrite, disabled, onClick }: {
   label: string; memo: string; canWrite: boolean; disabled?: boolean; onClick: () => void;
 }) {
-  if (!memo && !canWrite) return <span className="dr-memo-none">메모 없음</span>;
-  return <button type="button" className={memo ? 'dr-memo-toggle' : 'dr-memo-add'} disabled={disabled} aria-haspopup="dialog"
+  if (!memo && !canWrite) return <span className="dr-memo-none dr-memo-icon" role="img" aria-label={`${label} 메모 없음`} title="메모 없음"><StickyNote size={18} aria-hidden="true" /></span>;
+  return <button type="button" className={`dr-memo-icon ${memo ? 'dr-memo-toggle' : 'dr-memo-add'}`} disabled={disabled} aria-haspopup="dialog" title={memo ? '작성된 메모 보기' : '메모 작성'}
     aria-label={`${label} ${memo ? '메모 있음' : '새 메모'}`} onClick={onClick}>
-    {memo ? <StickyNote size={16} /> : <Plus size={16} />}{memo ? '메모 있음' : '새 메모'}
+    <StickyNote size={18} aria-hidden="true" />{memo && <span className="dr-memo-indicator" aria-hidden="true" />}
   </button>;
 });
 

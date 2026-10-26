@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight, faPrint, faRotateRight, faTable } from '@fortawesome/free-solid-svg-icons';
+import { FileSpreadsheet, List, StickyNote } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { advancePaymentService, type AdvancePayment } from '../../services/advancePaymentService';
 import { advancePaymentMemoService, type AdvancePaymentMemoChange } from '../../services/advancePaymentMemoService';
@@ -14,7 +15,7 @@ import { ADVANCE_ITEM_LABEL_KEYS, DEFAULT_ADVANCE_ITEM_LABELS, payrollConfigServ
 import { UserRole } from '../../types/roles';
 import { shiftYearMonth } from '../../components/common/MonthNavigator';
 import { getKoreanDateKey } from '../../utils/koreanBusinessDate';
-import { getContrastingTextColor, normalizeHexColor } from '../../utils/color';
+import { normalizeHexColor } from '../../utils/color';
 import { buildAdvanceSummary, isAdvanceSummaryFilter, isAdvanceSummaryMonth, type AdvanceSummaryTeam, type AdvanceSummaryRow, type AdvanceSummaryWorker } from './utils/advanceSummary';
 import AdvanceSummaryMemoDialog from './components/AdvanceSummaryMemoDialog';
 import AdvanceSummaryDepositAccountSelect from './components/AdvanceSummaryDepositAccountSelect';
@@ -81,7 +82,16 @@ const AdvanceSummaryPage: React.FC = () => {
         target.focus({ preventScroll: true });
         const top = page.scrollTop + target.getBoundingClientRect().top - page.getBoundingClientRect().top
             - (teamNavRef.current?.getBoundingClientRect().height || 0) - 12;
-        page.scrollTo({ top: Math.max(0, top), behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+        const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+        page.scrollTo({ top: Math.max(0, top), behavior });
+        const viewport = target.closest<HTMLElement>('.as-team-viewport');
+        if (viewport) {
+            const card = target.getBoundingClientRect();
+            const bounds = viewport.getBoundingClientRect();
+            if (card.left < bounds.left || card.right > bounds.right) {
+                viewport.scrollTo({ left: Math.max(0, viewport.scrollLeft + card.left - bounds.left - 8), behavior });
+            }
+        }
     };
 
     useEffect(() => { setMemoEditor(null); setSaveMessage(''); }, [uid, yearMonth]);
@@ -173,9 +183,7 @@ const AdvanceSummaryPage: React.FC = () => {
         <div ref={pageRef} className="advance-summary-page">
             <header className="as-header">
                 <div>
-                    <p className="as-eyebrow">가불 및 공제내역</p>
                     <h1><FontAwesomeIcon icon={faTable} /> 팀별 가불내역</h1>
-                    <p className="as-description">팀별 가불 항목과 금액, 계좌번호·예금주, 비고를 한눈에 확인하세요.</p>
                 </div>
                 <div className="as-actions">
                     <Link to={`/payroll/advance-payment?${entryParams}`}>가불·공제 입력</Link>
@@ -238,12 +246,12 @@ const AdvanceSummaryPage: React.FC = () => {
                     <div><dt>노무가불</dt><dd>{won(summary.labor)}<small>원</small></dd></div>
                     <div><dt>조회 인원 / 팀</dt><dd>{summary.workerCount}<small>명</small><span> / </span>{summary.groups.length}<small>팀</small></dd></div>
                 </dl>
-                {summary.groups.length > 1 && <div ref={teamNavRef} className="as-team-tools">
+                {summary.groups.length > 0 && <div ref={teamNavRef} className="as-team-tools">
                     <div className="as-view-controls">
                         <div><strong>{summary.groups.length}개 팀 가불내역</strong><span>팀을 누르면 해당 목록으로 이동합니다.</span></div>
                         <div className="as-view-switch" role="group" aria-label="팀 목록 보기 방식">
-                            <button type="button" aria-pressed={layout === 'compact'} onClick={() => setLayout('compact')}>빈 공간 채우기</button>
-                            <button type="button" aria-pressed={layout === 'wide'} onClick={() => setLayout('wide')}>한 팀씩 넓게</button>
+                            <button type="button" aria-pressed={layout === 'wide'} onClick={() => setLayout('wide')}><List size={16} />한 팀씩 넓게</button>
+                            <button type="button" aria-pressed={layout === 'compact'} onClick={() => setLayout('compact')}><FileSpreadsheet size={16} />엑셀형 · 3개씩</button>
                         </div>
                     </div>
                     <nav className="as-team-jumps" aria-label="팀 바로가기">
@@ -262,18 +270,18 @@ const AdvanceSummaryPage: React.FC = () => {
                         return <section key={group.team.id} className="as-team" tabIndex={-1}
                             ref={element => { if (element) teamRefs.current.set(group.team.id, element); else teamRefs.current.delete(group.team.id); }}
                             aria-label={`${group.team.name} 가불내역`} style={{ '--as-team-color': color } as React.CSSProperties}>
-                            <div className="as-team-heading" style={{ backgroundColor: color, color: getContrastingTextColor(color) }}>
+                            <div className="as-team-heading">
                                 <div className="as-team-title"><h3>{group.team.name}</h3><span>{group.rows.length}명</span></div>
                                 <div className="as-team-heading-total"><small>팀 합계</small><strong>{won(group.total)}원</strong></div>
                             </div>
                             <div className="as-table-scroll" role="region" aria-label={`${group.team.name} 가불내역 표`} tabIndex={0}>
                             <table>
                                 <caption className="sr-only">{group.team.name} 가불내역, 단위 원</caption>
-                                <colgroup><col className="as-col-no" /><col className="as-col-name" /><col className="as-col-amount" /><col className="as-col-account" /><col className="as-col-deposit" /><col /></colgroup>
+                                <colgroup><col className="as-col-no" /><col className="as-col-name" /><col className="as-col-amount" /><col className="as-col-account" /><col className="as-col-deposit" /><col className="as-col-memo" /></colgroup>
                                 <thead><tr><th scope="col">번호</th><th scope="col">이름</th><th scope="col">금액</th><th scope="col">계좌번호·예금주</th><th scope="col">입금계좌</th><th scope="col">비고</th></tr></thead>
                                 <tbody>{group.rows.map((row, index) => <tr key={row.key}>
                                     <td className="as-number">{index + 1}</td>
-                                    <th scope="row">{row.workerName}</th>
+                                    <th scope="row"><span className="as-worker-name" title={row.workerName}>{row.workerName}</span></th>
                                     <td className={`as-money${row.amount < 0 ? ' as-negative' : ''}`}>
                                         <div className="as-row-total"><span>총금액</span><span>{won(row.amount)}</span></div>
                                         <dl className="as-advance-items" aria-label={`${row.workerName} 항목별 금액`}>
@@ -293,11 +301,12 @@ const AdvanceSummaryPage: React.FC = () => {
                                             disabled={savingDepositAccount} onSave={saveDepositAccounts} />
                                     </td>
                                     <td className="as-memo">
-                                        <span>{row.memos.join('\n')}</span>
-                                        <button type="button" className="as-memo-edit" aria-haspopup="dialog" aria-label={`${group.team.name} ${row.workerName} 비고 수정`}
+                                        <span className="as-memo-print">{row.memos.join('\n')}</span>
+                                        <button type="button" className={`as-memo-edit${row.memos.length ? ' as-memo-filled' : ''}`} aria-haspopup="dialog" aria-label={`${group.team.name} ${row.workerName} 비고 수정`}
+                                            title={row.memos.length ? '메모 있음 · 보기 / 수정' : '새 메모 작성'}
                                             disabled={row.memoSources.some(source => !source.id)}
                                             onClick={() => { setSaveMessage(''); setMemoEditor({ uid, month: yearMonth, teamName: group.team.name, row }); }}>
-                                            {row.memos.length ? '비고 수정' : '비고 추가'}
+                                            <StickyNote size={18} aria-hidden="true" />{row.memos.length > 0 && <span className="as-memo-indicator" aria-hidden="true" />}
                                         </button>
                                     </td>
                                 </tr>)}</tbody>
