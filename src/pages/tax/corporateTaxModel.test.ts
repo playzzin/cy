@@ -1,9 +1,6 @@
-import { buildCorporateTaxReport, CORPORATE_TAX_STAFF, emptyManual, freelancerEvidence, ledgerEvidence, salaryEvidence, validateManual, cardEvidence, lodgingEvidence } from './corporateTaxModel';
-import type { CardTransaction } from '../../types/card';
-import type { UtilityRecord } from '../../types/accommodation';
+import { buildCorporateTaxReport, emptyManual, ledgerEvidence, validateManual, lodgingEvidence } from './corporateTaxModel';
+import type { Accommodation, UtilityRecord } from '../../types/accommodation';
 import type { WorkbookLedgerEntry } from '../../services/workbookLedgerService';
-import type { OfficeStaff } from '../../services/officeStaffService';
-import { calculatePayroll, DEFAULT_INSURANCE_SETTINGS } from '../payroll/officeStaffPayrollModel';
 
 const entry = (patch: Partial<WorkbookLedgerEntry> = {}): WorkbookLedgerEntry => ({ id: 'invoice', date: '2026-01-15', transactionType: '매출', partnerName: '검증 거래처', siteName: '', description: '검증 거래', supplyAmount: 1000, taxAmount: 100, totalAmount: 1100, paymentAmount: 0, ...patch });
 
@@ -21,36 +18,16 @@ it('거래일별 공급가액만 합산하고 음수 수정분을 유지하며 �
 
 it('첨부 표의 1월 이익을 재현하고 모든 수기 비용과 노무비를 차감한다', () => {
     const manual = emptyManual();
-    manual.months[1] = { amounts: { invoice: 3760549, other: 709240 }, notes: {} };
+    manual.months[1] = { amounts: { invoice: 3760549, other: 709240, salary: 10000000, card: 40596218 }, notes: {} };
     const evidence = [
         { id: 'sales', month: 1, field: 'sales' as const, label: '', description: '', amount: 638537499 },
         { id: 'purchases', month: 1, field: 'purchases' as const, label: '', description: '', amount: 536436054 },
-        { id: 'salary', month: 1, field: 'salary' as const, label: '', description: '', amount: 10000000 },
-        { id: 'card', month: 1, field: 'card' as const, label: '', description: '', amount: 40596218 },
         { id: 'lodging', month: 1, field: 'lodging' as const, label: '', description: '', amount: 19748000 },
     ];
     expect(buildCorporateTaxReport(evidence, manual).profit).toBe(27287438);
     manual.months[1].amounts.depreciation = 1000; manual.months[1].amounts.condolence = 2000;
-    expect(buildCorporateTaxReport([...evidence, { id: 'labor', month: 1, field: 'labor', label: '', description: '', amount: 3000 }], manual).profit).toBe(27281438);
-});
-
-it('카드사용 총액은 취소·타 연도·중복 명세서를 제외하고 환불 금액은 차감한다', () => {
-    const transaction: CardTransaction = { id: 'card-statement__2026-01__card__hash__0__tx1', cardId: 'card', cardLabel: '검증 카드', date: '2026-01-10', yearMonth: '2026-01', category: 'MEAL', merchant: '검증 가맹점', amount: 1000, statementSourceSha256: 'synthetic-hash', operationId: 'card-statement-import:synthetic' };
-    const result = cardEvidence(2026, [transaction, { ...transaction, id: 'card-statement__2026-01__card__other__0__tx1' },
-        { ...transaction, id: 'cancelled', status: 'CANCELLED' }, { ...transaction, id: 'old', yearMonth: '2025-12' },
-        { ...transaction, id: 'refund', statementSourceSha256: undefined, amount: -100 }]);
-    expect(result.reduce((sum, row) => sum + row.amount, 0)).toBe(900);
-    expect(result).toHaveLength(2);
-});
-
-it('숙소 월별 총액과 항목별 근거를 가져오며 같은 숙소·월 중복 자료는 최신 한 건만 반영한다', () => {
-    const record: UtilityRecord = { id: 'utility_2026-01_room', accommodationId: 'room', accommodationName: '검증 숙소', yearMonth: '2026-01', paymentStatus: 'unpaid',
-        costs: { rent: 500000, electricity: 50000, gas: 20000, water: 10000, internet: 30000, maintenance: 40000, other: 5000, total: 655000 } };
-    const rows = lodgingEvidence(2026, [record, { ...record, id: 'legacy' }, { ...record, id: 'old', yearMonth: '2025-12' }]);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].amount).toBe(655000);
-    expect(rows[0].description).toContain('월세 500,000 + 전기 50,000');
-    expect(buildCorporateTaxReport(rows, emptyManual()).profit).toBe(-655000);
+    manual.months[1].amounts.labor = 3000;
+    expect(buildCorporateTaxReport(evidence, manual).profit).toBe(27281438);
 });
 
 it('연간 순이익으로 세액을 계산하며 손실 또는 과다 예납시 납부액을 0으로 제한한다', () => {
@@ -69,104 +46,6 @@ it.each([[10000, 0.57, 57], [10000, 0.29, 29], [9999.99, 1, 99], [100, 10, 10], 
     expect(buildCorporateTaxReport([{ id: 'sale', month: 1, field: 'sales', label: '', description: '', amount: profit }], manual).estimatedTax).toBe(expected);
 });
 
-it('프리랜서 신고와 같은 청연팀 범위에서 월 신고액만 사용하고 신고가능액/성과급을 중복 합산하지 않는다', () => {
-    const rows = freelancerEvidence([
-        { id: 'a', name: '검증A', teamId: 'legacy', m01: 300, reportableAmount: 99000, performanceBonus: 9000 },
-        { id: 'b', name: '검증B', teamName: '청연 1팀', m02: 200 },
-        { id: 'c', name: '검증C', teamId: 'other', m01: 1000 },
-    ], [{ id: 'team', legacyId: 'legacy', name: '청연1팀', companyId: 'company' }], [{ id: 'company', name: '청연이엔지' }]);
-    expect(rows.map(row => row.amount)).toEqual([300, 200]);
-    expect(rows.map(row => row.month)).toEqual([1, 2]);
-    expect(rows.map(row => row.label)).toEqual(['청연1팀', '청연1팀']);
-});
-
-it('모든 팀의 월 합계를 더하며 기존 팀 ID와 팀명은 같은 팀으로 묶고 음수 정정도 반영한다', () => {
-    const rows = freelancerEvidence([
-        { teamId: 'legacy-a', teamName: '이전 팀명', m01: '1,000', m02: 200, total: 999999 },
-        { teamId: 'a', m01: -100, m01_id: 'manual-correction' },
-        { teamName: '검증 A팀', m01: 300 },
-        { teamId: 'b', m01: 500, m02: -50 },
-        { teamId: 'outside', m01: 90000 },
-        { teamId: 'a', isFooter: true, m01: 1200 },
-        { teamId: 'a', isEmpty: true, m01: 100000 },
-    ], [
-        { id: 'a', legacyId: 'legacy-a', name: '검증A팀', companyId: 'company' },
-        { id: 'b', name: '검증B팀', companyId: 'company' },
-    ], [{ id: 'company', name: '청연이엔지' }]);
-    expect(rows.map(({ month, label, amount }) => ({ month, label, amount }))).toEqual([
-        { month: 1, label: '검증A팀', amount: 1200 }, { month: 1, label: '검증B팀', amount: 500 },
-        { month: 2, label: '검증A팀', amount: 200 }, { month: 2, label: '검증B팀', amount: -50 },
-    ]);
-    expect(rows[0].description).toContain('신고 내역 3건');
-    const report = buildCorporateTaxReport(rows, emptyManual());
-    expect(report.months[0].amounts.labor).toBe(1700);
-    expect(report.months[1].amounts.labor).toBe(150);
-    expect(report.totals.labor).toBe(1850);
-    expect(report.profit).toBe(-1850);
-});
-
-it('월 금액이 상계되어 0원이 된 팀도 근거를 남기고 동명 팀의 서로 다른 ID는 구분한다', () => {
-    const rows = freelancerEvidence([
-        { teamId: 'a', teamName: '검증팀', m01: 100 }, { teamId: 'a', teamName: '검증팀', m01: -100 },
-        { teamId: 'b', teamName: '검증팀', m01: 500 }, { teamId: 'c', teamName: '빈팀', m01: null },
-    ], [], []);
-    expect(rows).toHaveLength(2);
-    expect(rows.map(row => row.amount)).toEqual([0, 500]);
-    expect(new Set(rows.map(row => row.id)).size).toBe(2);
-});
-
-it('프리랜서 소수점 금액을 원본 그대로 월별·팀별로 합산하며 정수 전용 입력 검증을 적용하지 않는다', () => {
-    const rows = freelancerEvidence([
-        { teamId: 'a', teamName: '검증A팀', m06: 1000.25, m07: 2000.75, m08: 0.1 + 0.2 },
-        { teamId: 'a', teamName: '검증A팀', m06: '2,000.50' },
-        { teamId: 'b', teamName: '검증B팀', m06: -100.25 },
-    ], [], []);
-    expect(rows.find(row => row.month === 6 && row.label === '검증A팀')?.amount).toBe(3000.75);
-    expect(rows.find(row => row.month === 8)?.amount).toBe(0.1 + 0.2);
-    const report = buildCorporateTaxReport(rows, emptyManual());
-    expect(report.months[5].amounts.labor).toBe(2900.5);
-    expect(report.months[6].amounts.labor).toBe(2000.75);
-    expect(report.profit).toBeCloseTo(-4901.55);
-    expect(() => validateManual({ ...emptyManual(), months: { 1: { amounts: { other: 100.5 }, notes: {} } } })).toThrow();
-});
-
-it.each([NaN, Infinity, '잘못된 금액', Number.MAX_SAFE_INTEGER + 1])('처리할 수 없는 원본 금액 %s는 0원으로 덮지 않고 금액 형식 오류를 반환한다', value => {
-    expect(() => freelancerEvidence([{ teamId: 'a', m01: value }], [], [])).toThrow(expect.objectContaining({ code: 'invalid-source-amount' }));
-});
-
-it('다른 자동금액도 소수점 원본을 보존한다', () => {
-    expect(ledgerEvidence(2026, [entry({ supplyAmount: 1000.25 })])[0].amount).toBe(1000.25);
-    expect(cardEvidence(2026, [{ id: 'card', yearMonth: '2026-01', category: 'MEAL', amount: 1000.25 } as CardTransaction])[0].amount).toBe(1000.25);
-    expect(lodgingEvidence(2026, [{ id: 'room', accommodationId: 'room', yearMonth: '2026-01', costs: { rent: 1000.25, total: 1000.25 } } as UtilityRecord])[0].amount).toBe(1000.25);
-    expect(salaryEvidence(2026, [], { '2026-01': { grossPaySnapshot: [{ id: 'staff', name: CORPORATE_TAX_STAFF[0], grossPay: 1000.25, baseSalary: 1000, bonus: 0.25, payBasis: 'gross' }] } }).rows[0].amount).toBe(1000.25);
-});
-
-it('지정한 4명만 월 저장본 세전 총액으로 계산하고 없는 달에 현재 급여를 복제하지 않는다', () => {
-    const snapshot = [...CORPORATE_TAX_STAFF, '대상외'].map((name, i) => ({ id: String(i), name, grossPay: 1000 + i, baseSalary: 900, bonus: 100 + i, payBasis: 'gross' as const }));
-    const staff = [{ id: '0', name: CORPORATE_TAX_STAFF[0], unitPrice: 999999 }] as OfficeStaff[];
-    const result = salaryEvidence(2026, staff, { '2026-01': { grossPaySnapshot: snapshot } });
-    expect(result.rows).toHaveLength(4);
-    expect(result.rows.reduce((sum, row) => sum + row.amount, 0)).toBe(4006);
-    expect(result.missingMonths).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-    expect(result.warnings).toEqual([]);
-});
-
-it('기존 급여의 세후 환산은 사무실 급여와 동일하고 공제/회사 보험료는 총급여에서 빼거나 더하지 않는다', () => {
-    const staff = CORPORATE_TAX_STAFF.map((name, index) => ({ id: String(index), name, unitPrice: 1000000, status: '재직' }));
-    const input = { baseSalary: 1500000, bonus: 100000, deduction: 50000, payBasis: 'net' as const, insuranceApplied: true, insuranceBurdenMode: 'shared' as const };
-    const result = salaryEvidence(2026, staff, { '2026-01': { rowInputs: { 'staff:0': input } } });
-    expect(result.rows[0].amount).toBe(calculatePayroll(input, DEFAULT_INSURANCE_SETTINGS).grossPay);
-    expect(result.rows[0].amount).toBeGreaterThan(1600000);
-    expect(result.warnings[0]).toContain('현재 직원 기본급');
-});
-
-it('동명이인 급여를 임의로 합산하지 않고 경고한다', () => {
-    const result = salaryEvidence(2026, [], { '2026-01': { grossPaySnapshot: [1, 2].map(i => ({ id: String(i), name: CORPORATE_TAX_STAFF[0], grossPay: 100, baseSalary: 100, bonus: 0, payBasis: 'gross' })) } });
-    expect(result.rows).toHaveLength(0);
-    expect(result.warnings[0]).toContain('중복');
-    expect(result.unconfirmedMonths).toContain(1);
-});
-
 it('수기 금액 형식/연월/예납/세율을 검증하고 음수 비용 정정은 허용한다', () => {
     const manual = emptyManual();
     manual.months[1] = { amounts: { other: -100 }, notes: { other: '환입' } };
@@ -175,4 +54,60 @@ it('수기 금액 형식/연월/예납/세율을 검증하고 음수 비용 정�
     expect(() => validateManual({ ...manual, interimPayment: -1 })).toThrow();
     expect(() => validateManual({ ...manual, months: { 13: { amounts: {}, notes: {} } } })).toThrow();
     expect(() => validateManual({ ...manual, months: { 1: { amounts: { other: NaN }, notes: {} } } })).toThrow();
+});
+
+const room = (id: string, ownership: Accommodation['ownership'] = 'Cheongyeon', patch: Partial<Accommodation> = {}): Accommodation => ({
+    id, name: id, ownership, status: 'active', contract: { startDate: '2026-01-01', endDate: '2026-12-31', monthlyRent: 500000 },
+    costProfile: { maintenance: 'fixed', fixedMaintenance: 110000 }, ...patch,
+} as Accommodation);
+const utility = (accommodationId: string, patch: Partial<UtilityRecord> = {}): UtilityRecord => ({
+    id: 'utility_2026-01_' + accommodationId, accommodationId, accommodationName: accommodationId, yearMonth: '2026-01', paymentStatus: 'unpaid',
+    costs: { rent: 500000, maintenance: 110000, electricity: 50000, gas: 20000, water: 10000, internet: 30000, other: 5000, total: 725000 }, ...patch,
+});
+
+it('청연·다원 숙소를 분리하고 개인·소유 불명·다른 연월과 공과금을 제외한다', () => {
+    const rooms = [room('cy'), room('dw', 'Dawon'), room('person', 'Individual')];
+    const records = ['cy', 'dw', 'person', 'unknown'].map(id => utility(id));
+    const cy = lodgingEvidence('2026-01', records, rooms, 'cheongyeon');
+    const dw = lodgingEvidence('2026-01', records, rooms, 'dawon');
+    expect(cy).toEqual([expect.objectContaining({ label: 'cy', amount: 610000, description: expect.stringContaining('관리비 110,000') })]);
+    expect(dw).toEqual([expect.objectContaining({ label: 'dw', amount: 610000 })]);
+    expect(buildCorporateTaxReport(cy, emptyManual()).profit).toBe(-610000);
+});
+
+it('7월에 한정하지 않고 1~12월 계약기간의 월세와 관리비를 집계한다', () => {
+    const rows = Array.from({ length: 12 }, (_, i) => lodgingEvidence('2026-' + String(i + 1).padStart(2, '0'), [], [room('cy')], 'cheongyeon')).flat();
+    expect(rows.map(row => row.month)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(buildCorporateTaxReport(rows, emptyManual()).totals.lodging).toBe(7320000);
+    expect(lodgingEvidence('2025-12', [], [room('cy')], 'cheongyeon')).toEqual([]);
+    expect(lodgingEvidence('2027-01', [], [room('cy')], 'cheongyeon')).toEqual([]);
+});
+
+it('명시한 0원·정정·소수점과 중복 제거를 보존하며 월세 포함 관리비는 더하지 않는다', () => {
+    const record = utility('cy', { costs: { rent: 0, maintenance: -1000.25, total: 999999 } as UtilityRecord['costs'] });
+    const rows = lodgingEvidence('2026-01', [record, { ...record, id: 'legacy' }], [room('cy')], 'cheongyeon');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amount).toBe(-1000.25);
+    expect(lodgingEvidence('2026-01', [], [room('cy', 'Cheongyeon', { costProfile: { maintenance: 'included', fixedMaintenance: 110000 } as Accommodation['costProfile'] })], 'cheongyeon')[0].amount).toBe(500000);
+});
+
+it('종료 숙소의 저장된 과거 자료를 보존하고 계약 전후의 기본값은 생성하지 않는다', () => {
+    const inactive = room('cy', 'Cheongyeon', { status: 'inactive' });
+    expect(lodgingEvidence('2026-01', [utility('cy')], [inactive], 'cheongyeon')[0].amount).toBe(610000);
+    expect(lodgingEvidence('2027-01', [], [inactive], 'cheongyeon')).toEqual([]);
+    const unknownContract = room('cy', 'Cheongyeon', { contract: {} as Accommodation['contract'] });
+    expect(lodgingEvidence('2026-01', [], [unknownContract], 'cheongyeon')).toEqual([]);
+    expect(lodgingEvidence('2026-01', [utility('cy')], [unknownContract], 'cheongyeon')[0].amount).toBe(610000);
+});
+
+it('기존 수기 자료를 보존하고 노무비·급여·카드 금액과 근거를 저장·합산한다', () => {
+    const manual = emptyManual();
+    manual.months[1] = { amounts: { labor: 3000, salary: 2000, card: 1000, other: 500 }, notes: { labor: '신고서', salary: '급여대장', card: '회사 카드' } };
+    expect(validateManual(manual)).toEqual(manual);
+    expect(buildCorporateTaxReport([], manual)).toMatchObject({ profit: -6500, totals: { labor: 3000, salary: 2000, card: 1000 } });
+    expect(validateManual({ ...emptyManual(), months: { 1: { amounts: { other: 100 }, notes: {} } } }).months[1].amounts).toEqual({ other: 100 });
+});
+
+it.each([NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])('잘못된 숙소 금액 %s를 0원으로 덮지 않는다', amount => {
+    expect(() => lodgingEvidence('2026-01', [utility('cy', { costs: { rent: amount, maintenance: 0 } as UtilityRecord['costs'] })], [room('cy')], 'cheongyeon')).toThrow(expect.objectContaining({ code: 'invalid-source-amount' }));
 });
