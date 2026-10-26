@@ -2,6 +2,7 @@ import { getDoc, onSnapshot, runTransaction } from 'firebase/firestore';
 import { menuServiceV11 } from './menuServiceV11';
 import { permissionAuditService } from './permissionAuditService';
 import type { SiteDataType } from '../types/menu';
+import { getPositionMenuView, setPositionMenuView, LINKED_POSITION_DIVIDER_ID } from '../utils/linkedPositionMenus';
 jest.mock('../config/firebase', () => ({ db: {} }));
 jest.mock('../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
 jest.mock('../utils/devAdminFixtures', () => ({ DEV_MENU_STORAGE_KEY: 'test' }));
@@ -9,6 +10,39 @@ jest.mock('./permissionAuditService', () => ({ permissionAuditService: { logMenu
 jest.mock('firebase/firestore', () => ({ doc: jest.fn(), getDoc: jest.fn(), setDoc: jest.fn(), updateDoc: jest.fn(), onSnapshot: jest.fn(), runTransaction: jest.fn() }));
 
 beforeEach(() => { jest.clearAllMocks(); menuServiceV11.clearCache(); });
+
+it('자동 추가된 급여 메뉴의 ID를 유지하며 통합 구분선 제목을 저장하고 다시 불러온다', async () => {
+    let remote: SiteDataType = {
+        admin: { name: '전체', icon: 'fa-list', menu: [], positionConfig: [
+            { id: 'dev', name: 'DEV', icon: 'fa-code', color: '#000' },
+            { id: 'manager', name: '매니저', icon: 'fa-user', color: '#000' },
+        ] },
+        pos_dev: { name: 'DEV', icon: 'fa-code', menu: [] },
+        pos_manager: { name: '매니저', icon: 'fa-user', menu: [
+            { id: 'payroll', text: '급여 관리', sub: [{ id: 'monthly', text: '월급제', path: '/payroll/monthly-wage' }] },
+        ] },
+    };
+    (getDoc as jest.Mock).mockImplementation(async () => ({ exists: () => true, data: () => remote }));
+    const write = jest.fn((_ref, data) => { remote = data; });
+    (runTransaction as jest.Mock).mockImplementation(async (_db, callback) => callback({
+        get: async () => ({ exists: () => true, data: () => remote }), set: write,
+    }));
+    const base = (await menuServiceV11.getMenuConfig())!;
+    const next = JSON.parse(JSON.stringify(base));
+    const items = getPositionMenuView(next, 'pos_dev');
+    items.find(item => item.id === LINKED_POSITION_DIVIDER_ID)!.dividerTitle = '직책별 메뉴';
+    setPositionMenuView(next, 'pos_dev', items);
+    // A title edit must not modify the generated child IDs in linked source menus.
+    expect(next.pos_manager.menu).toEqual(base.pos_manager.menu);
+    const saved = await menuServiceV11.saveMenuConfig(next, base);
+    expect(saved.pos_dev.linkedPositionDivider?.dividerTitle).toBe('직책별 메뉴');
+    expect(saved.pos_manager.menu).toEqual(base.pos_manager.menu);
+    expect(write).toHaveBeenCalledTimes(1);
+    menuServiceV11.clearCache();
+    const reloaded = (await menuServiceV11.getMenuConfig())!;
+    expect(reloaded).toEqual(saved);
+    expect(getPositionMenuView(reloaded, 'pos_dev').find(item => item.id === LINKED_POSITION_DIVIDER_ID)?.dividerTitle).toBe('직책별 메뉴');
+});
 
 it('실제 저장 경로에서 다른 직책 변경을 보존하고 같은 직책 메뉴 충돌 시 쓰지 않는다', async () => {
     const data: SiteDataType = {

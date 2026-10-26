@@ -1202,7 +1202,9 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     ensureCorporateTaxMenu(final);
     ensureAdvanceSummaryMenu(final);
 
-    return final;
+    // Migrations can insert items without IDs. Normalize those before exposing
+    // the view so linked projection, save bases and transaction snapshots agree.
+    return normalizeSiteDataType(final);
 };
 
 const notifyListeners = () => {
