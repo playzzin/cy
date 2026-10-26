@@ -17,6 +17,7 @@ export function previewDevRole(profile: any, positions: Array<{ id: string; name
 const reads = new Set(['getTeamScopedData', 'listGeminiUsageLogs', 'getCardExpenseAuditDashboard', 'listCardStatementFiles', 'getCardStatementFileDetail',
     'getMyAccountLinkCandidate', 'getMyAccountLinkStatus', 'searchAccountLinkCompanies', 'getWelfareGameConfig', 'getNoticeDeliveryReport', 'getNoticeBoard', 'getCardStatementImportJobStatus']);
 const readActions: Record<string, string[]> = {
+    supportTeamDocuments: ['list', 'read'],
     teamExpenseRequests: ['list', 'receipt'],
     teamWorkerRequests: ['list', 'document'],
     teamAccountApprovals: ['list'],

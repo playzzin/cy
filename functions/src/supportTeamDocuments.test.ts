@@ -30,6 +30,10 @@ test('팀장은 지원 이력 없이 명단의 타팀 서류를 읽으며 일반
         };
         // No sites or daily reports: permissions must not require attendance.
         const call = (input: any, uid = 'leader') => handleSupportTeamDocuments(input, { auth: { uid, token: {} } } as any);
+        const previewClaims = { devPreview: true, previewActorUid: 'developer', previewTargetUid: 'leader',
+            previewExpiresAt: Math.floor(Date.now() / 1000) + 600, previewDevRole: 'DEV' };
+        const preview = (input: any, claims = previewClaims) => handleSupportTeamDocuments(input,
+            { auth: { uid: 'cy-preview-fixture', token: claims } } as any);
         const denied = (code: string) => (error: any) => error.code === code;
         try {
             for (const [path, row] of Object.entries(fixtures)) await db.doc(path).set(row);
@@ -45,14 +49,20 @@ test('팀장은 지원 이력 없이 명단의 타팀 서류를 읽으며 일반
             assert.deepEqual(await call({ action: 'list', yearMonth: '2026-09', siteId: 'not-visited', companyId: 'outside', teamId: 'outside' }), directory);
             assert(!JSON.stringify(directory).includes('PRIVATE-NUMBER'));
             assert(!JSON.stringify(directory).includes('id_cards'));
+            assert.deepEqual(await preview({ action: 'list' }), directory);
+            await assert.rejects(preview({ action: 'list' }, { ...previewClaims, previewExpiresAt: 1 }), denied('permission-denied'));
+            await assert.rejects(preview({ action: 'list' }, { ...previewClaims, previewTargetUid: 'ordinary' }), denied('permission-denied'));
+            await assert.rejects(preview({ action: 'save', workerId: 'guest' }), denied('invalid-argument'));
             for (const kind of ['identity', 'bank', 'directPayBank']) {
                 const result = await call({ action: 'read', workerId: 'guest', kind }) as any;
                 assert.equal(result.photo.base64, png.toString('base64'));
                 assert.equal(result.photo.contentType, 'image/png');
+                assert.deepEqual(await preview({ action: 'read', workerId: 'guest', kind }), result);
             }
             assert.deepEqual(await call({ action: 'read', workerId: 'guest-leader', kind: 'bank' }), { photo: null });
             assert.equal((await call({ action: 'read', workerId: 'absent', kind: 'bank' }) as any).photo.base64, png.toString('base64'));
             for (const workerId of ['outside', 'retired']) await assert.rejects(call({ action: 'read', workerId, kind: 'bank' }), denied('permission-denied'));
+            await assert.rejects(preview({ action: 'read', workerId: 'outside', kind: 'identity' }), denied('permission-denied'));
             await db.doc('workers/guest').update({ fileNameSaved: bankPhotoPath('guest', photoId) });
             await assert.rejects(call({ action: 'read', workerId: 'guest', kind: 'identity' }), denied('failed-precondition'));
             await db.doc('workers/guest').update({ fileNameSaved: 'id_cards/support-test.png' });

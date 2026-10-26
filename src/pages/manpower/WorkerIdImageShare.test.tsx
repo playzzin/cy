@@ -8,6 +8,8 @@ import { canSaveImageFolder, saveImageFolder, zipImageFiles } from '../../utils/
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import { copyWindowsPhotos, openWindowsPhotoWindow, WindowsPhotoClipboardError } from '../../utils/windowsPhotoClipboard';
 
+let mockIsPreviewFrame = false;
+jest.mock('../../utils/devPreviewRuntime', () => ({ get isDevPreviewFrame() { return mockIsPreviewFrame; } }));
 jest.mock('../../config/firebase', () => ({ storage: {} }));
 jest.mock('firebase/storage', () => ({ ref: (_storage: unknown, path: string) => path, getDownloadURL: async (path: string) => path }));
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
@@ -24,6 +26,7 @@ const share = jest.fn();
 const canShare = jest.fn();
 beforeEach(() => {
     jest.clearAllMocks();
+    mockIsPreviewFrame = false;
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux' });
     (copyImageFile as jest.Mock).mockResolvedValue(undefined);
     (openWindowsPhotoWindow as jest.Mock).mockResolvedValue({ batchId: 'b'.repeat(32), photoCount: 2, opened: true });
@@ -40,6 +43,25 @@ beforeEach(() => {
     HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
     (imageFileFromUrl as jest.Mock).mockImplementation(async (url: string, name: string) =>
         new File([url], `${name}.${url.endsWith('.jpg') ? 'jpg' : 'png'}`, { type: url.endsWith('.jpg') ? 'image/jpeg' : 'image/png' }));
+});
+
+test.each(['Win32', 'iPhone'])('팀장 미리보기 %s는 원본 확인만 제공하고 전송·복사·저장 기능을 노출하지 않는다', async platform => {
+    mockIsPreviewFrame = true;
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: platform });
+    const loadImage = jest.fn().mockResolvedValue(new File(['fixture'], 'document.png', { type: 'image/png' }));
+    render(<WorkerIdImageShare workers={workers} loadImage={loadImage} />);
+    await prepare();
+    expect(screen.getAllByRole('img')).toHaveLength(2);
+    expect(screen.getByRole('status')).toHaveTextContent('조회 전용 화면에서는 사진 확인만 가능합니다.');
+    expect(screen.queryByRole('button', { name: /사진.*(?:공유|복사|저장|끌어놓기)/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('PC 카카오톡으로 보내기')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /보조 프로그램/ })).not.toBeInTheDocument();
+    expect(share).not.toHaveBeenCalled();
+    expect(copyImageFile).not.toHaveBeenCalled();
+    expect(copyWindowsPhotos).not.toHaveBeenCalled();
+    expect(openWindowsPhotoWindow).not.toHaveBeenCalled();
+    expect(saveAs).not.toHaveBeenCalled();
+    expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
 });
 
 test('Windows 전체 복사는 선택한 개별 원본 파일만 전달하고 복사만 기록한다', async () => {

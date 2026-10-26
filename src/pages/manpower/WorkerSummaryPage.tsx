@@ -13,6 +13,7 @@ import { getTeamScopedRows } from '../../services/teamScopedReadService';
 import WorkerIdImageShare from './WorkerIdImageShare';
 import WorkerBankPhotoRegistration from './WorkerBankPhotoRegistration';
 import { supportTeamDocumentService, type SupportDocumentPerson } from '../../services/supportTeamDocumentService';
+import { isDevPreviewFrame } from '../../utils/devPreviewRuntime';
 import './WorkerSummaryPage.css';
 
 
@@ -574,7 +575,7 @@ const WorkerSummaryPage: React.FC = () => {
         [selectedWorkers, documentWorkerIds, supportDocumentById]
     );
     const selectedOwnDocumentWorkers = useMemo(() => selectedWorkers.filter(worker => documentWorkerIds.has(worker.id!)), [selectedWorkers, documentWorkerIds]);
-    const needsSupportRead = selectedDocumentWorkers.some(worker => !documentWorkerIds.has(worker.id!));
+    const needsSupportRead = (restricted && isDevPreviewFrame) || selectedDocumentWorkers.some(worker => !documentWorkerIds.has(worker.id!));
     const visibleSelectedCount = filteredWorkers.filter(w => selectedWorkerIds.has(w.id!)).length;
     const allVisibleSelected = filteredWorkers.length > 0 && visibleSelectedCount === filteredWorkers.length;
 
@@ -870,7 +871,7 @@ const WorkerSummaryPage: React.FC = () => {
                         <ActionButtons className="ws-actions">
                             <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedDocumentWorkers} disabled={isSendingImage}
                                 loadImage={needsSupportRead ? readSupportIdentity : undefined} />
-                            <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedOwnDocumentWorkers} disabled={isSendingImage}
+                            <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedOwnDocumentWorkers} disabled={isSendingImage || isDevPreviewFrame}
                                 onSaved={updates => setWorkers(previous => previous.map(worker => {
                                     const update = updates.find(item => item.workerId === worker.id);
                                     return update ? { ...worker, directPayBankPhotoId: update.directPayBankPhotoId } : worker;

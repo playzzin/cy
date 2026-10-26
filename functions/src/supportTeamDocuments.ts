@@ -1,7 +1,6 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { protectedRegion, requireCallableAuth } from './auth';
-import { isPreviewIdentity } from './devPreviewPolicy';
 import { resolvedRoleNames } from './teamExpenseRequests';
 import { isTeamLeader, TeamRow, text } from './teamReadPolicy';
 import { queryByIds, queryRows } from './teamScopedQuery';
@@ -45,7 +44,8 @@ export async function readSupportDocumentScope(db: admin.firestore.Firestore, ui
 
 export async function handleSupportTeamDocuments(input: any, context: functions.https.CallableContext) {
     const { uid } = requireCallableAuth(context);
-    if (isPreviewIdentity(uid, context.auth?.token)) deny();
+    // The entrypoint validates preview sessions; requireCallableAuth resolves
+    // the selected user's UID so the same directory scope applies to reads.
     if (!['list', 'read'].includes(input?.action) || (input.action === 'read'
         && (!validId(input.workerId) || !['identity', 'bank', 'directPayBank'].includes(input.kind)))) {
         throw new functions.https.HttpsError('invalid-argument', '서류 공유 요청을 확인해 주세요.');

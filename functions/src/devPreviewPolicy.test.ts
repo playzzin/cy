@@ -17,6 +17,13 @@ test('preview callable policy rejects every mutation and unknown operation', () 
     }
     for (const name of ['createDevPreviewSession', 'getDevPreviewAccounts', 'syncUserAccessClaims', 'geminiGateway', 'teamAdvanceRequests', 'teamOffDutyRequests', 'newFutureEndpoint']) assert.equal(permitsPreviewCall(name, { action: 'list' }), false);
 });
+
+test('document preview permits only listing and reading, never saving or sharing actions', () => {
+    for (const action of ['list', 'read']) assert.equal(permitsPreviewCall('supportTeamDocuments', { action }), true);
+    for (const action of ['save', 'upload', 'delete', 'share', 'send', 'approve', 'unknown', undefined]) {
+        assert.equal(permitsPreviewCall('supportTeamDocuments', { action }), false);
+    }
+});
 test('reserved identities cannot lose their write restriction by dropping claims', () => {
     assert.equal(isPreviewIdentity('cy-preview-reserved', {}), true);
     assert.equal(isPreviewIdentity('actual-user', { devPreview: true }), true);

@@ -11,6 +11,7 @@ import { copyWindowsPhotos, openWindowsPhotoWindow, WindowsPhotoClipboardError, 
 import { readWorkerBankPhoto } from '../../services/workerBankPhotoService';
 import type { WorkerAccountPurpose } from '../../utils/workerAccount';
 import type { IdentityLogInput } from '../../services/identityBundleLogService';
+import { isDevPreviewFrame } from '../../utils/devPreviewRuntime';
 import './WorkerIdImageShare.css';
 
 type IdWorker = Pick<Worker, 'id' | 'name' | 'fileNameSaved' | 'bankPhotoId' | 'directPayBankPhotoId'>;
@@ -108,7 +109,7 @@ const WorkerIdImageShare: React.FC<{
                 return;
             }
             setPrepared({ workers, images, failed, missing });
-            setMessage(images.length ? `사진 ${images.length}장을 준비했습니다. 아래 사진을 확인한 뒤 공유하세요.` : kind === 'bank'
+            setMessage(images.length ? `사진 ${images.length}장을 준비했습니다. ${isDevPreviewFrame ? '조회 전용 화면에서는 사진 확인만 가능합니다.' : '아래 사진을 확인한 뒤 공유하세요.'}` : kind === 'bank'
                 ? bankPurpose === 'directPay'
                     ? '공유할 직불용 통장사본이 없습니다. 직불용 통장사본 등록에서 원본을 등록해 주세요.'
                     : '공유할 통장사본이 없습니다. 통합DB에서 해당 작업자의 기본 계좌 통장사본 원본을 등록해 주세요.'
@@ -274,7 +275,7 @@ const WorkerIdImageShare: React.FC<{
             onClick={() => void prepare()}>{shareTitle}</button>
         {open && createPortal(<dialog ref={dialogRef} className="worker-id-share" aria-labelledby={titleId}
             onCancel={event => { event.preventDefault(); close(); }}>
-            <header><div><h2 id={titleId}>{shareTitle}</h2><p>선택한 {workers.length}명의 {documentLabel}을 각각의 사진으로 보냅니다.</p></div>
+            <header><div><h2 id={titleId}>{shareTitle}</h2><p>선택한 {workers.length}명의 {documentLabel}을 {isDevPreviewFrame ? '확인합니다. 실제 공유는 팀장 계정으로 로그인한 뒤 이용해 주세요.' : '각각의 사진으로 보냅니다.'}</p></div>
                 <button type="button" aria-label={`${documentLabel} 공유 닫기`} onClick={close}>닫기</button></header>
             <p role="status" aria-live="polite">{message}</p>
             {error && <p role="alert" className="worker-id-share__error">{error}</p>}
@@ -282,7 +283,7 @@ const WorkerIdImageShare: React.FC<{
             {!!prepared?.failed.length && <div role="alert" className="worker-id-share__error">
                 <p>불러오기 실패 {prepared.failed.length}명: {prepared.failed.join(', ')}. 이 사진은 공유에 포함되지 않습니다.</p>
                 <button type="button" disabled={busy} onClick={() => void prepare()}>사진 다시 준비</button></div>}
-            {!!images.length && <div className="worker-id-share__send">
+            {!!images.length && !isDevPreviewFrame && <div className="worker-id-share__send">
                 {canShareAll && !isWindows ? <><button type="button" className="worker-id-share__primary" disabled={busy} onClick={() => void share(images)}>사진 {images.length}장 함께 공유</button>
                     <p>공유창에서 카카오톡과 받을 대화방을 선택하세요. 카카오톡이 보이지 않으면 아래 PC 저장 메뉴를 이용하세요.</p></>
                     : !canShareAll && !isWindows && <p>이 브라우저에서는 사진 {images.length}장을 바로 함께 공유할 수 없습니다. 아래에서 사진을 한꺼번에 저장해 카카오톡에 첨부하세요.</p>}
@@ -326,9 +327,9 @@ const WorkerIdImageShare: React.FC<{
             <div className="worker-id-share__images">{images.map(image => <article key={image.worker.id}>
                 <img src={image.url} alt={`${image.worker.name} ${documentLabel} 공유 미리보기`} />
                 <strong>{image.worker.name}</strong>
-                <div>{!isWindows && canShareImageFiles([image.file]) && <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 공유`} onClick={() => void share([image])}>개별 공유</button>}
+                {!isDevPreviewFrame && <div>{!isWindows && canShareImageFiles([image.file]) && <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 공유`} onClick={() => void share([image])}>개별 공유</button>}
                     <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 복사`} onClick={() => void copy(image)}>사진 복사</button>
-                    <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 저장`} onClick={() => save(image)}>사진 저장</button></div>
+                    <button type="button" disabled={busy} aria-label={`${image.worker.name} 사진 저장`} onClick={() => save(image)}>사진 저장</button></div>}
             </article>)}</div>
         </dialog>, document.body)}
     </>;

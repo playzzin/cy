@@ -9,6 +9,8 @@ import { getTeamScopedRows } from '../../services/teamScopedReadService';
 import { readWorkerBankPhoto, saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
 import { supportTeamDocumentService } from '../../services/supportTeamDocumentService';
 
+let mockIsPreviewFrame = false;
+jest.mock('../../utils/devPreviewRuntime', () => ({ get isDevPreviewFrame() { return mockIsPreviewFrame; } }));
 jest.mock('../../routes/TeamWorkflowGate', () => ({ useRestrictedTeamWorkflow: jest.fn() }));
 jest.mock('../../services/teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
 jest.mock('../../services/supportTeamDocumentService', () => ({ supportTeamDocumentService: { list: jest.fn(), read: jest.fn() } }));
@@ -33,6 +35,7 @@ jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockIsPreviewFrame = false;
     jest.mocked(supportTeamDocumentService.list).mockResolvedValue([]);
     (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
@@ -41,6 +44,27 @@ beforeEach(() => {
         { id: 'three', name: '가상다', teamId: 'b', teamName: '가상 B팀', status: '재직' },
         { id: 'inactive', name: '가상퇴사', teamId: 'a', status: '퇴사' }
     ]);
+});
+
+test('팀장 미리보기의 내 팀 서류도 동일한 조회 API를 사용하고 등록은 비활성화한다', async () => {
+    mockIsPreviewFrame = true;
+    jest.mocked(useRestrictedTeamWorkflow).mockReturnValue(true);
+    jest.mocked(getTeamScopedRows).mockResolvedValue([{
+        teams: [{ id: 'a', name: '가상 A팀' }],
+        workers: [{ id: 'one', name: '가상가', teamId: 'a', status: '재직', directPayBankPhotoId: 'fixture' }], documentWorkerIds: ['one'],
+    }]);
+    jest.mocked(supportTeamDocumentService.read).mockResolvedValue(new File(['fixture'], 'own.png', { type: 'image/png' }));
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:own') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
+    await openPage();
+    fireEvent.click(screen.getByRole('checkbox', { name: '가상가 선택' }));
+    expect(screen.getByRole('button', { name: '직불용 통장사본 등록' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '직불용 통장사본 공유' }));
+    await screen.findByAltText('가상가 직불용 통장사본 공유 미리보기');
+    expect(supportTeamDocumentService.read).toHaveBeenCalledWith('one', 'directPayBank', expect.any(String), expect.any(AbortSignal));
+    expect(readWorkerBankPhoto).not.toHaveBeenCalled();
 });
 
 test('서버 조회 대상에서 제외된 인원의 서류를 미등록으로 표시하거나 공유하지 않는다', async () => {
