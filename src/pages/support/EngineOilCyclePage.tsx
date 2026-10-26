@@ -195,6 +195,12 @@ const toDraftMap = (records: EngineOilRecord[]): Record<string, EngineOilDraft> 
 
 const formatKm = (value: number): string => `${Number(value || 0).toLocaleString('ko-KR')}km`;
 
+const formatDraftKm = (value: string): string => {
+    const [integer, fraction] = value.split('.');
+    const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return fraction === undefined ? grouped : `${grouped}.${fraction}`;
+};
+
 const getOilStatus = (record: EngineOilRecord): OilStatus => {
     const nextKm = Number(record.lastOilKm || 0) + Number(record.cycleKm || DEFAULT_CYCLE_KM);
     const remainKm = nextKm - Number(record.currentKm || 0);
@@ -485,6 +491,24 @@ const EngineOilCyclePage: React.FC = () => {
         setChangedIds((prev) => new Set(prev).add(id));
     };
 
+    const handleDistanceChange = (event: React.ChangeEvent<HTMLInputElement>, id: string, field: 'currentKm' | 'lastOilKm') => {
+        const input = event.currentTarget;
+        const raw = input.value.replace(/,/g, '');
+        if (!/^\d*(?:\.\d*)?$/.test(raw)) return;
+
+        const charactersBeforeCaret = input.value.slice(0, input.selectionStart ?? input.value.length).replace(/,/g, '').length;
+        const formatted = formatDraftKm(raw);
+        let caret = 0;
+        let characters = 0;
+        while (caret < formatted.length && characters < charactersBeforeCaret) {
+            if (formatted[caret] !== ',') characters += 1;
+            caret += 1;
+        }
+        input.value = formatted;
+        input.setSelectionRange(caret, caret);
+        setDraftValue(id, field, raw);
+    };
+
     const counts = useMemo(() => {
         return oilState.records.reduce(
             (acc, record) => {
@@ -616,6 +640,15 @@ const EngineOilCyclePage: React.FC = () => {
     };
 
     const handleInlineKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, id: string) => {
+        const input = event.currentTarget;
+        const caret = input.selectionStart;
+        if (caret !== null && caret === input.selectionEnd) {
+            if (event.key === 'Backspace' && input.value[caret - 1] === ',') {
+                input.setSelectionRange(caret - 1, caret - 1);
+            } else if (event.key === 'Delete' && input.value[caret] === ',') {
+                input.setSelectionRange(caret + 1, caret + 1);
+            }
+        }
         if (event.key === 'Enter') {
             event.preventDefault();
             void saveRecord(id);
@@ -869,10 +902,10 @@ const EngineOilCyclePage: React.FC = () => {
                                                 <span className="engine-oil-field-label">현재거리 <span className="font-normal">(km)</span></span>
                                                 <input
                                                     aria-label={`${record.plate} 현재거리`}
-                                                    value={draft.currentKm}
-                                                    type="number"
+                                                    value={formatDraftKm(draft.currentKm)}
+                                                    type="text"
                                                     inputMode="numeric"
-                                                    onChange={(event) => setDraftValue(record.id, 'currentKm', event.target.value)}
+                                                    onChange={(event) => handleDistanceChange(event, record.id, 'currentKm')}
                                                     onKeyDown={(event) => handleInlineKeyDown(event, record.id)}
                                                     className={inputClassName(changed)}
                                                 />
@@ -881,23 +914,23 @@ const EngineOilCyclePage: React.FC = () => {
                                                 <span className="engine-oil-field-label">최근교체 <span className="font-normal">(km)</span></span>
                                                 <input
                                                     aria-label={`${record.plate} 최근교체거리`}
-                                                    value={draft.lastOilKm}
-                                                    type="number"
+                                                    value={formatDraftKm(draft.lastOilKm)}
+                                                    type="text"
                                                     inputMode="numeric"
-                                                    onChange={(event) => setDraftValue(record.id, 'lastOilKm', event.target.value)}
+                                                    onChange={(event) => handleDistanceChange(event, record.id, 'lastOilKm')}
                                                     onKeyDown={(event) => handleInlineKeyDown(event, record.id)}
                                                     className={inputClassName(changed)}
                                                 />
                                             </td>
-                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right font-mono font-bold text-slate-800">
+                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right text-slate-800">
                                                 <span className="engine-oil-field-label">다음교체</span>
                                                 <span>{formatKm(status.nextKm)}</span>
                                             </td>
-                                            <td role="cell" className={`engine-oil-field px-3 py-2 text-right font-mono font-black ${classes.text}`}>
+                                            <td role="cell" className={`engine-oil-field px-3 py-2 text-right ${classes.text}`}>
                                                 <span className="engine-oil-field-label">남은거리</span>
                                                 <span>{formatKm(status.remainKm)}</span>
                                             </td>
-                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right font-mono font-bold text-slate-700">
+                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right text-slate-700">
                                                 <span className="engine-oil-field-label">교체주기</span>
                                                 <span>{formatKm(record.cycleKm)}</span>
                                             </td>

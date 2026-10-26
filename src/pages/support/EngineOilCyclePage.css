@@ -2,6 +2,14 @@
     display: none;
 }
 
+.engine-oil-field,
+.engine-oil-field > input {
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Reflow the same inputs into vertical vehicle cards without duplicating drafts. */
 @media (max-width: 1023px) {
     .engine-oil-table,
@@ -57,6 +65,7 @@
         justify-content: space-between;
         gap: 0.75rem;
         border-top: 1px solid rgb(148 163 184 / 20%);
+        font-size: 1rem;
     }
 
     .engine-oil-record .engine-oil-field-label {
@@ -80,7 +89,7 @@
         min-width: 0;
         max-width: 55%;
         min-height: 44px;
-        font-size: 1rem;
+        font-size: inherit;
     }
 
     .engine-oil-record .engine-oil-actions {
