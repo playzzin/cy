@@ -128,6 +128,29 @@ service cloud.firestore {
       ];
     }
 
+    function teamSettlementWriterRoles() {
+      return [
+        'ceo', 'CEO', 'Ceo', 'pos_ceo', '대표', '대표이사', '사장',
+        'dev', 'DEV', 'Dev', 'developer', 'DEVELOPER', 'Developer', 'pos_dev', '개발', '개발자',
+        'manager', 'MANAGER', 'Manager', 'pos_manager', '매니저', '메니저',
+        'manager1', 'manager2', 'manager3', 'MANAGER1', 'MANAGER2', 'MANAGER3',
+        'pos_manager1', 'pos_manager2', 'pos_manager3',
+        '매니저1', '매니저2', '매니저3', '메니저1', '메니저2', '메니저3'
+      ];
+    }
+
+    function canWriteTeamSettlement() {
+      let profile = userProfile();
+      let allowed = teamSettlementWriterRoles();
+      return hasActiveUserProfile() && (
+        profile.get('role', '') in allowed
+        || profile.get('position', '') in allowed
+        || profile.get('systemRole', '') in allowed
+        || (profile.get('roles', []) is list && profile.get('roles', []).hasAny(allowed))
+        || (profile.get('additionalPositions', []) is list && profile.get('additionalPositions', []).hasAny(allowed))
+      );
+    }
+
     function hasTokenRole(roles) {
       return hasActiveUserProfile()
         && (
@@ -1464,7 +1487,9 @@ service cloud.firestore {
 
     match /system_configs/{configId} {
       allow read: if (hasActiveUserProfile()) && previewReadsAllowed();
-      allow create, update, delete: if !isPreviewIdentity() && (isAdmin());
+      allow create, update, delete: if !isPreviewIdentity() && (
+        configId.matches('^team_settlement_.*') ? canWriteTeamSettlement() : isAdmin()
+      );
     }
 
     match /positions/{positionId} {
@@ -1836,7 +1861,7 @@ service cloud.firestore {
         && (canReadFinance() || (collectionId == 'progress_claims' && canReadClientProgressClaim()))) && previewReadsAllowed();
       allow create, update, delete: if !isPreviewIdentity() && (isFinanceCollection(collectionId)
         && collectionId != 'monthly_payroll_settlements'
-        && canWriteFinance());
+        && (collectionId == 'team_settlement_documents' ? canWriteTeamSettlement() : canWriteFinance()));
     }
 
     match /{collectionId}/{docId} {
@@ -2021,7 +2046,7 @@ service cloud.firestore {
         && canReadFinance()) && previewReadsAllowed();
       allow create, update, delete: if !isPreviewIdentity() && (isFinanceCollection(collectionId)
         && collectionId != 'monthly_payroll_settlements'
-        && canWriteFinance());
+        && (collectionId == 'team_settlement_documents' ? canWriteTeamSettlement() : canWriteFinance()));
 
       allow read: if (isCardStatementImportCollection(collectionId) && canReadCardBillingStatements()) && previewReadsAllowed();
       allow create, update, delete: if !isPreviewIdentity() && (false);
