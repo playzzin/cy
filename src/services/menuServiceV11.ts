@@ -1167,6 +1167,14 @@ const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType): void => {
     });
 };
 
+const ensureGeneratedMenuIds = (items: (MenuItem | string)[], parentId: string): void => {
+    items.forEach((item, index) => {
+        if (typeof item === 'string') return;
+        item.id ||= createDeterministicId([parentId, item.text, String(index)]);
+        if (item.sub) ensureGeneratedMenuIds(item.sub, item.id);
+    });
+};
+
 // This is the new "Init" logic: normalize inputs, prune illegal items, fix structure.
 // But it DOES NOT merge with defaults.
 const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
@@ -1202,9 +1210,10 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     ensureCorporateTaxMenu(final);
     ensureAdvanceSummaryMenu(final);
 
-    // Migrations can insert items without IDs. Normalize those before exposing
-    // the view so linked projection, save bases and transaction snapshots agree.
-    return normalizeSiteDataType(final);
+    // Migrations can insert items without IDs. Assign only missing IDs before
+    // projection; re-normalizing here would also rewrite their intentional labels.
+    Object.entries(final).forEach(([siteKey, site]) => ensureGeneratedMenuIds(site.menu, siteKey));
+    return final;
 };
 
 const notifyListeners = () => {
