@@ -564,7 +564,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="menu-list-wrapper">
                     <ul className="menu-list" style={{ paddingBottom: '20px' }}>
                         {finalMenu.map((item: MenuItem, index: number) => {
-                            if (isMenuDivider(item)) return <li key={`divider-${item.id || index}`}><MenuDivider item={item} /></li>;
+                            if (isMenuDivider(item)) return <li key={`divider-${item.id || index}`}><MenuDivider item={item} collapsed={isSidebarCollapsed && !isMobile} /></li>;
                             const hasSub = Boolean(item.sub?.length) || Boolean(getLinkedMenuRef(item.id) && getLinkedMenuRef(item.id)?.itemId === undefined);
                             const uniqueKey = item.id || `menu-${index}`;
                             const itemId = uniqueKey;

@@ -54,6 +54,12 @@ it('선택한 메뉴 아래에 링크 없는 구분선을 추가하고 전용 �
         expect(calls[calls.length - 1][0].admin.menu[1]).toMatchObject({ text: '-', dividerStyle: 'dashed', dividerSpacing: 'relaxed' });
     });
     expect(screen.getByRole('separator', { name: '메뉴 구분선' })).toHaveStyle({ padding: '22px 12px' });
+    fireEvent.change(screen.getByRole('textbox', { name: '구분선 제목' }), { target: { value: '현장 관리' } });
+    await waitFor(() => {
+        const calls = (menuServiceV11.saveMenuConfig as jest.Mock).mock.calls;
+        expect(calls[calls.length - 1][0].admin.menu[1]).toMatchObject({ text: '-', dividerTitle: '현장 관리' });
+    });
+    expect(screen.getByRole('separator', { name: '현장 관리 구분선' })).toHaveTextContent('현장 관리');
     fireEvent.click(screen.getByRole('checkbox', { name: '구분선 표시' }));
     await waitFor(() => expect(screen.queryByRole('separator')).not.toBeInTheDocument());
 });

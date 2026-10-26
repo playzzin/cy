@@ -9,6 +9,7 @@ export const getDividerAppearance = (item?: MenuItem | string) => {
     const settings = typeof item === 'object' ? item : undefined;
     const spacing = settings?.dividerSpacing || 'normal';
     return {
+        title: settings?.dividerTitle?.trim() || '',
         spacing,
         gap: DIVIDER_SPACING[spacing] ?? DIVIDER_SPACING.normal,
         lineStyle: settings?.dividerStyle === 'dashed' ? 'dashed' as const : 'solid' as const

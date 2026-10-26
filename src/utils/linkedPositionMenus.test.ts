@@ -1,4 +1,4 @@
-import { getPositionMenuView, getLinkedMenuRef, getLinkedPositions, linkedMenuId, setPositionMenuView } from './linkedPositionMenus';
+import { getPositionMenuView, getLinkedMenuRef, getLinkedPositions, linkedMenuId, LINKED_POSITION_DIVIDER_ID, setPositionMenuView } from './linkedPositionMenus';
 import { menuConfigsEqual, mergeMenuConfigChanges } from './menuConfigChanges';
 import type { SiteDataType, MenuItem } from '../types/menu';
 
@@ -11,6 +11,21 @@ const config = (): SiteDataType => ({
     pos_dev: { name: 'DEV', icon: '', menu: [{ id: 'same', text: 'DEV 고유' }] },
     pos_leader: { name: '팀장', icon: '', menu: [{ id: 'same', text: '일보', sub: [{ id: 'child', text: '작성', path: '/daily' }] }] },
     pos_office: { name: '사무실', icon: '', menu: [{ id: 'same', text: '급여' }] },
+});
+
+it('자동 구분선의 표시 설정을 저장하고 연결을 다시 켜도 복원한다', () => {
+    const data = config();
+    const view = getPositionMenuView(data, 'pos_dev');
+    const divider = view.find(item => item.id === LINKED_POSITION_DIVIDER_ID)!;
+    Object.assign(divider, { dividerTitle: '직책별 메뉴', dividerStyle: 'dashed', dividerSpacing: 'compact', hide: true });
+    setPositionMenuView(data, 'pos_dev', view);
+    expect(data.pos_dev.linkedPositionDivider).toEqual({ dividerTitle: '직책별 메뉴', dividerStyle: 'dashed', dividerSpacing: 'compact', hide: true });
+    expect(data.pos_dev.menu).toEqual(config().pos_dev.menu);
+    data.pos_dev.linkedPositionMenusEnabled = false;
+    expect(getPositionMenuView(data, 'pos_dev')).toEqual(data.pos_dev.menu);
+    data.pos_dev.linkedPositionMenusEnabled = true;
+    expect(getPositionMenuView(data, 'pos_dev').find(item => item.id === LINKED_POSITION_DIVIDER_ID)).toEqual(divider);
+    expect(JSON.stringify(data)).not.toContain('__linked_position__');
 });
 
 it('등록된 직책을 순서대로 연결하고 DEV와 다른 직책의 같은 ID를 분리한다', () => {

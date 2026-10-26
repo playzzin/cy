@@ -54,7 +54,7 @@ export const getPositionMenuView = (data: SiteDataType | null, siteKey: string):
     const own = data?.[siteKey]?.menu || [];
     const positions = getLinkedPositions(data, siteKey);
     if (!positions.length || !data) return own;
-    return [...own, createMenuDivider(LINKED_POSITION_DIVIDER_ID), ...positions.map(position => {
+    return [...own, { ...createMenuDivider(LINKED_POSITION_DIVIDER_ID), ...data[siteKey].linkedPositionDivider }, ...positions.map(position => {
         const source = positionSiteKey(position.id);
         return { id: linkedMenuId(source), text: position.name, icon: position.icon, sub: projectLinkedItems(data[source].menu, source) };
     })];
@@ -87,6 +87,18 @@ export const setPositionMenuView = (data: SiteDataType, siteKey: string, items: 
     const own = items.filter(item => !expected.has(item.id || '') && item.id !== LINKED_POSITION_DIVIDER_ID);
     assertOwnItems(own);
     const replacements: SiteDataType = { [siteKey]: { ...data[siteKey], menu: own } };
+    const dividers = items.filter(item => item.id === LINKED_POSITION_DIVIDER_ID);
+    if (dividers.length !== 1) throw new Error('연결 구분선은 설정에서 표시 여부를 변경해주세요.');
+    const previous = { ...createMenuDivider(LINKED_POSITION_DIVIDER_ID), ...data[siteKey].linkedPositionDivider };
+    const settings = { ...data[siteKey].linkedPositionDivider };
+    // Store only appearance overrides, never the generated ID or linked menus.
+    for (const key of ['dividerTitle', 'dividerStyle', 'dividerSpacing', 'hide'] as const) {
+        if (dividers[0][key] === previous[key]) continue;
+        if (dividers[0][key] === undefined) delete settings[key];
+        else Object.assign(settings, { [key]: dividers[0][key] });
+    }
+    if (Object.keys(settings).length) replacements[siteKey].linkedPositionDivider = settings;
+    else delete replacements[siteKey].linkedPositionDivider;
     sources.forEach(position => {
         const source = positionSiteKey(position.id);
         const groups = items.filter(item => item.id === linkedMenuId(source));
