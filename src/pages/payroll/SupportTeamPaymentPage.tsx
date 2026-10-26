@@ -60,6 +60,7 @@ import { db, storage } from '../../config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { getDownloadURL, ref } from 'firebase/storage';
 import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
+import SupportTeamDocuments from './SupportTeamDocuments';
 
 type SupportStatementPayType = SharedLaborStatementPayType;
 
@@ -3241,6 +3242,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
 
             <PagePrimaryAccountSettings compact scope={scope === 'incoming' ? 'support-team-incoming' : scope === 'internalOut' ? 'support-team-internal' : scope === 'internalIn' ? 'support-team-internal-incoming' : 'support-team'} />
 
+
             <div className="flex w-full flex-col gap-3 lg:flex-row">
                 {/* 좌측 사이드바 */}
                 {!hideSidebarFilter && (
@@ -3386,6 +3388,8 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                             </select>
                         </div>
                     </div>
+
+                <SupportTeamDocuments />
 
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
                         <SummaryCard label="총 투입 공수" value={`${formatNumber(totalSummary.totalManDay)} 공`} icon={faCalendarAlt} tone="violet" />

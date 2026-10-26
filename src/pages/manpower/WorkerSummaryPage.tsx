@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
@@ -12,6 +12,7 @@ import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
 import WorkerIdImageShare from './WorkerIdImageShare';
 import WorkerBankPhotoRegistration from './WorkerBankPhotoRegistration';
+import { supportTeamDocumentService, type SupportDocumentPerson } from '../../services/supportTeamDocumentService';
 import './WorkerSummaryPage.css';
 
 
@@ -365,12 +366,12 @@ const isActiveWorker = (worker: Worker) => {
     return worker.isActive !== false && status !== '퇴사' && status !== 'inactive' && status !== '출입금지';
 };
 
-const DocumentStatus: React.FC<{ document: string; registered: boolean; canView: boolean }> = ({ document, registered, canView }) => {
+const DocumentStatus: React.FC<{ document: string; registered: boolean; canView: boolean; unavailableLabel?: string }> = ({ document, registered, canView, unavailableLabel = '조회 대상 아님' }) => {
     const status = !canView ? 'unavailable' : registered ? 'registered' : 'missing';
-    const label = !canView ? '확인 불가' : registered ? '등록' : '미등록';
+    const label = !canView ? unavailableLabel : registered ? '등록' : '미등록';
     return (
         <span className={`ws-document-status ws-document-status--${status}`} aria-label={`${document} ${label}`}
-            title={canView ? `${document} ${label}` : '내 팀 작업자의 서류 등록 여부만 확인할 수 있습니다.'}>
+            title={`${document} ${label}`}>
             <span className="ws-document-symbol" aria-hidden="true">{!canView ? '−' : registered ? '○' : '×'}</span>
             {label}
         </span>
@@ -380,8 +381,8 @@ const DocumentStatus: React.FC<{ document: string; registered: boolean; canView:
 const WorkerSummaryPage: React.FC = () => {
     const restricted = useRestrictedTeamWorkflow();
     const summaryRef = React.useRef<HTMLTableElement>(null);
-    const [workers, setWorkers] = useState<Worker[]>([]);
-    const [teams, setTeams] = useState<Team[]>([]);
+    const [baseWorkers, setWorkers] = useState<Worker[]>([]);
+    const [baseTeams, setTeams] = useState<Team[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState(false);
 
@@ -396,6 +397,44 @@ const WorkerSummaryPage: React.FC = () => {
     const selectAllRef = React.useRef<HTMLInputElement>(null);
 
     const [documentWorkerIds, setDocumentWorkerIds] = useState<Set<string>>(new Set());
+    const [supportDocuments, setSupportDocuments] = useState<SupportDocumentPerson[] | null>(null);
+    const [documentLoading, setDocumentLoading] = useState(false);
+    const [documentError, setDocumentError] = useState(false);
+    const [documentRevision, setDocumentRevision] = useState(0);
+    useEffect(() => {
+        const controller = new AbortController();
+        setSupportDocuments(null); setDocumentError(false); setDocumentLoading(restricted);
+        if (restricted) void supportTeamDocumentService.list(controller.signal).then(people => {
+            if (!controller.signal.aborted) setSupportDocuments(people);
+        }).catch(() => {
+            if (!controller.signal.aborted) setDocumentError(true);
+        }).finally(() => { if (!controller.signal.aborted) setDocumentLoading(false); });
+        return () => controller.abort();
+    }, [restricted, documentRevision]);
+    const supportPeople = useMemo(() => restricted ? supportDocuments ?? [] : [], [restricted, supportDocuments]);
+    const supportDocumentById = useMemo(() => new Map(supportPeople.map(person => [person.id, person])), [supportPeople]);
+    const workers = useMemo(() => {
+        if (loadError) return [];
+        const merged = new Map(baseWorkers.map(worker => [worker.id, worker]));
+        supportPeople.forEach(person => {
+            if (!merged.has(person.id)) merged.set(person.id, { id: person.id, name: person.name, teamId: person.teamId,
+                teamName: person.teamName, role: person.role, status: '재직' });
+        });
+        return Array.from(merged.values());
+    }, [baseWorkers, supportPeople, loadError]);
+    const teams = useMemo(() => {
+        const merged = new Map(baseTeams.map(team => [team.id, team]));
+        supportPeople.forEach(person => {
+            if (person.teamId && !merged.has(person.teamId)) merged.set(person.teamId, { id: person.teamId, name: person.teamName, type: '미지정' });
+        });
+        return Array.from(merged.values());
+    }, [baseTeams, supportPeople]);
+    const readSupportIdentity = useCallback((worker: { id?: string }, name: string, signal: AbortSignal) =>
+        supportTeamDocumentService.read(worker.id!, 'identity', name, signal), []);
+    const readSupportBank = useCallback((worker: { id?: string }, name: string, signal: AbortSignal) =>
+        supportTeamDocumentService.read(worker.id!, 'directPayBank', name, signal), []);
+    const unavailableDocumentLabel = documentLoading || (!documentError && supportDocuments === null)
+        ? '확인 중' : documentError ? '조회 실패' : '조회 대상 아님';
 
     useEffect(() => {
         let cancelled = false;
@@ -531,9 +570,11 @@ const WorkerSummaryPage: React.FC = () => {
         [workers, selectedWorkerIds]
     );
     const selectedDocumentWorkers = useMemo(
-        () => selectedWorkers.filter(worker => documentWorkerIds.has(worker.id!)),
-        [selectedWorkers, documentWorkerIds]
+        () => selectedWorkers.filter(worker => documentWorkerIds.has(worker.id!) || supportDocumentById.has(worker.id!)),
+        [selectedWorkers, documentWorkerIds, supportDocumentById]
     );
+    const selectedOwnDocumentWorkers = useMemo(() => selectedWorkers.filter(worker => documentWorkerIds.has(worker.id!)), [selectedWorkers, documentWorkerIds]);
+    const needsSupportRead = selectedDocumentWorkers.some(worker => !documentWorkerIds.has(worker.id!));
     const visibleSelectedCount = filteredWorkers.filter(w => selectedWorkerIds.has(w.id!)).length;
     const allVisibleSelected = filteredWorkers.length > 0 && visibleSelectedCount === filteredWorkers.length;
 
@@ -827,13 +868,15 @@ const WorkerSummaryPage: React.FC = () => {
                             <span>{selectedWorkerIds.size}명 선택됨</span>
                         </HeaderTitle>
                         <ActionButtons className="ws-actions">
-                            <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedDocumentWorkers} disabled={isSendingImage} />
-                            <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedDocumentWorkers} disabled={isSendingImage}
+                            <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedDocumentWorkers} disabled={isSendingImage}
+                                loadImage={needsSupportRead ? readSupportIdentity : undefined} />
+                            <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedOwnDocumentWorkers} disabled={isSendingImage}
                                 onSaved={updates => setWorkers(previous => previous.map(worker => {
                                     const update = updates.find(item => item.workerId === worker.id);
                                     return update ? { ...worker, directPayBankPhotoId: update.directPayBankPhotoId } : worker;
                                 }))} />
-                            <WorkerIdImageShare key={restricted ? 'team-bank' : 'office-bank'} workers={selectedDocumentWorkers} disabled={isSendingImage} kind="bank" />
+                            <WorkerIdImageShare key={restricted ? 'team-bank' : 'office-bank'} workers={selectedDocumentWorkers} disabled={isSendingImage} kind="bank"
+                                loadImage={needsSupportRead ? readSupportBank : undefined} />
                             <ActionButton onClick={handleCopyImage} title="서류 사진 없이 명단만 복사한 뒤 PC 카카오톡에 붙여넣기" className="ws-copy" disabled={selectedWorkerIds.size === 0 || isSendingImage}>
                                 <FontAwesomeIcon icon={faCopy} />
                                 PC 공유
@@ -850,8 +893,15 @@ const WorkerSummaryPage: React.FC = () => {
                         </ActionButtons>
                     </CardHeader>
                     <p className="ws-share-guide">PC·모바일 공유는 명단만 보냅니다. 신분증·직불용 통장사본은 별도 공유 버튼을 이용해 주세요.
-                        {restricted && selectedDocumentWorkers.length < selectedWorkers.length && <span> 서류 공유·등록은 선택한 내 팀 인원 {selectedDocumentWorkers.length}명에게 적용됩니다.</span>}
+                        {restricted && <span> 팀장도 지원 이력과 관계없이 목록의 다른 팀 인원·팀장 서류를 확인하고 공유할 수 있습니다. 사진 등록은 내 팀만 가능합니다.</span>}
+                        {restricted && selectedDocumentWorkers.length < selectedWorkers.length && <span> 선택 인원 중 {selectedWorkers.length - selectedDocumentWorkers.length}명은 서류 공유 대상에서 제외됩니다.</span>}
                     </p>
+                    {restricted && <div className="ws-share-guide flex flex-wrap items-center gap-2">
+                        {documentLoading && <span aria-live="polite">서류 상태 확인 중…</span>}
+                        {documentError && <span role="alert">서류 상태를 불러오지 못했습니다. 잠시 후 다시 확인해 주세요.
+                            <button type="button" onClick={() => setDocumentRevision(value => value + 1)} className="ml-2 underline">서류 다시 확인</button>
+                        </span>}
+                    </div>}
                     {selectedWorkerIds.size === 0 ? (
                         <div className="ws-empty ws-summary-empty">
                             <FontAwesomeIcon icon={faUsers} />
@@ -909,11 +959,13 @@ const WorkerSummaryPage: React.FC = () => {
                                                 </td>
                                                 <td data-label="신분증" className="ws-document-cell px-4 py-3 text-center align-middle" data-html2canvas-ignore>
                                                     <span className="ws-field-label">신분증</span>
-                                                    <DocumentStatus document="신분증" registered={!!w.fileNameSaved?.trim()} canView={documentWorkerIds.has(w.id!)} />
+                                                    <DocumentStatus document="신분증" registered={documentWorkerIds.has(w.id!) ? !!w.fileNameSaved?.trim() : !!supportDocumentById.get(w.id!)?.hasIdentity}
+                                                        canView={documentWorkerIds.has(w.id!) || supportDocumentById.has(w.id!)} unavailableLabel={unavailableDocumentLabel} />
                                                 </td>
                                                 <td data-label="통장사본" className="ws-document-cell px-4 py-3 text-center align-middle" data-html2canvas-ignore>
                                                     <span className="ws-field-label">통장사본<span className="ws-document-subtitle">직불용</span></span>
-                                                    <DocumentStatus document="직불용 통장사본" registered={!!w.directPayBankPhotoId?.trim()} canView={documentWorkerIds.has(w.id!)} />
+                                                    <DocumentStatus document="직불용 통장사본" registered={documentWorkerIds.has(w.id!) ? !!w.directPayBankPhotoId?.trim() : !!supportDocumentById.get(w.id!)?.hasDirectPayBank}
+                                                        canView={documentWorkerIds.has(w.id!) || supportDocumentById.has(w.id!)} unavailableLabel={unavailableDocumentLabel} />
                                                 </td>
                                                 <td data-label="혈액형" className="px-4 py-3 text-slate-600 text-center align-middle">
                                                     <span className="ws-field-label" data-html2canvas-ignore>혈액형</span>

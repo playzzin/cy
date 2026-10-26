@@ -7,9 +7,11 @@ import html2canvas from 'html2canvas';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
 import { readWorkerBankPhoto, saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
+import { supportTeamDocumentService } from '../../services/supportTeamDocumentService';
 
 jest.mock('../../routes/TeamWorkflowGate', () => ({ useRestrictedTeamWorkflow: jest.fn() }));
 jest.mock('../../services/teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
+jest.mock('../../services/supportTeamDocumentService', () => ({ supportTeamDocumentService: { list: jest.fn(), read: jest.fn() } }));
 
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn(), updateWorker: jest.fn() } }));
 jest.mock('../../services/workerBankPhotoService', () => ({
@@ -31,6 +33,7 @@ jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
 
 beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(supportTeamDocumentService.list).mockResolvedValue([]);
     (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
         { id: 'one', name: '가상가', teamId: 'a', teamName: '가상 A팀', status: '재직', fileNameSaved: 'synthetic/identity.png', bankPhotoId: 'basic-photo' },
@@ -40,7 +43,7 @@ beforeEach(() => {
     ]);
 });
 
-test('팀장은 같은 회사의 다른 팀 인원을 섞어 명단을 만들고 서류 권한은 내 팀에 유지한다', async () => {
+test('서버 조회 대상에서 제외된 인원의 서류를 미등록으로 표시하거나 공유하지 않는다', async () => {
     (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
     (getTeamScopedRows as jest.Mock).mockResolvedValue([{
         teams: [{ id: 'a', legacyId: 'legacy-a', name: '가상 A팀' }, { id: 'b', name: '가상 B팀' }],
@@ -64,11 +67,71 @@ test('팀장은 같은 회사의 다른 팀 인원을 섞어 명단을 만들고
     expect(screen.getByRole('status')).toHaveTextContent('2명 선택');
     expect(screen.getByRole('table')).toHaveTextContent('가상가');
     expect(screen.getByRole('table')).toHaveTextContent('다른 팀 인원');
-    expect(screen.getByText(/서류 공유·등록은 선택한 내 팀 인원 1명/)).toBeInTheDocument();
+    expect(screen.getByText(/선택 인원 중 1명은 서류 공유 대상에서 제외/)).toBeInTheDocument();
     const otherTeamRow = screen.getByRole('row', { name: /다른 팀 인원/ });
-    expect(within(otherTeamRow).getByLabelText('신분증 확인 불가')).toBeInTheDocument();
-    expect(within(otherTeamRow).getByLabelText('직불용 통장사본 확인 불가')).toBeInTheDocument();
+    expect(within(otherTeamRow).getByLabelText('신분증 조회 대상 아님')).toBeInTheDocument();
+    expect(within(otherTeamRow).getByLabelText('직불용 통장사본 조회 대상 아님')).toBeInTheDocument();
     expect(within(otherTeamRow).queryByText('미등록')).not.toBeInTheDocument();
+});
+
+test('지원 이력이나 월 조건 없이 다른 팀장의 등록 여부와 신분증·통장 공유를 제공한다', async () => {
+    jest.mocked(useRestrictedTeamWorkflow).mockReturnValue(true);
+    jest.mocked(getTeamScopedRows).mockResolvedValue([{
+        teams: [{ id: 'a', name: '가상 A팀' }],
+        workers: [{ id: 'one', name: '가상가', teamId: 'a', status: '재직' }], documentWorkerIds: ['one'],
+    }]);
+    jest.mocked(supportTeamDocumentService.list).mockResolvedValue([{
+        id: 'guest', name: '가상 방문자', teamId: 'other', teamName: '다른 팀', role: '팀장', relation: 'other',
+        hasIdentity: true, hasBank: false, hasDirectPayBank: true,
+    }]);
+    jest.mocked(supportTeamDocumentService.read).mockResolvedValue(new File(['fixture'], 'guest.png', { type: 'image/png' }));
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:guest') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
+    await openPage();
+    fireEvent.click(await screen.findByRole('checkbox', { name: '가상 방문자 선택' }));
+    const row = screen.getByRole('row', { name: /가상 방문자/ });
+    expect(within(row).getByLabelText('신분증 등록')).toBeInTheDocument();
+    expect(within(row).getByLabelText('직불용 통장사본 등록')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '직불용 통장사본 등록' })).toBeDisabled();
+    for (const [button, kind, preview] of [
+        ['신분증 공유', 'identity', '가상 방문자 신분증 공유 미리보기'],
+        ['직불용 통장사본 공유', 'directPayBank', '가상 방문자 직불용 통장사본 공유 미리보기'],
+    ]) {
+        fireEvent.click(screen.getByRole('button', { name: button }));
+        await screen.findByAltText(preview);
+        expect(supportTeamDocumentService.read).toHaveBeenLastCalledWith('guest', kind, expect.any(String), expect.any(AbortSignal));
+        fireEvent.click(screen.getByRole('button', { name: `${button} 닫기` }));
+    }
+    expect(readWorkerBankPhoto).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('서류 기준월')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '신분증 공유' })).toBeEnabled();
+    expect(supportTeamDocumentService.list).toHaveBeenLastCalledWith(expect.any(AbortSignal));
+});
+
+test('지원팀 서버 조회 실패를 미등록과 구별하고 재시도 후 등록 상태로 갱신한다', async () => {
+    jest.mocked(useRestrictedTeamWorkflow).mockReturnValue(true);
+    jest.mocked(getTeamScopedRows).mockResolvedValue([{
+        teams: [{ id: 'a', name: '가상 A팀' }, { id: 'b', name: '가상 B팀' }],
+        workers: [{ id: 'one', name: '가상가', teamId: 'a' }, { id: 'other', name: '다른 팀 인원', teamId: 'b' }], documentWorkerIds: ['one'],
+    }]);
+    jest.mocked(supportTeamDocumentService.list).mockRejectedValueOnce(new Error('functions/not-found'));
+    await openPage();
+    fireEvent.click(screen.getByRole('checkbox', { name: '다른 팀 인원 선택' }));
+    await screen.findByRole('alert');
+    const row = screen.getByRole('row', { name: /다른 팀 인원/ });
+    expect(within(row).getByLabelText('신분증 조회 실패')).toBeInTheDocument();
+    expect(within(row).queryByText('미등록')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '신분증 공유' })).toBeDisabled();
+    jest.mocked(supportTeamDocumentService.list).mockResolvedValue([{
+        id: 'other', name: '다른 팀 인원', teamId: 'b', teamName: '가상 B팀', role: '', relation: 'other',
+        hasIdentity: true, hasBank: false, hasDirectPayBank: false,
+    }]);
+    fireEvent.click(screen.getByRole('button', { name: '서류 다시 확인' }));
+    await within(row).findByLabelText('신분증 등록');
+    expect(within(row).getByLabelText('직불용 통장사본 미등록')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '신분증 공유' })).toBeEnabled();
 });
 
 test('팀 조회 권한을 확인하지 못하면 전체 작업자 조회로 대체하지 않는다', async () => {
