@@ -13,6 +13,7 @@ type TeamSettlementWorkspaceHeaderProps = {
   issueCount: number;
   saveState: TeamSettlementSaveState;
   loading: boolean;
+  canWrite: boolean;
   canEdit: boolean;
   canRecalculate: boolean;
   onRefresh: () => void;
@@ -48,6 +49,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
   issueCount,
   saveState,
   loading,
+  canWrite,
   canEdit,
   canRecalculate,
   onRefresh,
@@ -66,6 +68,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
           <div>
             <h1 className="text-xl font-black tracking-tight text-slate-950 sm:text-2xl">팀정산 관리</h1>
             <p className="mt-1 text-sm text-slate-600">원천 검증부터 수기 조정, 최종 확정까지 한 흐름으로 처리합니다.</p>
+            {!canWrite && <p className="mt-2 text-sm text-amber-800" role="status">조회 전용입니다. CEO, DEV, 매니저 직책만 수정할 수 있습니다.</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
             {isDirty ? (
@@ -115,7 +118,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
             type="button"
             className={`${baseButtonClassName} border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
             onClick={onRecalculate}
-            disabled={!canRecalculate || loading || isSaving}
+            disabled={!canWrite || !canRecalculate || loading || isSaving}
           >
             재집계
           </button>
@@ -123,7 +126,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
             type="button"
             className={`${baseButtonClassName} bg-blue-600 text-white hover:bg-blue-700`}
             onClick={onSave}
-            disabled={!canEdit || !isDirty || loading || isSaving}
+            disabled={!canWrite || !canEdit || !isDirty || loading || isSaving}
           >
             {isSaving ? '저장 중…' : isDirty ? '변경사항 저장' : '변경사항 없음'}
           </button>
@@ -132,7 +135,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
               type="button"
               className={`${baseButtonClassName} bg-rose-600 text-white hover:bg-rose-700`}
               onClick={onUnconfirm}
-              disabled={loading || isSaving}
+              disabled={!canWrite || loading || isSaving}
             >
               확정 취소
             </button>
@@ -141,7 +144,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
               type="button"
               className={`${baseButtonClassName} bg-emerald-600 text-white hover:bg-emerald-700`}
               onClick={onConfirm}
-              disabled={!canEdit || loading || isSaving}
+              disabled={!canWrite || !canEdit || loading || isSaving}
             >
               저장 후 확정
             </button>
