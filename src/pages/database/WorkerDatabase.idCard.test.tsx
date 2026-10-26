@@ -6,7 +6,7 @@ import WorkerDatabase from './WorkerDatabase';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { geminiService } from '../../services/geminiService';
 
-jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: null }) }));
+jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'identity-test' } }) }));
 jest.mock('../../config/firebase', () => ({ storage: {} }));
 jest.mock('firebase/storage', () => ({ ref: (_storage: unknown, path: string) => ({ fullPath: path }), uploadBytes: jest.fn(), getDownloadURL: jest.fn(), getBlob: jest.fn() }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn(), updateWorker: jest.fn(), addWorker: jest.fn() } }));
@@ -40,6 +40,8 @@ const open = async (name = '검증작업자 신분증 등록') => {
 
 beforeEach(() => {
     jest.clearAllMocks(); localStorage.clear();
+    // Exercise the real column preference while keeping unrelated account editors out of this photo workflow.
+    localStorage.setItem('column_settings_worker_registration_visible_columns_identity-test', JSON.stringify(['name', 'idNumber', 'address']));
     workers = [
         { id: 'worker-a', name: '검증작업자', status: 'active', idNumber: 'synthetic-id', address: '검증용 주소', accountNumber: '001234567890' },
         { id: 'worker-b', name: '다른작업자', status: 'active', fileNameSaved: 'id_cards/existing.png' },
@@ -76,7 +78,7 @@ it('기존 작업자에게 AI 없이 사진만 등록하고 다시 조회해도 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:synthetic-id-photo');
     view.unmount(); render(<WorkerDatabase hideHeader />);
     expect(await screen.findByRole('button', { name: '검증작업자 신분증 교체' })).toBeVisible();
-});
+}, 10000); // Two complete table mounts can exceed Jest's 5s default during the full suite.
 
 it('등록된 신분증은 선택한 작업자의 사진만 교체한다', async () => {
     await open('다른작업자 신분증 교체');
