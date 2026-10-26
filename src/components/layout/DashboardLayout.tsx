@@ -374,6 +374,16 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     );
 
     useEffect(() => {
+        if (!siteData || !positions.length || currentPosition === 'full' || isDevPreviewFrame) return;
+        if (positions.some(position => position.id === currentPosition)) return;
+        // A removed/merged menu can leave a stale manual choice in localStorage.
+        // Let the account's current position resolve again after configuration changes.
+        setUserManuallyChangedPosition(false);
+        localStorage.removeItem(getMenuModeStorageKey('cy_position_manual', currentUser?.uid));
+        autoAppliedPositionForUserRef.current = '';
+    }, [siteData, positions, currentPosition, currentUser?.uid]);
+
+    useEffect(() => {
         let alive = true;
         setCanPreviewUsers(false);
         if (isDevPreviewFrame || !currentUser?.uid || !siteData) return;

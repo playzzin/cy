@@ -7,6 +7,7 @@ const normalizeMenuPositionKey = (value: unknown): string =>
 
 const POSITION_ALIASES: Record<string, string[]> = {
     ceo: ['ceo', '대표', '대표이사', '사장', 'chiefexecutiveofficer'],
+    manager: ['manager', 'manager1', 'manager2', 'manager3', '매니저', '매니저1', '매니저2', '매니저3', '메니저', '메니저1', '메니저2', '메니저3'],
 };
 
 /**
@@ -29,5 +30,6 @@ export const matchesMenuPosition = (
     const directKeys = [idKey, normalizeMenuPositionKey(positionName)].filter(Boolean);
     if (directKeys.includes(profileKey)) return true;
 
-    return (POSITION_ALIASES[idKey] || []).includes(profileKey);
+    const aliasKey = normalizeMenuPositionKey(positionName) === '매니저' ? 'manager' : idKey;
+    return (POSITION_ALIASES[aliasKey] || []).includes(profileKey);
 };

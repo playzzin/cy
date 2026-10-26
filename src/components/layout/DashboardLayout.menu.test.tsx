@@ -29,6 +29,7 @@ jest.mock('../../services/menuServiceV11', () => ({
             listener({
                 admin: { name: 'ERP', menu: [], positionConfig: [
                     { id: 'dev', name: '개발자' },
+                    { id: 'manager', name: '매니저' },
                     { id: 'leader', name: '팀장' },
                     { id: 'custom-foreman', name: '반장' },
                     { id: 'worker', name: '작업자' },
@@ -38,6 +39,7 @@ jest.mock('../../services/menuServiceV11', () => ({
                     { id: 'office', name: '사무실' },
                 ] },
                 pos_dev: { name: 'DEV', menu: [] },
+                pos_manager: { name: '매니저', menu: [] },
                 pos_leader: { name: '팀장', menu: [] },
                 'pos_custom-foreman': { name: '반장', menu: [] },
                 pos_worker: { name: '작업자', menu: [] },
@@ -77,6 +79,16 @@ it('공용 dev 설정이 남고 UID 역조회가 없어도 연결 ID로 팀장 �
     await waitFor(() => expect(screen.getByTestId('menu-mode').textContent).toBe('pos_leader'));
     expect(manpowerService.getWorker).toHaveBeenCalledWith('worker-1');
     expect(localStorage.getItem(getMenuModeStorageKey('cy_current_position', 'leader-account'))).toBe('leader');
+});
+
+it('통합 전 매니저 메뉴를 수동 선택해 둔 계정도 현재 매니저 메뉴로 연결한다', async () => {
+    localStorage.setItem(getMenuModeStorageKey('cy_current_position', 'leader-account'), 'retired-manager-id');
+    localStorage.setItem(getMenuModeStorageKey('cy_position_manual', 'leader-account'), 'true');
+    (manpowerService.getWorker as jest.Mock).mockResolvedValue(null);
+    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'user', position: '매니저' });
+    render(app());
+    await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_manager'));
+    expect(localStorage.getItem(getMenuModeStorageKey('cy_current_position', 'leader-account'))).toBe('manager');
 });
 
 it('로그인 계정이 바뀌면 이전 계정의 수동 dev 선택을 초기화한다', async () => {

@@ -108,6 +108,10 @@ const ROLE_GROUPS: Record<RoleGroup, string[]> = {
     support: [
         'support',
         'support_manager',
+        'manager',
+        'pos_manager',
+        '매니저',
+        '메니저',
         'manager1',
         'pos_manager1',
         '매니저1',

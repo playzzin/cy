@@ -100,6 +100,7 @@ const compactRoleKey = (role: unknown): string =>
 
 const isManagerRoleKey = (key: string, raw: string): boolean => (
     key === 'manager'
+    || key === 'posmanager'
     || /^manager[123]$/.test(key)
     || /^posmanager[123]$/.test(key)
     || raw === '대표'
@@ -108,7 +109,11 @@ const isManagerRoleKey = (key: string, raw: string): boolean => (
 );
 
 const isPrimaryManagerRoleKey = (key: string, raw: string): boolean => (
-    key === 'manager1'
+    key === 'manager'
+    || key === 'posmanager'
+    || key === '매니저'
+    || key === '메니저'
+    || key === 'manager1'
     || key === 'posmanager1'
     || key === '매니저1'
     || key === '메니저1'

@@ -113,6 +113,10 @@ export const ERP_ACCESS_ROLE_GROUPS: Record<ErpAccessRoleGroup, string[]> = {
   support: [
     'support',
     'support_manager',
+    'manager',
+    'pos_manager',
+    '매니저',
+    '메니저',
     'manager1',
     'MANAGER1',
     'pos_manager1',

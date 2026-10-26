@@ -38,7 +38,7 @@ const denied = async (label, operation) => {
 };
 const signIn = async (role) => {
   await signOut(auth);
-  const { user } = await createUserWithEmailAndPassword(auth, `${role}@example.test`, 'emulator-password');
+  const { user } = await createUserWithEmailAndPassword(auth, `${Buffer.from(role).toString('hex')}@example.test`, 'emulator-password');
   await getAdminAuth(adminApp).setCustomUserClaims(user.uid, { role });
   await db.doc(`users/${user.uid}`).set({ role, status: 'active' });
   await user.getIdToken(true);
@@ -87,6 +87,16 @@ assert.deepEqual((await getDoc(analysisResultRef)).data(), { transactions: [] },
 assertions += 1;
 await assert.rejects(() => setDoc(doc(clientDb, 'cardStatementFileAnalyses', 'fixture', 'results', 'forged'), { transactions: [] }), { code: 'permission-denied' });
 assertions += 1;
+
+// The consolidated title must retain support access without allowing admin writes.
+for (const role of ['매니저', 'manager']) {
+  await signIn(role);
+  await setDoc(doc(clientDb, 'accommodations', `manager-${role}`), { name: '합성 숙소' });
+  assert.equal((await getDoc(doc(clientDb, 'accommodations', `manager-${role}`))).exists(), true);
+  await assert.rejects(() => setDoc(doc(clientDb, 'settings', 'manager-denied'), { test: true }), { code: 'permission-denied' });
+  await denied('Managers cannot browse the admin storage root', () => listAll(ref(storage)));
+  assertions += 3;
+}
 
 for (const role of ['admin', 'DEV']) {
   const user = await signIn(role);

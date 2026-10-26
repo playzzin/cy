@@ -2,6 +2,10 @@ import { buildMenuAccessRoles, canAccessMenuRoute, findMenuItemsByRoute } from '
 import type { SiteDataType } from '../types/menu';
 
 describe('menuAccess', () => {
+    it.each(['매니저', 'manager', 'pos_manager'])('preserves support menu access for %s', (role) => {
+        expect(buildMenuAccessRoles(role)).toEqual(expect.arrayContaining(['support_manager', '지원담당']));
+        expect(canAccessMenuRoute(menuData, '/support/accommodation', [role], { siteKey: 'admin' })).toBe(true);
+    });
     const menuData: SiteDataType = {
         admin: {
             name: 'Admin',

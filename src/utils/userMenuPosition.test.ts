@@ -2,11 +2,18 @@ import { resolveUserMenuPositionId } from './userMenuPosition';
 import { PositionItem } from '../types/menu';
 
 const positions: PositionItem[] = [
+    { id: 'manager', name: '매니저', icon: '', color: '' },
     { id: 'dev', name: '개발자', icon: '', color: '' },
     { id: 'leader-custom', name: '팀장', icon: '', color: '' },
     { id: 'full', name: '전체', icon: '', color: '' },
     { id: 'general', name: '일반', icon: '', color: '' },
 ];
+
+it.each(['매니저', '매니저1', '매니저2', '매니저3', 'manager2'])(
+    '통합 전후 직책 %s는 통합 매니저 메뉴에 연결한다', (position) => {
+        expect(resolveUserMenuPositionId(positions, { role: 'user', position })).toBe('manager');
+    }
+);
 
 it('프로필에 dev가 남아 있어도 연결된 작업자의 팀장 직책을 우선한다', () => {
     expect(resolveUserMenuPositionId(positions, { position: 'dev', role: 'admin' }, ['팀장']))

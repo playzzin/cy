@@ -97,6 +97,8 @@ it('does not recreate retired titles or duplicate a saved lowercase ceo when ini
         expect(getDocs).toHaveBeenCalledTimes(1);
         expect(setDoc).toHaveBeenCalled();
         const createdNames = (setDoc as jest.Mock).mock.calls.map(([, data]) => data.name);
+        expect(createdNames.filter(name => name === '매니저')).toHaveLength(1);
+        expect(createdNames).not.toEqual(expect.arrayContaining(['매니저1', '매니저2', '매니저3']));
         expect(createdNames).not.toEqual(expect.arrayContaining(['대표']));
         expect(createdNames).not.toEqual(expect.arrayContaining(['사장']));
         expect(createdNames).not.toEqual(expect.arrayContaining(['CEO']));

@@ -67,9 +67,7 @@ const toSystemRole = (value: unknown): UserRole => {
 
 const DEFAULT_POSITIONS: Omit<Position, 'id'>[] = [
     { name: 'CEO', rank: 1, color: 'purple', icon: 'faCrown', iconKey: 'fa-crown', description: '업체 대표', isDefault: true, systemRole: UserRole.GENERAL },
-    { name: '매니저1', rank: 2, color: 'orange', icon: 'faUserTie', iconKey: 'fa-user-tie', description: '총괄 매니저', isDefault: true, systemRole: UserRole.MANAGER },
-    { name: '매니저2', rank: 2.1, color: 'orange', icon: 'faUserTie', iconKey: 'fa-user-tie', description: '구역 매니저', isDefault: true, systemRole: UserRole.MANAGER },
-    { name: '매니저3', rank: 2.2, color: 'yellow', icon: 'faUserTie', iconKey: 'fa-user-tie', description: '지원 매니저', isDefault: true, systemRole: UserRole.MANAGER },
+    { name: '매니저', legacyId: 'manager', rank: 2, color: 'orange', icon: 'faUserTie', iconKey: 'fa-user-tie', description: '통합 매니저', isDefault: true, systemRole: UserRole.MANAGER },
     { name: '팀장', rank: 3, color: 'blue', icon: 'faUserShield', iconKey: 'fa-user-shield', description: '시공 팀장', isDefault: true, systemRole: UserRole.GENERAL },
     { name: '반장', rank: 4, color: 'green', icon: 'faHardHat', iconKey: 'fa-hard-hat', description: '현장 반장', isDefault: true, systemRole: UserRole.GENERAL },
     { name: '일반', rank: 5, color: 'gray', icon: 'faUser', iconKey: 'fa-user', description: '일반 작업자', isDefault: true, systemRole: UserRole.GENERAL },

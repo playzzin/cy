@@ -75,7 +75,7 @@ export const setDevMenuConfig = (config: SiteDataType): void => {
 
 const initialDevPositions: Position[] = [
   { id: 'dev-pos-admin', name: 'CEO', rank: 1, color: 'purple', iconKey: 'fa-crown', isDefault: true, systemRole: UserRole.ADMIN },
-  { id: 'dev-pos-manager', name: '매니저1', rank: 2, color: 'orange', iconKey: 'fa-user-tie', isDefault: true, systemRole: UserRole.MANAGER },
+  { id: 'dev-pos-manager', name: '매니저', rank: 2, color: 'orange', iconKey: 'fa-user-tie', isDefault: true, systemRole: UserRole.MANAGER },
   { id: 'dev-pos-support', name: '지원담당', rank: 3, color: 'cyan', iconKey: 'fa-hand-holding-dollar', isDefault: true, systemRole: UserRole.MANAGER },
   { id: 'dev-pos-general', name: '일반', rank: 5, color: 'gray', iconKey: 'fa-user', isDefault: true, systemRole: UserRole.GENERAL },
   ...BUSINESS_PARTNER_DEFAULT_POSITION_ROWS.map((position) => ({
@@ -100,7 +100,7 @@ export let devUsers: UserData[] = [
     status: 'active',
     linkedWorkerIds: [],
     linkedOfficeStaffIds: ['dev-office-1'],
-    additionalPositions: ['매니저1', '지원담당'],
+    additionalPositions: ['매니저', '지원담당'],
   },
   {
     uid: 'dev-manager',
@@ -109,7 +109,7 @@ export let devUsers: UserData[] = [
     photoURL: null,
     lastLogin: Timestamp.now(),
     role: 'manager',
-    position: '매니저1',
+    position: '매니저',
     accountType: 'worker',
     status: 'active',
     linkedWorkerIds: ['dev-worker-1'],
@@ -131,7 +131,7 @@ export let devUsers: UserData[] = [
 ];
 
 export let devWorkers: Worker[] = [
-  { id: 'dev-worker-1', uid: 'dev-manager', name: '검증 작업자 A', role: '매니저1', teamName: '검증팀' } as Worker,
+  { id: 'dev-worker-1', uid: 'dev-manager', name: '검증 작업자 A', role: '매니저', teamName: '검증팀' } as Worker,
   { id: 'dev-worker-2', uid: 'dev-user', name: '검증 작업자 B', role: '일반', teamName: '일반팀' } as Worker,
 ];
 
@@ -140,7 +140,7 @@ export let devOfficeStaff: OfficeStaff[] = [
 ];
 
 let devUserPositionMap: Record<string, string[]> = {
-  'dev-admin': ['매니저1', '지원담당'],
+  'dev-admin': ['매니저', '지원담당'],
   'dev-manager': ['지원담당'],
 };
 

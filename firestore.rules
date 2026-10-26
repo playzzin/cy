@@ -107,6 +107,7 @@ service cloud.firestore {
     function supportRoles() {
       return [
         'SUPPORT', 'support', 'support_manager',
+        'manager', 'MANAGER', 'pos_manager', '매니저', '메니저',
         'manager1', 'pos_manager1', 'MANAGER1',
         '매니저1', '메니저1',
         '지원담당', '지원 담당', '자산관리', '자산 관리',
