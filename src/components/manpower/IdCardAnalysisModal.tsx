@@ -157,12 +157,6 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
     };
 
     const runAnalysis = async () => {
-        const apiKey = geminiService.getKey();
-        if (!apiKey) {
-            alert('API 키가 설정되지 않았습니다. /settings/ai 에서 Gemini API 키를 등록하거나 .env.local의 REACT_APP_GOOGLE_API_KEY를 설정해주세요.');
-            return;
-        }
-
         setIsAnalyzing(true);
         const newResults = [...results];
 

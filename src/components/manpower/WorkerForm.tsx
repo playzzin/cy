@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { teamService } from '../../services/teamService';
 import { Worker } from '../../services/manpowerService';
 import { Team } from '../../services/teamService';
@@ -7,9 +7,10 @@ import { Position } from '../../services/positionService';
 import { geminiService } from '../../services/geminiService';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUserTag, faCamera, faCheck, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { faUserTag, faCamera, faCheck, faTimes, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import SingleSelectPopover from '../common/SingleSelectPopover';
+import { prepareIdCardAnalysisImage } from '../../utils/idCardAnalysisImage';
 
 interface WorkerFormProps {
     initialData?: Worker | null;
@@ -107,6 +108,10 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         bloodType: ''
     });
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const aiInputRef = useRef<HTMLInputElement>(null);
+    const analysisRequest = useRef(0);
+    const analysisInFlight = useRef(false);
     const [affiliationType, setAffiliationType] = useState<AffiliationType>(CONSTRUCTION_COMPANY_TYPE);
     const [isNewTeam, setIsNewTeam] = useState(false);
     const [newTeamName, setNewTeamName] = useState('');
@@ -169,6 +174,10 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
     }, [formData.companyId, companies]);
 
     useEffect(() => {
+        analysisRequest.current += 1;
+        analysisInFlight.current = false;
+        setIsAnalyzing(false);
+        setSelectedFile(null);
         if (initialData) {
             setFormData(initialData);
         } else {
@@ -197,6 +206,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
             });
             setSelectedFile(null);
         }
+        return () => { analysisRequest.current += 1; };
     }, [initialData]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -278,35 +288,53 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
     };
 
     const handleAiClick = () => {
-        document.getElementById('aiInput')?.click();
+        aiInputRef.current?.click();
     };
 
     const handleAiFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+        const input = e.currentTarget;
+        const file = input.files?.[0];
+        input.value = '';
+        if (!file || analysisInFlight.current) return;
+        const requestId = ++analysisRequest.current;
+        analysisInFlight.current = true;
+        setIsAnalyzing(true);
 
         try {
-            const result = await geminiService.analyzeImage(file);
+            // Save the same supported, size-bounded photo that was analyzed.
+            const preparedFile = await prepareIdCardAnalysisImage(file);
+            if (requestId !== analysisRequest.current) return;
+            const result = await geminiService.analyzeImage(preparedFile);
+            if (requestId !== analysisRequest.current) return;
             void recordIdentityDocumentLog({ action: 'document_analysis', status: 'success', fileNames: [file.name], fileCount: 1,
                 personNames: [result.name || ''], workerId: initialData?.id });
             setFormData(prev => ({
                 ...prev,
                 name: result.name || prev.name,
                 idNumber: result.idNumber || prev.idNumber,
-                address: result.address || prev.address
+                address: result.address || prev.address,
+                fileNameSaved: preparedFile.name
             }));
-            await showSuccessAlert('인식 성공', '신분증 정보가 인식되었습니다.');
+            setSelectedFile(preparedFile);
+            const missingFields = [!result.name && '이름', !result.idNumber && '주민번호', !result.address && '주소'].filter(Boolean);
+            await showSuccessAlert('인식 성공', missingFields.length
+                ? `읽은 정보를 입력했습니다. ${missingFields.join(', ')}은(는) 인식되지 않아 기존 값을 유지했습니다. 저장 전에 확인해 주세요.`
+                : '신분증 정보를 입력하고 사진을 첨부했습니다. 저장 전에 내용을 확인해 주세요.');
         } catch (error: any) {
-            console.error(error);
+            if (requestId !== analysisRequest.current) return;
             void recordIdentityDocumentLog({ action: 'document_analysis', status: 'failure', fileNames: [file.name], fileCount: 1, reason: 'processing_failed', workerId: initialData?.id });
-            await showErrorAlert('인식 실패', error.message);
+            await showErrorAlert('인식 실패', error?.message || '신분증을 인식하지 못했습니다. 다시 시도해 주세요.');
         } finally {
-            e.target.value = '';
+            if (requestId === analysisRequest.current) {
+                analysisInFlight.current = false;
+                setIsAnalyzing(false);
+            }
         }
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (analysisInFlight.current) return;
 
         let finalData = { ...formData };
 
@@ -404,13 +432,15 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                     <button
                                         type="button"
                                         onClick={handleAiClick}
+                                        disabled={isAnalyzing}
                                         className="absolute right-2 text-brand-500 hover:text-brand-700 p-1"
                                         title="AI 신분증 인식"
                                     >
-                                        <FontAwesomeIcon icon={faCamera} />
+                                        <FontAwesomeIcon icon={isAnalyzing ? faSpinner : faCamera} spin={isAnalyzing} />
                                     </button>
-                                    <input type="file" id="aiInput" accept="image/*" className="hidden" onChange={handleAiFileChange} />
+                                    <input type="file" ref={aiInputRef} aria-label="AI 신분증 사진 선택" accept="image/*" className="hidden" disabled={isAnalyzing} onChange={handleAiFileChange} />
                                 </div>
+                                {isAnalyzing && <p role="status" className="mt-1 text-xs text-brand-600">신분증을 인식하고 있습니다...</p>}
                             </div>
                             <div className="hidden md:flex col-span-3 md:col-span-2 bg-slate-50 items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200 border-t md:border-t-0">
                                 주민번호
@@ -777,12 +807,15 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                             <div className="col-span-3 md:col-span-2 bg-slate-50 flex items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
                                 첨부 파일
                             </div>
-                            <div className="col-span-9 md:col-span-4 p-2 border-r border-slate-200 flex items-center">
+                            <div className="col-span-9 md:col-span-4 p-2 border-r border-slate-200 flex flex-col justify-center">
                                 <input
                                     type="file"
+                                    aria-label="작업자 첨부 파일"
+                                    disabled={isAnalyzing}
                                     onChange={handleFileChange}
                                     className="w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 cursor-pointer"
                                 />
+                                {selectedFile && <p className="mt-1 text-xs text-slate-600 break-all">저장할 사진: {selectedFile.name}</p>}
                             </div>
                             <div className="hidden md:flex col-span-3 md:col-span-2 bg-slate-50 items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200 border-t md:border-t-0">
                                 작업자 색상
@@ -821,6 +854,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                 </button>
                 <button
                     type="submit"
+                    disabled={isAnalyzing}
                     className="px-8 py-2.5 rounded-lg text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 shadow-lg hover:shadow-brand-500/30 transition-all transform hover:-translate-y-0.5 flex items-center gap-2"
                 >
                     <FontAwesomeIcon icon={faCheck} />
