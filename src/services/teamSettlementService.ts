@@ -437,10 +437,9 @@ export const teamSettlementService = {
       }
     }
 
-    // 예전에 이 브라우저에만 저장된 단가는 서버 설정이 없는 달에 한 번 자동 이관한다.
+    // 조회는 쓰기를 수행하지 않는다. 로컬 단가는 명시적인 단가 저장 시 서버에 반영한다.
     const localOverrides = loadLocalSupportRateOverrides(normalizedYearMonth);
     if (hasSupportRateOverrides(localOverrides)) {
-      await this.saveSupportRateOverrides(normalizedYearMonth, localOverrides);
       return localOverrides;
     }
 
@@ -797,7 +796,7 @@ export const teamSettlementService = {
     return rows;
   },
 
-  async getTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementDocument> {
+  async getTeamSettlement(params: { yearMonth: string; teamId: string; persistSnapshot?: boolean }): Promise<TeamSettlementDocument> {
     const team = await buildTeamIdVariants(params.teamId);
     const systemId = buildSystemConfigId({ yearMonth: params.yearMonth, teamId: team.canonicalTeamId });
 
@@ -824,8 +823,8 @@ export const teamSettlementService = {
     });
 
     const merged = mergeAutoAndDraft({ autoDoc, savedDoc });
-    // 최초 조회 또는 구 문서 보완 시 계산 결과를 즉시 저장해 같은 월의 원천을 고정한다.
-    await this.saveTeamSettlement(merged);
+    // 쓰기 권한을 확인한 호출자만 최초 원천을 고정한다. 일반 조회는 저장하지 않는다.
+    if (params.persistSnapshot) await this.saveTeamSettlement(merged);
     return merged;
   },
 
