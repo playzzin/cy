@@ -26,6 +26,7 @@ import BankBookAnalysisModal from '../../components/manpower/BankBookAnalysisMod
 import IdCardAnalysisModal from '../../components/manpower/IdCardAnalysisModal';
 import { recordIdentityDocumentLog } from '../../services/identityDocumentLogService';
 import WorkerModal from '../manpower/WorkerModal';
+import WorkerIdCardRegistrationModal from '../../components/manpower/WorkerIdCardRegistrationModal';
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
@@ -174,6 +175,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     const [isIdCardAnalysisModalOpen, setIsIdCardAnalysisModalOpen] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentWorker, setCurrentWorker] = useState<Worker | null>(null);
+    const [idCardTarget, setIdCardTarget] = useState<Worker | null>(null);
     const [isEditMode, setIsEditMode] = useState(false);
     const [showInactive, setShowInactive] = useState(false); // Default: Hide inactive workers
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
@@ -1894,8 +1896,25 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                 <span>신분증</span>
                                                             </button>
                                                         ) : (
-                                                            <span className="text-xs text-gray-400 p-1.5">미등록</span>
+                                                            <button
+                                                                type="button"
+                                                                aria-label={`${worker.name} 신분증 등록`}
+                                                                title="미등록 · 신분증 사진 등록"
+                                                                disabled={loading || !worker.id}
+                                                                onClick={() => setIdCardTarget(worker)}
+                                                                className="p-1.5 text-xs font-medium border border-dashed border-indigo-300 text-indigo-700 rounded hover:bg-indigo-50 disabled:opacity-50 whitespace-nowrap"
+                                                            >
+                                                                <FontAwesomeIcon icon={faPlus} className="mr-1" />신분증 등록
+                                                            </button>
                                                         )}
+                                                        {worker.fileNameSaved && <button
+                                                            type="button"
+                                                            aria-label={`${worker.name} 신분증 교체`}
+                                                            title="신분증 사진 교체"
+                                                            disabled={loading || !worker.id}
+                                                            onClick={() => setIdCardTarget(worker)}
+                                                            className="p-1.5 text-xs text-slate-600 rounded hover:bg-slate-100 disabled:opacity-50 whitespace-nowrap"
+                                                        >교체</button>}
                                                         <button
                                                             onClick={() => {
                                                                 setCurrentWorker(worker);
@@ -1926,6 +1945,11 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             </div >
 
             {/* Modals */}
+            {idCardTarget && <WorkerIdCardRegistrationModal
+                worker={idCardTarget}
+                onSaved={storagePath => setWorkers(previous => previous.map(worker => worker.id === idCardTarget.id ? { ...worker, fileNameSaved: storagePath } : worker))}
+                onClose={() => setIdCardTarget(null)}
+            />}
             {isModalOpen && (
                 <WorkerModal
                     isOpen={isModalOpen}
