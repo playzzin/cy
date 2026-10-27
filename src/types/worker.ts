@@ -12,5 +12,6 @@ export interface Worker {
     bankAccount?: string;
     bankName?: string;
     joinDate?: string;
+    retirementDate?: string;
     isActive?: boolean;
 }

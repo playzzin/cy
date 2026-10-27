@@ -2,11 +2,22 @@ import { strict as assert } from 'assert';
 import { test } from 'node:test';
 import * as admin from 'firebase-admin';
 import { readTeamScopedData } from './teamScopedRead';
-import { saveTeamResourceStatus } from './teamResourceStatus';
+import { saveTeamResourceStatus, workerEmploymentPatch } from './teamResourceStatus';
 
 const context = (uid = 'status-leader') => ({ auth: { uid, token: { role: 'admin' } } } as any);
 const denied = (reason: any) => reason.code === 'permission-denied';
 const request = (changes: any = {}) => ({ kind: 'site', id: 'status-site', status: 'completed', expectedStatus: 'active', expectedIsActive: null, ...changes });
+
+test('재직 기간을 검증하고 퇴사일을 저장하며 취소 시 해제한다', () => {
+    const before = { status: '재직', joinDate: '2026-01-01' };
+    assert.equal(workerEmploymentPatch(before, { status: '퇴사', retirementDate: '2026-09-30' }).retirementDate, '2026-09-30');
+    assert.equal(workerEmploymentPatch({ ...before, retirementDate: '' }, { status: '퇴사' }, '2026-10-28').retirementDate, '2026-10-28');
+    assert.equal(workerEmploymentPatch({ status: '퇴사' }, { status: '퇴사' }, '2026-10-28').retirementDate, '');
+    assert.equal(workerEmploymentPatch({ ...before, status: '퇴사', retirementDate: '2026-09-30' }, { status: '재직' }).retirementDate, '');
+    for (const retirementDate of ['2025-12-31', '2026-02-30', '', 'invalid']) {
+        assert.throws(() => workerEmploymentPatch(before, { status: '퇴사', retirementDate }), (error: any) => error.code === 'invalid-argument');
+    }
+});
 
 test('비로그인·미리보기·잘못된 대상과 상태 요청을 쓰기 전에 차단한다', async () => {
     await assert.rejects(saveTeamResourceStatus(request(), {} as any), (reason: any) => reason.code === 'unauthenticated');
@@ -48,10 +59,13 @@ test('팀장 종료·퇴사·복귀, 범위 제한, 동시 수정 충돌과 감�
         await assert.rejects(call(request()), stale);
         await call(request({ status: 'active', expectedStatus: 'completed' }));
         assert.equal((await db.doc('sites/status-site').get()).data()?.status, 'active');
-        const workerRequest = request({ kind: 'worker', id: 'status-member', status: '퇴사', expectedStatus: '재직', expectedIsActive: true });
+        const workerRequest = request({ kind: 'worker', id: 'status-member', status: '퇴사', expectedStatus: '재직', expectedIsActive: true,
+            joinDate: '2026-01-01', retirementDate: '2026-09-30' });
         await call(workerRequest);
         let member = (await db.doc('workers/status-member').get()).data()!;
         assert.equal(member.status, '퇴사'); assert.equal(member.isActive, false); assert.equal(member.teamId, 'status-team'); assert.equal(member.unitPrice, 123); assert.equal(member.siteId, 'status-site');
+        assert.equal(member.joinDate, '2026-01-01'); assert.equal(member.retirementDate, '2026-09-30');
+        await assert.rejects(call({ ...workerRequest, expectedStatus: '퇴사', expectedIsActive: false, expectedRetirementDate: '2026-08-31' }), stale);
         const workers = await readTeamScopedData({ collection: 'workers' }, context());
         assert.equal(workers.rows.find((row: any) => row.id === 'status-member')?.status, '퇴사');
         await call({ ...workerRequest, status: '재직', expectedStatus: '퇴사', expectedIsActive: false });

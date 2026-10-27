@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const isPhoneLayout = () => window.matchMedia('(max-width: 768px)').matches;
 
@@ -26,16 +26,42 @@ export function useMobileShellScroll(pathname: string, hash: string, navigationT
     }, [pathname, hash, navigationType, mobile]);
 }
 
-export function useMobileDetailNavigation<View extends string>(listView: View) {
+export function useMobileDetailNavigation<View extends string>(listView: View, browserBack = false) {
     const [view, setView] = useState<View>(listView);
     const workspaceRef = useRef<HTMLElement>(null);
     const previousView = useRef(view);
     const listPosition = useRef(0);
+    const historyKey = useRef(`detail-${Math.random().toString(36).slice(2)}`);
+    const returnPending = useRef(false);
+    const detailView = useRef<View>(listView);
+    const pageUrl = useRef(window.location.href);
+    useEffect(() => {
+        if (!browserBack) return;
+        const onPop = () => {
+            returnPending.current = false;
+            if (window.location.href !== pageUrl.current) return;
+            setView(window.history.state?.mobileDetailKey === historyKey.current ? detailView.current : listView);
+        };
+        window.addEventListener('popstate', onPop);
+        return () => window.removeEventListener('popstate', onPop);
+    }, [browserBack, listView]);
     const changeView = useCallback((next: View) => {
+        if (returnPending.current) return;
         // Capture before the list unmounts: a shorter detail can clamp scrollY.
-        if (view === listView && next !== listView && isPhoneLayout()) listPosition.current = window.scrollY;
+        if (view === listView && next !== listView && isPhoneLayout()) {
+            listPosition.current = window.scrollY;
+            if (browserBack) {
+                detailView.current = next;
+                pageUrl.current = window.location.href;
+                const state = window.history.state;
+                window.history.pushState({ ...state, ...(typeof state?.idx === 'number' ? { idx: state.idx + 1 } : {}), mobileDetailKey: historyKey.current }, '', window.location.href);
+            }
+        } else if (next === listView && browserBack && window.history.state?.mobileDetailKey === historyKey.current) {
+            returnPending.current = true;
+            window.history.back();
+        }
         setView(next);
-    }, [view, listView]);
+    }, [view, listView, browserBack]);
     useLayoutEffect(() => {
         const previous = previousView.current;
         previousView.current = view;

@@ -22,25 +22,13 @@ test('같은 날짜의 모든 현장과 금액을 상세에서 확인하고 닫�
     await waitFor(() => expect(day).toHaveFocus());
 });
 
-test('목록을 펼쳐 현장별 공수를 보고 별도 상세에서 단가를 확인한 뒤 포커스가 돌아온다', async () => {
+test('작업자 근무내역은 달력으로 통합하고 날짜에서 모든 현장의 상세를 확인한다', () => {
     render(<WorkerWorkHistory {...props} />);
-    fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
-    const row = screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false });
-    expect(within(row).getByText('150,000원')).toBeInTheDocument();
-    expect(screen.queryByText('단가')).not.toBeInTheDocument();
-    fireEvent.click(row);
-    expect(row).toHaveAttribute('aria-expanded', 'true');
-    const sites = screen.getByRole('list', { name: '2026-10-01 현장별 근무내역' });
-    expect(within(sites).getAllByRole('listitem')).toHaveLength(2);
-    expect(within(sites).getByText('0.5공수')).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.queryByText('단가')).not.toBeInTheDocument();
-    const detail = screen.getByRole('button', { name: '2026-10-01 근무 상세' });
-    detail.focus(); fireEvent.click(detail);
+    expect(screen.queryByRole('tab', { name: '목록보기' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '근무내역 달력' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역 1.5공수' }));
     expect(within(screen.getByRole('dialog')).getAllByText('단가')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: '상세 닫기' }));
-    await waitFor(() => expect(detail).toHaveFocus());
-    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(within(screen.getByRole('dialog')).getByText('0.5공수')).toBeInTheDocument();
 });
 
 test('빈 날짜와 월 변경은 이전 상세를 보여주지 않는다', () => {

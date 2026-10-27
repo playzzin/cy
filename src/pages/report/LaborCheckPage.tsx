@@ -10,6 +10,7 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
 import { resolvePayType, resolveWorkerPayType } from '../../utils/payType';
+import { isEmployedInMonth } from '../../utils/workerEmploymentPeriod';
 import {
     canOverrideInactiveLaborCheckCell,
     getFirstOutputDateByWorker,
@@ -36,6 +37,9 @@ type CheckWorker = {
     payStatus: WorkerPayStatus;
     workType: string;
     retired: boolean;
+    employedInMonth?: boolean;
+    joinDate?: string;
+    retirementDate?: string;
 };
 
 type ReplacementPicker = {
@@ -165,11 +169,11 @@ const LaborCheckPage: React.FC = () => {
         : formatMonth(new Date());
     const [selectedMonth, setSelectedMonth] = useState(initialMonth);
     const [selectedTeamId, setSelectedTeamId] = useState(searchParams.get('teamId') || '');
-    const [showOnlyWorkersWithOutput, setShowOnlyWorkersWithOutput] = useState(true);
+    const [showOnlyWorkersWithOutput, setShowOnlyWorkersWithOutput] = useState(false);
     const [inactiveCellEditingEnabled, setInactiveCellEditingEnabled] = useState(false);
     const [selectedWorkerKeys, setSelectedWorkerKeys] = useState<Set<string>>(new Set());
     const [payStatusFilter, setPayStatusFilter] = useState<'all' | 'direct'>('all');
-    // 현재 퇴사 상태여도 조회 월의 출역 이력은 기본 표시한다. 출역 없는 달은 기존 필터가 제외한다.
+    // 출역이 없어도 조회월이 재직 기간에 포함되면 명단에 남긴다.
     const [showRetired, setShowRetired] = useState(true);
     const [isTwoLineView, setIsTwoLineView] = useState(false);
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -344,6 +348,9 @@ const LaborCheckPage: React.FC = () => {
                 payStatus: getPayStatus(worker),
                 workType: resolveWorkerPayType(worker),
                 retired: isRetired(worker),
+                joinDate: worker.joinDate || historicalFirstOutputDates.get(workerKey),
+                retirementDate: worker.retirementDate || undefined,
+                employedInMonth: isEmployedInMonth(worker, selectedMonth, historicalFirstOutputDates.get(workerKey)),
             });
         });
 
@@ -374,7 +381,10 @@ const LaborCheckPage: React.FC = () => {
             if (first.retired !== second.retired) return first.retired ? 1 : -1;
             return compareKoreanText(first.workerKey, second.workerKey);
         });
-    }, [getTeamColor, reportRows, teamMatches, workers]);
+    }, [getTeamColor, reportRows, teamMatches, workers, historicalFirstOutputDates, selectedMonth]);
+
+    const missingEmploymentDates = workers.filter(worker => teamMatches(worker.teamId, worker.teamName)
+        && (!worker.joinDate || (isRetired(worker) && !worker.retirementDate))).length;
 
     const workerKeysWithOutput = useMemo(() => new Set(
         reportRows
@@ -467,8 +477,9 @@ const LaborCheckPage: React.FC = () => {
 
     const saveReportedSite = useCallback(async (worker: CheckWorker, date: string, selectedSiteName?: string): Promise<boolean> => {
         const { status, hasInvoice } = getCell(worker, date);
-        const firstOutputDate = firstOutputDateByWorker.get(worker.workerKey);
-        const outsideOutputPeriod = !firstOutputDate || isBeforeFirstOutputDate(date, firstOutputDate);
+        const firstOutputDate = worker.joinDate || firstOutputDateByWorker.get(worker.workerKey);
+        const outsideOutputPeriod = !firstOutputDate || isBeforeFirstOutputDate(date, firstOutputDate)
+            || Boolean(worker.retirementDate && date > worker.retirementDate);
         const canOverrideInactiveCell = canOverrideInactiveLaborCheckCell(
             inactiveCellEditingEnabled,
             selectedWorkerKeys,
@@ -553,8 +564,9 @@ const LaborCheckPage: React.FC = () => {
         const replacementSiteName = Object.prototype.hasOwnProperty.call(reportSiteDrafts, recordKey)
             ? reportSiteDrafts[recordKey]
             : savedRecord?.reportedSiteName || '';
-        const firstOutputDate = firstOutputDateByWorker.get(worker.workerKey);
-        const outsideOutputPeriod = !firstOutputDate || isBeforeFirstOutputDate(ymd, firstOutputDate);
+        const firstOutputDate = worker.joinDate || firstOutputDateByWorker.get(worker.workerKey);
+        const outsideOutputPeriod = status === 'empty' && (!firstOutputDate || isBeforeFirstOutputDate(ymd, firstOutputDate)
+            || Boolean(worker.retirementDate && ymd > worker.retirementDate));
         const canOverrideInactiveCell = canOverrideInactiveLaborCheckCell(
             inactiveCellEditingEnabled,
             selectedWorkerKeys,
@@ -580,12 +592,12 @@ const LaborCheckPage: React.FC = () => {
                 title={outsideOutputPeriod
                     ? canOverrideInactiveCell
                         ? '선택한 작업자 · 비활성 칸 입력 가능'
-                        : firstOutputDate ? '첫 출역일 이전 · 신고 대상 아님' : '출역 이력 없음 · 신고 대상 아님'
+                        : '재직 기간 밖 또는 입사일 미확인 · 신고 대상 아님'
                     : undefined}
             >
                 <div className="flex h-full min-h-[57px] flex-col justify-center px-1">
                     {outsideOutputPeriod && !canOverrideInactiveCell && (
-                        <span className="sr-only">{firstOutputDate ? '첫 출역일 이전' : '출역 이력 없음'}</span>
+                        <span className="sr-only">재직 기간 밖 또는 입사일 미확인</span>
                     )}
                     {cellSiteNames.length > 0 && !hasInvoice && (
                         <span className={`line-clamp-2 break-keep text-center text-[10px] font-bold leading-3 ${
@@ -728,7 +740,7 @@ const LaborCheckPage: React.FC = () => {
                                     : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
                             }`}
                         >
-                            {showRetired ? '퇴사자 숨기기' : '출역 퇴사자 보기'}
+                            {showRetired ? '퇴사자 숨기기' : '퇴사자 보기'}
                         </button>
                         <button
                             type="button"
@@ -776,6 +788,9 @@ const LaborCheckPage: React.FC = () => {
                     </div>
                 )}
 
+                {!isLoading && missingEmploymentDates > 0 && <p role="status" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    입·퇴사일 확인이 필요한 작업자가 {missingEmploymentDates}명 있습니다. 작업자 등록·수정에서 재직 기간을 입력하면 출역 없는 달에도 표시됩니다. 미등록 날짜는 임의로 추정하지 않습니다.
+                </p>}
                 <section className="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm">
                     {isLoading ? (
                         <div className="flex h-64 flex-col items-center justify-center gap-3 text-slate-500">
@@ -788,7 +803,7 @@ const LaborCheckPage: React.FC = () => {
                         </div>
                     ) : visibleWorkers.length === 0 ? (
                         <div className="flex h-64 items-center justify-center px-4 text-center text-sm font-bold text-slate-500">
-                            선택한 달의 출역 기록이 없습니다.
+                            선택한 조건에 해당하는 재직·출역 인원이 없습니다.
                         </div>
                     ) : (
                         <div
