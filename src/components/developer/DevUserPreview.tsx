@@ -124,7 +124,7 @@ export default function DevUserPreview({ actorUid, positionId, path, positions, 
             <div className="dev-user-preview__actions">
                 <button type="button" ref={pickerButton} className="dev-user-preview__mode-button" title="직책모드" aria-label="직책모드 열기" aria-expanded={pickerOpen} aria-controls="dev-preview-picker"
                     onClick={() => pickerOpen ? closePicker() : openPicker()}><FontAwesomeIcon icon={faIdBadge} /></button>
-                <button type="button" onClick={onExit}>DEV로 복귀</button>
+                <button type="button" onClick={onExit}>내 화면으로 복귀</button>
             </div>
         </header>
         {pickerOpen && <DevPreviewAccountPicker accounts={accounts} positions={positions} positionId={positionId} uid={uid} recent={recent}

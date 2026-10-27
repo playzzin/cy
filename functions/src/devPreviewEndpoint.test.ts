@@ -46,6 +46,11 @@ function previewHarness(t: TestContext, scenario: Scenario = {}) {
 }
 
 for (const action of ['list', 'read']) {
+    test(`valid CEO preview forwards document ${action}`, async t => {
+        const fixture = previewHarness(t, { actor: { status: 'active', position: 'CEO' }, claims: { previewDevRole: 'CEO' } });
+        assert.equal(await fixture.invoke(action), 'forwarded');
+        assert.equal(fixture.endpoint.mock.callCount(), 1);
+    });
     test(`valid DEV preview forwards document ${action} after checking current memberships`, async t => {
         const fixture = previewHarness(t);
         assert.equal(await fixture.invoke(action), 'forwarded');
@@ -60,7 +65,7 @@ for (const action of ['list', 'read']) {
 
 for (const action of ['save', 'unknown']) {
     test(`document preview rejects ${action} without invoking the handler`, async t => {
-        const fixture = previewHarness(t);
+        const fixture = previewHarness(t, { actor: { status: 'active', position: 'CEO' }, claims: { previewDevRole: 'CEO' } });
         await fixture.invoke(action);
         assert.equal(fixture.endpoint.mock.callCount(), 0);
         assert.equal(fixture.getAll.mock.callCount(), 0);
@@ -72,8 +77,10 @@ for (const action of ['save', 'unknown']) {
 const revokedScenarios: Array<[string, Scenario]> = [
     ['invalid signature', { invalidSignature: true }],
     ['expired claims', { claims: { previewExpiresAt: Math.floor(Date.now() / 1000) - 60 } }],
-    ['non-DEV actor', { actor: { status: 'active', position: '팀장' } }],
+    ['non-preview actor', { actor: { status: 'active', position: '팀장' } }],
     ['inactive DEV actor', { actor: { status: 'suspended', position: 'DEV' } }],
+    ['inactive CEO actor', { actor: { status: 'suspended', position: 'CEO' }, claims: { previewDevRole: 'CEO' } }],
+    ['revoked CEO membership', { actor: { status: 'active', position: '팀장' }, claims: { previewDevRole: 'CEO' } }],
     ['inactive target', { target: { status: 'suspended', position: '팀장' } }],
 ];
 for (const [name, scenario] of revokedScenarios) {

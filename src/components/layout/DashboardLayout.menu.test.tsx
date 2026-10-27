@@ -18,8 +18,8 @@ jest.mock('../../config/firebase', () => ({ db: {} }));
 jest.mock('firebase/firestore', () => ({ doc: jest.fn(), onSnapshot: jest.fn(() => jest.fn()) }));
 jest.mock('../../constants/messages', () => ({ MessageManager: { setContext: jest.fn() } }));
 jest.mock('../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
-jest.mock('./Header', () => ({ toggleSidebar, canPreviewUsers, changePosition }: any) => <header><button onClick={toggleSidebar}>메뉴 토글</button>{canPreviewUsers && <button onClick={() => changePosition('leader')}>상단 팀장 시점</button>}</header>);
-jest.mock('../developer/DevUserPreview', () => ({ positionId, onExit }: any) => <section aria-label="사용자 시점 확인"><span>{positionId}</span><button onClick={onExit}>DEV로 복귀</button></section>);
+jest.mock('./Header', () => ({ toggleSidebar, canPreviewUsers, changePosition }: any) => <header><button onClick={toggleSidebar}>메뉴 토글</button>{canPreviewUsers && <><button onClick={() => changePosition('leader')}>상단 팀장 시점</button><button onClick={() => changePosition('ceo')}>상단 CEO 선택</button></>}</header>);
+jest.mock('../developer/DevUserPreview', () => ({ positionId, onExit }: any) => <section aria-label="사용자 시점 확인"><span>{positionId}</span><button onClick={onExit}>내 화면으로 복귀</button></section>);
 jest.mock('./Sidebar', () => ({ side, closeAll }: any) => <nav data-testid="sidebar" data-side={side}><button onClick={closeAll}>메뉴 닫기</button></nav>);
 jest.mock('./LayoutBottomPanel', () => () => null);
 jest.mock('./AdminPanel', () => () => null);
@@ -29,6 +29,7 @@ jest.mock('../../services/menuServiceV11', () => ({
             listener({
                 admin: { name: 'ERP', menu: [], positionConfig: [
                     { id: 'dev', name: '개발자' },
+                    { id: 'ceo', name: 'CEO' },
                     { id: 'manager', name: '매니저' },
                     { id: 'leader', name: '팀장' },
                     { id: 'custom-foreman', name: '반장' },
@@ -39,6 +40,7 @@ jest.mock('../../services/menuServiceV11', () => ({
                     { id: 'office', name: '사무실' },
                 ] },
                 pos_dev: { name: 'DEV', menu: [] },
+                pos_ceo: { name: 'CEO', menu: [] },
                 pos_manager: { name: '매니저', menu: [] },
                 pos_leader: { name: '팀장', menu: [] },
                 'pos_custom-foreman': { name: '반장', menu: [] },
@@ -102,17 +104,34 @@ it('로그인 계정이 바뀌면 이전 계정의 수동 dev 선택을 초기�
     await waitFor(() => expect(screen.getByTestId('menu-mode').textContent).toBe('pos_leader'));
 });
 
-it('DEV 상단 직책모드에서 사용자 화면만 표시하고 복귀하면 기존 DEV 메뉴를 복원한다', async () => {
-    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'admin', position: 'DEV', status: 'active' });
+it.each(['DEV', 'CEO'])('%s 상단 직책모드에서 사용자 화면만 표시하고 복귀하면 기존 메뉴를 복원한다', async position => {
+    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'admin', position, status: 'active' });
     (manpowerService.getWorker as jest.Mock).mockResolvedValue(null);
     render(app());
     fireEvent.click(await screen.findByRole('button', { name: '상단 팀장 시점' }));
     expect(screen.getByRole('region', { name: '사용자 시점 확인' })).toHaveTextContent('leader');
     expect(screen.queryByTestId('sidebar')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '메뉴 토글' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'DEV로 복귀' }));
-    await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_dev'));
+    fireEvent.click(screen.getByRole('button', { name: '내 화면으로 복귀' }));
+    await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_' + position.toLowerCase()));
     expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+});
+
+it('CEO가 자신의 직책을 선택하면 미리보기를 열지 않는다', async () => {
+    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'user', position: 'CEO', status: 'active' });
+    (manpowerService.getWorker as jest.Mock).mockResolvedValue(null);
+    render(app());
+    await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_ceo'));
+    fireEvent.click(await screen.findByRole('button', { name: '상단 CEO 선택' }));
+    expect(screen.queryByRole('region', { name: '사용자 시점 확인' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+});
+
+it.each([{ status: 'active', role: 'admin', position: '팀장' }, { status: 'suspended', role: 'admin', position: 'CEO' }])('일반 관리자나 비활성 CEO에는 미리보기 진입을 제공하지 않는다', async profile => {
+    (userService.getUser as jest.Mock).mockResolvedValue(profile);
+    render(app());
+    await waitFor(() => expect(userService.getUser).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: '상단 팀장 시점' })).not.toBeInTheDocument();
 });
 
 it.each([

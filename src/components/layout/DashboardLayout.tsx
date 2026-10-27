@@ -29,6 +29,7 @@ import {
 } from '../../utils/themeMode';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
+import { canPreviewUsers as hasUserPreviewAccess } from '../../utils/userPreviewAccess';
 import { getPositionMenuView, isDevPositionSite } from '../../utils/linkedPositionMenus';
 import { getSidebarSide } from '../../utils/sidebarSide';
 import { getDevPreviewSession, isDevPreviewFrame } from '../../utils/devPreviewRuntime';
@@ -388,9 +389,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         setCanPreviewUsers(false);
         if (isDevPreviewFrame || !currentUser?.uid || !siteData) return;
         void import('../../services/userService').then(({ userService }) => userService.getUser(currentUser.uid, true)).then(profile => {
-            const roles = [profile?.role, profile?.position, ...(profile?.additionalPositions || [])].map(role => String(role || '').trim().toLowerCase().replace(/^pos_/, ''));
-            const allowed = profile?.status === 'active' && (roles.some(role => ['dev', 'developer', '개발', '개발자'].includes(role))
-                || positions.some(position => isDevPositionSite(siteData, getPositionSiteKey(position.id)) && roles.includes(position.id.toLowerCase().replace(/^pos_/, ''))));
+            const allowed = hasUserPreviewAccess(profile, positions);
             if (alive) { setCanPreviewUsers(Boolean(allowed)); if (!allowed) setUserPreview(null); }
         }).catch(() => { if (alive) { setCanPreviewUsers(false); setUserPreview(null); } });
         return () => { alive = false; };
@@ -616,7 +615,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     };
 
     const selectPositionMode = (positionId: string) => {
-        if (canPreviewUsers && positionId !== 'full' && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) {
+        if (canPreviewUsers && positionId !== 'full' && positionId !== currentPosition && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) {
             openUserPreview(positionId);
         } else {
             changePosition(positionId);
@@ -701,7 +700,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         );
     }
 
-    // The selected user owns the viewport without an enclosing DEV shell.
+    // The selected user owns the viewport without the actor's enclosing shell.
     if (userPreview && canPreviewUsers && currentUser) {
         return <SiteModeProvider {...siteModeValue}>
             <DevUserPreview key={currentUser.uid} actorUid={currentUser.uid} positionId={userPreview.positionId} path={userPreview.path}

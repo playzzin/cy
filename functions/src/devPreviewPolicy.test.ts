@@ -1,13 +1,20 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { assertPreviewClaims, isPreviewIdentity, permitsPreviewCall, previewDevRole } from './devPreviewPolicy';
+import { assertPreviewClaims, isPreviewIdentity, permitsPreviewCall, previewActorRole } from './devPreviewPolicy';
 
-test('only active DEV memberships, including configured position IDs, enable preview', () => {
-    const positions = [{ id: 'custom-dev', name: 'DEV' }, { id: 'teamlead', name: '팀장' }];
-    assert.equal(previewDevRole({ status: 'active', position: 'pos_custom-dev' }, positions), 'pos_custom-dev');
-    assert.equal(previewDevRole({ status: 'active', role: 'admin', position: '팀장' }, positions), null);
-    assert.equal(previewDevRole({ status: 'suspended', position: 'DEV' }, positions), null);
-    assert.equal(previewDevRole({ status: 'active', additionalPositions: ['DEV'] }), 'DEV');
+test('only active DEV and CEO memberships, including configured position IDs, enable preview', () => {
+    const positions = [{ id: 'custom-dev', name: 'DEV' }, { id: 'custom-ceo', name: 'CEO' }, { id: 'teamlead', name: '팀장' }];
+    for (const position of ['DEV', 'developer', '개발자', 'pos_custom-dev', 'CEO', ' ceo ', 'pos_ceo', '대표', '대표이사', '사장', 'pos_custom-ceo']) {
+        assert.equal(previewActorRole({ status: 'active', position }, positions), position);
+        assert.equal(previewActorRole({ status: 'suspended', position }, positions), null);
+    }
+    for (const field of ['role', 'position', 'systemRole', 'roles', 'additionalPositions']) {
+        assert.equal(previewActorRole({ status: 'active', [field]: ['roles', 'additionalPositions'].includes(field) ? ['CEO'] : 'CEO' }), 'CEO');
+    }
+    assert.equal(previewActorRole({ status: 'active', role: 'admin', position: '팀장' }, positions), null);
+    assert.equal(previewActorRole({ status: 'active', position: 'unknown' }, positions), null);
+    assert.equal(previewActorRole({ position: 'CEO' }, positions), null);
+    assert.equal(previewActorRole(null), null);
 });
 test('preview callable policy rejects every mutation and unknown operation', () => {
     assert.equal(permitsPreviewCall('getTeamScopedData', {}), true);
