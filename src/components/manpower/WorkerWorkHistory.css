@@ -94,7 +94,75 @@
 .worker-history__members li > span { min-width: 0; overflow-wrap: anywhere; }
 .worker-history__members li > strong { flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 600; color: #334155; }
 .worker-history__detail > .worker-history__badge { margin-bottom: 6px; }
+.work-day-dialog { width: min(840px, calc(100vw - 40px)); }
+.work-day-dialog .cy-detail-dialog__header { padding: 20px 24px; align-items: center; }
+.work-day-dialog .cy-detail-dialog__header h2 { font-size: 21px; letter-spacing: -0.6px; }
+.work-day-dialog .cy-detail-dialog__header p { line-height: 1.5; overflow-wrap: anywhere; }
+.work-day-dialog .cy-detail-dialog__body { padding: 20px 24px 24px; background: #f5f7fb; }
+.work-day, .work-day * { box-sizing: border-box; }
+.work-day { min-width: 0; }
+.work-day__summary { overflow: hidden; border: 1px solid #dbe3ee; border-radius: 14px; background: #fff; }
+.work-day__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 20px 0; }
+.work-day__stats > div { min-width: 0; padding: 0 20px; }
+.work-day__stats > div + div { border-left: 1px solid #e2e8f0; }
+.work-day__stats dt { margin-bottom: 7px; color: #64748b; font-size: 12px; font-weight: 600; }
+.work-day__stats dd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; margin: 0; color: #0f172a; font-size: 28px; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.work-day__stats > div:first-child dd { color: #1d4ed8; }
+.work-day__stats dd small { color: #64748b; font-size: 12px; font-weight: 500; }
+.work-day__wage-total { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 12px 20px; border-top: 1px solid #e2e8f0; background: #f8fafc; font-size: 12px; color: #64748b; }
+.work-day__wage-total strong { color: #334155; font-size: 15px; font-variant-numeric: tabular-nums; }
+.work-day__section-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 24px 0 12px; }
+.work-day__section-title h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: #334155; font-size: 14px; font-weight: 800; }
+.work-day__section-title > span { color: #64748b; font-size: 12px; }
+.work-day__groups { display: grid; gap: 18px; }
+.work-day__team { min-width: 0; overflow: hidden; border: 1px solid var(--work-team-border); border-radius: 14px; background: #fff; }
+.work-day__team-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; border-left: 5px solid var(--work-team-color); border-bottom: 1px solid var(--work-team-border); background: var(--work-team-tint); }
+.work-day__team-identity { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.work-day__team-identity > div { min-width: 0; }
+.work-day__team-dot { flex-shrink: 0; width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: var(--work-team-color); box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.15); }
+.work-day__team-identity h3 { margin: 0; color: var(--work-team-text); font-size: 16px; font-weight: 800; line-height: 1.4; overflow-wrap: anywhere; }
+.work-day__team-identity p { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 6px 0 0; color: #475569; font-size: 11px; }
+.work-day__team-badge { padding: 2px 6px; border: 1px solid var(--work-team-border); border-radius: 5px; color: var(--work-team-text); background: #fff; font-weight: 600; }
+.work-day__team-total { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.work-day__team-total > span { color: #475569; font-size: 10px; }
+.work-day__team-total strong { color: var(--work-team-text); font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.work-day__team-total small { margin-left: 4px; font-size: 11px; font-weight: 500; }
+.work-day__workers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; padding: 14px; }
+.work-day__worker { min-width: 0; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+.work-day__worker-header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.work-day__avatar { flex-shrink: 0; display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--work-team-border); border-radius: 10px; background: var(--work-team-tint); color: var(--work-team-text); font-size: 13px; font-weight: 700; }
+.work-day__worker-header h4 { min-width: 0; margin: 0; color: #0f172a; font-size: 14px; font-weight: 800; line-height: 1.4; overflow-wrap: anywhere; }
+.work-day__man-day { flex-shrink: 0; margin-left: auto; padding: 5px 8px; border-radius: 6px; background: var(--work-team-tint); color: var(--work-team-text); font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.work-day__man-day small { margin-left: 3px; font-size: 10px; font-weight: 500; }
+.work-day__pay { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 12px; padding: 10px; border-radius: 7px; background: #f8fafc; }
+.work-day__pay dt { margin-bottom: 5px; font-size: 10px; color: #64748b; }
+.work-day__pay dd { margin: 0; color: #334155; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.work-day__pay > div:last-child dd { color: #0f172a; font-weight: 800; }
+.work-day__meta { display: grid; gap: 7px; margin: 0; }
+.work-day__meta > div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; font-size: 11px; line-height: 1.6; }
+.work-day__meta dt { color: #64748b; }
+.work-day__meta dd { margin: 0; color: #334155; overflow-wrap: anywhere; }
+.work-day__meta > .work-day__content { grid-template-columns: minmax(0, 1fr); gap: 4px; padding-top: 10px; margin-top: 3px; border-top: 1px dashed #e2e8f0; }
+.work-day__content dd { white-space: pre-wrap; }
+.work-day__empty { display: flex; flex-direction: column; align-items: center; padding: 40px 16px; text-align: center; color: #94a3b8; }
+.work-day__empty h3 { margin: 16px 0 6px; font-size: 16px; color: #334155; }
+.work-day__empty p { margin: 0; font-size: 13px; color: #64748b; }
 @media (max-width: 640px) {
+    .work-day-dialog { width: 100%; }
+    .work-day-dialog .cy-detail-dialog__header { padding: 16px; }
+    .work-day-dialog .cy-detail-dialog__header h2 { font-size: 18px; }
+    .work-day-dialog .cy-detail-dialog__header p { font-size: 12px; }
+    .work-day-dialog .cy-detail-dialog__body { padding: 14px 12px 20px; }
+    .work-day__stats { padding: 16px 0; }
+    .work-day__stats > div { padding: 0 12px; }
+    .work-day__stats dd { font-size: 24px; }
+    .work-day__stats dt { font-size: 11px; }
+    .work-day__wage-total { padding: 11px 12px; }
+    .work-day__team-header { padding: 12px; }
+    .work-day__team-identity { gap: 7px; }
+    .work-day__team-identity h3 { font-size: 14px; }
+    .work-day__workers { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 10px; }
+    .work-day__worker { padding: 12px; }
     .worker-history { padding: 10px; }
     .worker-history__calendar-heading h4 { font-size: 18px; }
     .worker-history__legend { gap: 5px; margin-bottom: 12px; }

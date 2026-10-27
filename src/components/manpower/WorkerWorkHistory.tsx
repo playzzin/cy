@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { CalendarDays, ChevronDown, Users } from 'lucide-react';
 import type { DailyReportWorkerRow } from '../../services/dailyReportService';
 import ResponsiveDetailDialog from '../common/ResponsiveDetailDialog';
 import { resolveReportPayType } from '../../utils/payType';
@@ -18,6 +18,55 @@ const money = (value: number) => `${Math.round(value).toLocaleString('ko-KR')}�
 const days = (value: number) => value.toLocaleString('ko-KR', { maximumFractionDigits: 4 });
 const workerCount = (rows: DailyReportWorkerRow[]) => new Set(rows.map(row => row.workerId || row.workerName || row.name)).size;
 const EMPTY_TEAMS: WorkHistoryTeam[] = [];
+
+function SiteWorkDayDetails({ rows, teams }: { rows: DailyReportWorkerRow[]; teams: WorkHistoryTeam[] }) {
+    const groups = groupWorkTeams(rows, teams);
+    const entries = rows.map((row, index) => ({ row, index, teamKey: recordedWorkTeam(row, teams).key }));
+    const hasVisibleWages = rows.some(row => !row.isSiteSupport);
+    const hasHiddenWages = rows.some(row => row.isSiteSupport);
+    if (rows.length === 0) return <div className="work-day__empty">
+        <CalendarDays size={32} aria-hidden="true" /><h3>등록된 출력일보가 없습니다</h3>
+        <p>해당 날짜의 근무내역이 없습니다.</p>
+    </div>;
+
+    return <div className="work-day">
+        <section className="work-day__summary" aria-label="일일 출력 요약">
+            <dl className="work-day__stats">
+                <div><dt>총 공수</dt><dd>{days(rows.reduce((sum, row) => sum + number(row.manDay), 0))}<small>공수</small></dd></div>
+                <div><dt>투입 인원</dt><dd>{workerCount(rows)}<small>명</small></dd></div>
+                <div><dt>참여 팀</dt><dd>{groups.length}<small>개</small></dd></div>
+            </dl>
+            {hasVisibleWages && <div className="work-day__wage-total"><span>{hasHiddenWages ? '조회 가능 노무비' : '총 노무비'}</span>
+                <strong>{money(rows.reduce((sum, row) => sum + workHistoryAmount(row), 0))}</strong></div>}
+        </section>
+        <div className="work-day__section-title"><h3><Users size={16} aria-hidden="true" />팀별 작업 내역</h3><span>작업 기록 {rows.length}건</span></div>
+        <div className="work-day__groups">{groups.map(team => <section key={team.key} className="work-day__team"
+            style={workTeamStyle(team.color) as React.CSSProperties} aria-label={`${team.name} 출력 내역`}>
+            <header className="work-day__team-header">
+                <div className="work-day__team-identity"><span className="work-day__team-dot" aria-hidden="true" />
+                    <div><h3>{team.name}</h3><p><span className="work-day__team-badge">{team.support ? '지원팀' : '현장팀'}</span><span>작업자 {team.workers.size}명</span></p></div>
+                </div>
+                <div className="work-day__team-total"><span>팀 합계</span><strong>{days(team.manDay)}<small>공수</small></strong></div>
+            </header>
+            <div className="work-day__workers">{entries.filter(entry => entry.teamKey === team.key).map(({ row, index }) => {
+                const name = row.workerName || row.name || '작업자 미지정';
+                return <article key={`${row.reportId}-${index}`} className="work-day__worker" aria-label={`${name} 작업 내역`}>
+                    <header className="work-day__worker-header"><span className="work-day__avatar" aria-hidden="true">{name.slice(0, 1)}</span>
+                        <h4>{name}</h4><span className="work-day__man-day">{days(number(row.manDay))}<small>공수</small></span></header>
+                    {!row.isSiteSupport && <dl className="work-day__pay">
+                        <div><dt>단가</dt><dd>{money(number(row.unitPrice))}</dd></div>
+                        <div><dt>금액</dt><dd>{money(workHistoryAmount(row))}</dd></div>
+                    </dl>}
+                    <dl className="work-day__meta">
+                        <div><dt>현장소속팀</dt><dd>{row.responsibleTeamName || row.teamName || '-'}</dd></div>
+                        {!row.isSiteSupport && <div><dt>급여방식</dt><dd>{resolveReportPayType(row) || '-'}</dd></div>}
+                        {row.workContent && <div className="work-day__content"><dt>작업내용</dt><dd>{row.workContent}</dd></div>}
+                    </dl>
+                </article>;
+            })}</div>
+        </section>)}</div>
+    </div>;
+}
 
 export default function WorkerWorkHistory({ rows, month, workerName, siteName, loading, error, teams = EMPTY_TEAMS }: Props) {
     const isSite = siteName !== undefined;
@@ -136,16 +185,15 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
             </>}
         </div>
         <ResponsiveDetailDialog open={!!selectedDate && !loading && !error} onOpenChange={open => { if (!open) setSelectedDate(''); }}
+            className={isSite ? 'work-day-dialog' : undefined}
             title={`${selectedDate} ${title}`} description={`${subjectName} · ${selectedRows.length}건`}>
-            {selectedRows.length === 0 ? <p>해당 날짜의 근무내역이 없습니다.</p> : selectedRows.map((row, index) => <article className="worker-history__detail" key={`${row.reportId}-${index}`}>
-                {isSite && mode === 'list' && recordedWorkTeam(row, teams).support && <span className="worker-history__badge worker-history__badge--support">지원팀</span>}
-                <h4>{isSite ? row.workerName || row.name || '작업자 미지정' : row.siteName || '현장 미지정'}</h4><dl>
+            {isSite ? <SiteWorkDayDetails rows={selectedRows} teams={teams} /> : selectedRows.length === 0 ? <p>해당 날짜의 근무내역이 없습니다.</p> : selectedRows.map((row, index) => <article className="worker-history__detail" key={`${row.reportId}-${index}`}>
+                <h4>{row.siteName || '현장 미지정'}</h4><dl>
                     <div><dt>공수</dt><dd>{days(number(row.manDay))}공수</dd></div>
                     {!row.isSiteSupport && <><div><dt>단가</dt><dd>{money(number(row.unitPrice))}</dd></div>
                     <div><dt>금액</dt><dd>{money(workHistoryAmount(row))}</dd></div></>}
                     <div><dt>현장소속팀</dt><dd>{row.responsibleTeamName || row.teamName || '-'}</dd></div>
                     <div><dt>소속팀</dt><dd>{row.workerTeamName || '-'}</dd></div>
-                    {isSite && !row.isSiteSupport && <div><dt>급여방식</dt><dd>{resolveReportPayType(row) || '-'}</dd></div>}
                     {row.workContent && <div><dt>작업내용</dt><dd>{row.workContent}</dd></div>}
                 </dl>
             </article>)}

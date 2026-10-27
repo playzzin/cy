@@ -89,7 +89,7 @@ test('별도 현장 출력일보 화면에서 달력 합계와 작업자별 상�
     fireEvent.click(day);
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getAllByRole('heading', { name: '동명작업자' })).toHaveLength(2);
-    expect(within(dialog).getByText('0.25공수')).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('article', { name: '동명작업자 작업 내역' }).some(article => article.textContent?.includes('0.25공수'))).toBe(true);
     expect(within(dialog).getByText('25,000원')).toBeInTheDocument();
     expect(within(dialog).queryByText('다른현장작업자')).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: '상세 닫기' }));

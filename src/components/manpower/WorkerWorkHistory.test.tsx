@@ -148,3 +148,41 @@ test('달력의 오늘과 주말을 구분하고 빈 월에서도 보기 전환�
     fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
     expect(screen.getByText('선택한 기간의 근무내역이 없습니다.')).toBeInTheDocument();
 });
+
+test.each(['calendar', 'list'])('%s 날짜 상세는 등록된 팀 색상으로 묶고 지원 급여를 숨긴 채 개별 기록을 보존한다', mode => {
+    const attendance = [
+        { reportId: 'own', date: '2026-10-01', workerId: 'own', workerName: '동명', workerTeamId: 'a', workerTeamName: '가람팀', responsibleTeamId: 'a', manDay: 1, unitPrice: 100000, workContent: '외벽 작업' },
+        { reportId: 'support-1', date: '2026-10-01', workerId: 'support', workerName: '동명', workerTeamId: 'b', workerTeamName: '나래팀', responsibleTeamId: 'a', manDay: 0.25, isSiteSupport: true, unitPrice: 900000, amount: 225000 },
+        { reportId: 'support-2', date: '2026-10-01', workerId: 'support', workerName: '동명', workerTeamId: 'b', workerTeamName: '나래팀', responsibleTeamId: 'a', manDay: 0.5, isSiteSupport: true, unitPrice: 900000, amount: 450000 },
+    ] as DailyReportWorkerRow[];
+    render(<WorkerWorkHistory rows={attendance} teams={[{ id: 'a', name: '가람팀', color: '#2563eb' }, { id: 'b', name: '나래팀', color: '#0d9488' }]}
+        month="2026-10" siteName="검증현장" loading={false} error="" />);
+    if (mode === 'list') {
+        fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
+        fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false }));
+        fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무 상세' }));
+    } else fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역 1.75공수' }));
+    const dialog = screen.getByRole('dialog');
+    const summary = within(dialog).getByRole('region', { name: '일일 출력 요약' });
+    expect(summary).toHaveTextContent('총 공수1.75공수투입 인원2명참여 팀2개');
+    expect(summary).toHaveTextContent('조회 가능 노무비100,000원');
+    const own = within(dialog).getByRole('region', { name: '가람팀 출력 내역' });
+    const support = within(dialog).getByRole('region', { name: '나래팀 출력 내역' });
+    expect(own.style.getPropertyValue('--work-team-color')).toBe('#2563eb');
+    expect(support.style.getPropertyValue('--work-team-color')).toBe('#0d9488');
+    expect(within(own).getByText('외벽 작업')).toBeInTheDocument();
+    expect(within(support).getAllByRole('article')).toHaveLength(2);
+    expect(support).toHaveTextContent('작업자 1명');
+    expect(support).toHaveTextContent('팀 합계0.75공수');
+    expect(within(support).queryByText('단가')).not.toBeInTheDocument();
+    expect(within(support).queryByText('금액')).not.toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/900,000|225,000|450,000|775,000/);
+});
+
+test('지원 기록만 있는 날짜에는 노무비 합계와 급여 정보를 표시하지 않는다', () => {
+    render(<WorkerWorkHistory rows={[{ ...rows[0], isSiteSupport: true, workerTeamName: '지원팀', unitPrice: 100000, amount: 100000 }]}
+        month="2026-10" siteName="검증현장" loading={false} error="" />);
+    fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역 1공수' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).not.toHaveTextContent(/노무비|단가|급여방식|100,000원/);
+});
