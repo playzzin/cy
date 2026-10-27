@@ -9,7 +9,7 @@ on:
       - master
 
 jobs:
-  verify:
+  frontend:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,9 +25,6 @@ jobs:
       - name: Install app dependencies
         run: npm ci
 
-      - name: Install functions dependencies
-        run: npm --prefix functions ci
-
       # Restore after npm ci, which removes node_modules (including its caches).
       # Cache compiler state only; successful-check proofs and release outputs
       # must be produced and verified by this run.
@@ -41,14 +38,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node22-cy-build-v1-${{ hashFiles('package-lock.json', 'tsconfig.json', 'tailwind.config.js', 'postcss.config.js', 'scripts/build-performance.cjs', 'scripts/patchReactScriptsWebpack.js', 'scripts/postcss-readable-type.js') }}-
 
-      - name: Verify project health
-        run: npm run verify:project
+      - name: Verify frontend health
+        run: npm run verify:hosting
 
       - name: Verify release comparison
         run: npm run test:release-tools
-
-      - name: Verify every server unit test
-        run: npm run test:functions
 
       - name: Lint hardened modules
         run: npm run lint:improvements
@@ -66,6 +60,23 @@ jobs:
 
       - name: Verify hosting build
         run: npm run verify:hosting-build
+
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      - run: npm ci
+      - run: npm --prefix functions ci
+      - run: npm run functions:build
+      - name: Verify every server unit test
+        run: npm run test:functions
 
   rules:
     runs-on: ubuntu-latest
@@ -92,3 +103,18 @@ jobs:
         run: node scripts/run-task-notification-rules-test.mjs
       - name: Verify storage access with fake data
         run: node scripts/run-storage-manager-rules-test.mjs
+
+  # Keep the existing required check name. Every lane must succeed, including
+  # when a dependency fails, is skipped or gets cancelled.
+  verify:
+    needs: [frontend, server, rules]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require every quality lane to succeed
+        env:
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          SERVER_RESULT: ${{ needs.server.result }}
+          RULES_RESULT: ${{ needs.rules.result }}
+        run: node scripts/verify-quality-results.cjs

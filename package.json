@@ -82,7 +82,7 @@
     "verify:project": "node scripts/verify-project-health.js",
     "verify:hosting": "node scripts/verify-project-health.js --scope=hosting",
     "verify:functions": "node scripts/verify-project-health.js --scope=functions",
-    "test:release-tools": "node --test scripts/release-manifest.test.cjs scripts/staging-isolation.test.cjs scripts/browser-env-security.test.cjs scripts/build-performance.test.cjs scripts/typecheck.test.cjs scripts/react-scripts-test.test.cjs scripts/test-verification-cache.test.cjs scripts/verify-project-health.test.cjs scripts/deploy-selected.test.cjs scripts/hosting-build-cache.test.cjs scripts/check-release.test.cjs scripts/clean-build-artifacts.test.cjs",
+    "test:release-tools": "node --test scripts/release-manifest.test.cjs scripts/staging-isolation.test.cjs scripts/browser-env-security.test.cjs scripts/build-performance.test.cjs scripts/typecheck.test.cjs scripts/react-scripts-test.test.cjs scripts/test-verification-cache.test.cjs scripts/verify-project-health.test.cjs scripts/deploy-selected.test.cjs scripts/hosting-build-cache.test.cjs scripts/check-release.test.cjs scripts/clean-build-artifacts.test.cjs scripts/quality-workflow.test.cjs",
     "clean:generated": "node scripts/clean-build-artifacts.cjs",
     "typecheck": "node scripts/typecheck.cjs",
     "test:ci": "node scripts/react-scripts-test.cjs",

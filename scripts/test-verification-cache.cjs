@@ -9,6 +9,18 @@ const MAX_AGE_MS = 60 * 60 * 1000;
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const proofPath = root => path.join(workspaceCache(root), 'react-tests-success.json');
 const isCI = env => Boolean(env.CI && env.CI.toLowerCase() !== 'false');
+const CALLER_METADATA = new Set(['npm_lifecycle_event', 'npm_lifecycle_script', 'npm_command', 'codex_tool_call_id']);
+
+function testEnvironment(env) {
+  const environment = { ...env, NODE_ENV: 'test', BABEL_ENV: 'test', PUBLIC_URL: '' };
+  // A different tool call is not a different test environment. Remove only
+  // caller metadata from BOTH the fingerprint and the actual Jest process.
+  // Keep application settings, PATH, temp directories and other unknown inputs.
+  for (const key of Object.keys(environment)) {
+    if (CALLER_METADATA.has(key.toLowerCase())) delete environment[key];
+  }
+  return environment;
+}
 
 function fileDigest(file) {
   try { return digest(fs.readFileSync(file)); }
@@ -53,13 +65,10 @@ function testIdentity(root, env = process.env, now = Date.now()) {
   const files = [...new Set([...listed, '.env', '.env.test', '.env.test.local'])].sort();
   const installedLock = path.join(root, 'node_modules', '.package-lock.json');
   if (!fs.existsSync(installedLock)) throw new Error('설치된 의존성 확인 기록이 없습니다.');
-  const environment = { ...env, NODE_ENV: 'test', BABEL_ENV: 'test', PUBLIC_URL: '' };
-  // These describe the npm caller, not the test environment. Removing them
-  // from BOTH the child and the identity enables direct/health-check reuse.
-  for (const key of ['npm_lifecycle_event', 'npm_lifecycle_script', 'npm_command']) delete environment[key];
+  const environment = testEnvironment(env);
   const date = new Date(now);
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     workspace: fs.realpathSync(root),
     inputs: inputFingerprint(root, files),
     dependencies: fileDigest(installedLock),
@@ -82,15 +91,29 @@ function passedSummary(report) {
   return Object.fromEntries(keys.map(key => [key, report[key]]));
 }
 
-function reusableProof(file, identity, now) {
+const identityComponents = identity => Object.fromEntries(Object.entries(identity)
+  .map(([key, value]) => [key, digest(JSON.stringify(value))]));
+const COMPONENT_LABELS = { schemaVersion: '검증 방식', workspace: '작업 폴더', inputs: '소스·설정',
+  dependencies: '설치 의존성', runtime: '실행 런타임', environment: '실행 환경', day: '검사 날짜' };
+
+function proofStatus(file, identity, now) {
   try {
     const proof = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return proof.schemaVersion === 1 && proof.identity === digest(JSON.stringify(identity))
-      && Number.isFinite(proof.completedAt) && proof.completedAt <= now && now - proof.completedAt < MAX_AGE_MS
-      && passedSummary({ ...proof.summary, success: true, numFailedTests: 0,
-        numFailedTestSuites: 0, numRuntimeErrorTestSuites: 0 }) ? proof : null;
-  } catch { return null; }
+    if (proof.schemaVersion !== 2) return { reason: '검증 기록 형식 변경' };
+    if (!Number.isFinite(proof.completedAt) || proof.completedAt > now) return { reason: '검증 기록 시각 오류' };
+    if (now - proof.completedAt >= MAX_AGE_MS) return { reason: '검증 기록 유효기간 만료' };
+    if (!passedSummary({ ...proof.summary, success: true, numFailedTests: 0,
+      numFailedTestSuites: 0, numRuntimeErrorTestSuites: 0 })) return { reason: '전체 통과 결과 미확인' };
+    if (proof.identity !== digest(JSON.stringify(identity))) {
+      const components = identityComponents(identity);
+      const changed = Object.keys(components).filter(key => proof.components?.[key] !== components[key]);
+      return { reason: `${changed.map(key => COMPONENT_LABELS[key] || '검증 입력').join(', ') || '검증 입력'} 변경` };
+    }
+    return { proof };
+  } catch (error) { return { reason: error.code === 'ENOENT' ? '검증 기록 없음' : '검증 기록 읽기 오류' }; }
 }
+
+const reusableProof = (file, identity, now) => proofStatus(file, identity, now).proof || null;
 
 function acquireLock(directory) {
   const file = path.join(directory, 'react-tests.lock');
@@ -134,17 +157,21 @@ function runTests(args = [], { root = path.resolve(__dirname, '..'), env = proce
       try { before = testIdentity(root, env, now()); }
       catch { log('테스트 입력을 모두 확인할 수 없어 전체 테스트를 새로 실행합니다.'); }
     }
-    const proof = before && !force && reusableProof(destination, before, now());
+    const status = before && !force ? proofStatus(destination, before, now()) : null;
+    const proof = status?.proof;
     if (proof) {
       log(`동일한 소스·의존성·환경의 전체 테스트 통과 기록을 재사용합니다 (${proof.summary.numPassedTests}개 통과, 유효기간 1시간).`);
       log(`테스트 확인 완료 (${((performance.now() - started) / 1000).toFixed(1)}초). --force로 다시 실행할 수 있습니다.`);
       return { reused: true, summary: proof.summary };
     }
+    const reason = force ? '강제 검사 요청' : !full ? '사용자 지정 테스트 인자'
+      : isCI(env) ? 'CI에서 전체 검사 필수' : !cacheable ? '외부 자료 또는 에뮬레이터 사용'
+        : status?.reason || '검증 입력 확인 불가';
+    log(`테스트를 실행합니다 (재사용하지 않는 이유: ${reason}).`);
     // A failed, interrupted, forced or filtered attempt must not leave an old
     // success available for a subsequent deployment.
     fs.rmSync(destination, { force: true });
-    const childEnv = { ...env, NODE_ENV: 'test', BABEL_ENV: 'test', PUBLIC_URL: '' };
-    for (const key of ['npm_lifecycle_event', 'npm_lifecycle_script', 'npm_command']) delete childEnv[key];
+    const childEnv = testEnvironment(env);
     const cli = require.resolve('react-scripts/scripts/test', { paths: [root] });
     const result = spawn(process.execPath, [cli, ...ciTestArgs(forwarded, { cwd: root }),
       ...(full ? ['--json', '--outputFile', reportFile] : [])], { cwd: root, env: childEnv, stdio: 'inherit', shell: false });
@@ -157,8 +184,9 @@ function runTests(args = [], { root = path.resolve(__dirname, '..'), env = proce
     if (before) {
       const after = testIdentity(root, env, now());
       if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('테스트 중 소스·의존성·환경이 바뀌었습니다. 다시 검사해 주세요.');
-      fs.writeFileSync(destination, JSON.stringify({ schemaVersion: 1,
-        identity: digest(JSON.stringify(after)), completedAt: now(), summary }));
+      // Store only dimension hashes and counts, never environment keys/values.
+      fs.writeFileSync(destination, JSON.stringify({ schemaVersion: 2,
+        identity: digest(JSON.stringify(after)), components: identityComponents(after), completedAt: now(), summary }));
     }
     log(`전체 테스트 확인 완료 (${((performance.now() - started) / 1000).toFixed(1)}초).`);
     return { reused: false, summary };
@@ -168,4 +196,4 @@ function runTests(args = [], { root = path.resolve(__dirname, '..'), env = proce
   }
 }
 
-module.exports = { MAX_AGE_MS, testIdentity, proofPath, reusableProof, runTests };
+module.exports = { MAX_AGE_MS, testEnvironment, testIdentity, proofPath, reusableProof, runTests };

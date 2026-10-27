@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { MAX_AGE_MS, testIdentity, proofPath, runTests } = require('./test-verification-cache.cjs');
+const { MAX_AGE_MS, testEnvironment, testIdentity, proofPath, runTests } = require('./test-verification-cache.cjs');
 
 const passed = { success: true, wasInterrupted: false, numFailedTests: 0, numFailedTestSuites: 0,
   numRuntimeErrorTestSuites: 0, numTotalTests: 3, numPassedTests: 1, numPendingTests: 1, numTodoTests: 1,
@@ -36,6 +36,7 @@ function fixture(t) {
     assert.equal(options.shell, false);
     assert.equal(options.env.NODE_ENV, 'test');
     assert.equal(options.env.npm_lifecycle_event, undefined);
+    assert.equal(options.env.CODEX_TOOL_CALL_ID, undefined);
     const outputIndex = args.indexOf('--outputFile');
     if (outputIndex >= 0) fs.writeFileSync(args[outputIndex + 1], JSON.stringify(passed));
     return { status: 0 };
@@ -55,6 +56,39 @@ test('only a successful full run is reused; proofs store counts and hashes, neve
   assert.ok(!proof.includes('SYNTHETIC_SETTING'));
   assert.ok(!proof.includes('example.test.js'));
   assert.equal(f.run([], { env: { ...f.options.env, npm_lifecycle_event: 'verify:project' } }).reused, true);
+});
+
+test('different tool calls share a proof without exposing caller metadata to Jest', t => {
+  const f = fixture(t);
+  const first = { ...f.options.env, CODEX_TOOL_CALL_ID: 'synthetic-call-a', npm_command: 'run-script' };
+  const second = { ...first, CODEX_TOOL_CALL_ID: 'synthetic-call-b', npm_lifecycle_script: 'node deploy.cjs' };
+  assert.equal(f.run([], { env: first }).reused, false);
+  assert.equal(f.run([], { env: second }).reused, true);
+  assert.equal(f.calls(), 1);
+  assert.deepEqual(testEnvironment(first), testEnvironment(second));
+  assert.equal(first.CODEX_TOOL_CALL_ID, 'synthetic-call-a', 'never mutate the parent environment');
+  for (const key of ['TEMP', 'TMP', 'LOCALAPPDATA', 'PATH', 'NODE_OPTIONS', 'REACT_APP_TEST_SETTING', 'UNKNOWN_SETTING']) {
+    const a = testIdentity(f.root, { ...first, [key]: 'synthetic-a' }, f.options.now());
+    const b = testIdentity(f.root, { ...first, [key]: 'synthetic-b' }, f.options.now());
+    assert.notEqual(a.environment, b.environment, `${key} remains a real test input`);
+  }
+});
+
+test('cache misses identify changed input groups without logging environment contents', t => {
+  const f = fixture(t);
+  const messages = [];
+  const log = message => messages.push(message);
+  f.run([], { log });
+  assert.match(messages.join('\n'), /검증 기록 없음/);
+  messages.length = 0;
+  f.run([], { log, env: { ...f.options.env, SYNTHETIC_SETTING: 'do-not-log-this-value' } });
+  assert.match(messages.join('\n'), /실행 환경 변경/);
+  assert.doesNotMatch(messages.join('\n'), /SYNTHETIC_SETTING|do-not-log-this-value/);
+  assert.doesNotMatch(fs.readFileSync(proofPath(f.root), 'utf8'), /SYNTHETIC_SETTING|do-not-log-this-value/);
+  messages.length = 0;
+  f.write('src/example.test.js', '// changed');
+  f.run([], { log, env: { ...f.options.env, SYNTHETIC_SETTING: 'do-not-log-this-value' } });
+  assert.match(messages.join('\n'), /소스·설정 변경/);
 });
 
 test('source, untracked fixtures, test settings, env files and installed dependencies invalidate reuse', t => {
@@ -144,6 +178,18 @@ test('real CRA/Jest execution records a full success, reuses it and catches a la
   f.write('src/example.test.js', 'test("synthetic", () => expect(1).toBe(2));');
   assert.throws(() => actual(), /테스트 실패/);
   assert.equal(fs.existsSync(proofPath(f.root)), false);
+});
+
+test('independent Node invocations reuse a real Jest result despite changing tool call IDs', t => {
+  const f = fixture(t);
+  f.write('src/example.test.js', 'test("caller metadata is absent", () => expect(process.env.CODEX_TOOL_CALL_ID).toBeUndefined());');
+  const code = `const {runTests}=require(${JSON.stringify(path.join(__dirname, 'test-verification-cache.cjs'))});
+    const result=runTests([], {root:${JSON.stringify(f.root)},log:()=>{}}); console.log(JSON.stringify({reused:result.reused}));`;
+  const invoke = id => JSON.parse(execFileSync(process.execPath, ['-e', code], {
+    cwd: f.root, env: { ...process.env, CI: 'false', CODEX_TOOL_CALL_ID: id }, encoding: 'utf8',
+  }).trim().split('\n').pop());
+  assert.equal(invoke('synthetic-exec-one').reused, false);
+  assert.equal(invoke('synthetic-exec-two').reused, true);
 });
 
 test('date boundaries invalidate otherwise matching inputs', t => {
