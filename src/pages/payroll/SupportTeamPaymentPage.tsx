@@ -2,6 +2,7 @@ import { PagePrimaryAccountSettings } from '../../components/accounts/PagePrimar
 import { PrimaryAccountPage } from '../../services/primaryAccountService';
 import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
 import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
+import { useLaborStatementWorkerRefresh } from '../../hooks/useLaborStatementWorkerRefresh';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -44,6 +45,7 @@ import { statementOutputService } from '../../services/statementOutputService';
 import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
 import type { StatementOutputRecord } from '../../types/statementOutput';
 import {
+    formatLaborStatementPaymentAccountLabel,
     getLaborStatementWorkerPayType,
     getWorkerMasterLaborStatementPayType,
     loadLaborStatementPresetDefaults,
@@ -64,6 +66,8 @@ import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
 type SupportStatementPayType = SharedLaborStatementPayType;
 
 interface SupportLaborExcelRow {
+    workerDefaultAccount?: { bankName: string; accountNumber: string; accountHolder: string };
+    accountPurpose?: 'default' | 'directPay';
     aggregateId: string;
     workerId: string;
     workerName: string;
@@ -217,6 +221,7 @@ interface SupportLaborStatementViewOptions {
 }
 
 interface SupportLaborStatementOptions {
+    workerAccountPurpose?: 'default' | 'directPay';
     unitPriceOverride: number;
     defaultPayType: SupportStatementPayType;
     workerPayTypes: Record<string, SupportStatementPayType>;
@@ -931,6 +936,7 @@ const applySupportLaborStatementOptions = (
         const workerKey = getSupportLaborStatementWorkerKey(row);
         const payType = options.workerPayTypes[workerKey] ?? options.defaultPayType;
         const useDelegateAccount = payType === 'delegate';
+        const workerBank = options.workerAccountPurpose === 'default' ? row.workerDefaultAccount : row;
         const billingUnitPrice = options.unitPriceOverride > 0
             ? options.unitPriceOverride
             : row.billingUnitPrice;
@@ -939,9 +945,10 @@ const applySupportLaborStatementOptions = (
         return {
             ...row,
             payType,
-            bankName: useDelegateAccount ? options.delegateBankName : row.bankName,
-            accountHolder: useDelegateAccount ? options.delegateAccountHolder : row.accountHolder,
-            accountNumber: useDelegateAccount ? options.delegateAccountNumber : row.accountNumber,
+            accountPurpose: options.workerAccountPurpose ?? 'directPay',
+            bankName: useDelegateAccount ? options.delegateBankName : workerBank?.bankName ?? '',
+            accountHolder: useDelegateAccount ? options.delegateAccountHolder : workerBank?.accountHolder ?? '',
+            accountNumber: useDelegateAccount ? options.delegateAccountNumber : workerBank?.accountNumber ?? '',
             billingUnitPrice,
             billingAmount,
             issuedAmount: billingAmount
@@ -1320,6 +1327,7 @@ const buildLaborStatementExcelBlock = (preview: SitePreviewBlock): SupportLaborS
         accountNumber: row.accountNumber,
         accountHolder: row.accountHolder,
         payType: row.payType,
+        accountPurpose: row.accountPurpose,
         days: row.days,
         totalManDay: row.totalManDay,
         unitPrice: row.unitPrice,
@@ -2709,9 +2717,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                             siteName: entry.siteName ?? siteInfo?.name ?? '',
                             teamId: entry.workerTeamId ?? entry.teamId,
                             teamNames,
-                            bankName: workerInfo?.bankName ?? '',
-                            accountNumber: workerInfo?.accountNumber ?? '',
-                            accountHolder: workerInfo?.accountHolder ?? workerInfo?.name ?? entry.workerName ?? '',
+                            bankName: workerInfo?.directPayBankName ?? '',
+                            workerDefaultAccount: { bankName: workerInfo?.bankName ?? '',
+                                accountNumber: workerInfo?.accountNumber ?? '', accountHolder: workerInfo?.accountHolder ?? '' },
+                            accountNumber: workerInfo?.directPayAccountNumber ?? '',
+                            accountHolder: workerInfo?.directPayAccountHolder ?? '',
                             workerLaborStatementPayType: getWorkerMasterLaborStatementPayType(workerInfo),
                             days: Array.from({ length: MAX_DAY_COLUMNS }, () => 0),
                             totalManDay: 0,
@@ -4056,6 +4066,7 @@ const SupportLaborStatementPanel: React.FC<{
     logoUrl?: string | null;
     onClose: () => void;
 }> = ({ primaryAccountScope, aggregate, previews, yearMonth, adjustment, onClose }) => {
+    const { findWorker: findRefreshedWorker, refresh: refreshWorkerDb, loading: loadingWorkerDb, error: workerDbError } = useLaborStatementWorkerRefresh();
     const [statementOptionPreset, setStatementOptionPreset] = useState<StatementIssueOptionPreset>(() => loadStatementIssueOptionPreset());
     const [showBankColumn, setShowBankColumn] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).showBankColumn);
     const [showBillingColumns, setShowBillingColumns] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).showBillingColumns);
@@ -4084,13 +4095,14 @@ const SupportLaborStatementPanel: React.FC<{
     const delegateAccountHolder = pagePrimaryAccount.account?.accountHolder ?? legacyDelegateAccountHolder;
     const delegateAccountNumber = pagePrimaryAccount.account?.accountNumber ?? legacyDelegateAccountNumber;
     const statementOptions = useMemo<SupportLaborStatementOptions>(() => ({
+        workerAccountPurpose: useWorkerMasterPayType ? 'directPay' : 'default',
         unitPriceOverride: appliedBulkUnitPrice,
         defaultPayType: 'direct',
-        workerPayTypes,
+        workerPayTypes: useWorkerMasterPayType ? workerPayTypes : {},
         delegateBankName,
         delegateAccountHolder,
         delegateAccountNumber
-    }), [appliedBulkUnitPrice, workerPayTypes, delegateBankName, delegateAccountHolder, delegateAccountNumber]);
+    }), [appliedBulkUnitPrice, workerPayTypes, delegateBankName, delegateAccountHolder, delegateAccountNumber, useWorkerMasterPayType]);
     const statementViewOptions = useMemo<SupportLaborStatementViewOptions>(() => ({
         showBankColumn,
         showBillingColumns,
@@ -4099,8 +4111,17 @@ const SupportLaborStatementPanel: React.FC<{
         showTeamUnderName
     }), [showBankColumn, showBillingColumns, isSplitView, showBankUnderAddress, showTeamUnderName]);
     const statementPreviews = useMemo(
-        () => applySupportLaborStatementOptions(previews, statementOptions),
-        [previews, statementOptions]
+        () => applySupportLaborStatementOptions(previews.map(preview => ({
+            ...preview,
+            rows: preview.rows.map(row => {
+                if (!findRefreshedWorker) return row;
+                const worker = findRefreshedWorker(row);
+                return { ...row, bankName: worker?.directPayBankName ?? '',
+                    workerDefaultAccount: { bankName: worker?.bankName ?? '', accountNumber: worker?.accountNumber ?? '', accountHolder: worker?.accountHolder ?? '' },
+                    accountNumber: worker?.directPayAccountNumber ?? '', accountHolder: worker?.directPayAccountHolder ?? '' };
+            }),
+        })), statementOptions),
+        [previews, statementOptions, findRefreshedWorker]
     );
     const statementTotalManDay = statementPreviews.reduce((sum, preview) => sum + preview.rows.reduce((rowSum, row) => rowSum + row.totalManDay, 0), 0);
     const statementTotalAmount = statementPreviews.reduce((sum, preview) => sum + preview.rows.reduce((rowSum, row) => rowSum + row.billingAmount, 0), 0);
@@ -4201,13 +4222,13 @@ const SupportLaborStatementPanel: React.FC<{
         if (!useWorkerMasterPayType) return [];
         const missingByKey = new Map<string, string>();
         flatPreviewRows.forEach((row) => {
-            if (row.workerLaborStatementPayType) return;
+            if (findRefreshedWorker ? getWorkerMasterLaborStatementPayType(findRefreshedWorker(row)) : row.workerLaborStatementPayType) return;
             const key = getSupportLaborStatementWorkerKey(row);
             if (!key || missingByKey.has(key)) return;
             missingByKey.set(key, row.workerName || row.workerId || '이름 없음');
         });
         return Array.from(missingByKey.values());
-    }, [flatPreviewRows, useWorkerMasterPayType]);
+    }, [flatPreviewRows, useWorkerMasterPayType, findRefreshedWorker]);
 
     useEffect(() => {
         setActivePreviewIndex(0);
@@ -4279,14 +4300,19 @@ const SupportLaborStatementPanel: React.FC<{
         setBulkUnitPriceInput('');
     }, []);
 
-    const handleUseWorkerMasterPayTypeChange = useCallback((checked: boolean) => {
+    const handleUseWorkerMasterPayTypeChange = async (checked: boolean) => {
+        const findWorker = checked ? await refreshWorkerDb() : findRefreshedWorker;
+        if (checked && !findWorker) return;
         setUseWorkerMasterPayType(checked);
         setWorkerPayTypes(buildSupportLaborWorkerPayTypesFromDefaults(
-            flatPreviewRows,
+            findWorker ? flatPreviewRows.map(row => ({ ...row,
+                workerLaborStatementPayType: getWorkerMasterLaborStatementPayType(findWorker(row)),
+            })) : flatPreviewRows,
             checked,
             loadSupportLaborStatementDefaults(statementOptionPreset)
         ));
-    }, [flatPreviewRows, statementOptionPreset]);
+        if (checked && !showBankUnderAddress) setShowBankColumn(true);
+    };
 
     const handleStatementOptionPresetChange = useCallback((value: StatementIssueOptionPreset) => {
         setStatementOptionPreset(value);
@@ -4532,11 +4558,14 @@ const SupportLaborStatementPanel: React.FC<{
                             <input
                                 type="checkbox"
                                 checked={useWorkerMasterPayType}
+                                disabled={loadingWorkerDb}
                                 onChange={(event) => handleUseWorkerMasterPayTypeChange(event.target.checked)}
                                 className="accent-blue-600"
                             />
                             DB 직불여부 적용
                         </label>
+                        {loadingWorkerDb && <span role="status" className="text-xs text-slate-500">직불 정보 불러오는 중…</span>}
+                        {workerDbError && <span role="alert" className="text-xs text-red-600">{workerDbError}</span>}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
                         <span className="text-xs font-black text-slate-500">옵션 저장</span>
@@ -4915,14 +4944,14 @@ const LaborStatementPreview: React.FC<{
     const statementTableMinWidth = statementColumns.reduce((sum, column) => sum + column.width, 0);
     const statementSheetMinWidth = statementTableMinWidth + 82;
     const footerRowSpan = viewOptions.isSplitView ? 2 : 1;
-    const getPaymentLabel = (payType?: SupportStatementPayType) => payType === 'delegate' ? '위임' : '직불';
+    const getPaymentLabel = formatLaborStatementPaymentAccountLabel;
     const formatBankInfo = (row: SupportLaborExcelRow) =>
         [row.bankName, row.accountHolder, row.accountNumber].filter(Boolean).join(' / ');
     const getAddressContent = (row: SupportLaborExcelRow) => {
         const parts = [row.address || row.siteAddress || '-'];
         if (viewOptions.showBankUnderAddress) {
             const bankInfo = formatBankInfo(row);
-            parts.push(bankInfo ? `${bankInfo} (${getPaymentLabel(row.payType)})` : getPaymentLabel(row.payType));
+            parts.push(bankInfo ? `${bankInfo} (${getPaymentLabel(row.payType, row.accountPurpose)})` : getPaymentLabel(row.payType, row.accountPurpose));
         }
         return parts;
     };
@@ -5013,7 +5042,7 @@ const LaborStatementPreview: React.FC<{
                                     )}
                                     {viewOptions.showBankColumn && (
                                         <td rowSpan={viewOptions.isSplitView ? 2 : 1} className={`break-words border-2 border-slate-800 px-1.5 py-1.5 text-[10px] leading-snug ${row.payType === 'delegate' ? 'bg-yellow-100 text-yellow-900' : 'bg-white text-slate-700'}`}>
-                                            <div className="font-black">{getPaymentLabel(row.payType)}</div>
+                                            <div className="font-black">{getPaymentLabel(row.payType, row.accountPurpose)}</div>
                                             <div className="mt-1 font-semibold">{formatBankInfo(row) || '-'}</div>
                                         </td>
                                     )}

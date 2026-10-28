@@ -19,8 +19,11 @@ import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
 import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
 import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
+import { useLaborStatementWorkerRefresh } from '../../hooks/useLaborStatementWorkerRefresh';
 import { formatManDayWithDecimal, roundManDay, sumManDays } from '../../utils/manDayMath';
 import {
+  getLaborStatementAccountLabel,
+  formatLaborStatementPaymentAccountLabel,
   getWorkerMasterLaborStatementPayType,
   loadLaborStatementDefaults,
   saveLaborStatementDefaults
@@ -45,6 +48,7 @@ type RowState = {
   unitPrice: string;
   days: string[]; // 1..31
   payType: PayType;
+  accountPurpose: 'default' | 'directPay';
   bankName: string;
   bankOwner: string;
   bankAccount: string;
@@ -115,6 +119,7 @@ const createEmptyRow = (id: number): RowState => ({
   unitPrice: '',
   days: Array.from({ length: 31 }, () => ''),
   payType: 'direct',
+  accountPurpose: 'default',
   bankName: '',
   bankOwner: '',
   bankAccount: '',
@@ -193,7 +198,7 @@ const formatWorkerIdentityCell = (row: RowState): string => {
 
 const formatInlineBankInfo = (row: RowState): string => {
   const bankParts = [row.bankName.trim(), row.bankOwner.trim(), row.bankAccount.trim()].filter(Boolean);
-  const payTypeLabel = row.payType === 'delegate' ? '위임' : '직불';
+  const payTypeLabel = formatLaborStatementPaymentAccountLabel(row.payType, row.accountPurpose);
   if (bankParts.length === 0) return payTypeLabel;
   return `${bankParts.join(' / ')} (${payTypeLabel})`;
 };
@@ -260,6 +265,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [showBankUnderAddress, setShowBankUnderAddress] = useState(false);
   const [showTeamUnderName, setShowTeamUnderName] = useState(false);
   const [useWorkerMasterPayType, setUseWorkerMasterPayType] = useState(() => loadLaborStatementDefaults().useWorkerMasterPayType);
+  const { workers: refreshedWorkers, findWorker: findRefreshedWorker, refresh: refreshWorkerDb, loading: loadingWorkerDb, error: workerDbError } = useLaborStatementWorkerRefresh();
 
   // --- Main Configuration ---
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -523,15 +529,15 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   const workerById = useMemo(() => {
     const map = new Map<string, Worker>();
-    workers.forEach(w => { if (w.id) map.set(w.id, w); });
+    (refreshedWorkers ?? workers).forEach(w => { if (w.id) map.set(w.id, w); });
     return map;
-  }, [workers]);
+  }, [workers, refreshedWorkers]);
 
   const workerByName = useMemo(() => {
     const map = new Map<string, Worker>();
-    workers.forEach(w => { if (w.name) map.set(w.name, w); });
+    (refreshedWorkers ?? workers).forEach(w => { if (w.name) map.set(w.name, w); });
     return map;
-  }, [workers]);
+  }, [workers, refreshedWorkers]);
 
   const getWorkerDirectBankInfo = (row: RowState) => {
     const worker = (row.workerId ? workerById.get(row.workerId) : undefined)
@@ -575,11 +581,15 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   const buildBankFieldsForPayType = useCallback((
     payType: PayType,
-    directBank: Pick<RowState, 'bankName' | 'bankOwner' | 'bankAccount'>
-  ): Pick<RowState, 'payType' | 'bankName' | 'bankOwner' | 'bankAccount' | 'directBankName' | 'directBankOwner' | 'directBankAccount'> => {
+    directBank: Pick<RowState, 'bankName' | 'bankOwner' | 'bankAccount'>,
+    defaultBank = directBank,
+    accountPurpose: RowState['accountPurpose'] = 'directPay'
+  ): Pick<RowState, 'payType' | 'accountPurpose' | 'bankName' | 'bankOwner' | 'bankAccount' | 'directBankName' | 'directBankOwner' | 'directBankAccount'> => {
+    const workerBank = accountPurpose === 'default' ? defaultBank : directBank;
     if (payType === 'delegate') {
       return {
         payType: 'delegate',
+        accountPurpose,
         bankName: masterBank,
         bankOwner: masterOwner,
         bankAccount: masterAccount,
@@ -591,9 +601,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
     return {
       payType: 'direct',
-      bankName: directBank.bankName,
-      bankOwner: directBank.bankOwner,
-      bankAccount: directBank.bankAccount,
+      accountPurpose,
+      bankName: workerBank.bankName,
+      bankOwner: workerBank.bankOwner,
+      bankAccount: workerBank.bankAccount,
       directBankName: directBank.bankName,
       directBankOwner: directBank.bankOwner,
       directBankAccount: directBank.bankAccount
@@ -685,7 +696,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       workerPhone: w?.contact ?? '',
       workerAddress: w?.address ?? '',
       unitPrice,
-      ...buildBankFieldsForPayType(payType, directBank),
+      ...buildBankFieldsForPayType(payType, directBank, {
+        bankName: w?.bankName ?? '', bankOwner: w?.accountHolder ?? '', bankAccount: w?.accountNumber ?? ''
+      }, useWorkerMasterPayType ? 'directPay' : 'default'),
       teamName: w?.teamName ?? ''
     } : r));
   };
@@ -702,7 +715,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       if (r.id !== rowId) return r;
 
       const next: RowState = { ...r, ...patch };
-      if (r.payType === 'direct') {
+      if (r.payType === 'direct' && r.accountPurpose === 'directPay') {
         if (patch.bankName !== undefined) next.directBankName = patch.bankName;
         if (patch.bankOwner !== undefined) next.directBankOwner = patch.bankOwner;
         if (patch.bankAccount !== undefined) next.directBankAccount = patch.bankAccount;
@@ -711,12 +724,19 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     }));
   };
 
-  const setRowPayType = (rowId: number, payType: PayType) => {
+  const setRowPayType = (rowId: number, payType: PayType | 'default') => {
     setRows((prev) => prev.map((r) => {
       if (r.id !== rowId) return r;
 
+      if (payType === 'default') {
+        const worker = (r.workerId ? workerById.get(r.workerId) : undefined) ?? workerByName.get(r.workerName);
+        return { ...r, ...buildBankFieldsForPayType('direct', getDirectBankInfo(r), {
+          bankName: worker?.bankName ?? '', bankOwner: worker?.accountHolder ?? '', bankAccount: worker?.accountNumber ?? ''
+        }, 'default') };
+      }
+
       if (payType === 'delegate') {
-        const directBank = r.payType === 'direct'
+        const directBank = r.payType === 'direct' && r.accountPurpose === 'directPay'
           ? {
               bankName: r.bankName,
               bankOwner: r.bankOwner,
@@ -740,6 +760,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       return {
         ...r,
         payType: 'direct',
+        accountPurpose: 'directPay',
         bankName: directBank.bankName,
         bankOwner: directBank.bankOwner,
         bankAccount: directBank.bankAccount,
@@ -752,21 +773,30 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   const buildRowsForWorkerMasterPayTypeSetting = (
     currentRows: RowState[],
-    enabled: boolean
+    enabled: boolean,
+    findWorker = findRefreshedWorker
   ): { nextRows: RowState[]; warnings: string[] } => {
     const warningSet = new Set<string>();
     const nextRows = currentRows.map((row) => {
       const hasWorker = String(row.workerId ?? '').trim().length > 0 || row.workerName.trim().length > 0;
       if (!hasWorker) return row;
 
-      const masterWorker = (row.workerId ? workerById.get(row.workerId) : undefined)
+      const masterWorker = findWorker ? findWorker(row) : (row.workerId ? workerById.get(row.workerId) : undefined)
         ?? (row.workerName ? workerByName.get(row.workerName) : undefined);
-      const directBank = getDirectBankInfo(row);
+      const directBank = enabled && masterWorker ? {
+        bankName: masterWorker.directPayBankName ?? '',
+        bankOwner: masterWorker.directPayAccountHolder ?? '',
+        bankAccount: masterWorker.directPayAccountNumber ?? ''
+      } : getDirectBankInfo(row);
 
       if (!enabled) {
         return {
           ...row,
-          ...buildBankFieldsForPayType('direct', directBank)
+          ...buildBankFieldsForPayType('direct', directBank, {
+            bankName: masterWorker?.bankName ?? '',
+            bankOwner: masterWorker?.accountHolder ?? '',
+            bankAccount: masterWorker?.accountNumber ?? ''
+          }, 'default')
         };
       }
 
@@ -784,11 +814,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     return { nextRows, warnings: Array.from(warningSet) };
   };
 
-  const handleUseWorkerMasterPayTypeChange = (checked: boolean) => {
+  const handleUseWorkerMasterPayTypeChange = async (checked: boolean) => {
+    const findWorker = checked ? await refreshWorkerDb() : findRefreshedWorker;
+    if (checked && !findWorker) return;
     setUseWorkerMasterPayType(checked);
-    const { nextRows, warnings } = buildRowsForWorkerMasterPayTypeSetting(rows, checked);
-    setRows(nextRows);
+    const { warnings } = buildRowsForWorkerMasterPayTypeSetting(rows, checked, findWorker);
+    setRows(current => buildRowsForWorkerMasterPayTypeSetting(current, checked, findWorker).nextRows);
     setPayTypeAutoWarnings(checked ? warnings : []);
+    if (checked && !showBankUnderAddress) setShowBankColumn(true);
     saveLaborStatementDefaults({ useWorkerMasterPayType: checked });
   };
 
@@ -844,7 +877,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         r.workerId = w.workerId ?? null;
         r.workerName = w.name;
         r.isRetired = isRetiredWorker(masterWorker);
-        Object.assign(r, buildBankFieldsForPayType(payType ?? 'direct', directBank));
+        Object.assign(r, buildBankFieldsForPayType(payType ?? 'direct', directBank, {
+          bankName: masterWorker?.bankName ?? '',
+          bankOwner: masterWorker?.accountHolder ?? '',
+          bankAccount: masterWorker?.accountNumber ?? ''
+        }, useWorkerMasterPayType ? 'directPay' : 'default'));
         if (masterWorker) {
           r.workerSsn = masterWorker.idNumber ?? '';
           r.workerPhone = masterWorker.contact ?? '';
@@ -1125,7 +1162,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       grandTotalDays = roundManDay(grandTotalDays + totalDaysVal);
       grandTotalAmount += totalAmountVal;
 
-      const bankCells = showBankDetailsColumn ? [r.bankName, r.bankOwner, r.bankAccount, r.payType === 'delegate' ? '위임' : '직불'] : [r.payType === 'delegate' ? '위임' : '직불'];
+      const bankCells = showBankDetailsColumn
+        ? [r.bankName, r.bankOwner, r.bankAccount, `${r.payType === 'delegate' ? '위임' : '직불'}\n${getLaborStatementAccountLabel(r.payType, r.accountPurpose)}`]
+        : [r.payType === 'delegate' ? '위임' : '직불'];
       if (isSplitView) {
         const d1: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), r.workerSsn, formatAddressCell(r, showBankUnderAddress)];
         for (let d = 0; d < daySplitPoint; d++) {
@@ -1823,11 +1862,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 <input
                   type="checkbox"
                   checked={useWorkerMasterPayType}
+                  disabled={loadingWorkerDb}
                   onChange={(e) => handleUseWorkerMasterPayTypeChange(e.target.checked)}
                   className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-gray-300"
                 />
                 <span className="text-sm font-bold">DB 직불여부 적용</span>
               </label>
+              {loadingWorkerDb && <span role="status" className="text-sm text-slate-500">직불 정보 불러오는 중…</span>}
+              {workerDbError && <span role="alert" className="text-sm text-red-600">{workerDbError}</span>}
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -1999,6 +2041,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                           />
                           {showBankUnderAddress && (
                             <div data-capture-bank-flat="true" className={`flex items-center divide-x divide-slate-700 bg-slate-50/50 ${splitRowSectionClass}`}>
+                              {(row.workerName || row.workerId || row.bankAccount) && <span className="shrink-0 px-1 text-[9px] font-bold text-indigo-700">{getLaborStatementAccountLabel(row.payType, row.accountPurpose)}</span>}
                               <input type="text" value={row.bankName} onChange={e => updateRowBankInfo(row.id, { bankName: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="은행" />
                               <input type="text" value={row.bankOwner} onChange={e => updateRowBankInfo(row.id, { bankOwner: e.target.value })} className="w-[70px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="예금주" />
                               <input type="text" value={row.bankAccount} onChange={e => updateRowBankInfo(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="계좌번호" />
@@ -2033,9 +2076,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                       {showBankColumn && (
                         <td className={`border-black p-1 border-l ${row.payType === 'delegate' ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
                           <div className="flex flex-col gap-1 h-full justify-center">
-                            <div className="flex items-center justify-center gap-4 text-[11px] border-b border-black pb-1 mb-1">
-                              <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'direct'} onChange={() => setRowPayType(row.id, 'direct')} className="accent-blue-600" /><span className="font-medium text-slate-700">직불</span></label>
+                            <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[11px] border-b border-black pb-1 mb-1">
+                              <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'direct' && row.accountPurpose === 'default'} onChange={() => setRowPayType(row.id, 'default')} className="accent-slate-600" /><span className="font-medium text-slate-700">기본</span></label>
+                              <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'direct' && row.accountPurpose === 'directPay'} onChange={() => setRowPayType(row.id, 'direct')} className="accent-blue-600" /><span className="font-medium text-slate-700">직불</span></label>
                               <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'delegate'} onChange={() => setRowPayType(row.id, 'delegate')} className="accent-red-600" /><span className="font-bold text-red-600">위임</span></label>
+                              {(row.workerName || row.workerId || row.bankAccount) && <span className="rounded bg-indigo-50 px-1 text-[9px] font-bold text-indigo-700">{getLaborStatementAccountLabel(row.payType, row.accountPurpose)}</span>}
                             </div>
                             <div data-capture-bank-flat="true" className="flex h-[30px] items-center divide-x divide-black border border-black rounded bg-white/50">
                               <input type="text" value={row.bankName} onChange={e => updateRowBankInfo(row.id, { bankName: e.target.value })} className="w-[50px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="은행" />

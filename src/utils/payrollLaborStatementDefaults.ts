@@ -1,4 +1,11 @@
 export type SharedLaborStatementPayType = 'direct' | 'delegate';
+export type LaborStatementWorkerAccountPurpose = 'default' | 'directPay';
+export const getLaborStatementAccountLabel = (payType?: SharedLaborStatementPayType, purpose: LaborStatementWorkerAccountPurpose = 'directPay'): string =>
+    payType === 'delegate' ? '대표계좌(위임)' : purpose === 'default' ? '기본계좌' : '직불계좌';
+
+export const formatLaborStatementPaymentAccountLabel = (payType?: SharedLaborStatementPayType, purpose?: LaborStatementWorkerAccountPurpose): string =>
+    `${payType === 'delegate' ? '위임' : '직불'} · ${getLaborStatementAccountLabel(payType, purpose)}`;
+
 export type StatementIssueOptionPreset = 'beforeIssue' | 'afterIssue';
 
 export const STATEMENT_ISSUE_OPTION_PRESETS: Array<{ value: StatementIssueOptionPreset; label: string }> = [
