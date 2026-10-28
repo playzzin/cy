@@ -36,12 +36,14 @@ export function projectSiteWorkReports(reports: TeamRow[], sites: TeamRow[], sco
             const master = workerById.get(workerId);
             const teamId = text(worker.teamId) || text(master?.teamId);
             const team = teamById.get(teamId);
+            const teamColor = text(team?.color);
             // Never spread worker rows: supporting workers expose attendance
             // only, with no wage, contact, identity, bank or private note fields.
             return {
                 workerId: master?.id || workerId, name: text(worker.name || worker.workerName) || text(master?.name) || '작업자 미지정',
                 teamId: team?.id || teamId,
                 workerTeamName: text(worker.workerTeamName) || text(team?.name) || text(master?.teamName) || '소속 미확인',
+                ...(/^#[0-9a-f]{6}$/i.test(teamColor) ? { workerTeamColorHex: teamColor } : {}),
                 manDay: number(worker.manDay), status: text(worker.status) || 'attendance', isSiteSupport: !own,
                 ...(own ? { unitPrice: number(worker.unitPrice), payType: text(worker.payType),
                     salaryModel: text(worker.salaryModel), workContent: text(worker.workContent) } : {}),

@@ -186,3 +186,14 @@ test('지원 기록만 있는 날짜에는 노무비 합계와 급여 정보를 
     const dialog = screen.getByRole('dialog');
     expect(dialog).not.toHaveTextContent(/노무비|단가|급여방식|100,000원/);
 });
+
+test('지원팀 목록이 없어도 서버에서 전달된 DB 색상이 달력과 날짜 상세에 동일하게 적용된다', () => {
+    const attendance = [{ ...rows[0], workerTeamId: 'support', workerTeamName: '지원검증팀', workerTeamColorHex: '#d96cbd', isSiteSupport: true }];
+    render(<WorkerWorkHistory rows={attendance} teams={[]} month="2026-10" siteName="검증현장" loading={false} error="" />);
+    const day = screen.getByRole('button', { name: '2026-10-01 근무내역 1공수' });
+    expect(within(day).getByTitle('지원검증팀 1공수').style.getPropertyValue('--work-team-color')).toBe('#d96cbd');
+    fireEvent.click(day);
+    const team = within(screen.getByRole('dialog')).getByRole('region', { name: '지원검증팀 출력 내역' });
+    expect(team.style.getPropertyValue('--work-team-color')).toBe('#d96cbd');
+    expect(within(team).queryByText('단가')).not.toBeInTheDocument();
+});

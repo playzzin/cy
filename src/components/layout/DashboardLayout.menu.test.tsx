@@ -81,6 +81,24 @@ it('공용 dev 설정이 남고 UID 역조회가 없어도 연결 ID로 팀장 �
     await waitFor(() => expect(screen.getByTestId('menu-mode').textContent).toBe('pos_leader'));
     expect(manpowerService.getWorker).toHaveBeenCalledWith('worker-1');
     expect(localStorage.getItem(getMenuModeStorageKey('cy_current_position', 'leader-account'))).toBe('leader');
+    expect(document.documentElement).toHaveAttribute('data-team-typography', 'baemin');
+});
+
+it('팀장 메뉴에서 다른 직책으로 이동하거나 레이아웃을 닫으면 글꼴 범위를 해제한다', async () => {
+    const view = render(app());
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-team-typography', 'baemin'));
+    fireEvent.click(screen.getByRole('button', { name: '사무실 메뉴로 전환' }));
+    await waitFor(() => expect(document.documentElement).not.toHaveAttribute('data-team-typography'));
+    view.unmount();
+    render(app());
+    expect(document.documentElement).not.toHaveAttribute('data-team-typography');
+});
+
+it('팀장 레이아웃이 사라지면 로그인 화면에 글꼴 설정을 남기지 않는다', async () => {
+    const view = render(app());
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-team-typography', 'baemin'));
+    view.unmount();
+    expect(document.documentElement).not.toHaveAttribute('data-team-typography');
 });
 
 it('통합 전 매니저 메뉴를 수동 선택해 둔 계정도 현재 매니저 메뉴로 연결한다', async () => {
@@ -112,6 +130,7 @@ it.each(['DEV', 'CEO'])('%s 상단 직책모드에서 사용자 화면만 표시
     expect(screen.getByRole('region', { name: '사용자 시점 확인' })).toHaveTextContent('leader');
     expect(screen.queryByTestId('sidebar')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '메뉴 토글' })).not.toBeInTheDocument();
+    expect(document.documentElement).not.toHaveAttribute('data-team-typography');
     fireEvent.click(screen.getByRole('button', { name: '내 화면으로 복귀' }));
     await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_' + position.toLowerCase()));
     expect(screen.getByTestId('sidebar')).toBeInTheDocument();
@@ -153,6 +172,7 @@ it.each(['office', 'dev', 'full'])('%s 메뉴는 기존 왼쪽 배치를 유지�
     await screen.findByTestId('sidebar');
     expect(screen.getByTestId('sidebar')).toHaveAttribute('data-side', 'left');
     expect(layoutShell()).not.toHaveClass('sidebar-right');
+    expect(document.documentElement).not.toHaveAttribute('data-team-typography');
 });
 
 it('모바일 메뉴를 열고 닫거나 직책을 전환해도 배치와 열린 상태가 일치한다', async () => {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation, useNavigationType, type NavigateOptions } from 'react-router-dom';
 import { useMobileShellScroll } from '../../hooks/useMobileScroll';
+import { useTeamLeaderTypography } from '../../hooks/useTeamLeaderTypography';
 import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
 // ROLE_SITE_MAP removed - now fully dynamic
@@ -36,7 +37,7 @@ import { getDevPreviewSession, isDevPreviewFrame } from '../../utils/devPreviewR
 import DevUserPreview from '../developer/DevUserPreview';
 import DevPreviewRouteGuard from '../developer/DevPreviewRouteGuard';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
-import { filterTeamWorkflowMenu } from '../../utils/teamWorkflowPolicy';
+import { filterTeamWorkflowMenu, isTeamLeaderRole } from '../../utils/teamWorkflowPolicy';
 
 // Removed hardcoded siteData in favor of dynamic loading
 
@@ -508,6 +509,10 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         ? (siteData[effectiveSite] || siteData[fallbackSite] || null)
         : null;
     const restrictedTeam = useRestrictedTeamWorkflow();
+    useTeamLeaderTypography(!isSiteLayerMode && !userPreview && (
+        restrictedTeam || effectiveSite === 'pos_leader' ||
+        isTeamLeaderRole(positions.find(position => position.id === currentPosition)?.name)
+    ));
     const currentSiteData = sourceSiteData && siteData
         ? { ...sourceSiteData, menu: restrictedTeam ? filterTeamWorkflowMenu(getPositionMenuView(siteData, effectiveSite)) : getPositionMenuView(siteData, effectiveSite),
             ...(restrictedTeam && sourceSiteData.headerActions ? { headerActions: filterTeamWorkflowMenu(sourceSiteData.headerActions) } : {}) }
