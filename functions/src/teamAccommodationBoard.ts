@@ -9,6 +9,7 @@ import { isTeamLeader, text } from './teamReadPolicy';
 
 type Row = Record<string, any> & { id: string };
 type Change = { workerId: string; accommodationId: string | null };
+type RoomChange = { accommodationId: string; roomCount: number | null; maxOccupants: number | null };
 const fail = (code: functions.https.FunctionsErrorCode, message: string): never => { throw new functions.https.HttpsError(code, message); };
 const validId = (value: unknown): value is string => typeof value === 'string' && value.trim() === value
     && value.length > 0 && value.length <= 1500 && !value.includes('/') && !['.', '..'].includes(value);
@@ -21,6 +22,10 @@ const ALL_TEAMS = '__all__';
 const adminRoles = new Set(['admin', 'administrator', 'superadmin', 'systemadmin', 'owner', 'dev', 'developer', '관리자', '개발', '개발자', '시스템관리자', 'ceo', '대표', '대표이사', '사장',
     'manager', 'manager1', 'manager2', 'manager3', '매니저', '매니저1', '매니저2', '매니저3', '메니저', '메니저1', '메니저2', '메니저3']);
 const roleKey = (role: unknown) => text(role).toLowerCase().replace(/[\s_-]/g, '');
+const validRoomNumber = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 999;
+const roomCount = (room: Row): number | null => room.roomCount === undefined
+    ? ({ OneRoom: 1, TwoRoom: 2, ThreeRoom: 3 } as Record<string, number>)[text(room.type)] || null
+    : validRoomNumber(room.roomCount) ? room.roomCount : null;
 const companyKey = (value: unknown) => text(value).normalize('NFKC').toLowerCase()
     .replace(/주식회사|\(주\)|\(株\)/g, '').replace(/[\s().,·ㆍ-]/g, '');
 const isCheongyeonName = (value: unknown) => ['청연이엔지', '청연엔지', '청연eng', 'cheongyeoneng', 'cyeng', '청연', 'cheongyeon', 'cy'].includes(companyKey(value));
@@ -38,10 +43,22 @@ export function accommodationCompanyTeams(teams: Row[], companies: Row[]): Row[]
 export function validateAccommodationChanges(input: any): Change[] {
     const changes = input?.changes;
     if (!validId(input?.teamId) || typeof input?.revision !== 'string' || !/^[a-f0-9]{64}$/.test(input.revision)
-        || !Array.isArray(changes) || !changes.length || changes.length > 100
+        || !Array.isArray(changes) || (!changes.length && !input?.roomChanges?.length) || changes.length > 100
         || changes.some(change => !change || !validId(change.workerId) || (change.accommodationId !== null && !validId(change.accommodationId)))
         || new Set(changes.map(change => change.workerId)).size !== changes.length) {
         fail('invalid-argument', '배정할 작업자와 숙소를 확인해 주세요. 한 번에 최대 100명을 저장할 수 있습니다.');
+    }
+    return changes;
+}
+
+export function validateAccommodationRoomChanges(input: any): RoomChange[] {
+    const changes = input?.roomChanges === undefined ? [] : input.roomChanges;
+    if (!Array.isArray(changes) || changes.length > 100
+        || changes.some(change => !change || !validId(change.accommodationId)
+            || (change.roomCount !== null && !validRoomNumber(change.roomCount))
+            || (change.maxOccupants !== null && !validRoomNumber(change.maxOccupants)))
+        || new Set(changes.map(change => change.accommodationId)).size !== changes.length) {
+        fail('invalid-argument', '방 개수와 최대 인원은 1~999의 정수 또는 미설정 값이어야 합니다. 한 번에 최대 100곳까지 저장할 수 있습니다.');
     }
     return changes;
 }
@@ -102,7 +119,12 @@ async function loadBoard(transaction: FirebaseFirestore.Transaction, uid: string
         : await byIds('accommodations', [FieldPath.documentId(), 'legacyId'], allocations.map(row => fieldId(row, 'accommodation')));
     const rooms = houses.filter(row => row.status === 'active'
         && (!row.contract?.startDate || row.contract.startDate <= date) && (!row.contract?.endDate || row.contract.endDate >= date));
+    // Capacity includes occupants outside the currently selected company/team, without returning their identities.
+    const roomOccupancies = (await byIds('accommodationAssignments', ['accommodationId', 'accommodation.id'], rooms.flatMap(keys)))
+        .filter(row => fieldId(row, 'worker') && current(row, date));
     const roomFor = (id: string) => rooms.find(room => keys(room).includes(id));
+    const occupants = (room: Row) => new Set(roomOccupancies.filter(row => keys(room).includes(fieldId(row, 'accommodation')))
+        .map(row => workers.find(worker => keys(worker).includes(fieldId(row, 'worker')))?.id || fieldId(row, 'worker')));
     const workerRows = workers.map(worker => {
         const related = allAssignments.filter(row => keys(worker).includes(fieldId(row, 'worker')));
         const occupied = related.filter(row => current(row, date));
@@ -116,13 +138,14 @@ async function loadBoard(transaction: FirebaseFirestore.Transaction, uid: string
             teamName: text(workerTeam?.name || worker.teamName) || '소속 미지정', accommodationId: room?.id || null, ...(lockedReason ? { lockedReason } : {}) };
     }).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
     const revision = createHash('sha256').update(JSON.stringify({ date, teamId, workers: workerRows,
-        rooms: rooms.map(row => [row.id, row.status, row.contract?.endDate || '']).sort(),
+        rooms: rooms.map(row => [row.id, row.status, row.contract?.endDate || '', roomCount(row), row.maxOccupants ?? null, row.ownership || '', [...occupants(row)].sort()]).sort(),
         assignments: allAssignments.map(row => [row.id, fieldId(row, 'worker'), fieldId(row, 'team'), fieldId(row, 'accommodation'),
             row.status || '', row.startDate || '', row.endDate || '', row.updatedAt?.toMillis?.() || 0]).sort(),
     })).digest('hex');
-    return { teams, workers, rooms, allAssignments, date, board: {
+    return { teams, workers, rooms, allAssignments, date, occupants, board: {
         canManageAll: administrator, teamId, teams: teams.map(row => ({ id: row.id, name: text(row.name), color: text(row.color) })), date, revision,
-        rooms: rooms.map(row => ({ id: row.id, name: text(row.name), address: text(row.address), type: text(row.type) })), workers: workerRows,
+        rooms: rooms.map(row => ({ id: row.id, name: text(row.name), address: text(row.address), type: text(row.type), ownership: text(row.ownership),
+            roomCount: roomCount(row), maxOccupants: validRoomNumber(row.maxOccupants) ? row.maxOccupants : null, totalOccupants: occupants(row).size })), workers: workerRows,
     } };
 }
 
@@ -136,15 +159,40 @@ export async function saveTeamAccommodationBoardData(input: any, context: functi
     if (context.auth && isPreviewIdentity(context.auth.uid, context.auth.token)) fail('permission-denied', '조회 미리보기에서는 배정을 저장할 수 없습니다.');
     const auth = requireCallableAuth(context);
     const changes = validateAccommodationChanges(input);
+    const roomChanges = validateAccommodationRoomChanges(input);
     const db = admin.firestore();
     return db.runTransaction(async transaction => {
-        const { board, teams, workers, rooms, allAssignments, date } = await loadBoard(transaction, auth.uid, input.teamId);
+        const { board, teams, workers, rooms, allAssignments, date, occupants } = await loadBoard(transaction, auth.uid, input.teamId);
         if (board.revision !== input.revision) fail('failed-precondition', '배정 정보가 변경되었습니다. 새로고침 후 다시 배정해 주세요.');
         // Validate the entire batch before queuing any writes.
         for (const change of changes) {
             const worker = board.workers.find(row => row.id === change.workerId);
             if (!worker || worker.lockedReason || (change.accommodationId !== null && !rooms.some(row => row.id === change.accommodationId))) {
                 fail('permission-denied', '현재 계정에서 배정 가능한 작업자와 숙소만 변경할 수 있습니다.');
+            }
+        }
+        for (const change of roomChanges) {
+            if (!rooms.some(room => room.id === change.accommodationId)) fail('permission-denied', '현재 팀에서 배정 가능한 숙소의 설정만 변경할 수 있습니다.');
+        }
+        const affectedRooms = new Set(roomChanges.map(change => change.accommodationId));
+        for (const change of changes) {
+            const previous = board.workers.find(worker => worker.id === change.workerId)!.accommodationId;
+            if (previous) affectedRooms.add(previous);
+            if (change.accommodationId) affectedRooms.add(change.accommodationId);
+        }
+        for (const id of affectedRooms) {
+            const room = rooms.find(row => row.id === id)!;
+            const currentOccupants = occupants(room);
+            const nextOccupants = new Set(currentOccupants);
+            for (const change of changes) {
+                nextOccupants.delete(change.workerId);
+                if (change.accommodationId === id) nextOccupants.add(change.workerId);
+            }
+            const setting = roomChanges.find(change => change.accommodationId === id);
+            const maximum = setting ? setting.maxOccupants : board.rooms.find(row => row.id === id)!.maxOccupants;
+            if (maximum !== null && nextOccupants.size > maximum
+                && (nextOccupants.size > currentOccupants.size || (setting && setting.maxOccupants !== (room.maxOccupants ?? null)))) {
+                fail('failed-precondition', `${text(room.name)}의 최대 인원은 ${maximum}명입니다. 현재 입실 인원과 배정 변경을 확인해 주세요.`);
             }
         }
         const yesterday = new Date(new Date(`${date}T00:00:00Z`).getTime() - 86400_000).toISOString().slice(0, 10);
@@ -169,7 +217,15 @@ export async function saveTeamAccommodationBoardData(input: any, context: functi
             // Serialize concurrent assignments even when both initially had no occupancy row.
             transaction.update(db.doc(`workers/${worker.id}`), { accommodationAssignmentUpdatedAt: FieldValue.serverTimestamp() });
         }
-        return { saved: changes.length };
+        // Serialize settings and occupancy changes across teams sharing a room.
+        for (const id of affectedRooms) {
+            const setting = roomChanges.find(change => change.accommodationId === id);
+            transaction.update(db.doc(`accommodations/${id}`), {
+                ...(setting ? { roomCount: setting.roomCount, maxOccupants: setting.maxOccupants } : {}),
+                updatedAt: FieldValue.serverTimestamp(), updatedByUid: auth.uid,
+            });
+        }
+        return { saved: changes.length, roomsSaved: roomChanges.length };
     });
 }
 

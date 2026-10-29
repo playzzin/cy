@@ -32,6 +32,7 @@ beforeEach(() => {
 const open = async () => { render(<TeamAccommodationPage />); await screen.findByText('원룸 1호', { selector: 'h3' }); };
 const select = (name: string) => fireEvent.click(screen.getByRole('checkbox', { name: `${name} 선택` }));
 const assignTo = (name: string) => fireEvent.click(within(screen.getByRole('region', { name })).getByRole('button', { name: /선택 작업자 배정/ }));
+const editRoom = (name: string) => fireEvent.click(screen.getByRole('button', { name: `${name} 방 설정` }));
 
 test('여러 작업자를 선택하여 이동하고 확인 후 변경분만 저장한다', async () => {
     await open(); select('작업자 가'); select('작업자 나'); assignTo('투룸 2호');
@@ -163,4 +164,64 @@ test('다른 팀 조회 실패 후 재시도도 같은 팀으로 요청한다', 
     fireEvent.click(screen.getByRole('button', { name: '다시 불러오기' }));
     await waitFor(() => expect(teamAccommodationBoardService.load).toHaveBeenCalledTimes(3));
     expect(teamAccommodationBoardService.load).toHaveBeenLastCalledWith('b');
+});
+
+test('개인방·숙소를 구분하고 방 설정만 변경해도 확인 후 저장한다', async () => {
+    const configured = { ...fixture, rooms: [
+        { ...fixture.rooms[0], ownership: 'Individual', roomCount: 1, maxOccupants: 2, totalOccupants: 1 },
+        { ...fixture.rooms[1], ownership: 'Cheongyeon', roomCount: 2, maxOccupants: null, totalOccupants: 0 },
+    ] };
+    (teamAccommodationBoardService.load as jest.Mock).mockResolvedValue(configured);
+    await open();
+    expect(within(screen.getByRole('region', { name: '원룸 1호' })).getByText('개인방')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '투룸 2호' })).getByText('숙소')).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    editRoom('투룸 2호');
+    expect(screen.getByRole('spinbutton', { name: '투룸 2호 최대 인원' })).toHaveValue(null);
+    fireEvent.change(screen.getByRole('spinbutton', { name: '투룸 2호 방 개수' }), { target: { value: '3' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: '투룸 2호 최대 인원' }), { target: { value: '6' } });
+    editRoom('투룸 2호');
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    editRoom('투룸 2호');
+    expect(screen.getByRole('spinbutton', { name: '투룸 2호 최대 인원' })).toHaveValue(6);
+    expect(teamAccommodationBoardService.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '변경사항 저장 (1)' }));
+    expect(within(screen.getByRole('dialog')).getByText('투룸 2호 · 설정')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByText('최대 인원 미설정')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '변경 확정 저장' }));
+    await waitFor(() => expect(teamAccommodationBoardService.save).toHaveBeenCalledWith(configured, [], [{ accommodationId: 'two', roomCount: 3, maxOccupants: 6 }]));
+    expect(await screen.findByText('1곳의 숙소 설정을 저장했습니다.')).toBeInTheDocument();
+});
+
+test.each(['0', '1.5', '1000'])('잘못된 방 설정 %s는 저장할 수 없고 되돌리면 원래 값이 복원된다', async value => {
+    await open();
+    editRoom('원룸 1호');
+    const field = screen.getByRole('spinbutton', { name: '원룸 1호 방 개수' });
+    fireEvent.change(field, { target: { value } });
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: '변경사항 저장 (1)' })).toBeDisabled();
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: '되돌리기' }));
+    expect(confirm).toHaveBeenCalled();
+    expect(field).toHaveValue(null);
+    expect(screen.getByRole('button', { name: '변경사항 저장' })).toBeDisabled();
+    confirm.mockRestore();
+});
+
+test('다른 팀 입실 인원을 포함해 최대 인원을 확인하고 설정과 배정을 함께 저장한다', async () => {
+    const shared = { ...fixture, rooms: fixture.rooms.map(room => room.id === 'two' ? { ...room, roomCount: 2, maxOccupants: 2, totalOccupants: 1 } : room) };
+    (teamAccommodationBoardService.load as jest.Mock).mockResolvedValue(shared);
+    await open(); select('작업자 가'); select('작업자 나'); assignTo('투룸 2호');
+    expect(screen.getByRole('alert')).toHaveTextContent('최대 인원은 2명');
+    expect(within(screen.getByRole('region', { name: '투룸 2호' })).queryByText('작업자 가')).not.toBeInTheDocument();
+    editRoom('투룸 2호');
+    fireEvent.change(screen.getByRole('spinbutton', { name: '투룸 2호 최대 인원' }), { target: { value: '3' } });
+    assignTo('투룸 2호');
+    expect(within(screen.getByRole('region', { name: '투룸 2호' })).getByText('3명', { selector: 'b' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '변경사항 저장 (3)' }));
+    fireEvent.click(screen.getByRole('button', { name: '변경 확정 저장' }));
+    await waitFor(() => expect(teamAccommodationBoardService.save).toHaveBeenCalledWith(shared,
+        [{ workerId: 'w1', accommodationId: 'two' }, { workerId: 'w2', accommodationId: 'two' }],
+        [{ accommodationId: 'two', roomCount: 2, maxOccupants: 3 }]));
+    await screen.findByText('1곳의 숙소 설정과 2명의 배정을 저장했습니다.');
 });

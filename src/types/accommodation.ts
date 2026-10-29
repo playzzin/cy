@@ -45,6 +45,8 @@ export interface Accommodation {
     name: string; // e.g., "사동 502호"
     address: string;
     type: 'OneRoom' | 'TwoRoom' | 'ThreeRoom' | 'Apartment';
+    roomCount?: number;
+    maxOccupants?: number;
     utilityOverchargeThreshold?: number;
     status: 'active' | 'inactive';
     ownership: 'Cheongyeon' | 'Dawon' | 'Individual';

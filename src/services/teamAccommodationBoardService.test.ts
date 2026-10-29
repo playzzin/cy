@@ -33,3 +33,10 @@ test('실제 서버 오류를 샘플 데이터로 대체하지 않는다', async
     call.mockRejectedValue(new Error('unavailable'));
     await expect(service.load('team-a')).rejects.toThrow('unavailable');
 });
+
+test('숙소 설정 변경과 미설정 값도 실제 저장 함수에 전달한다', async () => {
+    call.mockResolvedValue({ data: { saved: 0, roomsSaved: 1 } });
+    const roomChanges = [{ accommodationId: 'room', roomCount: 3, maxOccupants: null }];
+    await service.save(board, [], roomChanges);
+    expect(call).toHaveBeenLastCalledWith({ teamId: 'team-a', revision: 'revision', changes: [], roomChanges });
+});

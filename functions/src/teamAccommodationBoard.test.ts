@@ -1,7 +1,7 @@
 import { strict as assert } from 'assert';
 import { test } from 'node:test';
 import * as admin from 'firebase-admin';
-import { getTeamAccommodationBoardData as load, saveTeamAccommodationBoardData as save, validateAccommodationChanges, accommodationCompanyTeams } from './teamAccommodationBoard';
+import { getTeamAccommodationBoardData as load, saveTeamAccommodationBoardData as save, validateAccommodationChanges, validateAccommodationRoomChanges, accommodationCompanyTeams } from './teamAccommodationBoard';
 import { permitsPreviewCall } from './devPreviewPolicy';
 
 const context = (uid = 'housing-leader') => ({ auth: { uid, token: { role: 'admin' } } } as any);
@@ -29,6 +29,86 @@ test('숙소 배정은 비로그인·미리보기 저장·잘못된 변경을 �
     }
     assert.equal(permitsPreviewCall('getTeamAccommodationBoard', {}), true);
     assert.equal(permitsPreviewCall('saveTeamAccommodationBoard', {}), false);
+});
+
+test('방 설정은 중복 없는 숙소 ID와 정수 또는 미설정만 허용한다', () => {
+    const setting = { accommodationId: 'room', roomCount: 2, maxOccupants: null };
+    const payload = { teamId: 'team-a', revision: 'a'.repeat(64), changes: [], roomChanges: [setting] };
+    assert.deepEqual(validateAccommodationChanges(payload), []);
+    assert.deepEqual(validateAccommodationRoomChanges(payload), [setting]);
+    assert.deepEqual(validateAccommodationRoomChanges({}), []);
+    for (const roomChanges of [null, 'invalid', [setting, setting], [{ ...setting, accommodationId: '../room' }],
+        ...[0, -1, 1.5, 1000, '2', undefined].flatMap(value => [[{ ...setting, roomCount: value }], [{ ...setting, maxOccupants: value }]])]) {
+        assert.throws(() => validateAccommodationRoomChanges({ roomChanges }), (error: any) => error.code === 'invalid-argument');
+    }
+});
+
+test('공유 숙소 정원·설정 변경·동시 입실은 같은 트랜잭션으로 검증한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
+    const app = admin.initializeApp({ projectId: 'demo-team-accommodation' });
+    const db = app.firestore();
+    const fixtures = {
+        'companies/cy': { name: '청연이엔지' },
+        'teams/a': { name: '가 팀', companyId: 'cy' },
+        'teams/b': { name: '나 팀', companyId: 'cy' },
+        'users/a': { status: 'active', position: '팀장', linkedWorkerIds: ['a'] },
+        'users/b': { status: 'active', position: '팀장', linkedWorkerIds: ['b'] },
+        'workers/a': { name: '가 작업자', teamId: 'a' },
+        'workers/b': { name: '나 작업자', teamId: 'b' },
+        'accommodations/shared': { name: '공유 숙소', type: 'TwoRoom', ownership: 'Cheongyeon', maxOccupants: 2, status: 'active', contract: { memo: '보존' } },
+        'accommodations/private': { name: '개인방', type: 'OneRoom', ownership: 'Individual', status: 'active' },
+        'accommodationAssignments/a': { source: 'team', teamId: 'a', accommodationId: 'shared', status: 'active' },
+        'accommodationAssignments/b': { source: 'team', teamId: 'b', accommodationId: 'shared', status: 'active' },
+        'accommodationAssignments/private': { source: 'team', teamId: 'a', accommodationId: 'private', status: 'active' },
+        'accommodationAssignments/outside': { source: 'worker', workerId: 'outside', teamId: 'outside', accommodationId: 'shared', status: 'active' },
+    };
+    const read = (uid: string) => load({ teamId: uid }, context(uid));
+    const setting = (roomCount: number | null, maxOccupants: number | null) => ({ accommodationId: 'shared', roomCount, maxOccupants });
+    try {
+        const batch = db.batch();
+        Object.entries(fixtures).forEach(([path, value]) => batch.set(db.doc(path), value));
+        await batch.commit();
+        let a = await read('a');
+        const shared = a.rooms.find(room => room.id === 'shared')!;
+        assert.equal(shared.roomCount, 2, '기존 투룸은 방 개수 2를 표시한다');
+        assert.equal(shared.totalOccupants, 1, '현재 조회 범위 밖의 입실 인원도 포함한다');
+        assert.equal(shared.ownership, 'Cheongyeon');
+        assert.equal(a.rooms.find(room => room.id === 'private')?.ownership, 'Individual');
+        assert.equal(a.rooms.find(room => room.id === 'private')?.maxOccupants, null, '미등록 정원을 임의로 추정하지 않는다');
+        assert.equal(JSON.stringify(a).includes('outside'), false, '다른 팀 입실자의 신원은 반환하지 않는다');
+        await save({ teamId: 'a', revision: a.revision, changes: [], roomChanges: [setting(3, 2)] }, context('a'));
+        assert.deepEqual((await db.doc('accommodations/shared').get()).data()?.contract, { memo: '보존' });
+        await assert.rejects(save({ teamId: 'a', revision: a.revision, changes: [], roomChanges: [setting(4, 3)] }, context('a')), (e: any) => e.code === 'failed-precondition');
+        a = await read('a');
+        let b = await read('b');
+        await assert.rejects(save({ teamId: 'b', revision: b.revision, changes: [], roomChanges: [{ accommodationId: 'private', roomCount: 2, maxOccupants: 3 }] }, context('b')), (e: any) => e.code === 'permission-denied');
+        const payload = (uid: string, revision: string) => ({ teamId: uid, revision, changes: [{ workerId: uid, accommodationId: 'shared' }] });
+        const race = await Promise.allSettled([save(payload('a', a.revision), context('a')), save(payload('b', b.revision), context('b'))]);
+        assert.equal(race.filter(result => result.status === 'fulfilled').length, 1, '서로 다른 팀이 마지막 1자리에 동시에 입실할 수 없다');
+        const winner = race[0].status === 'fulfilled' ? 'a' : 'b';
+        const loser = winner === 'a' ? 'b' : 'a';
+        const losingBoard = await read(loser);
+        await assert.rejects(save(payload(loser, losingBoard.revision), context(loser)), (e: any) => e.code === 'failed-precondition' && e.message.includes('최대 인원'));
+        let board = await read(winner);
+        assert.equal(board.rooms.find(room => room.id === 'shared')?.totalOccupants, 2);
+        await assert.rejects(save({ teamId: winner, revision: board.revision, changes: [], roomChanges: [setting(3, 1)] }, context(winner)), (e: any) => e.code === 'failed-precondition');
+        await save({ teamId: winner, revision: board.revision, changes: [{ workerId: winner, accommodationId: null }], roomChanges: [setting(3, 1)] }, context(winner));
+        board = await read(winner);
+        assert.equal(board.rooms.find(room => room.id === 'shared')?.totalOccupants, 1);
+        assert.equal(board.rooms.find(room => room.id === 'shared')?.maxOccupants, 1);
+        await save({ teamId: winner, revision: board.revision, changes: [], roomChanges: [setting(null, null)] }, context(winner));
+        board = await read(winner);
+        assert.equal(board.rooms.find(room => room.id === 'shared')?.roomCount, null, '명시적으로 비운 값은 유형 기본값으로 되돌리지 않는다');
+        assert.equal(board.rooms.find(room => room.id === 'shared')?.maxOccupants, null);
+        assert.equal((await db.doc('accommodationAssignments/outside').get()).data()?.status, 'active');
+        assert.equal((await db.doc('accommodationAssignments/a').get()).data()?.status, 'active');
+        assert.equal((await db.doc('accommodations/shared').get()).data()?.ownership, 'Cheongyeon');
+    } finally {
+        for (const collection of ['users', 'companies', 'teams', 'workers', 'accommodations', 'accommodationAssignments']) {
+            const rows = await db.collection(collection).get();
+            const cleanup = db.batch(); rows.docs.forEach(doc => cleanup.delete(doc.ref)); await cleanup.commit();
+        }
+        await app.delete();
+    }
 });
 
 test('팀 범위·동시 저장·입실 이력과 기존 팀 배정을 실제 Firestore 트랜잭션에서 검증한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {

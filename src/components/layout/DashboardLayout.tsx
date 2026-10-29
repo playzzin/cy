@@ -706,7 +706,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     ].includes(location.pathname);
     const mainContentClassName = [
         location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : '',
-        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage || isAdvancePaymentPage || location.pathname === '/tools/excel-converter' ? 'page-full-bleed' : '',
+        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage || isAdvancePaymentPage || ['/tools/excel-converter', '/assignment/team-accommodation'].includes(location.pathname) ? 'page-full-bleed' : '',
         isDailyReportListPage || isAdvancePaymentPage ? 'page-contained-scroll' : '',
         isSupportManagementHubPage ? 'page-support-management' : '',
     ].filter(Boolean).join(' ');
