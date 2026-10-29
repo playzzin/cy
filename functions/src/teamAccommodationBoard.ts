@@ -21,6 +21,19 @@ const ALL_TEAMS = '__all__';
 const adminRoles = new Set(['admin', 'administrator', 'superadmin', 'systemadmin', 'owner', 'dev', 'developer', '관리자', '개발', '개발자', '시스템관리자', 'ceo', '대표', '대표이사', '사장',
     'manager', 'manager1', 'manager2', 'manager3', '매니저', '매니저1', '매니저2', '매니저3', '메니저', '메니저1', '메니저2', '메니저3']);
 const roleKey = (role: unknown) => text(role).toLowerCase().replace(/[\s_-]/g, '');
+const companyKey = (value: unknown) => text(value).normalize('NFKC').toLowerCase()
+    .replace(/주식회사|\(주\)|\(株\)/g, '').replace(/[\s().,·ㆍ-]/g, '');
+const isCheongyeonName = (value: unknown) => ['청연이엔지', '청연엔지', '청연eng', 'cheongyeoneng', 'cyeng', '청연', 'cheongyeon', 'cy'].includes(companyKey(value));
+
+export function accommodationCompanyTeams(teams: Row[], companies: Row[]): Row[] {
+    const companyById = new Map(companies.flatMap(company => keys(company).map(id => [id, company] as const)));
+    return teams.filter(team => {
+        const company = companyById.get(text(team.companyId));
+        // A resolved company reference takes precedence over a stale copied name on a team.
+        if (company) return isCheongyeonName(company.name) || ['cy', 'cyeng'].includes(companyKey(company.code));
+        return isCheongyeonName(team.companyName);
+    });
+}
 
 export function validateAccommodationChanges(input: any): Change[] {
     const changes = input?.changes;
@@ -67,24 +80,25 @@ async function loadBoard(transaction: FirebaseFirestore.Transaction, uid: string
         const anchors = (await byIds('workers', [FieldPath.documentId()], links)).filter(activeWorker);
         teams = await byIds('teams', [FieldPath.documentId(), 'legacyId'], anchors.map(row => text(row.teamId)));
     }
-    teams = teams.filter(team => team.isActive !== false).sort((a, b) => text(a.name).localeCompare(text(b.name), 'ko'));
-    // Open a single team's workers first. Privileged users can explicitly request all teams.
+    const companies = await readQuery(db.collection('companies').select('name', 'code', 'legacyId'));
+    teams = accommodationCompanyTeams(teams, companies).filter(team => team.isActive !== false)
+        .sort((a, b) => text(a.name).localeCompare(text(b.name), 'ko'));
+    // "All teams" includes only Cheongyeon ENG teams, using the same scope for reads and saves.
     const teamId = text(requestedTeam) || teams[0]?.id || (administrator ? ALL_TEAMS : '');
     const team = teams.find(row => row.id === teamId);
     const allTeams = administrator && teamId === ALL_TEAMS;
-    if (!allTeams && !team) fail('permission-denied', '배정할 수 있는 소속 팀이 없습니다.');
-    const teamKeys = team ? keys(team) : [];
-    const workers = (await (allTeams ? readQuery(db.collection('workers')) : byIds('workers', ['teamId'], teamKeys))).filter(activeWorker);
+    if (!allTeams && !team) fail('permission-denied', '배정 가능한 청연이엔지 소속 팀이 없습니다.');
+    const teamKeys = allTeams ? teams.flatMap(keys) : team ? keys(team) : [];
+    const workers = (await byIds('workers', ['teamId'], teamKeys)).filter(activeWorker);
     const workerKeys = workers.flatMap(keys);
-    const assignments = allTeams ? await readQuery(db.collection('accommodationAssignments'))
-        : await byIds('accommodationAssignments', ['teamId', 'team.id'], teamKeys);
-    const workerAssignments = allTeams ? [] : await byIds('accommodationAssignments', ['workerId', 'worker.id'], workerKeys);
+    const assignments = await byIds('accommodationAssignments', ['teamId', 'team.id'], teamKeys);
+    const workerAssignments = await byIds('accommodationAssignments', ['workerId', 'worker.id'], workerKeys);
     const allAssignments = [...new Map([...assignments, ...workerAssignments].map(row => [row.id, row])).values()];
     const date = today();
-    // A team allocation is a team-level record, not a personal occupancy record.
-    // It remains intact when the last occupant leaves or moves to another room.
-    const allocations = assignments.filter(row => !fieldId(row, 'worker') && row.source === 'team' && current(row, date));
-    const houses = administrator ? await readQuery(db.collection('accommodations'))
+    // A team's current room list includes team allocations and individual occupancies recorded for it.
+    // Team-level allocations remain intact when the last occupant leaves or moves.
+    const allocations = assignments.filter(row => current(row, date));
+    const houses = allTeams ? await readQuery(db.collection('accommodations'))
         : await byIds('accommodations', [FieldPath.documentId(), 'legacyId'], allocations.map(row => fieldId(row, 'accommodation')));
     const rooms = houses.filter(row => row.status === 'active'
         && (!row.contract?.startDate || row.contract.startDate <= date) && (!row.contract?.endDate || row.contract.endDate >= date));

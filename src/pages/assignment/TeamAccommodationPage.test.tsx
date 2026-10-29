@@ -69,8 +69,8 @@ test('저장 실패 시 성공 표시 없이 변경사항을 유지한다', asyn
     expect(teamAccommodationBoardService.load).toHaveBeenCalledTimes(1);
 });
 
-test('숙소가 없는 팀에 다른 팀 숙소나 임의 기본 숙소를 보여주지 않는다', async () => {
-    (teamAccommodationBoardService.load as jest.Mock).mockResolvedValue({ ...fixture, rooms: [], workers: [] });
+test.each([false, true])('숙소가 없는 팀에 다른 팀 숙소나 임의 기본 숙소를 보여주지 않는다 (관리자: %s)', async canManageAll => {
+    (teamAccommodationBoardService.load as jest.Mock).mockResolvedValue({ ...fixture, canManageAll, rooms: [], workers: [] });
     render(<TeamAccommodationPage />);
     expect(await screen.findByText('아직 팀에 배정된 숙소가 없습니다')).toBeInTheDocument();
     expect(screen.queryByText('원룸 1호')).not.toBeInTheDocument();
@@ -91,6 +91,8 @@ test('관리자는 전체 작업자 모드와 팀 필터를 이용하고 다른 
     await open();
     expect(screen.getByRole('heading', { name: '전체 숙소 배정' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: '작업자 팀' })).toHaveValue('__all__');
+    expect(screen.getByRole('option', { name: '청연이엔지 전체 팀' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '청연 전체 팀' })).toBeInTheDocument();
     select('다른 팀원'); assignTo('원룸 1호');
     fireEvent.click(screen.getByRole('button', { name: '변경사항 저장 (1)' }));
     fireEvent.click(screen.getByRole('button', { name: '배정 확정 저장' }));
@@ -103,7 +105,7 @@ test('관리자는 전체 작업자 모드와 팀 필터를 이용하고 다른 
 test('팀장 화면에는 전체 팀 선택지를 노출하지 않는다', async () => {
     await open();
     expect(screen.getByRole('heading', { name: '우리 팀 숙소 배정' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: '전체 팀 · 전체 작업자' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '청연이엔지 전체 팀' })).not.toBeInTheDocument();
 });
 
 test('서버 오류 코드를 그대로 표시하지 않고 복구 가능한 안내를 표시한다', async () => {
@@ -121,10 +123,10 @@ test('샘플 계정은 조회와 저장 없이 실제 계정으로 전환한다'
     expect(teamAccommodationBoardService.save).not.toHaveBeenCalled();
 });
 
-test('팀 버튼은 서버에서 해당 팀만 새로 조회하고 이전 선택과 검색을 초기화한다', async () => {
+test('팀 버튼은 해당 팀의 작업자와 숙소만 새로 표시하고 이전 선택과 검색을 초기화한다', async () => {
     const teams = [...fixture.teams, { id: 'b', name: '지원 팀', color: '#d97706' }];
     (teamAccommodationBoardService.load as jest.Mock).mockResolvedValueOnce({ ...fixture, canManageAll: true, teams }).mockResolvedValue({
-        ...fixture, canManageAll: true, teamId: 'b', teams,
+        ...fixture, canManageAll: true, teamId: 'b', teams, rooms: [fixture.rooms[1]],
         workers: [{ id: 'b1', name: '지원 작업자', teamId: 'b', teamName: '지원 팀', role: '기공', accommodationId: null }],
     });
     await open();
@@ -138,6 +140,8 @@ test('팀 버튼은 서버에서 해당 팀만 새로 조회하고 이전 선택
     expect(screen.getByRole('textbox', { name: '작업자 검색' })).toHaveValue('');
     expect(screen.getByRole('textbox', { name: '숙소 검색' })).toHaveValue('');
     expect(screen.getByRole('region', { name: '투룸 2호' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '원룸 1호' })).not.toBeInTheDocument();
+    expect(screen.getByText('팀 숙소')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '지원 팀', pressed: true })).toHaveStyle('--ta-team-color: #d97706');
 });
 
