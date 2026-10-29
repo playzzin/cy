@@ -1,7 +1,7 @@
 export interface TeamAccommodationBoard {
     canManageAll?: boolean;
     teamId: string;
-    teams: Array<{ id: string; name: string }>;
+    teams: Array<{ id: string; name: string; color?: string }>;
     date: string;
     revision: string;
     rooms: Array<{ id: string; name: string; address: string; type: string }>;

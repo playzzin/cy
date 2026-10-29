@@ -68,7 +68,8 @@ async function loadBoard(transaction: FirebaseFirestore.Transaction, uid: string
         teams = await byIds('teams', [FieldPath.documentId(), 'legacyId'], anchors.map(row => text(row.teamId)));
     }
     teams = teams.filter(team => team.isActive !== false).sort((a, b) => text(a.name).localeCompare(text(b.name), 'ko'));
-    const teamId = text(requestedTeam) || (administrator ? ALL_TEAMS : teams[0]?.id || '');
+    // Open a single team's workers first. Privileged users can explicitly request all teams.
+    const teamId = text(requestedTeam) || teams[0]?.id || (administrator ? ALL_TEAMS : '');
     const team = teams.find(row => row.id === teamId);
     const allTeams = administrator && teamId === ALL_TEAMS;
     if (!allTeams && !team) fail('permission-denied', '배정할 수 있는 소속 팀이 없습니다.');
@@ -106,7 +107,7 @@ async function loadBoard(transaction: FirebaseFirestore.Transaction, uid: string
             row.status || '', row.startDate || '', row.endDate || '', row.updatedAt?.toMillis?.() || 0]).sort(),
     })).digest('hex');
     return { teams, workers, rooms, allAssignments, date, board: {
-        canManageAll: administrator, teamId, teams: teams.map(row => ({ id: row.id, name: text(row.name) })), date, revision,
+        canManageAll: administrator, teamId, teams: teams.map(row => ({ id: row.id, name: text(row.name), color: text(row.color) })), date, revision,
         rooms: rooms.map(row => ({ id: row.id, name: text(row.name), address: text(row.address), type: text(row.type) })), workers: workerRows,
     } };
 }

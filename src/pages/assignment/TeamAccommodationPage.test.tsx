@@ -4,22 +4,26 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import TeamAccommodationPage from './TeamAccommodationPage';
 import { teamAccommodationBoardService } from '../../services/teamAccommodationBoardService';
 import type { TeamAccommodationBoard } from '../../types/teamAccommodationBoard';
+import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
+import { openRealAccommodationSession } from '../../utils/teamAccommodationAppearance';
 
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'leader' } }) }));
 jest.mock('../../services/teamAccommodationBoardService', () => ({ teamAccommodationBoardService: { load: jest.fn(), save: jest.fn() } }));
-jest.mock('../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
+jest.mock('../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: jest.fn(() => false) }));
+jest.mock('../../utils/teamAccommodationAppearance', () => ({ ...jest.requireActual('../../utils/teamAccommodationAppearance'), openRealAccommodationSession: jest.fn() }));
 jest.mock('../../utils/devPreviewRuntime', () => ({ isDevPreviewFrame: false }));
 const fixture: TeamAccommodationBoard = {
-    teamId: 'a', teams: [{ id: 'a', name: '테스트 팀' }], date: '2026-10-30', revision: 'revision',
+    teamId: 'a', teams: [{ id: 'a', name: '테스트 팀', color: '#2563eb' }], date: '2026-10-30', revision: 'revision',
     rooms: [{ id: 'one', name: '원룸 1호', address: '테스트 주소', type: 'OneRoom' }, { id: 'two', name: '투룸 2호', address: '', type: 'TwoRoom' }],
     workers: [
-        { id: 'w1', name: '작업자 가', role: '기공', accommodationId: null },
-        { id: 'w2', name: '작업자 나', role: '조공', accommodationId: 'one' },
+        { id: 'w1', name: '작업자 가', role: '기공', teamId: 'a', teamName: '테스트 팀', accommodationId: null },
+        { id: 'w2', name: '작업자 나', role: '조공', teamId: 'a', teamName: '테스트 팀', accommodationId: 'one' },
         { id: 'locked', name: '확인 작업자', role: '', accommodationId: null, lockedReason: '예정된 입실 기록이 있습니다.' },
     ],
 };
 beforeEach(() => {
     jest.clearAllMocks();
+    (isDevAdminSessionEnabled as jest.Mock).mockReturnValue(false);
     (teamAccommodationBoardService.load as jest.Mock).mockResolvedValue(fixture);
     (teamAccommodationBoardService.save as jest.Mock).mockResolvedValue(undefined);
     HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
@@ -107,4 +111,52 @@ test('서버 오류 코드를 그대로 표시하지 않고 복구 가능한 안
     render(<TeamAccommodationPage />);
     expect(await screen.findByRole('alert')).toHaveTextContent('숙소 배정 서비스에 연결하지 못했습니다.');
     expect(screen.queryByText('internal')).not.toBeInTheDocument();
+});
+
+test('샘플 계정은 조회와 저장 없이 실제 계정으로 전환한다', () => {
+    (isDevAdminSessionEnabled as jest.Mock).mockReturnValue(true);
+    render(<TeamAccommodationPage />);
+    expect(openRealAccommodationSession).toHaveBeenCalledTimes(1);
+    expect(teamAccommodationBoardService.load).not.toHaveBeenCalled();
+    expect(teamAccommodationBoardService.save).not.toHaveBeenCalled();
+});
+
+test('팀 버튼은 서버에서 해당 팀만 새로 조회하고 이전 선택과 검색을 초기화한다', async () => {
+    const teams = [...fixture.teams, { id: 'b', name: '지원 팀', color: '#d97706' }];
+    (teamAccommodationBoardService.load as jest.Mock).mockResolvedValueOnce({ ...fixture, canManageAll: true, teams }).mockResolvedValue({
+        ...fixture, canManageAll: true, teamId: 'b', teams,
+        workers: [{ id: 'b1', name: '지원 작업자', teamId: 'b', teamName: '지원 팀', role: '기공', accommodationId: null }],
+    });
+    await open();
+    select('작업자 가');
+    fireEvent.change(screen.getByRole('textbox', { name: '작업자 검색' }), { target: { value: '작업자 가' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '숙소 검색' }), { target: { value: '원룸' } });
+    fireEvent.click(within(screen.getByRole('navigation', { name: '팀별 작업자 불러오기' })).getByRole('button', { name: '지원 팀' }));
+    expect(await screen.findByRole('checkbox', { name: '지원 작업자 선택' })).not.toBeChecked();
+    expect(teamAccommodationBoardService.load).toHaveBeenLastCalledWith('b');
+    expect(screen.queryByRole('checkbox', { name: '작업자 가 선택' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '작업자 검색' })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: '숙소 검색' })).toHaveValue('');
+    expect(screen.getByRole('region', { name: '투룸 2호' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '지원 팀', pressed: true })).toHaveStyle('--ta-team-color: #d97706');
+});
+
+test('검색 중에도 숙소 배정 인원과 팀 색상을 유지한다', async () => {
+    await open();
+    const room = screen.getByRole('region', { name: '원룸 1호' });
+    expect(within(room).getByText('테스트 팀', { selector: '.ta-room-teams span' })).toHaveStyle('--ta-team-color: #2563eb');
+    fireEvent.change(screen.getByRole('textbox', { name: '작업자 검색' }), { target: { value: '검색되지 않는 이름' } });
+    expect(within(room).getByText('선택 팀 1명')).toBeInTheDocument();
+    expect(within(room).getByText('검색 조건에 맞는 작업자가 없습니다')).toBeInTheDocument();
+});
+
+test('다른 팀 조회 실패 후 재시도도 같은 팀으로 요청한다', async () => {
+    const teams = [...fixture.teams, { id: 'b', name: '지원 팀' }];
+    (teamAccommodationBoardService.load as jest.Mock).mockResolvedValueOnce({ ...fixture, canManageAll: true, teams }).mockRejectedValue(new Error('조회 실패'));
+    await open();
+    fireEvent.change(screen.getByRole('combobox', { name: '작업자 팀' }), { target: { value: 'b' } });
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: '다시 불러오기' }));
+    await waitFor(() => expect(teamAccommodationBoardService.load).toHaveBeenCalledTimes(3));
+    expect(teamAccommodationBoardService.load).toHaveBeenLastCalledWith('b');
 });

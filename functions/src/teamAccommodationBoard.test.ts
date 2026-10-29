@@ -31,8 +31,8 @@ test('팀 범위·동시 저장·입실 이력과 기존 팀 배정을 실제 Fi
         'users/housing-manager-custom': { status: 'active', position: 'pos_housing-manager' },
         'settings/menus_v12': { admin: { positionConfig: [{ id: 'housing-manager', name: '매니저' }] } },
         'users/housing-worker': { status: 'active', role: '작업자', linkedWorkerIds: ['anchor'] },
-        'teams/team-a': { name: '가상 A팀', legacyId: 'old-a' },
-        'teams/team-b': { name: '가상 B팀' },
+        'teams/team-a': { name: '가상 A팀', legacyId: 'old-a', color: '#2563eb' },
+        'teams/team-b': { name: '가상 B팀', color: '#d97706' },
         'workers/anchor': { name: '가상 팀장', teamId: 'old-a', role: '팀장' },
         'workers/member': { name: '가상 작업자', teamId: 'team-a', phone: 'private' },
         'workers/other': { name: '다른 팀 작업자', teamId: 'team-b' },
@@ -60,13 +60,17 @@ test('팀 범위·동시 저장·입실 이력과 기존 팀 배정을 실제 Fi
         assert.deepEqual(new Set(board.workers.map(row => row.id)), new Set(['anchor', 'member']));
         assert.equal(JSON.stringify(board).includes('private'), false);
         assert.equal(board.canManageAll, false);
+        assert.equal(board.teams[0].color, '#2563eb');
         await assert.rejects(load({ teamId: '__all__', canManageAll: true }, context()), (e: any) => e.code === 'permission-denied');
         await assert.rejects(load({ teamId: 'team-b' }, context()), (e: any) => e.code === 'permission-denied');
         await assert.rejects(load({}, context('housing-worker')), (e: any) => e.code === 'permission-denied');
         assert.equal((await load({ teamId: 'team-b' }, context('housing-admin'))).teamId, 'team-b');
         // Actual profile roles (including custom menu IDs), never token/input role claims, determine global access.
         for (const [index, uid] of ['housing-admin', 'housing-ceo', 'housing-manager', 'housing-manager-ko', 'housing-manager-custom'].entries()) {
-            const global = await load({}, context(uid));
+            const firstTeam = await load({}, context(uid));
+            assert.equal(firstTeam.teamId, 'team-a');
+            assert.deepEqual(new Set(firstTeam.workers.map(row => row.id)), new Set(['anchor', 'member']));
+            const global = await load({ teamId: '__all__' }, context(uid));
             assert.equal(global.canManageAll, true);
             assert.equal(global.teamId, '__all__');
             assert.deepEqual(new Set(global.workers.map(row => row.id)), new Set(['anchor', 'member', 'other', 'no-team']));
@@ -77,13 +81,13 @@ test('팀 범위·동시 저장·입실 이력과 기존 팀 배정을 실제 Fi
             assert.equal(occupancy.accommodationId, target);
             assert.equal(occupancy.teamId, 'team-b', '저장자의 팀이나 숙소의 팀으로 작업자 소속을 덮어쓰면 안 된다');
         }
-        let global = await load({}, context('housing-manager'));
+        let global = await load({ teamId: '__all__' }, context('housing-manager'));
         await save({ teamId: '__all__', revision: global.revision, changes: [change('no-team', 'room-a')] }, context('housing-manager'));
         assert.equal((await db.collection('accommodationAssignments').where('workerId', '==', 'no-team').get()).docs[0].data().teamId, null);
         const filtered = await load({ teamId: 'team-b' }, context('housing-manager'));
         assert.deepEqual(filtered.workers.map(row => row.id), ['other']);
         assert.equal(filtered.rooms.length, 4, '관리자가 팀을 필터해도 전체 숙소로 배정할 수 있어야 한다');
-        global = await load({}, context('housing-manager'));
+        global = await load({ teamId: '__all__' }, context('housing-manager'));
         await db.doc('users/housing-manager').update({ role: '작업자' });
         await assert.rejects(save({ teamId: '__all__', revision: global.revision, changes: [change('other', 'room-a')] }, context('housing-manager')), (e: any) => e.code === 'permission-denied');
         for (const invalid of [change('other', 'room-a'), change('retired', 'room-a'), change('anchor', 'room-b'), change('anchor', 'expired')]) {
