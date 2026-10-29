@@ -18,8 +18,8 @@ jest.mock('../../config/firebase', () => ({ db: {} }));
 jest.mock('firebase/firestore', () => ({ doc: jest.fn(), onSnapshot: jest.fn(() => jest.fn()) }));
 jest.mock('../../constants/messages', () => ({ MessageManager: { setContext: jest.fn() } }));
 jest.mock('../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
-jest.mock('./Header', () => ({ toggleSidebar, canPreviewUsers, changePosition }: any) => <header><button onClick={toggleSidebar}>메뉴 토글</button>{canPreviewUsers && <><button onClick={() => changePosition('leader')}>상단 팀장 시점</button><button onClick={() => changePosition('ceo')}>상단 CEO 선택</button></>}</header>);
-jest.mock('../developer/DevUserPreview', () => ({ positionId, onExit }: any) => <section aria-label="사용자 시점 확인"><span>{positionId}</span><button onClick={onExit}>내 화면으로 복귀</button></section>);
+jest.mock('./Header', () => ({ toggleSidebar, canPreviewUsers, changePosition }: any) => <header><button onClick={toggleSidebar}>메뉴 토글</button>{canPreviewUsers && <><button onClick={() => changePosition('leader')}>상단 팀장 시점</button><button onClick={() => changePosition('ceo')}>상단 CEO 선택</button><button onClick={() => changePosition('full')}>상단 전체 메뉴 선택</button></>}</header>);
+jest.mock('../developer/DevUserPreview', () => ({ positionId, onExit, onPosition }: any) => <section aria-label="사용자 시점 확인"><span>{positionId}</span><button onClick={() => onPosition('worker')}>작업자 시점</button><button onClick={onExit}>내 화면으로 복귀</button></section>);
 jest.mock('./Sidebar', () => ({ side, closeAll }: any) => <nav data-testid="sidebar" data-side={side}><button onClick={closeAll}>메뉴 닫기</button></nav>);
 jest.mock('./LayoutBottomPanel', () => () => null);
 jest.mock('./AdminPanel', () => () => null);
@@ -144,6 +144,48 @@ it('CEO가 자신의 직책을 선택하면 미리보기를 열지 않는다', a
     fireEvent.click(await screen.findByRole('button', { name: '상단 CEO 선택' }));
     expect(screen.queryByRole('region', { name: '사용자 시점 확인' })).not.toBeInTheDocument();
     expect(screen.getByTestId('sidebar')).toBeInTheDocument();
+});
+
+it.each([
+    ['CEO', 'ceo', 'admin', 'cy_position_manual'],
+    ['CEO', 'ceo', 'admin', 'cy_site_manual'],
+    ['CEO', 'ceo', 'test', 'cy_site_manual'],
+    ['DEV', 'dev', 'admin', 'cy_position_manual'],
+] as const)('%s는 저장된 전체 메뉴(%s/%s/%s) 대신 본인 직책으로 반복 복귀한다', async (position, positionId, site, manualKey) => {
+    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'admin', position, status: 'active' });
+    (manpowerService.getWorker as jest.Mock).mockResolvedValue(null);
+    localStorage.setItem(getMenuModeStorageKey('cy_current_position', 'leader-account'), 'full');
+    localStorage.setItem(getMenuModeStorageKey('cy_current_site', 'leader-account'), site);
+    localStorage.setItem(getMenuModeStorageKey(manualKey, 'leader-account'), 'true');
+    const view = render(app());
+
+    fireEvent.click(await screen.findByRole('button', { name: '상단 팀장 시점' }));
+    fireEvent.click(screen.getByRole('button', { name: '작업자 시점' }));
+    expect(screen.getByRole('region', { name: '사용자 시점 확인' })).toHaveTextContent('worker');
+    expect(localStorage.getItem(getMenuModeStorageKey('cy_current_position', 'leader-account'))).toBe('full');
+    fireEvent.click(screen.getByRole('button', { name: '내 화면으로 복귀' }));
+    await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_' + positionId));
+    expect(localStorage.getItem(getMenuModeStorageKey('cy_current_position', 'leader-account'))).toBe(positionId);
+    expect(localStorage.getItem(getMenuModeStorageKey('cy_current_site', 'leader-account'))).toBe('admin');
+    expect(localStorage.getItem(getMenuModeStorageKey('cy_site_manual', 'leader-account'))).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '상단 팀장 시점' }));
+    fireEvent.click(screen.getByRole('button', { name: '내 화면으로 복귀' }));
+    expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_' + positionId);
+    view.unmount();
+    render(app());
+    await waitFor(() => expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_' + positionId));
+});
+
+it('전체 메뉴를 보던 CEO가 본인 직책을 선택하면 CEO 메뉴를 직접 연다', async () => {
+    (userService.getUser as jest.Mock).mockResolvedValue({ role: 'admin', position: 'CEO', status: 'active' });
+    (manpowerService.getWorker as jest.Mock).mockResolvedValue(null);
+    render(app());
+    fireEvent.click(await screen.findByRole('button', { name: '상단 전체 메뉴 선택' }));
+    expect(screen.getByTestId('menu-mode')).toHaveTextContent('admin');
+    fireEvent.click(screen.getByRole('button', { name: '상단 CEO 선택' }));
+    expect(screen.queryByRole('region', { name: '사용자 시점 확인' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('menu-mode')).toHaveTextContent('pos_ceo');
 });
 
 it.each([{ status: 'active', role: 'admin', position: '팀장' }, { status: 'suspended', role: 'admin', position: 'CEO' }])('일반 관리자나 비활성 CEO에는 미리보기 진입을 제공하지 않는다', async profile => {

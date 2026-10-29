@@ -84,6 +84,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     // Dynamic Menu State
     const [siteData, setSiteData] = useState<SiteDataType | null>(null);
     const [canPreviewUsers, setCanPreviewUsers] = useState(false);
+    const [ownPositionId, setOwnPositionId] = useState<string>();
     const [userPreview, setUserPreview] = useState<{ positionId: string; path: string } | null>(null);
 
     const autoAppliedPositionForUserRef = useRef('');
@@ -388,10 +389,16 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     useEffect(() => {
         let alive = true;
         setCanPreviewUsers(false);
+        setOwnPositionId(undefined);
         if (isDevPreviewFrame || !currentUser?.uid || !siteData) return;
         void import('../../services/userService').then(({ userService }) => userService.getUser(currentUser.uid, true)).then(profile => {
             const allowed = hasUserPreviewAccess(profile, positions);
-            if (alive) { setCanPreviewUsers(Boolean(allowed)); if (!allowed) setUserPreview(null); }
+            if (alive) {
+                setCanPreviewUsers(Boolean(allowed));
+                // Resolve the actor's menu even when a saved manual menu disables auto-selection.
+                setOwnPositionId(allowed ? resolveUserMenuPositionId(positions, profile) : undefined);
+                if (!allowed) setUserPreview(null);
+            }
         }).catch(() => { if (alive) { setCanPreviewUsers(false); setUserPreview(null); } });
         return () => { alive = false; };
     }, [currentUser?.uid, siteData, positions]);
@@ -619,8 +626,14 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         console.log('Position changed to:', positionId);
     };
 
+    const exitUserPreview = () => {
+        // "My screen" restores the signed-in position, including its persisted menu mode.
+        changePosition(ownPositionId || currentPosition);
+        closeAll();
+    };
+
     const selectPositionMode = (positionId: string) => {
-        if (canPreviewUsers && positionId !== 'full' && positionId !== currentPosition && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) {
+        if (canPreviewUsers && positionId !== 'full' && positionId !== ownPositionId && positionId !== currentPosition && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) {
             openUserPreview(positionId);
         } else {
             changePosition(positionId);
@@ -711,7 +724,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         return <SiteModeProvider {...siteModeValue}>
             <DevUserPreview key={currentUser.uid} actorUid={currentUser.uid} positionId={userPreview.positionId} path={userPreview.path}
                 positions={positions} onPosition={positionId => openUserPreview(positionId)}
-                onPath={path => setUserPreview(previous => previous ? { ...previous, path } : previous)} onExit={() => setUserPreview(null)} />
+                onPath={path => setUserPreview(previous => previous ? { ...previous, path } : previous)} onExit={exitUserPreview} />
         </SiteModeProvider>;
     }
     const routedContent = isDevPreviewFrame
