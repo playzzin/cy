@@ -1,0 +1,14 @@
+export interface TeamAccommodationBoard {
+    canManageAll?: boolean;
+    teamId: string;
+    teams: Array<{ id: string; name: string }>;
+    date: string;
+    revision: string;
+    rooms: Array<{ id: string; name: string; address: string; type: string }>;
+    workers: Array<{ id: string; name: string; role: string; teamId?: string; teamName?: string; accommodationId: string | null; lockedReason?: string }>;
+}
+
+export interface TeamAccommodationChange {
+    workerId: string;
+    accommodationId: string | null;
+}

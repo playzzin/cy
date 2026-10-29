@@ -157,6 +157,7 @@ export { analyzeExcelStructure } from './excelStructurePlanning';
 
 export { getTeamScopedData } from './teamScopedRead';
 export { saveTeamVehicleOil } from './teamVehicleOilWrite';
+export { getTeamAccommodationBoard, saveTeamAccommodationBoard } from './teamAccommodationBoard';
 export { teamExpenseRequests } from './teamExpenseRequests';
 export { teamWorkerRequests } from './teamWorkerRequests';
 

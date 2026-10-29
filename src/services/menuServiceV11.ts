@@ -21,6 +21,7 @@ import { ensureTeamPersonnelMenu } from '../utils/teamPersonnelMenu';
 import { ensureBankTransferMenu } from '../utils/bankTransferMenu';
 import { ensureCorporateTaxMenu } from '../utils/corporateTaxMenu';
 import { ensureAdvanceSummaryMenu } from '../utils/advanceSummaryMenu';
+import { ensureTeamAccommodationDevMenu } from '../utils/teamAccommodationMenu';
 
 export type { MenuItem, SiteDataType };
 
@@ -1209,6 +1210,7 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     ensureBankTransferMenu(final);
     ensureCorporateTaxMenu(final);
     ensureAdvanceSummaryMenu(final);
+    ensureTeamAccommodationDevMenu(final);
 
     // Migrations can insert items without IDs. Assign only missing IDs before
     // projection; re-normalizing here would also rewrite their intentional labels.

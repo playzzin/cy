@@ -158,6 +158,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         ],
         positionConfig: [
             { id: 'full', name: '전체 메뉴', icon: 'fa-shield-halved', color: 'from-red-600 to-red-400', order: 0 },
+            { id: 'dev', name: 'DEV', icon: 'fa-code', color: 'from-teal-600 to-emerald-400', order: 99 },
             { id: 'ceo', name: 'CEO', icon: 'fa-crown', color: 'from-amber-500 to-yellow-400', order: 1 },
             { id: 'manager', name: '매니저', icon: 'fa-user-tie', color: 'from-blue-600 to-blue-400', order: 2 },
             ...BUSINESS_PARTNER_POSITION_CONFIGS,
@@ -207,6 +208,11 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         ]
     },
     // === 직책별 메뉴 (Position Mode) ===
+    pos_dev: {
+        name: 'DEV', icon: 'fa-code', menu: [{ text: '구성메뉴', icon: 'fa-layer-group', sub: [
+            { text: '우리 팀 숙소 배정', icon: 'fa-house', path: '/assignment/team-accommodation' }
+        ] }]
+    },
     pos_ceo: {
         name: "CEO",
         icon: "fa-crown",

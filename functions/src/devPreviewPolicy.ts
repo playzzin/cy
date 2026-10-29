@@ -15,6 +15,7 @@ export function previewActorRole(profile: any, positions: Array<{ id: string; na
 
 // Explicitly audited read operations. New endpoints fail closed until reviewed.
 const reads = new Set(['getTeamScopedData', 'listGeminiUsageLogs', 'getCardExpenseAuditDashboard', 'listCardStatementFiles', 'getCardStatementFileDetail',
+    'getTeamAccommodationBoard',
     'getMyAccountLinkCandidate', 'getMyAccountLinkStatus', 'searchAccountLinkCompanies', 'getWelfareGameConfig', 'getNoticeDeliveryReport', 'getNoticeBoard', 'getCardStatementImportJobStatus']);
 const readActions: Record<string, string[]> = {
     supportTeamDocuments: ['list', 'read'],

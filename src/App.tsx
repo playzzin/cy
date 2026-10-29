@@ -24,6 +24,7 @@ const FieldSchedulePlannerPage = React.lazy(() => import('./pages/assignment/Fie
 const WorkerOffDutyRequestPage = React.lazy(() => import('./pages/assignment/WorkerOffDutyRequestPage'));
 const ScheduleConfirmationBoardPage = React.lazy(() => import('./pages/assignment/ScheduleConfirmationBoardPage'));
 const TeamAssignmentPage = React.lazy(() => import('./pages/assignment/TeamAssignmentPage'));
+const TeamAccommodationPage = React.lazy(() => import('./pages/assignment/TeamAccommodationPage'));
 const SiteAssignmentPage = React.lazy(() => import('./pages/assignment/SiteAssignmentPage'));
 const SupportAssignmentPage = React.lazy(() => import('./pages/assignment/SupportAssignmentPage'));
 const RateChangePage = React.lazy(() => import('./pages/hr/RateChangePage'));
@@ -647,6 +648,7 @@ const App: React.FC = () => {
             <Route path="/support/settings" element={<SupportSettingsPage />} />
             <Route path="/support/status" element={<SupportStatusPage />} />
             <Route path="/support/accommodation" element={<SupportManagerPage />} />
+            <Route path="/assignment/team-accommodation" element={<TeamAccommodationPage />} />
             <Route path="/support/accommodation/logs" element={<ActivityCenterPage />} />
             <Route path="/support/vehicles" element={<SupportManagerPage />} />
             <Route path="/support/vehicles/oil-cycle" element={<EngineOilCyclePage />} />
