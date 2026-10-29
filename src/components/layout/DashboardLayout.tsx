@@ -673,6 +673,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         toggleDarkMode
     };
     const isMemoFullBleedPage = location.pathname === '/memos';
+    const isAdvancePaymentPage = location.pathname === '/payroll/advance-payment';
     const isWorkbookLedgerFullBleedPage = [
         '/payroll/workbook-ledger',
         '/payroll/workbook-ledger-dawon',
@@ -692,8 +693,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     ].includes(location.pathname);
     const mainContentClassName = [
         location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : '',
-        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage || location.pathname === '/tools/excel-converter' ? 'page-full-bleed' : '',
-        isDailyReportListPage ? 'page-contained-scroll' : '',
+        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage || isAdvancePaymentPage || location.pathname === '/tools/excel-converter' ? 'page-full-bleed' : '',
+        isDailyReportListPage || isAdvancePaymentPage ? 'page-contained-scroll' : '',
         isSupportManagementHubPage ? 'page-support-management' : '',
     ].filter(Boolean).join(' ');
 

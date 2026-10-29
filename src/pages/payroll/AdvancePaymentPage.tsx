@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { teamService } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { advancePaymentService, AdvancePayment } from '../../services/advancePaymentService';
@@ -27,12 +28,15 @@ import type { AccommodationAssignment } from '../../types/accommodationAssignmen
 import type { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
 import type { UtilityRecord } from '../../types/accommodation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight, faUsers, faCheck } from '@fortawesome/free-solid-svg-icons';
-import Swal from 'sweetalert2';
+import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight, faUsers, faCheck, faExpand, faCompress } from '@fortawesome/free-solid-svg-icons';
+import SweetAlert from 'sweetalert2';
 import { Link, useSearchParams } from 'react-router-dom';
 import { shiftYearMonth } from '../../components/common/MonthNavigator';
 import { normalizeHexColor } from '../../utils/color';
 import './AdvancePaymentPage.css';
+
+// Keep feedback and confirmations inside the active view, including the modal top layer.
+const Swal = SweetAlert.mixin({ target: '.advance-payment-page', keydownListenerCapture: true });
 
 // 임시저장 데이터 타입
 type AdvanceTempData = {
@@ -639,6 +643,58 @@ const AdvancePaymentPage: React.FC = () => {
     const { currentUser } = useAuth();
     const [searchParams] = useSearchParams();
     const [canUseAdvanceManagement, setCanUseAdvanceManagement] = useState<boolean | null>(null);
+    const [expandedDialog, setExpandedDialog] = useState<HTMLDialogElement | null>(null);
+    const [fitTableToWidth, setFitTableToWidth] = useState(() => window.innerWidth >= 900);
+    const [tableScale, setTableScale] = useState(1);
+    const tableScrollRef = useRef<HTMLDivElement>(null);
+    const tableRef = useRef<HTMLTableElement>(null);
+    const expandButtonRef = useRef<HTMLButtonElement>(null);
+    const isExpanded = expandedDialog !== null;
+
+    useEffect(() => {
+        if (!expandedDialog) return;
+
+        const previousOverflow = document.body.style.overflow;
+        const closeExpandedView = (event: Event) => {
+            // Let an open confirmation or memo dialog handle Escape first.
+            event.preventDefault();
+            if (!Swal.isVisible()) setExpandedDialog(null);
+        };
+        expandedDialog.className = 'advance-expanded-dialog';
+        expandedDialog.setAttribute('aria-label', '가불 및 공제 전체 보기');
+        expandedDialog.addEventListener('cancel', closeExpandedView);
+        document.body.appendChild(expandedDialog);
+        document.body.style.overflow = 'hidden';
+        expandedDialog.showModal();
+        expandButtonRef.current?.focus();
+
+        return () => {
+            expandedDialog.removeEventListener('cancel', closeExpandedView);
+            expandedDialog.close();
+            expandedDialog.remove();
+            document.body.style.overflow = previousOverflow;
+            expandButtonRef.current?.focus();
+        };
+    }, [expandedDialog]);
+
+    useLayoutEffect(() => {
+        const scroll = tableScrollRef.current;
+        const table = tableRef.current;
+        if (!scroll || !table || !fitTableToWidth) return;
+
+        const fit = () => {
+            if (!scroll.clientWidth || !table.offsetWidth) return;
+            const scale = table.offsetWidth <= scroll.clientWidth
+                ? 1
+                : Math.floor((scroll.clientWidth - 1) / table.offsetWidth * 10000) / 10000;
+            setTableScale(previous => previous === scale ? previous : scale);
+        };
+        const observer = new ResizeObserver(fit);
+        observer.observe(scroll);
+        observer.observe(table);
+        fit();
+        return () => observer.disconnect();
+    }, [fitTableToWidth, isExpanded]);
 
     const parseNumberFromInput = useCallback((raw: string): number => {
         const cleaned = String(raw ?? '').replace(/,/g, '').replace(/[^0-9-]/g, '').trim();
@@ -1044,18 +1100,6 @@ const AdvancePaymentPage: React.FC = () => {
             isCancelled = true;
         };
     }, [canUseAdvanceManagement]);
-
-    // Lock main content scroll
-    useEffect(() => {
-        const mainContent = document.getElementById('main-content');
-        if (mainContent) {
-            const originalOverflow = mainContent.style.overflow;
-            mainContent.style.overflow = 'hidden';
-            return () => {
-                mainContent.style.overflow = originalOverflow;
-            };
-        }
-    }, []);
 
     // 1. Load Initial Teams/Companies
     useEffect(() => {
@@ -2461,15 +2505,25 @@ const AdvancePaymentPage: React.FC = () => {
     };
 
     // 5. Render
-    return (
-        <div className="advance-payment-page">
+    const pageContent = (
+        <div className={`advance-payment-page${isExpanded ? ' advance-payment-page--expanded' : ''}`}>
             <div className="advance-page-header">
                 <h1>
                     <FontAwesomeIcon icon={faCalculator} />
                     가불 및 공제 관리
                 </h1>
                 <div className="advance-page-actions">
-                    {canUseAdvanceManagement && (
+                    <button
+                        type="button"
+                        ref={expandButtonRef}
+                        className="advance-action"
+                        aria-expanded={isExpanded}
+                        onClick={() => setExpandedDialog(isExpanded ? null : document.createElement('dialog'))}
+                    >
+                        <FontAwesomeIcon icon={isExpanded ? faCompress : faExpand} />
+                        {isExpanded ? '전체 보기 닫기' : '전체 보기'}
+                    </button>
+                    {canUseAdvanceManagement && !isExpanded && (
                         <Link
                             to={`/payroll/advance-summary?${new URLSearchParams({ yearMonth: selectedMonth,
                                 ...(selectedTeamId && selectedTeamId !== ALL_TEAMS_VALUE ? { teamId: selectedTeamId } : {}) })}`}
@@ -2479,7 +2533,7 @@ const AdvancePaymentPage: React.FC = () => {
                         </Link>
                     )}
                     {/* Settings Toggle */}
-                    {canUseAdvanceManagement && (
+                    {canUseAdvanceManagement && !isExpanded && (
                         <button
                             onClick={() => setIsDeductionSettingsOpen(!isDeductionSettingsOpen)}
                             className="advance-action"
@@ -2493,7 +2547,7 @@ const AdvancePaymentPage: React.FC = () => {
                     )}
 
                     {/* Temp Data Restoration */}
-                    {hasTempData && (
+                    {hasTempData && !isExpanded && (
                         <div className="advance-temp-data">
                             <span className="text-xs text-amber-600 font-bold">
                                 {tempDataSavedAt ? new Date(tempDataSavedAt).toLocaleTimeString() : ''} 임시저장됨
@@ -2796,11 +2850,23 @@ const AdvancePaymentPage: React.FC = () => {
             {/* Table Area */}
             <div className="advance-ledger" id="table-container" style={{ '--advance-team-color': displayedLedger.color } as React.CSSProperties}>
                 <div className="advance-ledger-heading">
-                    <div><h2>{displayedLedger.title}</h2><span>{visibleWorkers.length}명 · 가불 및 공제</span></div>
-                    <span className="advance-ledger-total">공제 합계 <strong>{displayedLedger.total.toLocaleString()}원</strong></span>
+                    <div><h2>{displayedLedger.title}</h2><span>{selectedMonth} · {visibleWorkers.length}명 · 가불 및 공제</span></div>
+                    <div className="advance-ledger-view-actions">
+                        <span className="advance-ledger-total">공제 합계 <strong>{displayedLedger.total.toLocaleString()}원</strong></span>
+                        <button
+                            type="button"
+                            className="advance-fit-button"
+                            aria-pressed={fitTableToWidth}
+                            title={fitTableToWidth ? '원본 크기로 보기' : '모든 열을 화면 너비에 맞춰 보기'}
+                            onClick={() => setFitTableToWidth(fit => !fit)}
+                        >
+                            {fitTableToWidth && <FontAwesomeIcon icon={faCheck} />}
+                            너비 맞춤{fitTableToWidth ? ` ${Math.round(tableScale * 100)}%` : ''}
+                        </button>
+                    </div>
                 </div>
-                <div className="advance-table-scroll" role="region" aria-label="가불 및 공제 입력표" tabIndex={0}>
-                    <table className="advance-input-table">
+                <div ref={tableScrollRef} className="advance-table-scroll" role="region" aria-label="가불 및 공제 입력표" tabIndex={0}>
+                    <table ref={tableRef} className={`advance-input-table${fitTableToWidth ? ' advance-input-table--fit' : ''}`} style={{ zoom: fitTableToWidth ? tableScale : 1 }}>
                         <thead className="bg-slate-100 sticky top-0 z-30 text-slate-700 font-bold border-b border-slate-300 h-10">
                             <tr>
                                 <th rowSpan={2} className="advance-number-cell sticky left-0 z-40">No</th>
@@ -3010,16 +3076,14 @@ const AdvancePaymentPage: React.FC = () => {
 
             <div className="advance-input-help">
                 <span>* 방향키로 셀을 이동할 수 있습니다. (상/하/좌/우)</span>
-                <br />
                 <span>* 숫자를 입력하면 자동으로 합계가 계산됩니다. 입력 후 반드시 [저장] 버튼을 눌러주세요.</span>
-                <br />
                 <span>* <span className="text-emerald-600 font-bold">연녹색 배경</span>: 자동 반영된 값 (숙소/공과금 등, 수정 불가)</span>
-                <br />
                 <span>* 흰색 입력칸: 직접 입력 항목 (관리비·기타 포함, 음수 금액 입력 가능)</span>
             </div>
         </div>
     );
 
+    return expandedDialog ? createPortal(pageContent, expandedDialog) : pageContent;
 };
 
 export default AdvancePaymentPage;
