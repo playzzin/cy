@@ -147,7 +147,7 @@ const AdvanceSummaryPage: React.FC = () => {
     const unclassified = useMemo(() => buildAdvanceSummary(status === 'ready' ? result.requests : [], result.teams,
         { yearMonth, teamId, item: 'unclassified', query }, result.workers), [status, result.requests, result.teams, result.workers, yearMonth, teamId, query]);
     const unclassifiedIds = new Set(unclassified.groups.flatMap(group => group.rows.flatMap(row => row.memoSources.map(source => source.id))));
-    const manualWorkers = result.workers.filter(worker => worker.id && result.teams.some(team => team.id === worker.teamId || team.legacyId === worker.teamId));
+    const manualWorkers = result.workers.filter(worker => worker.id && worker.teamId && result.teams.some(team => team.id === worker.teamId || team.legacyId === worker.teamId));
     const prepaymentAmounts = new Map(result.requests.filter(request => request.source === 'manual-prepayment' && request.yearMonth === yearMonth)
         .map(request => [request.workerId, request.requestedAmount]));
     const itemLabel = item === 'all' ? '전체 신청' : ADVANCE_REQUEST_CATEGORY_LABELS[item];
@@ -368,7 +368,7 @@ const AdvanceSummaryPage: React.FC = () => {
                 workerName={memoEditor.row.workerName} context={`${monthLabel} · ${memoEditor.teamName}`}
                 sources={memoEditor.row.memoSources} onSave={saveMemos} onClose={() => setMemoEditor(null)} />}
             {prepaymentWorker !== null && status === 'ready' && <AdvancePrepaymentDialog key={`${uid}/${yearMonth}/${prepaymentWorker}`}
-                workers={manualWorkers} initialWorkerId={prepaymentWorker} amounts={prepaymentAmounts} month={monthLabel}
+                workers={manualWorkers} teams={result.teams} initialWorkerId={prepaymentWorker} initialTeamId={teamId} amounts={prepaymentAmounts} month={monthLabel}
                 onSave={savePrepayment} onClose={() => setPrepaymentWorker(null)} />}
         </div>
     );

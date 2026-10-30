@@ -120,7 +120,6 @@
 .as-unclassified > div > span { flex: 1; }
 .as-account .as-unclassified-amount { margin-left: 12px; color: #92400e; font-weight: 700; }
 .as-prepayment-edit { min-width: 36px; padding: 4px; border: 1px dashed #cbd5e1; border-radius: 4px; background: #fffbeb; color: #92400e; font: inherit; cursor: pointer; }
-.as-prepayment-dialog input, .as-prepayment-dialog select { width: 100%; min-height: 44px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; font-size: 16px; }
 @media print { .as-prepayment-edit { border: 0; padding: 0; background: none; color: inherit; } }
 .as-memo-form { display: flex; flex-direction: column; gap: 16px; }
 .as-memo-help { color: #64748b; font-size: 13px; }
