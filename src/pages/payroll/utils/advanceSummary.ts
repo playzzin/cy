@@ -1,10 +1,10 @@
-import type { AdvancePayment } from '../../../services/advancePaymentService';
+import type { AdvanceRequest } from '../../../services/advanceRequestService';
 import type { Worker } from '../../../services/manpowerService';
-import { normalizeAdvancePaymentDepositAccount, type AdvancePaymentDepositAccount } from '../../../types/advancePaymentDepositAccount';
-import { ADVANCE_ITEM_LABEL_KEYS, type AdvanceItemLabelKey } from '../../../services/payrollConfigService';
+import { normalizeAdvancePaymentDepositAccount, type AdvancePaymentDepositAccount, type AdvanceDepositAccountCategory } from '../../../types/advancePaymentDepositAccount';
+import { ADVANCE_REQUEST_CATEGORIES, ADVANCE_REQUEST_CATEGORY_LABELS, getAdvanceRequestCategory, type AdvanceRequestCategory } from '../../../types/advanceRequestCategory';
 
-export type AdvanceSummaryFilter = 'all' | 'corporate' | 'labor' | AdvanceItemLabelKey;
-export type AdvanceSummaryWorker = Pick<Worker, 'id' | 'legacyId' | 'bankName' | 'accountNumber' | 'accountHolder'>;
+export type AdvanceSummaryFilter = 'all' | AdvanceRequestCategory;
+export type AdvanceSummaryWorker = Pick<Worker, 'id' | 'legacyId' | 'bankName' | 'accountNumber' | 'accountHolder'> & Partial<Pick<Worker, 'name' | 'teamId' | 'teamName'>>;
 export interface AdvanceSummaryTeam {
     id: string;
     legacyId?: string | null;
@@ -19,11 +19,10 @@ export interface AdvanceSummaryRow {
     accountNumber: string;
     accountHolder: string;
     amount: number;
-    corporate: number;
-    labor: number;
-    items: Partial<Record<AdvanceItemLabelKey, number>>;
+    items: Partial<Record<AdvanceRequestCategory, number>>;
+    depositAmounts: Record<AdvanceDepositAccountCategory | 'unclassified', number>;
     memos: string[];
-    memoSources: { id: string; memo: string; salaryModel: string }[];
+    memoSources: { id: string; memo: string; label: string }[];
     depositAccountSources: { id: string; depositAccount: AdvancePaymentDepositAccount }[];
 }
 export interface AdvanceSummaryGroup {
@@ -34,11 +33,11 @@ export interface AdvanceSummaryGroup {
 
 export const isAdvanceSummaryMonth = (value: string): boolean => /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 export const isAdvanceSummaryFilter = (value: string): value is AdvanceSummaryFilter =>
-    ['all', 'corporate', 'labor', ...ADVANCE_ITEM_LABEL_KEYS].includes(value);
+    ['all', ...ADVANCE_REQUEST_CATEGORIES, 'unclassified'].includes(value);
 
-/** Only explicit advance items belong to this report; totalDeduction includes unrelated charges. */
+/** Report submitted amounts, never the deduction ledger or the available-amount snapshots. */
 export function buildAdvanceSummary(
-    payments: AdvancePayment[],
+    requests: AdvanceRequest[],
     teams: AdvanceSummaryTeam[],
     filters: { yearMonth: string; teamId: string; item: AdvanceSummaryFilter; query: string },
     workers: AdvanceSummaryWorker[] = [],
@@ -56,17 +55,20 @@ export function buildAdvanceSummary(
         if (team.legacyId) teamById.set(team.legacyId, team);
     });
     const selectedTeam = teamById.get(filters.teamId);
-    const keys = ADVANCE_ITEM_LABEL_KEYS.filter(key => filters.item === 'all'
-        || key === filters.item || key.startsWith(`${filters.item}Advance`));
     const query = filters.query.trim().toLocaleLowerCase('ko-KR');
     const grouped = new Map<string, { team: AdvanceSummaryTeam; rows: Map<string, AdvanceSummaryRow> }>();
 
-    payments.forEach((payment, index) => {
-        if (payment.yearMonth !== filters.yearMonth) return;
-        const team = teamById.get(payment.teamId);
-        // Use the same construction-company team scope as the entry screen, including legacy IDs.
+    requests.forEach((request, index) => {
+        if (request.yearMonth !== filters.yearMonth || !['requested', 'approved', 'paid'].includes(request.status)) return;
+        const category = getAdvanceRequestCategory(request);
+        if (filters.item !== 'all' && filters.item !== category) return;
+        const amount = Number(String(request.requestedAmount ?? 0).replace(/,/g, ''));
+        if (!Number.isSafeInteger(amount) || amount <= 0) return;
+        const team = teamById.get(request.teamId || '');
+        // Preserve the construction-company team scope, including historical team IDs.
         if (!team || (filters.teamId && team.id !== selectedTeam?.id)) return;
-        const workerKey = payment.workerId || payment.id || `record-${index}`;
+        const worker = workerById.get(request.workerId) || workerByLegacyId.get(request.workerId);
+        const workerKey = worker?.id || request.workerId || request.id || `record-${index}`;
         let group = grouped.get(team.id);
         if (!group) {
             group = { team, rows: new Map() };
@@ -74,32 +76,26 @@ export function buildAdvanceSummary(
         }
         let row = group.rows.get(workerKey);
         if (!row) {
-            const worker = workerById.get(payment.workerId) || workerByLegacyId.get(payment.workerId);
-            row = { key: workerKey, workerId: payment.workerId, workerName: payment.workerName || '이름 미등록',
+            row = { key: workerKey, workerId: worker?.id || request.workerId, workerName: request.workerName || '이름 미등록',
                 bankName: worker?.bankName?.trim() || '', accountNumber: worker?.accountNumber?.trim() || '',
                 accountHolder: worker?.accountHolder?.trim() || '',
-                amount: 0, corporate: 0, labor: 0, items: {}, memos: [], memoSources: [], depositAccountSources: [] };
+                amount: 0, items: {}, depositAmounts: { corporate: 0, personal: 0, other: 0, unclassified: 0 }, memos: [], memoSources: [], depositAccountSources: [] };
             group.rows.set(workerKey, row);
         }
-        keys.forEach(key => {
-            const value = Number(String(payment.items?.[key] ?? 0).replace(/,/g, ''));
-            const amount = Number.isFinite(value) ? value : 0;
-            row!.items[key] = (row!.items[key] ?? 0) + amount;
-            row!.amount += amount;
-            if (key.startsWith('corporate')) row!.corporate += amount;
-            else row!.labor += amount;
-        });
-        const memo = payment.memo?.trim();
+        row.items[category] = (row.items[category] ?? 0) + amount;
+        row.amount += amount;
+        const memo = request.memo?.trim();
         if (memo && !row.memos.includes(memo)) row.memos.push(memo);
-        row.memoSources.push({ id: payment.id || '', memo: payment.memo ?? '', salaryModel: payment.salaryModel || '급여 구분 없음' });
-        row.depositAccountSources.push({ id: payment.id || '', depositAccount: normalizeAdvancePaymentDepositAccount(payment.depositAccount) });
+        row.memoSources.push({ id: request.id || '', memo: request.memo ?? '', label: ADVANCE_REQUEST_CATEGORY_LABELS[category] });
+        const depositAccount = normalizeAdvancePaymentDepositAccount(request.depositAccount);
+        const depositCategory = depositAccount === 'corporate' || depositAccount === 'personal' || depositAccount === 'other' ? depositAccount : 'unclassified';
+        row.depositAmounts[depositCategory] += amount;
+        row.depositAccountSources.push({ id: request.id || '', depositAccount });
     });
 
     const groups: AdvanceSummaryGroup[] = Array.from(grouped.values()).map(({ team, rows }) => {
         const visibleRows = Array.from(rows.values()).filter(row =>
-            // Keep offsetting entries visible even when the net advance is zero.
-            Object.values(row.items).some(value => value !== 0)
-            && (!query || `${row.workerName} ${team.name} ${row.memos.join(' ')}`.toLocaleLowerCase('ko-KR').includes(query)));
+            !query || `${row.workerName} ${team.name} ${row.memos.join(' ')}`.toLocaleLowerCase('ko-KR').includes(query));
         visibleRows.sort((a, b) => a.workerName.localeCompare(b.workerName, 'ko') || a.key.localeCompare(b.key));
         return { team, rows: visibleRows, total: visibleRows.reduce((sum, row) => sum + row.amount, 0) };
     }).filter(group => group.rows.length > 0).sort((a, b) => a.team.name.localeCompare(b.team.name, 'ko'));
@@ -107,8 +103,16 @@ export function buildAdvanceSummary(
     return {
         groups,
         total: rows.reduce((sum, row) => sum + row.amount, 0),
-        corporate: rows.reduce((sum, row) => sum + row.corporate, 0),
-        labor: rows.reduce((sum, row) => sum + row.labor, 0),
+        first: rows.reduce((sum, row) => sum + (row.items.first || 0), 0),
+        second: rows.reduce((sum, row) => sum + (row.items.second || 0), 0),
+        other: rows.reduce((sum, row) => sum + (row.items.other || 0), 0),
+        unclassified: rows.reduce((sum, row) => sum + (row.items.unclassified || 0), 0),
+        depositTotals: rows.reduce((totals, row) => ({
+            corporate: totals.corporate + row.depositAmounts.corporate,
+            personal: totals.personal + row.depositAmounts.personal,
+            other: totals.other + row.depositAmounts.other,
+            unclassified: totals.unclassified + row.depositAmounts.unclassified,
+        }), { corporate: 0, personal: 0, other: 0, unclassified: 0 }),
         workerCount: new Set(groups.flatMap(group => group.rows.map(row => row.workerId || `${group.team.id}/${row.key}`))).size,
     };
 }

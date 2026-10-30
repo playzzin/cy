@@ -10,7 +10,7 @@ export interface AdvancePaymentMemoChange {
 export class AdvancePaymentMemoError extends Error {}
 
 export const advancePaymentMemoService = {
-    async save(changes: AdvancePaymentMemoChange[]): Promise<void> {
+    async save(changes: AdvancePaymentMemoChange[], collectionName: 'advance_payments' | 'advance_requests' = 'advance_payments'): Promise<void> {
         if (!changes.length) return;
         if (new Set(changes.map(change => change.id)).size !== changes.length
             || changes.some(change => !change.id || change.id !== change.id.trim() || change.id.includes('/')
@@ -21,7 +21,7 @@ export const advancePaymentMemoService = {
             throw new AdvancePaymentMemoError('비고는 내역별로 4,000자까지 입력할 수 있습니다.');
         }
         await runTransaction(db, async transaction => {
-            const entries = changes.map(change => ({ ...change, ref: doc(db, 'advance_payments', change.id) }));
+            const entries = changes.map(change => ({ ...change, ref: doc(db, collectionName, change.id) }));
             // Read every source before writing so a merged worker row saves atomically.
             const snapshots = await Promise.all(entries.map(entry => transaction.get(entry.ref)));
             snapshots.forEach((snapshot, index) => {

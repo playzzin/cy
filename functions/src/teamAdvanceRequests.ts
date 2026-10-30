@@ -29,28 +29,75 @@ export function advanceRequestFingerprint(workerId: string, yearMonth: string, r
     return createHash('sha256').update(JSON.stringify(values)).digest('hex');
 }
 
+const storedCategory = (row: any) => row.category === 'first' || row.category === 'second' ? row.category
+    : row.source === 'manual-prepayment' && row.category === 'other' ? 'other' : 'unclassified';
+const requireRound = (value: unknown): 'first' | 'second' => value === 'first' || value === 'second' ? value
+    : fail('invalid-argument', '화면을 새로고침하고 1회차 또는 2회차를 선택해 주세요. 선입금은 팀별 내역에서 입력합니다.');
+
+async function requireSummaryWriteAccess(transaction: FirebaseFirestore.Transaction, uid: string, worker: any, privileged: boolean) {
+    if (privileged) return;
+    const db = admin.firestore();
+    const staff = await transaction.get(db.collection('workers').where('uid', '==', uid).limit(2));
+    const companyIds = [...new Set(staff.docs.map(doc => text(doc.data().companyId)).filter(Boolean))];
+    const teamId = text(worker.teamId);
+    if (!companyIds.length || !teamId || teamId.includes('/')) fail('permission-denied', '선입금 및 회차 수정 권한이 없습니다.');
+    const [direct, legacy] = await Promise.all([transaction.get(db.doc(`teams/${teamId}`)), transaction.get(db.collection('teams').where('legacyId', '==', teamId))]);
+    const companyId = text(direct.data()?.companyId || legacy.docs[0]?.data().companyId);
+    if (!companyId || companyId.includes('/') || !companyIds.includes(companyId)) fail('permission-denied', '소속 시공사의 내역만 수정할 수 있습니다.');
+    const company = await transaction.get(db.doc(`companies/${companyId}`));
+    if (company.data()?.type !== '시공사') fail('permission-denied', '시공사 계정만 수정할 수 있습니다.');
+}
+
 export async function handleTeamAdvanceRequest(input: any, context: functions.https.CallableContext) {
     const { uid } = requireCallableAuth(context);
     const db = admin.firestore();
-    if (!['create', 'cancel', 'setCategory'].includes(input?.action)) fail('invalid-argument', '지원하지 않는 요청입니다.');
+    if (!['create', 'cancel', 'setCategory', 'setPrepayment'].includes(input?.action)) fail('invalid-argument', '지원하지 않는 요청입니다.');
     const requestId = input.action === 'create'
-        ? createHash('sha256').update(`${uid}:${id(input.requestId)}`).digest('hex') : id(input.id);
+        ? createHash('sha256').update(`${uid}:${id(input.requestId)}`).digest('hex') : input.action === 'setPrepayment'
+            ? `prepayment_${createHash('sha256').update(`${id(input.workerId)}:${text(input.yearMonth)}`).digest('hex')}` : id(input.id);
     const ref = db.collection('advance_requests').doc(requestId);
     return db.runTransaction(async transaction => {
         const [profileSnapshot, menu, saved] = await transaction.getAll(db.doc(`users/${uid}`), db.doc('settings/menus_v12'), ref);
         const profile = profileSnapshot.data();
         if (!profile || profile.status !== 'active') fail('permission-denied', '활성 계정이 필요합니다.');
         const privileged = resolvedRoleNames(profile, menu.data()).some(role => payrollRoles.has(role.toLowerCase().replace(/[\s_-]/g, '')));
+        if (input.action === 'setPrepayment') {
+            const workerId = id(input.workerId), yearMonth = text(input.yearMonth);
+            if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '입력 월을 확인해 주세요.');
+            const requestedAmount = input.amount, expectedAmount = input.expectedAmount;
+            if (![requestedAmount, expectedAmount].every(value => Number.isSafeInteger(value) && value >= 0)) fail('invalid-argument', '선입금 금액을 확인해 주세요.');
+            const worker = (await transaction.get(db.doc(`workers/${workerId}`))).data();
+            if (!worker) return fail('not-found', '작업자를 찾을 수 없습니다.');
+            await requireSummaryWriteAccess(transaction, uid, worker, privileged);
+            const prior = saved.data();
+            if (prior && (prior.source !== 'manual-prepayment' || prior.category !== 'other')) fail('failed-precondition', '선입금 원본을 확인해 주세요.');
+            if ((prior?.requestedAmount ?? 0) !== expectedAmount) fail('aborted', '다른 화면에서 선입금이 변경되었습니다. 새로고침 후 다시 입력해 주세요.');
+            const lock = db.doc(`server_settings/advance-request-${workerId}`);
+            const revision = await transaction.get(lock);
+            const now = admin.firestore.Timestamp.now();
+            transaction.set(lock, { revision: (Number(revision.data()?.revision) || 0) + 1 });
+            transaction.set(ref, { workerId, workerName: text(worker.name), teamId: text(worker.teamId), teamName: text(worker.teamName),
+                yearMonth, periodStart: `${yearMonth}-01`, periodEnd: new Date(Date.UTC(Number(yearMonth.slice(0, 4)), Number(yearMonth.slice(5)), 0)).toISOString().slice(0, 10),
+                requestedAmount, category: 'other', source: 'manual-prepayment', status: 'paid', updatedAt: now, manualUpdatedById: uid,
+                ...(!prior ? { createdAt: now, requesterUid: uid, memo: '', depositAccount: '' } : {}),
+            }, { merge: true });
+            return { id: ref.id, category: 'other' as const };
+        }
         if (input.action === 'setCategory') {
             const row = saved.data();
             if (!row) return fail('not-found', '신청을 찾을 수 없습니다.');
-            if (row.requesterUid !== uid || row.status !== 'requested') fail('permission-denied', '처리 전 본인 신청의 분류만 수정할 수 있습니다.');
+            if (row.source === 'manual-prepayment' || !['requested', 'approved', 'paid'].includes(row.status)) fail('permission-denied', '유효한 가불 신청의 회차만 수정할 수 있습니다.');
+            if (row.requesterUid !== uid || row.status !== 'requested') {
+                const worker = (await transaction.get(db.doc(`workers/${id(row.workerId)}`))).data();
+                if (!worker) return fail('not-found', '작업자를 찾을 수 없습니다.');
+                await requireSummaryWriteAccess(transaction, uid, worker, privileged);
+            }
             if (input.category === undefined || input.expectedCategory === undefined) fail('invalid-argument', '신청 분류를 확인해 주세요.');
-            const category = parseAdvanceRequestCategory(input.category);
-            const current = parseAdvanceRequestCategory(row.category);
-            const expected = parseAdvanceRequestCategory(input.expectedCategory);
+            const category = requireRound(input.category);
+            const current = storedCategory(row);
+            const expected = input.expectedCategory;
             if (current !== expected) fail('aborted', '신청 분류가 변경되었습니다. 새로고침 후 다시 선택해 주세요.');
-            transaction.update(ref, { category, categoryUpdatedAt: admin.firestore.Timestamp.now() });
+            transaction.update(ref, { category, categoryUpdatedAt: admin.firestore.Timestamp.now(), categoryUpdatedById: uid });
             return { id: ref.id, category };
         }
         if (input.action === 'cancel') {
@@ -71,7 +118,7 @@ export async function handleTeamAdvanceRequest(input: any, context: functions.ht
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '신청 월을 확인해 주세요.');
         const requestedAmount = Number(input.requestedAmount);
         if (!Number.isSafeInteger(requestedAmount) || requestedAmount <= 0) fail('invalid-argument', '신청 금액을 확인해 주세요.');
-        const category = parseAdvanceRequestCategory(input.category);
+        const category = requireRound(input.category);
         const fingerprint = advanceRequestFingerprint(workerId, yearMonth, requestedAmount, input.memo, input.category);
         if (saved.exists) {
             const row = saved.data()!;

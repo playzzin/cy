@@ -5,13 +5,14 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight, faPrint, faRotateRight, faTable } from '@fortawesome/free-solid-svg-icons';
 import { FileSpreadsheet, List, StickyNote } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { advancePaymentService, type AdvancePayment } from '../../services/advancePaymentService';
+import { advanceRequestService, type AdvanceRequest } from '../../services/advanceRequestService';
 import { advancePaymentMemoService, type AdvancePaymentMemoChange } from '../../services/advancePaymentMemoService';
 import { teamService } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
 import { manpowerService } from '../../services/manpowerService';
 import { userService } from '../../services/userService';
-import { ADVANCE_ITEM_LABEL_KEYS, DEFAULT_ADVANCE_ITEM_LABELS, payrollConfigService, type AdvanceItemLabelsConfig } from '../../services/payrollConfigService';
+import { ADVANCE_REQUEST_CATEGORIES, ADVANCE_REQUEST_ROUNDS, ADVANCE_REQUEST_CATEGORY_LABELS, getAdvanceRequestCategory } from '../../types/advanceRequestCategory';
+import { ADVANCE_DEPOSIT_ACCOUNTS } from '../../types/advancePaymentDepositAccount';
 import { UserRole } from '../../types/roles';
 import { shiftYearMonth } from '../../components/common/MonthNavigator';
 import { getKoreanDateKey } from '../../utils/koreanBusinessDate';
@@ -20,6 +21,8 @@ import { buildAdvanceSummary, isAdvanceSummaryFilter, isAdvanceSummaryMonth, typ
 import AdvanceSummaryMemoDialog from './components/AdvanceSummaryMemoDialog';
 import AdvanceSummaryDepositAccountSelect from './components/AdvanceSummaryDepositAccountSelect';
 import AdvanceSummaryTeamLayout, { type AdvanceSummaryLayout } from './components/AdvanceSummaryTeamLayout';
+import AdvanceSummaryFitTable from './components/AdvanceSummaryFitTable';
+import AdvancePrepaymentDialog from './components/AdvancePrepaymentDialog';
 import { advancePaymentDepositAccountService, type AdvancePaymentDepositAccountChange } from '../../services/advancePaymentDepositAccountService';
 import './AdvanceSummaryPage.css';
 
@@ -27,12 +30,11 @@ type LoadResult = {
     uid: string;
     month: string;
     status: 'loading' | 'ready' | 'denied' | 'error';
-    payments: AdvancePayment[];
+    requests: AdvanceRequest[];
     teams: AdvanceSummaryTeam[];
     workers: AdvanceSummaryWorker[];
-    labels: AdvanceItemLabelsConfig;
 };
-const emptyResult = { payments: [], teams: [], workers: [], labels: DEFAULT_ADVANCE_ITEM_LABELS };
+const emptyResult = { requests: [], teams: [], workers: [] };
 const won = (amount: number) => amount.toLocaleString('ko-KR');
 const companyKey = (value?: string | null) => String(value ?? '').replace(/\s*소속팀\s*$/, '').replace(/\s+/g, '').toLowerCase();
 
@@ -52,6 +54,9 @@ const AdvanceSummaryPage: React.FC = () => {
     const [memoEditor, setMemoEditor] = useState<{ uid: string; month: string; teamName: string; row: AdvanceSummaryRow } | null>(null);
     const [saveMessage, setSaveMessage] = useState('');
     const [savingDepositAccount, setSavingDepositAccount] = useState(false);
+    const [prepaymentWorker, setPrepaymentWorker] = useState<string | null>(null);
+    const [savingCategory, setSavingCategory] = useState(false);
+    const categoryPending = useRef(false);
     const depositAccountPending = useRef(false);
     const reportRef = useRef<HTMLDivElement>(null);
     const pageRef = useRef<HTMLDivElement>(null);
@@ -94,7 +99,7 @@ const AdvanceSummaryPage: React.FC = () => {
         }
     };
 
-    useEffect(() => { setMemoEditor(null); setSaveMessage(''); }, [uid, yearMonth]);
+    useEffect(() => { setMemoEditor(null); setPrepaymentWorker(null); setSaveMessage(''); }, [uid, yearMonth]);
 
     useEffect(() => {
         let cancelled = false;
@@ -114,11 +119,9 @@ const AdvanceSummaryPage: React.FC = () => {
                     if (cancelled) return;
                     if (company?.type !== '시공사') { commit({ status: 'denied' }); return; }
                 }
-                const [year, month] = yearMonth.split('-').map(Number);
-                const [teams, companies, payments, config, workers] = await Promise.all([
+                const [teams, companies, requests, workers] = await Promise.all([
                     teamService.getTeams(), companyService.getCompaniesByType('시공사'),
-                    advancePaymentService.getAdvancePaymentsByYearMonth(year, month),
-                    payrollConfigService.getConfigReadOnly(),
+                    advanceRequestService.listByYearMonth(yearMonth),
                     manpowerService.getWorkers(refresh > 0),
                 ]);
                 const companyIds = new Set(companies.map(company => company.id).filter(Boolean));
@@ -127,8 +130,8 @@ const AdvanceSummaryPage: React.FC = () => {
                     ? companyIds.has(team.companyId) : companyNames.has(companyKey(team.companyName))))
                     .map(team => ({ id: team.id!, legacyId: team.legacyId, name: team.name, color: team.color }))
                     .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-                commit({ status: 'ready', payments, teams: allowedTeams, labels: config.advanceItemLabels,
-                    workers: workers.map(({ id, legacyId, bankName, accountNumber, accountHolder }) => ({ id, legacyId, bankName, accountNumber, accountHolder })) });
+                commit({ status: 'ready', requests, teams: allowedTeams,
+                    workers: workers.map(({ id, legacyId, bankName, accountNumber, accountHolder, name, teamId, teamName }) => ({ id, legacyId, bankName, accountNumber, accountHolder, name, teamId, teamName })) });
             } catch {
                 commit({ status: 'error' });
             }
@@ -138,27 +141,52 @@ const AdvanceSummaryPage: React.FC = () => {
     }, [uid, yearMonth, refresh]);
 
     const status = result.uid === uid && result.month === yearMonth ? result.status : 'loading';
-    const summary = useMemo(() => buildAdvanceSummary(status === 'ready' ? result.payments : [], result.teams,
-        { yearMonth, teamId, item, query }, result.workers), [status, result.payments, result.teams, result.workers, yearMonth, teamId, item, query]);
+    const summary = useMemo(() => buildAdvanceSummary(status === 'ready' ? result.requests : [], result.teams,
+        { yearMonth, teamId, item, query }, result.workers), [status, result.requests, result.teams, result.workers, yearMonth, teamId, item, query]);
     const selectedTeam = result.teams.find(team => team.id === teamId || team.legacyId === teamId);
-    const itemLabel = item === 'all' ? '전체 가불' : item === 'corporate' ? '법인가불' : item === 'labor' ? '노무가불' : result.labels[item];
+    const unclassified = useMemo(() => buildAdvanceSummary(status === 'ready' ? result.requests : [], result.teams,
+        { yearMonth, teamId, item: 'unclassified', query }, result.workers), [status, result.requests, result.teams, result.workers, yearMonth, teamId, query]);
+    const unclassifiedIds = new Set(unclassified.groups.flatMap(group => group.rows.flatMap(row => row.memoSources.map(source => source.id))));
+    const manualWorkers = result.workers.filter(worker => worker.id && result.teams.some(team => team.id === worker.teamId || team.legacyId === worker.teamId));
+    const prepaymentAmounts = new Map(result.requests.filter(request => request.source === 'manual-prepayment' && request.yearMonth === yearMonth)
+        .map(request => [request.workerId, request.requestedAmount]));
+    const itemLabel = item === 'all' ? '전체 신청' : ADVANCE_REQUEST_CATEGORY_LABELS[item];
+    const visibleCategories = item === 'all' ? ADVANCE_REQUEST_CATEGORIES : [item];
     const monthLabel = `${Number(yearMonth.slice(0, 4))}년 ${Number(yearMonth.slice(5))}월`;
     const printReport = useReactToPrint({ contentRef: reportRef, documentTitle: `팀별 가불내역_${yearMonth}`,
         pageStyle: '@page { size: A4 landscape; margin: 10mm; }' });
-    const entryParams = new URLSearchParams({ yearMonth, teamId: selectedTeam?.id || '__ALL_TEAMS__' });
 
     const saveMemos = async (changes: AdvancePaymentMemoChange[]) => {
         const editor = memoEditor;
         if (!editor || editor.uid !== uid || editor.month !== yearMonth || status !== 'ready') return;
-        await advancePaymentMemoService.save(changes);
+        await advancePaymentMemoService.save(changes, 'advance_requests');
         const savedById = new Map(changes.map(change => [change.id, change.memo]));
         setResult(current => current.uid !== editor.uid || current.month !== editor.month ? current : {
             ...current,
-            payments: current.payments.map(payment => payment.id && savedById.has(payment.id)
-                ? { ...payment, memo: savedById.get(payment.id)! } : payment),
+            requests: current.requests.map(request => request.id && savedById.has(request.id)
+                ? { ...request, memo: savedById.get(request.id)! } : request),
         });
         setMemoEditor(current => current === editor ? null : current);
         setSaveMessage('비고를 저장했습니다.');
+    };
+
+    const savePrepayment = async (workerId: string, amount: number, expectedAmount: number) => {
+        await advanceRequestService.setPrepayment(workerId, yearMonth, amount, expectedAmount);
+        setPrepaymentWorker(null);
+        setRefresh(value => value + 1);
+        setSaveMessage('선입금을 저장했습니다.');
+    };
+    const fixCategory = async (request: AdvanceRequest, category: 'first' | 'second') => {
+        if (!request.id || categoryPending.current) return;
+        categoryPending.current = true; setSavingCategory(true); setSaveMessage('');
+        try {
+            await advanceRequestService.setCategory(request.id, category, getAdvanceRequestCategory(request));
+            setResult(current => current.uid !== uid || current.month !== yearMonth ? current : {
+                ...current, requests: current.requests.map(row => row.id === request.id ? { ...row, category } : row),
+            });
+            setSaveMessage('신청 회차를 수정했습니다.');
+        } catch { setSaveMessage('회차를 수정하지 못했습니다. 새로고침 후 다시 선택해 주세요.'); }
+        finally { categoryPending.current = false; setSavingCategory(false); }
     };
 
     const saveDepositAccounts = async (changes: AdvancePaymentDepositAccountChange[]) => {
@@ -166,12 +194,12 @@ const AdvanceSummaryPage: React.FC = () => {
         depositAccountPending.current = true;
         setSavingDepositAccount(true);
         try {
-            await advancePaymentDepositAccountService.save(changes);
+            await advancePaymentDepositAccountService.save(changes, 'advance_requests');
             const savedById = new Map(changes.map(change => [change.id, change.depositAccount]));
             setResult(current => current.uid !== uid || current.month !== yearMonth ? current : {
                 ...current,
-                payments: current.payments.map(payment => payment.id && savedById.has(payment.id)
-                    ? { ...payment, depositAccount: savedById.get(payment.id)! } : payment),
+                requests: current.requests.map(request => request.id && savedById.has(request.id)
+                    ? { ...request, depositAccount: savedById.get(request.id)! } : request),
             });
         } finally {
             depositAccountPending.current = false;
@@ -186,7 +214,7 @@ const AdvanceSummaryPage: React.FC = () => {
                     <h1><FontAwesomeIcon icon={faTable} /> 팀별 가불내역</h1>
                 </div>
                 <div className="as-actions">
-                    <Link to={`/payroll/advance-payment?${entryParams}`}>가불·공제 입력</Link>
+                    <Link to="/payroll/advance-request">가불 신청</Link>
                     <button type="button" onClick={() => setRefresh(value => value + 1)} disabled={status === 'loading' || savingDepositAccount}>
                         <FontAwesomeIcon icon={faRotateRight} /> 새로고침
                     </button>
@@ -214,12 +242,10 @@ const AdvanceSummaryPage: React.FC = () => {
                         {result.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
                     </select>
                 </label>
-                <label>가불 구분
-                    <select aria-label="가불 구분" value={item} onChange={event => updateFilter('item', event.target.value)}>
-                        <option value="all">전체 가불</option><option value="corporate">법인가불</option><option value="labor">노무가불</option>
-                        <optgroup label="항목별 조회">
-                            {ADVANCE_ITEM_LABEL_KEYS.map(key => <option key={key} value={key}>{result.labels[key]}</option>)}
-                        </optgroup>
+                <label>신청 분류
+                    <select aria-label="신청 분류" value={item} onChange={event => updateFilter('item', event.target.value)}>
+                        <option value="all">전체 신청</option>
+                        {ADVANCE_REQUEST_CATEGORIES.map(key => <option key={key} value={key}>{ADVANCE_REQUEST_CATEGORY_LABELS[key]}</option>)}
                     </select>
                 </label>
                 <label className="as-search">이름·팀·비고 검색
@@ -227,8 +253,19 @@ const AdvanceSummaryPage: React.FC = () => {
                 </label>
                 {(teamId || item !== 'all' || query) && <button type="button" className="as-reset" onClick={resetFilters}>검색·필터 초기화</button>}
             </section>
-            <p className="as-note">가불·공제 입력에서 저장한 월별 가불을 표시합니다. 숙소비·공과금·이월 등 기타 공제는 합계에 포함하지 않습니다. 계좌번호와 예금주는 현재 작업자 정보에 등록된 내용입니다.</p>
+            <p className="as-note">1·2회차는 가불 신청금액, 선입금은 수기 입력금액입니다. 취소·반려 건은 제외하며 회차 미지정 금액은 별도 안내합니다. 계좌번호와 예금주는 현재 작업자 등록 정보입니다.</p>
             {saveMessage && <p className="as-save-message" role="status">{saveMessage}</p>}
+            {status === 'ready' && <div className="as-manual-tools"><button type="button" onClick={() => setPrepaymentWorker('')}>선입금 수기 입력</button><span>1·2회차는 가불 신청에서 가져오며 선입금은 직접 입력합니다.</span></div>}
+            {status === 'ready' && unclassifiedIds.size > 0 && <details className="as-unclassified" open>
+                <summary>회차 미지정 {unclassifiedIds.size}건 · {won(unclassified.total)}원 — 1회차 또는 2회차를 선택해 주세요.</summary>
+                <p>이전 신청의 회차가 저장되지 않아 회차별 합계에서 빠져 있습니다. 선입금에는 포함하지 않습니다.</p>
+                {result.requests.filter(request => request.id && unclassifiedIds.has(request.id)).map(request => <div key={request.id}>
+                    <span>{request.workerName} · {won(request.requestedAmount)}원</span>
+                    {ADVANCE_REQUEST_ROUNDS.map(round => <button key={round} type="button" disabled={savingCategory}
+                        aria-label={`${request.workerName} ${won(request.requestedAmount)}원 ${ADVANCE_REQUEST_CATEGORY_LABELS[round]}로 지정`}
+                        onClick={() => void fixCategory(request, round)}>{ADVANCE_REQUEST_CATEGORY_LABELS[round]}</button>)}
+                </div>)}
+            </details>}
 
             {status === 'loading' && <div className="as-empty" role="status">가불내역을 불러오고 있습니다.</div>}
             {status === 'denied' && <div className="as-empty" role="alert">시공사 계정과 관리자만 가불내역을 조회할 수 있습니다.</div>}
@@ -242,16 +279,27 @@ const AdvanceSummaryPage: React.FC = () => {
                 </p></div>
                 <dl className="as-totals" aria-label="조회 결과 합계">
                     <div className="as-total-main"><dt>가불 합계</dt><dd>{won(summary.total)}<small>원</small></dd></div>
-                    <div><dt>법인가불</dt><dd>{won(summary.corporate)}<small>원</small></dd></div>
-                    <div><dt>노무가불</dt><dd>{won(summary.labor)}<small>원</small></dd></div>
+                    {ADVANCE_REQUEST_CATEGORIES.map(category => <div key={category}><dt>{ADVANCE_REQUEST_CATEGORY_LABELS[category]}</dt><dd>{won(summary[category])}<small>원</small></dd></div>)}
                     <div><dt>조회 인원 / 팀</dt><dd>{summary.workerCount}<small>명</small><span> / </span>{summary.groups.length}<small>팀</small></dd></div>
                 </dl>
-                {summary.groups.length > 0 && <div ref={teamNavRef} className="as-team-tools">
+                <dl className="as-deposit-totals" aria-label="입금계좌별 합계">
+                    {ADVANCE_DEPOSIT_ACCOUNTS.map(account => <div key={account.value} className={`as-deposit-${account.value}`} role="group" aria-label={`${account.label} 총액`}>
+                        <dt>{account.label} 총액</dt><dd>{won(summary.depositTotals[account.value])}<small>원</small></dd>
+                    </div>)}
+                    {summary.depositTotals.unclassified > 0 && <div className="as-deposit-none" role="group" aria-label="미선택·기존 구분"><dt>미선택·기존 구분</dt><dd>{won(summary.depositTotals.unclassified)}<small>원</small></dd></div>}
+                </dl>
+                <div ref={teamNavRef} className="as-team-tools">
+                    <div className="as-category-filter" role="group" aria-label="목록 신청 분류">
+                        <span>신청 분류</span>
+                        <button type="button" aria-pressed={item === 'all'} onClick={() => updateFilter('item', 'all')}>전체</button>
+                        {ADVANCE_REQUEST_CATEGORIES.map(category => <button key={category} type="button"
+                            aria-pressed={item === category} onClick={() => updateFilter('item', category)}>{ADVANCE_REQUEST_CATEGORY_LABELS[category]}</button>)}
+                    </div>
                     <div className="as-view-controls">
                         <div><strong>{summary.groups.length}개 팀 가불내역</strong><span>팀을 누르면 해당 목록으로 이동합니다.</span></div>
                         <div className="as-view-switch" role="group" aria-label="팀 목록 보기 방식">
                             <button type="button" aria-pressed={layout === 'wide'} onClick={() => setLayout('wide')}><List size={16} />한 팀씩 넓게</button>
-                            <button type="button" aria-pressed={layout === 'compact'} onClick={() => setLayout('compact')}><FileSpreadsheet size={16} />엑셀형 · 3개씩</button>
+                            <button type="button" aria-pressed={layout === 'compact'} onClick={() => setLayout('compact')}><FileSpreadsheet size={16} />엑셀형 · 4개씩</button>
                         </div>
                     </div>
                     <nav className="as-team-jumps" aria-label="팀 바로가기">
@@ -261,7 +309,7 @@ const AdvanceSummaryPage: React.FC = () => {
                             <strong>{group.team.name}</strong><span>{group.rows.length}명</span><b>{won(group.total)}원</b>
                         </button>)}
                     </nav>
-                </div>}
+                </div>
                 {summary.groups.length === 0 ? <div className="as-empty" role="status">
                     <strong>조회 조건에 맞는 가불내역이 없습니다.</strong><p>다른 월·팀·가불 항목을 선택하거나 검색어를 확인해 주세요.</p>
                 </div> : <AdvanceSummaryTeamLayout mode={layout}>
@@ -274,28 +322,23 @@ const AdvanceSummaryPage: React.FC = () => {
                                 <div className="as-team-title"><h3>{group.team.name}</h3><span>{group.rows.length}명</span></div>
                                 <div className="as-team-heading-total"><small>팀 합계</small><strong>{won(group.total)}원</strong></div>
                             </div>
-                            <div className="as-table-scroll" role="region" aria-label={`${group.team.name} 가불내역 표`} tabIndex={0}>
+                            <AdvanceSummaryFitTable label={`${group.team.name} 가불내역 표`}>
                             <table>
                                 <caption className="sr-only">{group.team.name} 가불내역, 단위 원</caption>
-                                <colgroup><col className="as-col-no" /><col className="as-col-name" /><col className="as-col-amount" /><col className="as-col-account" /><col className="as-col-deposit" /><col className="as-col-memo" /></colgroup>
-                                <thead><tr><th scope="col">번호</th><th scope="col">이름</th><th scope="col">금액</th><th scope="col">계좌번호·예금주</th><th scope="col">입금계좌</th><th scope="col">비고</th></tr></thead>
-                                <tbody>{group.rows.map((row, index) => <tr key={row.key}>
+                                <colgroup><col className="as-col-no" /><col className="as-col-name" />
+                                    {visibleCategories.map(category => <col key={category} className="as-col-category" />)}
+                                    <col className="as-col-amount" /><col className="as-col-deposit" /><col className="as-col-memo" /></colgroup>
+                                <thead><tr><th scope="col">번호</th><th scope="col">이름</th>
+                                    {visibleCategories.map(category => <th key={category} scope="col">{ADVANCE_REQUEST_CATEGORY_LABELS[category]}</th>)}
+                                    <th scope="col">총금액</th><th scope="col">입금구분</th><th scope="col">비고</th></tr></thead>
+                                <tbody>{group.rows.map((row, index) => <React.Fragment key={row.key}><tr>
                                     <td className="as-number">{index + 1}</td>
                                     <th scope="row"><span className="as-worker-name" title={row.workerName}>{row.workerName}</span></th>
-                                    <td className={`as-money${row.amount < 0 ? ' as-negative' : ''}`}>
-                                        <div className="as-row-total"><span>총금액</span><span>{won(row.amount)}</span></div>
-                                        <dl className="as-advance-items" aria-label={`${row.workerName} 항목별 금액`}>
-                                            {ADVANCE_ITEM_LABEL_KEYS.filter(key => row.items[key]).map(key => <div key={key}>
-                                                <dt>{result.labels[key]}</dt><dd className={row.items[key]! < 0 ? 'as-negative' : undefined}>{won(row.items[key]!)}</dd>
-                                            </div>)}
-                                        </dl>
-                                    </td>
-                                    <td className="as-account">
-                                        {row.bankName && <small>{row.bankName}</small>}
-                                        <span>{row.accountNumber || '미등록'}</span>
-                                        <div className="as-account-holder"><small>예금주</small><span>{row.accountHolder || '미등록'}</span></div>
-                                    </td>
-                                    <td className="as-deposit">
+                                    {visibleCategories.map(category => <td key={category} className="as-money as-category-money" data-label={ADVANCE_REQUEST_CATEGORY_LABELS[category]}>
+                                        {category === 'other' ? <button type="button" className="as-prepayment-edit" aria-label={`${row.workerName} 선입금 수기 입력`} onClick={() => setPrepaymentWorker(row.workerId)}>{won(row.items.other || 0)}</button> : won(row.items[category] || 0)}
+                                    </td>)}
+                                    <td className="as-money as-total-money" data-label="총금액">{won(row.amount)}</td>
+                                    <td className="as-deposit" data-label="입금계좌">
                                         <AdvanceSummaryDepositAccountSelect key={`${uid}/${yearMonth}/${group.team.id}/${row.key}`}
                                             label={`${group.team.name} ${row.workerName} 입금계좌`} sources={row.depositAccountSources}
                                             disabled={savingDepositAccount} onSave={saveDepositAccounts} />
@@ -309,18 +352,30 @@ const AdvanceSummaryPage: React.FC = () => {
                                             <StickyNote size={18} aria-hidden="true" />{row.memos.length > 0 && <span className="as-memo-indicator" aria-hidden="true" />}
                                         </button>
                                     </td>
-                                </tr>)}</tbody>
-                                <tfoot><tr><th scope="row" colSpan={2}>팀 소계</th><td className="as-money">{won(group.total)}</td><td colSpan={3}>{group.rows.length}명</td></tr></tfoot>
+                                </tr><tr className="as-account-row" aria-label={`${index + 1}번 계좌정보`}>
+                                    <td className="as-account" colSpan={visibleCategories.length + 5}>
+                                        <small>계좌</small>{row.bankName && <small>{row.bankName}</small>}
+                                        <span>{row.accountNumber || '미등록'}</span>
+                                        <span className="as-account-holder"><small>예금주</small><span>{row.accountHolder || '미등록'}</span></span>
+                                        {!!row.items.unclassified && <small className="as-unclassified-amount">회차 미지정 {won(row.items.unclassified)}원</small>}
+                                    </td>
+                                </tr></React.Fragment>)}</tbody>
+                                <tfoot><tr><th scope="row" colSpan={2}>팀 소계</th>
+                                    {visibleCategories.map(category => <td key={category} className="as-money as-category-money" data-label={ADVANCE_REQUEST_CATEGORY_LABELS[category]}>{won(group.rows.reduce((total, row) => total + (row.items[category] || 0), 0))}</td>)}
+                                    <td className="as-money as-total-money" data-label="총금액">{won(group.total)}</td><td className="as-team-count" colSpan={2}>{group.rows.length}명</td></tr></tfoot>
                             </table>
-                            </div>
+                            </AdvanceSummaryFitTable>
                         </section>;
                     })}
                 </AdvanceSummaryTeamLayout>}
-                {summary.groups.length > 0 && <p className="as-report-footnote">현재 조회 조건 기준 · 동일 작업자의 여러 급여 구분은 팀별로 합산됩니다. · 계좌번호·예금주는 현재 작업자 등록 정보 기준입니다. · 입금계좌 선택은 해당 월·팀·작업자의 합산된 내역에 자동 저장됩니다.</p>}
+                {summary.groups.length > 0 && <p className="as-report-footnote">현재 조회 조건 기준 · 동일 작업자의 신청은 팀별로 합산됩니다. · 계좌번호·예금주는 현재 작업자 등록 정보 기준입니다. · 입금계좌 선택과 비고는 현재 조회 중인 신청 원본에 저장됩니다.</p>}
             </div>}
             {memoEditor && memoEditor.uid === uid && memoEditor.month === yearMonth && <AdvanceSummaryMemoDialog
                 workerName={memoEditor.row.workerName} context={`${monthLabel} · ${memoEditor.teamName}`}
                 sources={memoEditor.row.memoSources} onSave={saveMemos} onClose={() => setMemoEditor(null)} />}
+            {prepaymentWorker !== null && status === 'ready' && <AdvancePrepaymentDialog key={`${uid}/${yearMonth}/${prepaymentWorker}`}
+                workers={manualWorkers} initialWorkerId={prepaymentWorker} amounts={prepaymentAmounts} month={monthLabel}
+                onSave={savePrepayment} onClose={() => setPrepaymentWorker(null)} />}
         </div>
     );
 };

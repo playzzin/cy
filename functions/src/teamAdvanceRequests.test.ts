@@ -13,6 +13,53 @@ test('분류를 검증하고 기존 클라이언트의 재시도 지문을 유�
     assert.notEqual(advanceRequestFingerprint(...values, 'first'), advanceRequestFingerprint(...values, 'second'));
 });
 
+test('선입금은 권한 있는 수기 입력만 허용하고 충돌과 회차 누락을 보호한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
+    assert.equal(process.env.GCLOUD_PROJECT, 'demo-team-worker-request');
+    const app = admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT });
+    const db = app.firestore();
+    const call = (input: any, uid = 'manual-admin') => handleTeamAdvanceRequest(input, { auth: { uid, token: {} } } as any);
+    const manual = { action: 'setPrepayment', workerId: 'manual-worker', yearMonth: '2026-10', amount: 10000, expectedAmount: 0 };
+    try {
+        await db.doc('users/manual-admin').set({ status: 'active', role: 'admin' });
+        await db.doc('users/manual-owner').set({ status: 'active', role: 'user', linkedWorkerIds: ['manual-worker'] });
+        await db.doc('users/manual-staff').set({ status: 'active', role: 'user' });
+        await db.doc('workers/manual-worker').set({ status: '재직', name: 'fixture', teamId: 'manual-team' });
+        await db.doc('workers/manual-staff-worker').set({ uid: 'manual-staff', companyId: 'manual-company' });
+        await db.doc('teams/manual-team').set({ companyId: 'manual-company' });
+        await db.doc('companies/manual-company').set({ type: '시공사' });
+        await db.doc('daily_reports/manual-report').set({ date: '2026-10-01', workers: [{ workerId: 'manual-worker', manDay: 1, unitPrice: 100000 }] });
+        await assert.rejects(call(manual, 'manual-owner'), (e: any) => e.code === 'permission-denied');
+        for (const amount of [-1, 1.5, '10', Number.MAX_SAFE_INTEGER + 1]) await assert.rejects(call({ ...manual, amount }), (e: any) => e.code === 'invalid-argument');
+        const saved = await call(manual, 'manual-staff');
+        assert.equal(saved.category, 'other');
+        const ref = db.doc(`advance_requests/${saved.id}`);
+        assert.equal((await ref.get()).data()?.source, 'manual-prepayment');
+        await ref.update({ memo: 'keep', depositAccount: 'corporate' });
+        const edits = await Promise.allSettled([20000, 30000].map(amount => call({ ...manual, amount, expectedAmount: 10000 })));
+        assert.equal(edits.filter(result => result.status === 'fulfilled').length, 1);
+        assert.equal((edits.find(result => result.status === 'rejected') as PromiseRejectedResult).reason.code, 'aborted');
+        const current = (await ref.get()).data()!;
+        assert.equal(current.memo, 'keep'); assert.equal(current.depositAccount, 'corporate');
+        await assert.rejects(call({ action: 'setCategory', id: saved.id, category: 'first', expectedCategory: 'other' }), (e: any) => e.code === 'permission-denied');
+        await call({ ...manual, amount: 80000, expectedAmount: current.requestedAmount });
+        const request = { action: 'create', requestId: 'invalid', workerId: 'manual-worker', yearMonth: '2026-10', requestedAmount: 30000, category: 'first' };
+        await assert.rejects(call(request, 'manual-owner'), (e: any) => e.code === 'failed-precondition');
+        await assert.rejects(call({ ...request, category: 'other' }, 'manual-owner'), (e: any) => e.code === 'invalid-argument');
+        await db.doc('advance_requests/manual-legacy').set({ workerId: 'manual-worker', requesterUid: 'manual-owner', status: 'approved', requestedAmount: 10000 });
+        await call({ action: 'setCategory', id: 'manual-legacy', category: 'second', expectedCategory: 'unclassified' });
+        assert.equal((await db.doc('advance_requests/manual-legacy').get()).data()?.category, 'second');
+        await call({ ...manual, amount: 0, expectedAmount: 80000 });
+        assert.equal((await ref.get()).data()?.requestedAmount, 0);
+        await db.doc('workers/manual-staff-worker').update({ companyId: 'other-company' });
+        await assert.rejects(call(manual, 'manual-staff'), (e: any) => e.code === 'permission-denied');
+    } finally {
+        const requests = await db.collection('advance_requests').where('workerId', '==', 'manual-worker').get();
+        await Promise.all(requests.docs.map(doc => doc.ref.delete()));
+        await Promise.all(['users/manual-admin', 'users/manual-owner', 'users/manual-staff', 'workers/manual-worker', 'workers/manual-staff-worker', 'teams/manual-team', 'companies/manual-company', 'daily_reports/manual-report', 'server_settings/advance-request-manual-worker'].map(path => db.doc(path).delete()));
+        await app.delete();
+    }
+});
+
 test('동시 가불 신청, 응답 유실 재시도, 본인 연결과 취소 상태를 검증한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
     assert.equal(process.env.GCLOUD_PROJECT, 'demo-team-worker-request');
     const app = admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT });
@@ -42,7 +89,7 @@ test('동시 가불 신청, 응답 유실 재시도, 본인 연결과 취소 상
         await assert.rejects(call(edit, 'advance-other'), (e: any) => e.code === 'permission-denied');
         await assert.rejects(call({ ...edit, category: 'third' }), (e: any) => e.code === 'invalid-argument');
         assert.equal((await call(edit)).category, 'first');
-        await assert.rejects(call({ ...edit, category: 'other' }), (e: any) => e.code === 'aborted');
+        await assert.rejects(call({ ...edit, category: 'second' }), (e: any) => e.code === 'aborted');
         const edited = (await rows.docs[0].ref.get()).data()!;
         assert.equal(edited.category, 'first');
         assert.equal(edited.requestedAmount, 80000);
@@ -55,15 +102,17 @@ test('동시 가불 신청, 응답 유실 재시도, 본인 연결과 취소 상
         assert.equal((await db.doc(`advance_requests/${replay.id}`).get()).data()?.status, 'cancelled');
         await assert.rejects(call({ ...edit, expectedCategory: 'first' }), (e: any) => e.code === 'permission-denied');
         const legacyInput = { ...input, requestId: 'legacy', category: undefined };
-        const legacy = await call(legacyInput);
-        await db.doc(`advance_requests/${legacy.id}`).update({ category: admin.firestore.FieldValue.delete() });
+        await assert.rejects(call(legacyInput), (e: any) => e.code === 'invalid-argument');
+        const legacy = { id: createHash('sha256').update('advance-leader:legacy').digest('hex') };
+        await db.doc(`advance_requests/${legacy.id}`).set({ ...rows.docs[0].data(), category: admin.firestore.FieldValue.delete(),
+            requestFingerprint: advanceRequestFingerprint(input.workerId, input.yearMonth, input.requestedAmount, input.memo, undefined) }, { merge: true });
         const repaired = await call({ ...legacyInput, category: 'first' });
         assert.equal(repaired.id, legacy.id);
         assert.equal(repaired.category, 'first');
         assert.equal((await db.doc(`advance_requests/${legacy.id}`).get()).data()?.category, 'first');
         assert.equal((await db.collection('advance_requests').where('workerId', '==', 'advance-worker').get()).size, 2);
         await db.doc(`advance_requests/${legacy.id}`).update({ category: admin.firestore.FieldValue.delete() });
-        await call({ action: 'setCategory', id: legacy.id, category: 'second', expectedCategory: 'other' });
+        await call({ action: 'setCategory', id: legacy.id, category: 'second', expectedCategory: 'unclassified' });
         assert.equal((await db.doc(`advance_requests/${legacy.id}`).get()).data()?.category, 'second');
         await db.doc('workers/advance-worker').update({ isActive: false });
         await assert.rejects(call({ ...input, requestId: 'inactive' }), (e: any) => e.code === 'permission-denied');
