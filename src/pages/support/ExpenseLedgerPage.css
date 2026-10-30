@@ -1,3 +1,17 @@
+.expense-ledger-frozen-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  padding-bottom: 0.5rem;
+  background: #f8fafc;
+  box-shadow: 0 6px 8px -8px rgb(15 23 42 / 35%);
+}
+
+/* 앱의 고정 헤더 아래에 조회월부터 팀 선택까지 함께 고정한다. */
+#main-content.page-support-management .expense-ledger-frozen-header {
+  top: var(--header-height, 60px);
+}
+
 /* 경비 요약과 펼친 상세표 모두 기존 글자 크기에서 1pt 확대한다. */
 .expense-ledger-page .text-\[10px\] {
   font-size: calc(10px + 1pt);
