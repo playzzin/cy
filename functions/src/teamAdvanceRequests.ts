@@ -16,10 +16,23 @@ const amount = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, 
 const cashKeys = ['corporateAdvance1', 'corporateAdvance2', 'corporateAdvance3', 'corporateAdvance4', 'laborAdvance1', 'laborAdvance2', 'laborAdvance3', 'laborAdvance4'];
 const payrollRoles = new Set(['admin', 'administrator', 'superadmin', 'owner', 'dev', 'developer', '관리자', '사장', '실장', 'office', 'officestaff', '사무', '사무실직원', 'payrollmanager', '급여담당', '정산담당', '정산관리자', 'finance', 'financemanager', 'accounting', 'accountingmanager', '회계', '재무', '경리', '회계담당', '재무담당']);
 
+export function parseAdvanceRequestCategory(value: unknown): 'first' | 'second' | 'other' {
+    if (value === undefined) return 'other'; // Older clients did not send a category.
+    if (value === 'first' || value === 'second' || value === 'other') return value;
+    return fail('invalid-argument', '신청 분류를 확인해 주세요.');
+}
+
+export function advanceRequestFingerprint(workerId: string, yearMonth: string, requestedAmount: number, memo: unknown, category: unknown): string {
+    const values: unknown[] = [workerId, yearMonth, requestedAmount, text(memo)];
+    // Preserve retries from older clients while binding new requests to their category.
+    if (category !== undefined) values.push(parseAdvanceRequestCategory(category));
+    return createHash('sha256').update(JSON.stringify(values)).digest('hex');
+}
+
 export async function handleTeamAdvanceRequest(input: any, context: functions.https.CallableContext) {
     const { uid } = requireCallableAuth(context);
     const db = admin.firestore();
-    if (!['create', 'cancel'].includes(input?.action)) fail('invalid-argument', '지원하지 않는 요청입니다.');
+    if (!['create', 'cancel', 'setCategory'].includes(input?.action)) fail('invalid-argument', '지원하지 않는 요청입니다.');
     const requestId = input.action === 'create'
         ? createHash('sha256').update(`${uid}:${id(input.requestId)}`).digest('hex') : id(input.id);
     const ref = db.collection('advance_requests').doc(requestId);
@@ -28,6 +41,18 @@ export async function handleTeamAdvanceRequest(input: any, context: functions.ht
         const profile = profileSnapshot.data();
         if (!profile || profile.status !== 'active') fail('permission-denied', '활성 계정이 필요합니다.');
         const privileged = resolvedRoleNames(profile, menu.data()).some(role => payrollRoles.has(role.toLowerCase().replace(/[\s_-]/g, '')));
+        if (input.action === 'setCategory') {
+            const row = saved.data();
+            if (!row) return fail('not-found', '신청을 찾을 수 없습니다.');
+            if (row.requesterUid !== uid || row.status !== 'requested') fail('permission-denied', '처리 전 본인 신청의 분류만 수정할 수 있습니다.');
+            if (input.category === undefined || input.expectedCategory === undefined) fail('invalid-argument', '신청 분류를 확인해 주세요.');
+            const category = parseAdvanceRequestCategory(input.category);
+            const current = parseAdvanceRequestCategory(row.category);
+            const expected = parseAdvanceRequestCategory(input.expectedCategory);
+            if (current !== expected) fail('aborted', '신청 분류가 변경되었습니다. 새로고침 후 다시 선택해 주세요.');
+            transaction.update(ref, { category, categoryUpdatedAt: admin.firestore.Timestamp.now() });
+            return { id: ref.id, category };
+        }
         if (input.action === 'cancel') {
             const row = saved.data();
             if (!row) return fail('not-found', '신청을 찾을 수 없습니다.');
@@ -46,10 +71,18 @@ export async function handleTeamAdvanceRequest(input: any, context: functions.ht
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '신청 월을 확인해 주세요.');
         const requestedAmount = Number(input.requestedAmount);
         if (!Number.isSafeInteger(requestedAmount) || requestedAmount <= 0) fail('invalid-argument', '신청 금액을 확인해 주세요.');
-        const fingerprint = createHash('sha256').update(JSON.stringify([workerId, yearMonth, requestedAmount, text(input.memo)])).digest('hex');
+        const category = parseAdvanceRequestCategory(input.category);
+        const fingerprint = advanceRequestFingerprint(workerId, yearMonth, requestedAmount, input.memo, input.category);
         if (saved.exists) {
-            if (saved.data()?.requestFingerprint !== fingerprint) fail('already-exists', '같은 신청 번호로 다른 내용을 저장할 수 없습니다.');
-            return { id: ref.id };
+            const row = saved.data()!;
+            // Recover a retried request accepted by the old server before it stored categories.
+            if (row.category === undefined && input.category !== undefined && row.status === 'requested'
+                && row.requestFingerprint === advanceRequestFingerprint(workerId, yearMonth, requestedAmount, input.memo, undefined)) {
+                transaction.update(ref, { category, requestFingerprint: fingerprint, categoryUpdatedAt: admin.firestore.Timestamp.now() });
+                return { id: ref.id, category };
+            }
+            if (row.requestFingerprint !== fingerprint) fail('already-exists', '같은 신청 번호로 다른 내용을 저장할 수 없습니다.');
+            return { id: ref.id, category: parseAdvanceRequestCategory(row.category) };
         }
         const [year, month] = yearMonth.split('-').map(Number);
         const previousMonth = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 7);
@@ -84,13 +117,13 @@ export async function handleTeamAdvanceRequest(input: any, context: functions.ht
         transaction.create(ref, {
             workerId, workerName: text(worker!.name), teamId: text(worker!.teamId), teamName: text(worker!.teamName),
             requesterUid: uid, requesterName: text(profile!.displayName || profile!.name), requesterEmail: text(profile!.email),
-            yearMonth, periodStart, periodEnd, requestedAmount, currentMonthEarned, previousMonthEarned,
+            yearMonth, periodStart, periodEnd, requestedAmount, category, currentMonthEarned, previousMonthEarned,
             earnedAmountSnapshot: earnedAmount, existingAdvanceAmountSnapshot: existingAdvanceAmount,
             activeRequestAmountSnapshot: activeRequestAmount, availableAmountSnapshot: availableAmount,
             bankName: text(worker!.bankName), accountNumber: text(worker!.accountNumber), accountHolder: text(worker!.accountHolder || worker!.name),
             memo: text(input.memo).slice(0, 1000), requestFingerprint: fingerprint, status: 'requested', createdAt: now, updatedAt: now,
         });
-        return { id: ref.id };
+        return { id: ref.id, category };
     });
 }
 
