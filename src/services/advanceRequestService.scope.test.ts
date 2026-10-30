@@ -1,4 +1,4 @@
-import { getDocs } from 'firebase/firestore';
+import { getDocs, where } from 'firebase/firestore';
 import { getTeamScopedRows } from './teamScopedReadService';
 import { advanceRequestService } from './advanceRequestService';
 
@@ -38,4 +38,29 @@ it('관리자는 기존 조회를 유지하고 중복 신청을 합친다', asyn
     read.mockResolvedValue({ docs: [{ id: 'one', data: () => ({ workerId: 'worker-a' }) }] });
     expect(await advanceRequestService.listForWorkerIds(['worker-a', 'worker-a'], 'admin')).toHaveLength(1);
     expect(read).toHaveBeenCalledTimes(2);
+});
+
+it('월별 신청을 서버 권한 범위에서 읽고 회차 누락을 선입금으로 오인하지 않는다', async () => {
+    scoped.mockResolvedValue([
+        { id: 'first', workerId: 'a', yearMonth: '2026-10', category: 'first', requestedAmount: 10000, memo: ' 원본 비고\n' },
+        { id: 'legacy', workerId: 'b', yearMonth: '2026-10', requestedAmount: 20000 },
+        { id: 'previous', workerId: 'a', yearMonth: '2026-09', requestedAmount: 30000 },
+    ]);
+    expect(await advanceRequestService.listByYearMonth('2026-10')).toEqual([
+        expect.objectContaining({ id: 'first', category: 'first', memo: ' 원본 비고\n' }),
+        expect.objectContaining({ id: 'legacy', category: 'unclassified' }),
+    ]);
+    expect(scoped).toHaveBeenCalledWith('advance_requests', { yearMonth: '2026-10' });
+    expect(read).not.toHaveBeenCalled();
+    scoped.mockRejectedValueOnce(new Error('permission-denied'));
+    await expect(advanceRequestService.listByYearMonth('2026-10')).rejects.toThrow('permission-denied');
+    expect(read).not.toHaveBeenCalled();
+});
+
+it('관리자의 월별 신청 조회는 신청 컬렉션의 해당 월만 요청한다', async () => {
+    scoped.mockResolvedValue(null);
+    read.mockResolvedValue({ docs: [] });
+    await expect(advanceRequestService.listByYearMonth('2026-10')).resolves.toEqual([]);
+    expect(where).toHaveBeenCalledWith('yearMonth', '==', '2026-10');
+    await expect(advanceRequestService.listByYearMonth('2026-13')).rejects.toThrow('조회 월');
 });

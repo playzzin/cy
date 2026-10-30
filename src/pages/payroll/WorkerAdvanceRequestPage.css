@@ -120,6 +120,23 @@
 .advance-calculation-details { border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
 .advance-calculation-details .advance-summary { padding: 12px; }
 .advance-input { order: 0; }
+.advance-mobile-input fieldset { border: 0; padding: 0; margin: 0 0 12px; }
+.advance-mobile-input legend { margin-bottom: 8px; font-size: 13px; font-weight: 700; color: #475569; }
+.advance-mobile-rounds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.advance-mobile-rounds button { border: 1px solid #cbd5e1; border-radius: 8px; background: white; font-weight: 700; }
+.advance-mobile-rounds button[aria-pressed=true] { background: #2563eb; color: white; border-color: #2563eb; }
+.advance-mobile-input > input { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #e2e8f0; border-radius: 8px; }
+.advance-mobile-workers { margin-top: 8px; }
+.advance-mobile-worker { display: grid; grid-template-columns: minmax(0,1fr) minmax(100px,1.2fr) 48px; gap: 6px; align-items: center; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
+.advance-mobile-worker.is-selected { background: #eff6ff; }
+.advance-mobile-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14px; font-weight: 700; text-align: left; padding: 2px; }
+.advance-mobile-team-color { width: 8px; height: 28px; border-radius: 3px; flex-shrink: 0; }
+.advance-mobile-amount { display: flex; align-items: center; gap: 3px; min-width: 0; padding: 4px 6px; background: white; border: 1px solid #cbd5e1; border-radius: 6px; }
+.advance-mobile-amount input { width: 100%; min-width: 0; height: 36px; background: transparent; text-align: right; font-variant-numeric: tabular-nums; }
+.advance-mobile-amount > span:last-child { font-size: 12px; color: #64748b; }
+.advance-mobile-submit { border-radius: 6px; background: #2563eb; color: white; font-size: 13px; font-weight: 700; }
+.advance-mobile-submit:disabled { background: #e2e8f0; color: #64748b; }
+.advance-mobile-input :focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .advance-work-details { order: 1; align-self: start; min-width: 0; }
 @media (max-width: 767px) {
     .advance-request-page .advance-request-workspace { padding: 10px; gap: 10px; }

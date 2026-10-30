@@ -29,6 +29,13 @@ test('빈 비고도 저장하여 기존 내용을 지울 수 있다', async () =
     expect(transaction.update).toHaveBeenCalledWith('advance_payments/record', { memo: '', memoUpdatedAt: 'memo-time' });
 });
 
+test('신청 요약의 비고는 가불관리 대신 신청 원본에만 저장한다', async () => {
+    transaction.get.mockResolvedValue({ exists: () => true, data: () => ({ memo: '' }) });
+    await advancePaymentMemoService.save([{ id: 'request', expectedMemo: '', memo: '신청 비고' }], 'advance_requests');
+    expect(doc).toHaveBeenCalledWith({}, 'advance_requests', 'request');
+    expect(transaction.update).toHaveBeenCalledWith('advance_requests/request', { memo: '신청 비고', memoUpdatedAt: 'memo-time' });
+});
+
 test('비고가 없었던 원본에도 추가할 수 있다', async () => {
     transaction.get.mockResolvedValue({ exists: () => true, data: () => ({ memo: null }) });
     await advancePaymentMemoService.save([{ id: 'record', expectedMemo: '', memo: '추가 비고' }]);
