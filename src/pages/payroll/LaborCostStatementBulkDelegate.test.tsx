@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
@@ -28,14 +28,14 @@ const mockWorkers: Worker[] = ['가상작업자A', '가상작업자B'].map((name
     bankName: '기본은행', accountHolder: name + '예금주', accountNumber: `TEST-BASIC-${index}`,
     directPayBankName: '직불은행', directPayAccountHolder: name + '직불예금주', directPayAccountNumber: `TEST-DIRECT-${index}`,
 }));
-const bulkButton = () => screen.getByRole('button', { name: '전체 위임' });
+const bulkCheckbox = () => within(screen.getByRole('group', { name: '보기 설정' })).getByRole('checkbox', { name: '전체 위임' });
 const openStatement = async (fill = true) => {
     render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/?month=2026-10']}><LaborCostStatementGeneratorPage /></MemoryRouter>);
     await screen.findByRole('option', { name: /가상작업자A/ });
     if (fill) {
         fireEvent.click(screen.getByRole('button', { name: '자동채우기' }));
         await screen.findByDisplayValue('가상작업자A');
-        await waitFor(() => expect(bulkButton()).toBeEnabled());
+        await waitFor(() => expect(bulkCheckbox()).toBeEnabled());
     }
 };
 
@@ -53,9 +53,11 @@ it('이름이 있는 모든 행에 위임계좌를 적용하고 빈 행·공수�
     fireEvent.click(screen.getAllByRole('radio', { name: '위임' })[1]);
     fireEvent.change(screen.getAllByPlaceholderText('이름')[2], { target: { value: '가상수기작업자' } });
     fireEvent.change(screen.getAllByPlaceholderText('이름')[3], { target: { value: '   ' } });
-    expect(screen.getByRole('status', { name: '위임 현황' })).toHaveTextContent('3명 중 위임 1명');
-    fireEvent.click(bulkButton());
-    expect(screen.getByRole('status', { name: '위임 현황' })).toHaveTextContent('3명 중 위임 3명');
+    expect(bulkCheckbox()).not.toBeChecked();
+    expect(screen.queryByRole('button', { name: '전체 위임' })).not.toBeInTheDocument();
+    expect(screen.queryByText('지급구분 일괄 변경')).not.toBeInTheDocument();
+    fireEvent.click(bulkCheckbox());
+    expect(bulkCheckbox()).toBeChecked();
     expect(screen.getAllByDisplayValue('TEST-DELEGATE')).toHaveLength(3);
     expect(screen.getAllByRole('radio', { name: '위임' }).filter(radio => (radio as HTMLInputElement).checked)).toHaveLength(3);
     expect(screen.getAllByRole('radio', { name: '기본' })[3]).toBeChecked();
@@ -82,37 +84,38 @@ it('이름이 있는 모든 행에 위임계좌를 적용하고 빈 행·공수�
     expect(JSON.stringify(rows)).not.toContain('TEST-DIRECT');
 });
 
-it('전체 위임을 반복 적용해도 수정한 직불계좌를 보존하고 각 행을 기본·직불로 복원할 수 있다', async () => {
+it('전체 위임 체크를 해제하면 수정한 직불계좌와 기본계좌를 복원한다', async () => {
     await openStatement();
     fireEvent.click(screen.getAllByRole('radio', { name: '직불' })[0]);
     fireEvent.change(screen.getByDisplayValue('TEST-DIRECT-0'), { target: { value: 'TEST-EDITED-DIRECT' } });
-    fireEvent.click(bulkButton());
-    fireEvent.click(bulkButton());
-    fireEvent.click(screen.getAllByRole('radio', { name: '직불' })[0]);
+    fireEvent.click(bulkCheckbox());
+    expect(bulkCheckbox()).toBeChecked();
+    fireEvent.click(bulkCheckbox());
+    expect(screen.getAllByRole('radio', { name: '직불' })[0]).toBeChecked();
     expect(screen.getByDisplayValue('TEST-EDITED-DIRECT')).toBeVisible();
-    fireEvent.click(screen.getAllByRole('radio', { name: '기본' })[1]);
+    expect(screen.getAllByRole('radio', { name: '기본' })[1]).toBeChecked();
     expect(screen.getByDisplayValue('TEST-BASIC-1')).toBeVisible();
-    expect(screen.getByRole('status', { name: '위임 현황' })).toHaveTextContent('2명 중 위임 0명');
+    expect(bulkCheckbox()).not.toBeChecked();
 });
 
 it('계좌 열이 숨겨져 있어도 전체 위임을 사용할 수 있고 적용 결과를 표시한다', async () => {
     await openStatement();
     fireEvent.click(screen.getByRole('checkbox', { name: '계좌/지급구분' }));
     expect(screen.queryByRole('radio', { name: '위임' })).not.toBeInTheDocument();
-    fireEvent.click(bulkButton());
+    fireEvent.click(bulkCheckbox());
     expect(screen.getByRole('checkbox', { name: '계좌/지급구분' })).toBeChecked();
     expect(screen.getAllByDisplayValue('TEST-DELEGATE')).toHaveLength(2);
 });
 
 it('빈 명세서는 일괄 변경할 수 없고 대표계좌 조회 실패 시 기존 지급구분을 보존한다', async () => {
     await openStatement(false);
-    expect(bulkButton()).toBeDisabled();
+    expect(bulkCheckbox()).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '자동채우기' }));
     await screen.findByDisplayValue('가상작업자A');
     mockAccountReady = false;
-    fireEvent.click(bulkButton());
+    fireEvent.click(bulkCheckbox());
     expect(screen.getByDisplayValue('TEST-BASIC-0')).toBeVisible();
-    expect(screen.getByRole('status', { name: '위임 현황' })).toHaveTextContent('2명 중 위임 0명');
+    expect(bulkCheckbox()).not.toBeChecked();
 });
 
 it('DB 직불여부 조회 중에는 일괄 변경을 막고 조회 완료 후에는 전체 위임을 우선 적용한다', async () => {
@@ -120,10 +123,38 @@ it('DB 직불여부 조회 중에는 일괄 변경을 막고 조회 완료 후�
     let finishRefresh!: (workers: Worker[]) => void;
     (manpowerService.getWorkers as jest.Mock).mockReturnValueOnce(new Promise(resolve => { finishRefresh = resolve; }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'DB 직불여부 적용' }));
-    expect(bulkButton()).toBeDisabled();
+    expect(bulkCheckbox()).toBeDisabled();
     await act(async () => finishRefresh(mockWorkers));
-    expect(bulkButton()).toBeEnabled();
-    fireEvent.click(bulkButton());
+    expect(bulkCheckbox()).toBeEnabled();
+    fireEvent.click(bulkCheckbox());
     expect(screen.getAllByDisplayValue('TEST-DELEGATE')).toHaveLength(2);
     expect(screen.getByRole('checkbox', { name: 'DB 직불여부 적용' })).toBeChecked();
+});
+
+
+it('체크 해제는 기존 개별 위임을 유지하고 일괄 적용 후 수정한 단가를 보존한다', async () => {
+    await openStatement();
+    fireEvent.click(screen.getAllByRole('radio', { name: '위임' })[1]);
+    fireEvent.click(bulkCheckbox());
+    fireEvent.change(screen.getAllByDisplayValue('100,000')[0], { target: { value: '130000' } });
+    fireEvent.click(bulkCheckbox());
+    expect(screen.getAllByRole('radio', { name: '기본' })[0]).toBeChecked();
+    expect(screen.getAllByRole('radio', { name: '위임' })[1]).toBeChecked();
+    expect(screen.getByDisplayValue('130,000')).toBeVisible();
+    expect(bulkCheckbox()).not.toBeChecked();
+});
+
+it('자동채우기 후 전체 위임 해제 시 이전 명세서의 지급구분을 복원하지 않는다', async () => {
+    await openStatement();
+    fireEvent.click(screen.getAllByRole('radio', { name: '직불' })[0]);
+    fireEvent.click(bulkCheckbox());
+    fireEvent.click(screen.getByRole('button', { name: '자동채우기' }));
+    await screen.findByDisplayValue('TEST-BASIC-0');
+    fireEvent.click(screen.getAllByRole('radio', { name: '위임' })[0]);
+    fireEvent.click(screen.getAllByRole('radio', { name: '위임' })[1]);
+    expect(bulkCheckbox()).toBeChecked();
+    fireEvent.click(bulkCheckbox());
+    expect(screen.getByDisplayValue('TEST-BASIC-0')).toBeVisible();
+    expect(screen.getByDisplayValue('TEST-BASIC-1')).toBeVisible();
+    expect(bulkCheckbox()).not.toBeChecked();
 });
