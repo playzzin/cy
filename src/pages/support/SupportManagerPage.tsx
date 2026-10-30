@@ -100,16 +100,20 @@ const SupportManagerPage: React.FC = () => {
     rememberSupportManagementYearMonth(nextYearMonth);
   };
 
+  const workspaceHeader = (
+    <SupportWorkspaceHeader
+      activeTab={activeTab}
+      onTabChange={handleTabChange}
+      yearMonth={yearMonth}
+      onYearMonthChange={handleYearMonthChange}
+    />
+  );
+
   return (
     <SupportBillingClosingGuardContext.Provider value={registerClosingBlock}>
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 px-3 pb-6 pt-0 sm:px-5 xl:px-6">
+    <div className={`min-h-screen w-full max-w-full ${activeTab === 'expense' ? 'overflow-x-clip' : 'overflow-x-hidden'} bg-slate-50 px-3 pb-6 pt-0 sm:px-5 xl:px-6`}>
       <div className="w-full max-w-none min-w-0 space-y-3">
-        <SupportWorkspaceHeader
-          activeTab={activeTab}
-          onTabChange={handleTabChange}
-          yearMonth={yearMonth}
-          onYearMonthChange={handleYearMonthChange}
-        />
+        {activeTab !== 'expense' && workspaceHeader}
 
         <div className="w-full min-w-0">
           {(activeTab === 'vehicle' || activeTab === 'card' || activeTab === 'accommodation') && (
@@ -123,7 +127,7 @@ const SupportManagerPage: React.FC = () => {
           {activeTab === 'vehicle' && <VehicleManagerPage embedded initialTab={activeView} onTabChange={handleViewChange} onBeforeRepairLeaveChange={registerRepairLeaveGuard} />}
           {activeTab === 'card' && <CardManagerPage embedded initialTab={activeView} onTabChange={handleViewChange} />}
           {activeTab === 'accommodation' && <AccommodationManager embedded initialTab={activeView} onTabChange={handleViewChange} />}
-          {activeTab === 'expense' && <ExpenseLedgerPage embedded />}
+          {activeTab === 'expense' && <ExpenseLedgerPage embedded workspaceHeader={workspaceHeader} />}
           {activeTab === 'claim' && <ExpenseClaimManagementPage embedded onDirtyChange={setClaimFormDirty} />}
         </div>
         {closing && <SupportBillingClosingDialog domain={closing.domain} yearMonth={closing.yearMonth} onClose={() => setClosing(null)} externalBlockedReason={closingBlockedReason} />}

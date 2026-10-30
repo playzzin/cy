@@ -54,7 +54,7 @@ jest.mock('./AccommodationManager', () => ({
 
 jest.mock('./ExpenseLedgerPage', () => ({
   __esModule: true,
-  default: () => <span>통합 경비현황</span>,
+  default: ({ workspaceHeader }: { workspaceHeader?: React.ReactNode }) => <>{workspaceHeader}<span>통합 경비현황</span></>,
 }));
 
 jest.mock('./ExpenseClaimManagementPage', () => ({
