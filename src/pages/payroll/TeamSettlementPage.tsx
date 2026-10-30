@@ -3978,6 +3978,12 @@ export const TeamSettlementPage: React.FC = () => {
                     <span className="font-semibold text-slate-700">공수</span>
                     <span className="font-extrabold text-slate-900">{formatManDay1(transactionSectionTotals.salesDirect.manDay)}공</span>
                   </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-blue-50 px-3 py-2 text-sm" role="group" aria-label="도급 + 직영 총금액">
+                    <span className="font-semibold text-blue-700">도급 + 직영 총금액</span>
+                    <span className="whitespace-nowrap font-extrabold text-blue-900">
+                      {formatCurrency(transactionSectionTotals.salesContract.amount + transactionSectionTotals.salesDirect.amount)}원
+                    </span>
+                  </div>
                 </div>
               </div>
 
