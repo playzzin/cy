@@ -308,6 +308,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
   const [rows, setRows] = useState<RowState[]>(() => Array.from({ length: 15 }, (_, i) => createEmptyRow(i + 1)));
   const [payTypeAutoWarnings, setPayTypeAutoWarnings] = useState<string[]>([]);
+  const bulkPayTypeSnapshot = useRef<{ rows: Map<number, RowState>; warnings: string[] } | null>(null);
 
   // --- Constructor Company Info ---
   const [constructorCompany, setConstructorCompany] = useState<Company | null>(null);
@@ -675,6 +676,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   };
 
   const fillRowWithWorker = (rowId: number, worker: Worker | null, workerKey?: string, fallbackName?: string) => {
+    bulkPayTypeSnapshot.current?.rows.delete(rowId);
     const w = worker ?? null;
     const unitPriceFromWorker = Number(w?.unitPrice || 0);
     const unitPrice = unitPriceFromWorker > 0 ? String(unitPriceFromWorker) : '';
@@ -724,51 +726,89 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     }));
   };
 
-  const setRowPayType = (rowId: number, payType: PayType | 'default') => {
-    setRows((prev) => prev.map((r) => {
-      if (r.id !== rowId) return r;
+  const applyRowPayType = (r: RowState, payType: PayType | 'default'): RowState => {
+    if (payType === 'default') {
+      const worker = (r.workerId ? workerById.get(r.workerId) : undefined) ?? workerByName.get(r.workerName);
+      return { ...r, ...buildBankFieldsForPayType('direct', getDirectBankInfo(r), {
+        bankName: worker?.bankName ?? '', bankOwner: worker?.accountHolder ?? '', bankAccount: worker?.accountNumber ?? ''
+      }, 'default') };
+    }
 
-      if (payType === 'default') {
-        const worker = (r.workerId ? workerById.get(r.workerId) : undefined) ?? workerByName.get(r.workerName);
-        return { ...r, ...buildBankFieldsForPayType('direct', getDirectBankInfo(r), {
-          bankName: worker?.bankName ?? '', bankOwner: worker?.accountHolder ?? '', bankAccount: worker?.accountNumber ?? ''
-        }, 'default') };
-      }
+    if (payType === 'delegate') {
+      const directBank = r.payType === 'direct' && r.accountPurpose === 'directPay'
+        ? {
+            bankName: r.bankName,
+            bankOwner: r.bankOwner,
+            bankAccount: r.bankAccount
+          }
+        : getDirectBankInfo(r);
 
-      if (payType === 'delegate') {
-        const directBank = r.payType === 'direct' && r.accountPurpose === 'directPay'
-          ? {
-              bankName: r.bankName,
-              bankOwner: r.bankOwner,
-              bankAccount: r.bankAccount
-            }
-          : getDirectBankInfo(r);
-
-        return {
-          ...r,
-          payType: 'delegate',
-          bankName: masterBank,
-          bankOwner: masterOwner,
-          bankAccount: masterAccount,
-          directBankName: directBank.bankName,
-          directBankOwner: directBank.bankOwner,
-          directBankAccount: directBank.bankAccount
-        };
-      }
-
-      const directBank = getDirectBankInfo(r);
       return {
         ...r,
-        payType: 'direct',
-        accountPurpose: 'directPay',
-        bankName: directBank.bankName,
-        bankOwner: directBank.bankOwner,
-        bankAccount: directBank.bankAccount,
+        payType: 'delegate',
+        bankName: masterBank,
+        bankOwner: masterOwner,
+        bankAccount: masterAccount,
         directBankName: directBank.bankName,
         directBankOwner: directBank.bankOwner,
         directBankAccount: directBank.bankAccount
       };
-    }));
+    }
+
+    const directBank = getDirectBankInfo(r);
+    return {
+      ...r,
+      payType: 'direct',
+      accountPurpose: 'directPay',
+      bankName: directBank.bankName,
+      bankOwner: directBank.bankOwner,
+      bankAccount: directBank.bankAccount,
+      directBankName: directBank.bankName,
+      directBankOwner: directBank.bankOwner,
+      directBankAccount: directBank.bankAccount
+    };
+  };
+
+  const setRowPayType = (rowId: number, payType: PayType | 'default') => {
+    setRows(current => current.map(row => row.id === rowId ? applyRowPayType(row, payType) : row));
+  };
+
+  const filledRows = rows.filter(row => row.workerName.trim().length > 0);
+  const delegatedRowCount = filledRows.filter(row => row.payType === 'delegate').length;
+  const bulkPayTypeDisabled = filledRows.length === 0 || loadingReports || loadingAttendance || loadingWorkerDb || pagePrimaryAccount.loading;
+
+  const allRowsDelegated = filledRows.length > 0 && delegatedRowCount === filledRows.length;
+
+  const handleDelegateAllChange = (checked: boolean) => {
+    if (bulkPayTypeDisabled || !ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
+    if (checked) {
+      bulkPayTypeSnapshot.current = { rows: new Map(filledRows.map(row => [row.id, row])), warnings: payTypeAutoWarnings };
+      setRows(current => current.map(row => row.workerName.trim() ? applyRowPayType(row, 'delegate') : row));
+      setPayTypeAutoWarnings([]);
+    } else {
+      const snapshot = bulkPayTypeSnapshot.current;
+      setRows(current => current.map(row => {
+        if (!row.workerName.trim()) return row;
+        const previous = snapshot?.rows.get(row.id);
+        if (!previous || previous.workerId !== row.workerId || previous.workerName !== row.workerName) {
+          return applyRowPayType(row, 'default');
+        }
+        return {
+          ...row,
+          payType: previous.payType,
+          accountPurpose: previous.accountPurpose,
+          bankName: previous.payType === 'delegate' ? masterBank : previous.bankName,
+          bankOwner: previous.payType === 'delegate' ? masterOwner : previous.bankOwner,
+          bankAccount: previous.payType === 'delegate' ? masterAccount : previous.bankAccount,
+          directBankName: previous.directBankName,
+          directBankOwner: previous.directBankOwner,
+          directBankAccount: previous.directBankAccount,
+        };
+      }));
+      setPayTypeAutoWarnings(snapshot?.warnings ?? []);
+      bulkPayTypeSnapshot.current = null;
+    }
+    setShowBankColumn(true);
   };
 
   const buildRowsForWorkerMasterPayTypeSetting = (
@@ -817,6 +857,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const handleUseWorkerMasterPayTypeChange = async (checked: boolean) => {
     const findWorker = checked ? await refreshWorkerDb() : findRefreshedWorker;
     if (checked && !findWorker) return;
+    bulkPayTypeSnapshot.current = null;
     setUseWorkerMasterPayType(checked);
     const { warnings } = buildRowsForWorkerMasterPayTypeSetting(rows, checked, findWorker);
     setRows(current => buildRowsForWorkerMasterPayTypeSetting(current, checked, findWorker).nextRows);
@@ -900,6 +941,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       }
       newRows.push(r);
     }
+    bulkPayTypeSnapshot.current = null;
     setRows(newRows);
     setPayTypeAutoWarnings(useWorkerMasterPayType ? Array.from(missingPayTypeWarnings) : []);
   };
@@ -921,6 +963,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   const handleClearAll = () => {
     if (window.confirm('작성된 모든 내용을 초기화하시겠습니까?')) {
+      bulkPayTypeSnapshot.current = null;
       setRows(Array.from({ length: 15 }, (_, i) => createEmptyRow(i + 1)));
       setPayTypeAutoWarnings([]);
     }
@@ -1835,7 +1878,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
               <Settings className="w-3.5 h-3.5" /> 보기 설정
             </span>
-            <div className="flex items-center gap-3 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
+            <div role="group" aria-label="보기 설정" className="flex flex-wrap items-center gap-3 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
               <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none">
                 <input type="checkbox" checked={showBankColumn} onChange={(e) => setShowBankColumn(e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300" />
                 <span className="text-sm font-bold text-slate-700">계좌/지급구분</span>
@@ -1867,6 +1910,17 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-gray-300"
                 />
                 <span className="text-sm font-bold">DB 직불여부 적용</span>
+              </label>
+              <div className="w-px h-3 bg-slate-200"></div>
+              <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none">
+                <input
+                  type="checkbox"
+                  checked={allRowsDelegated}
+                  disabled={bulkPayTypeDisabled}
+                  onChange={(e) => handleDelegateAllChange(e.target.checked)}
+                  className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300"
+                />
+                <span className="text-sm font-bold text-slate-700">전체 위임</span>
               </label>
               {loadingWorkerDb && <span role="status" className="text-sm text-slate-500">직불 정보 불러오는 중…</span>}
               {workerDbError && <span role="alert" className="text-sm text-red-600">{workerDbError}</span>}
