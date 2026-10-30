@@ -3584,9 +3584,6 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                                 <span>{agg.companyName}</span>
                                                                                 <span className="shrink-0 text-[10px] text-slate-500">현장 {agg.sites.length}개</span>
                                                                             </button>
-                                                                            <div className={`mt-1 truncate text-[10px] font-semibold ${agg.accountNumber ? 'text-slate-600' : 'text-rose-600'}`}>
-                                                                                {getSettlementAccountLabel(agg) || '계좌 정보 없음'}
-                                                                            </div>
                                                                         </div>
                                                                     </td>
                                                                     <td className="border border-slate-900 px-2 py-1.5 text-center">
@@ -3673,9 +3670,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                             className="h-7 w-full bg-transparent px-1 text-center text-[12px] font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
                                                                             placeholder={remarkPlaceholder}
                                                                         />
-                                                                        <div className={`mt-1 truncate px-1 text-[10px] font-semibold ${agg.accountNumber ? 'text-slate-600' : 'text-rose-600'}`}>
-                                                                            {getSettlementAccountLabel(agg) || '계좌 정보 없음'}
-                                                                        </div>
+                                                                        {agg.direction === '외부지원온곳' && (
+                                                                            <div className={`mt-1 truncate px-1 text-[10px] font-semibold ${agg.accountNumber ? 'text-slate-600' : 'text-rose-600'}`}>
+                                                                                {getSettlementAccountLabel(agg) || '계좌 정보 없음'}
+                                                                            </div>
+                                                                        )}
                                                                     </td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
                                                                         <div className="flex flex-col gap-1">
