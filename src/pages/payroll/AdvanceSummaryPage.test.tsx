@@ -2,6 +2,7 @@ import React from 'react';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import * as XLSX from 'xlsx-js-style';
 import AdvanceSummaryPage from './AdvanceSummaryPage';
 import { advanceRequestService } from '../../services/advanceRequestService';
 import { advancePaymentService } from '../../services/advancePaymentService';
@@ -25,6 +26,7 @@ jest.mock('../../services/companyService', () => ({ companyService: { getCompani
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkerByUid: jest.fn(), getWorkers: jest.fn() } }));
 jest.mock('../../services/userService', () => ({ userService: { getUser: jest.fn() } }));
 jest.mock('react-to-print', () => ({ useReactToPrint: () => jest.fn() }));
+jest.mock('xlsx-js-style', () => ({ ...jest.requireActual('xlsx-js-style'), writeFile: jest.fn() }));
 
 const record = { id: 'entry', workerId: 'test-worker', workerName: '검증 작업자', teamId: 'test-team',
     yearMonth: '2026-10', category: 'first', status: 'requested', requestedAmount: 150000, memo: '검증용 비고' };
@@ -38,6 +40,50 @@ beforeEach(() => {
     (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([record]);
     (advancePaymentMemoService.save as jest.Mock).mockResolvedValue(undefined);
     (advancePaymentDepositAccountService.save as jest.Mock).mockResolvedValue(undefined);
+});
+
+test('국민은행 미리보기는 선택한 회차와 표시 문구를 같은 양식으로 다운로드한다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ id: 'test-worker', bankName: '국민은행', accountNumber: '000-1234-5678', accountHolder: '검증 예금주' }]);
+    (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([record, { ...record, id: 'second', category: 'second', requestedAmount: 50000 }]);
+    renderPage();
+    await screen.findByRole('rowheader', { name: '검증 작업자' });
+    fireEvent.click(within(screen.getByRole('group', { name: '목록 신청 분류' })).getByRole('button', { name: '2회차' }));
+    fireEvent.click(screen.getByRole('button', { name: '국민은행용 엑셀' }));
+    const preview = screen.getByRole('dialog', { name: '국민은행용 엑셀 미리보기' });
+    expect(within(preview).getByRole('row', { name: /검증 작업자/ })).toHaveTextContent('50,000원');
+    fireEvent.change(within(preview).getByLabelText('받는분통장표시'), { target: { value: '검증가불' } });
+    fireEvent.change(within(preview).getByLabelText(/내통장메모 규칙/), { target: { value: '{이름} 2회차' } });
+    fireEvent.click(within(preview).getByRole('button', { name: '국민은행용 다운로드' }));
+    const [workbook, filename] = (XLSX.writeFile as jest.Mock).mock.calls[0];
+    expect(filename).toBe('팀별가불내역_국민은행용_2026-10_전체 팀_2회차.xlsx');
+    expect(XLSX.utils.sheet_to_json(workbook.Sheets['국민은행용'], { header: 1 })).toEqual([
+        ['A. 은행코드', 'B. 계좌번호', 'C. 이체금액', 'D. 받는분통장표시', 'E. 내통장메모'],
+        ['004', '00012345678', 50000, '검증가불', '검증 작업자 2회차'],
+    ]);
+    expect(advanceRequestService.setPrepayment).not.toHaveBeenCalled();
+    expect(advancePaymentDepositAccountService.save).not.toHaveBeenCalled();
+});
+
+test('국민은행 출력 대상의 계좌 오류를 보여주며 정상 대상이 없으면 다운로드하지 않는다', async () => {
+    renderPage();
+    await screen.findByRole('rowheader', { name: '검증 작업자' });
+    fireEvent.click(screen.getByRole('button', { name: '국민은행용 엑셀' }));
+    const preview = screen.getByRole('dialog', { name: '국민은행용 엑셀 미리보기' });
+    expect(within(preview).getByRole('status')).toHaveTextContent('1명은 다운로드에서 제외');
+    expect(within(preview).getByRole('button', { name: '국민은행용 다운로드' })).toBeDisabled();
+    expect(XLSX.writeFile).not.toHaveBeenCalled();
+});
+
+test('조회 월이 바뀌면 이전 국민은행 미리보기를 폐기한다', async () => {
+    renderPage();
+    await screen.findByRole('rowheader', { name: '검증 작업자' });
+    const monthInput = screen.getByLabelText('조회 월');
+    fireEvent.click(screen.getByRole('button', { name: '국민은행용 엑셀' }));
+    expect(screen.getByRole('dialog', { name: '국민은행용 엑셀 미리보기' })).toBeInTheDocument();
+    fireEvent.change(monthInput, { target: { value: '2026-11' } });
+    expect(screen.queryByRole('dialog', { name: '국민은행용 엑셀 미리보기' })).not.toBeInTheDocument();
+    await screen.findByRole('heading', { name: '2026년 11월 가불내역' });
+    expect(XLSX.writeFile).not.toHaveBeenCalled();
 });
 
 test('회차 누락을 선입금으로 합치지 않고 지정 후 해당 회차 합계에 반영한다', async () => {
