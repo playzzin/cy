@@ -31,6 +31,7 @@ import {
     subscribeSupportManagementYearMonth,
 } from '../../utils/supportManagementState';
 import { normalizeVehicleExpenseType } from '../../utils/vehicleExpenseType';
+import { matchesVehiclePaymentDay } from '../../utils/vehiclePaymentDay';
 import { SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../../utils/supportWriteErrorReporting';
 import { formatNumberForDisplay } from '../../utils/zeroDisplay';
 import { SupportExcelDownloadButton } from '../support/SupportExcelDownloadButton';
@@ -329,6 +330,7 @@ interface VehicleMonthlyLedgerProps {
     teams?: Team[];
     teamFilterId?: string;
     searchText?: string;
+    paymentDayFilter?: string;
     loadingVehicles: boolean;
     onOpenSetup?: (vehicle: Vehicle) => void;
 }
@@ -344,6 +346,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     teams = [],
     teamFilterId = '',
     searchText = '',
+    paymentDayFilter = '',
     loadingVehicles,
     onOpenSetup
 }) => {
@@ -1406,8 +1409,9 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         return rows
             .map((row, index) => ({ row, index }))
             .filter(({ row }) => rowMatchesTeamFilter(row, teamFilterId))
+            .filter(({ row }) => matchesVehiclePaymentDay(row.vehicle, paymentDayFilter))
             .filter(({ row }) => rowMatchesSearchText(row, searchText));
-    }, [rows, rowMatchesSearchText, rowMatchesTeamFilter, searchText, teamFilterId]);
+    }, [rows, rowMatchesSearchText, rowMatchesTeamFilter, searchText, teamFilterId, paymentDayFilter]);
 
     const vehicleRowCountById = useMemo(() => {
         const map = new Map<string, number>();
