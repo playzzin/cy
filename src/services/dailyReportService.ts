@@ -70,6 +70,8 @@ export interface DailyReportWorkerRow {
     createdAt: any;
     workerTeamName?: string | undefined;
     workerTeamId?: string | undefined;
+    /** Current team catalog color projected by the scoped attendance endpoint. */
+    workerTeamColorHex?: string | undefined;
 }
 
 export interface DailyReportWorkerBulkUpdateTarget {
@@ -720,6 +722,7 @@ export const dailyReportService = {
                     createdAt: report.createdAt,
                     workerTeamName: worker.workerTeamName,
                     workerTeamId: worker.teamId,
+                    workerTeamColorHex: (worker as DailyReportWorker & { workerTeamColorHex?: string }).workerTeamColorHex,
                 });
             });
         });

@@ -1,0 +1,55 @@
+/* Official Woowa Brothers fonts; copyright and SIL OFL in public/fonts/baemin. */
+@font-face {
+    font-family: 'CY BM Jua';
+    src: url('../../assets/fonts/baemin/BMJUA_otf.otf') format('opentype');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'CY BM Dohyeon';
+    src: url('../../assets/fonts/baemin/BMDOHYEON_otf.otf') format('opentype');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'CY BM Hanna';
+    src: url('../../assets/fonts/baemin/BMHANNA_11yrs_otf.otf') format('opentype');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+/* Role-scoped screen typography also covers menus and body-level portals.
+   Printed documents keep their existing typefaces and dimensions. */
+@media screen {
+    html[data-team-typography='baemin'] body {
+        --team-font-body: 'CY BM Jua', 'Malgun Gothic', sans-serif;
+        --team-font-title: 'CY BM Dohyeon', 'Malgun Gothic', sans-serif;
+        --team-font-section: 'CY BM Hanna', 'Malgun Gothic', sans-serif;
+        font-family: var(--team-font-body);
+        font-synthesis: none;
+    }
+
+    html[data-team-typography='baemin'] :is(
+        #main-content, .preview-workspace, .cy-detail-dialog,
+        .support-team-font, .font-sans, [class*="font-['Pretendard']"]
+    ) {
+        font-family: var(--team-font-body);
+    }
+
+    html[data-team-typography='baemin'] :is(button, input, select, textarea) {
+        font-family: inherit;
+    }
+
+    html[data-team-typography='baemin'] :is(h1, h2) {
+        font-family: var(--team-font-title);
+        font-weight: 400;
+    }
+
+    html[data-team-typography='baemin'] :is(h3, h4, h5, h6, .tw-list-block-title) {
+        font-family: var(--team-font-section);
+        font-weight: 400;
+    }
+}

@@ -10,7 +10,13 @@ export const teamService = { getTeams: async () => [{ id: 'test-team', name: '�
 export const companyService = { getCompanies: async () => [{ id: 'test-company', name: '청연 검증회사', status: 'active' }] };
 export const accountDirectoryService = { getEntries: async () => [] };
 export const primaryAccountService = { subscribe: () => () => undefined, getPrimaryAccount: async () => null };
-export const aiSettingsService = {};
+export const aiSettingsService = { assertCurrentPageEnabled: () => undefined };
+export const requestGeminiContent = async () => {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    return { candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify({
+        validDocument: true, bankName: '분석은행', accountNumber: '000222333444', accountHolder: '가상 분석예금주',
+    }) }] } }] };
+};
 export const geminiService = {};
 export const siteService = { getSites: async () => [] };
 export const positionService = { getPositions: async () => [] };

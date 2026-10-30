@@ -36,6 +36,7 @@ export const IDENTITY_LOG_SOURCES = {
   identity_bundle: '신분증 묶음사진',
   worker_database: '작업자·통합DB',
   worker_summary: '작업자 요약',
+  support_team: '지원팀 서류 공유',
 } as const;
 
 export type IdentityLogAction = keyof typeof IDENTITY_LOG_ACTIONS;

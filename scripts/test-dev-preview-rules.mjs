@@ -28,13 +28,14 @@ const previewClaims = (target, changes = {}) => ({ devPreview:true, previewActor
 let checks = 0;
 async function denied(work, code = 'permission-denied') { await assert.rejects(work, error => String(error.code).endsWith(code)); checks++; }
 try {
-    await Promise.all(['dev-fixture','leader-a','leader-b','worker-a'].map(async uid => {
+    await Promise.all(['dev-fixture','ceo-fixture','leader-a','leader-b','worker-a'].map(async uid => {
         try { await adminAuth.createUser({ uid, email:`${uid}@example.test`, password:'Preview-demo-2026!' }); } catch(error) { if(error.code!=='auth/uid-already-exists') throw error; }
     }));
-    const positionConfig = [{id:'dev',name:'DEV',icon:'fa-code',color:'blue'},{id:'lead',name:'팀장',icon:'fa-users',color:'teal'},{id:'worker',name:'작업자',icon:'fa-user',color:'gray'},{id:'empty',name:'미연결 직책',icon:'fa-user',color:'gray'}];
+    const positionConfig = [{id:'dev',name:'DEV',icon:'fa-code',color:'blue'},{id:'ceo',name:'CEO',icon:'fa-user-tie',color:'blue'},{id:'lead',name:'팀장',icon:'fa-users',color:'teal'},{id:'worker',name:'작업자',icon:'fa-user',color:'gray'},{id:'empty',name:'미연결 직책',icon:'fa-user',color:'gray'}];
     const menu = [{id:'dashboard',text:'홈',path:'/dashboard'},{id:'work',text:'근무내역',path:'/manpower/team-worker-detail?section=work'}];
     const fixtures = {
         'users/dev-fixture':{status:'active',role:'admin',position:'DEV',displayName:'검증 DEV',accountType:'office'},
+        'users/ceo-fixture':{status:'active',role:'user',position:'CEO',displayName:'검증 CEO',accountType:'office'},
         'users/leader-a':{status:'active',role:'user',position:'팀장',displayName:'검증 팀장 A',linkedWorkerIds:['wa'],accountType:'worker'},
         'users/leader-b':{status:'active',role:'user',position:'팀장',displayName:'검증 팀장 B',linkedWorkerIds:['wb'],accountType:'worker'},
         'users/worker-a':{status:'active',role:'user',position:'작업자',displayName:'검증 작업자 A',linkedWorkerIds:['wc'],accountType:'worker'},
@@ -51,6 +52,7 @@ try {
         'settings/menus_v12':{admin:{name:'관리',icon:'',menu,positionConfig},pos_dev:{name:'DEV',icon:'',menu:[{id:'settings',text:'메뉴 관리',path:'/admin/menu-manager'}]},pos_lead:{name:'팀장',icon:'',menu},pos_worker:{name:'작업자',icon:'',menu:[{id:'worker_home',text:'작업자 홈',path:'/worker/home'}]},pos_empty:{name:'미연결 직책',icon:'',menu:[]}},
         'settings/system_config':{},
     };
+    fixtures['settings/menus_v12'].pos_ceo = {name:'CEO',icon:'',menu};
     for (const [path,data] of Object.entries(fixtures)) await db.doc(path).set(data);
     await bucket.file('profiles/leader-a/avatar.png').save(Buffer.from('fixture'),{metadata:{contentType:'image/png'}});
     const a = await client('cy-preview-rules-a',previewClaims('leader-a'));
@@ -84,6 +86,30 @@ try {
     await denied(httpsCallable(issued.functions,'teamWorkerRequests')({action:'review',id:'arbitrary'}));
     await denied(httpsCallable(issued.functions,'createDevPreviewSession')({targetUid:'leader-b'}));
     const notDev = await client('leader-a'); await denied(httpsCallable(notDev.functions,'createDevPreviewSession')({targetUid:'leader-b'}));
+    const ceo = await client('ceo-fixture');
+    const ceoAccounts = (await httpsCallable(ceo.functions,'getDevPreviewAccounts')({})).data.accounts;
+    assert.equal(ceoAccounts.find(row=>row.uid==='leader-a').positionIds[0],'lead'); checks++;
+    const ceoIssue = (await httpsCallable(ceo.functions,'createDevPreviewSession')({targetUid:'leader-a'})).data;
+    const ceoPreview = await client('cy-preview-ceo-temp'); await signInWithCustomToken(ceoPreview.auth,ceoIssue.token);
+    const ceoToken = await ceoPreview.auth.currentUser.getIdTokenResult();
+    assert.equal(ceoToken.claims.previewDevRole,'CEO'); checks++;
+    assert.equal((await getDoc(doc(ceoPreview.db,'workers','wa'))).data().teamId,'ta'); checks++;
+    await denied(getDoc(doc(ceoPreview.db,'workers','wb')));
+    await denied(updateDoc(doc(ceoPreview.db,'workers','wa'),{name:'changed'}));
+    assert.ok((await getBytes(ref(ceoPreview.storage,'profiles/leader-a/avatar.png'))).byteLength); checks++;
+    await denied(uploadBytes(ref(ceoPreview.storage,'profiles/leader-a/new.png'),new Uint8Array([1]),{contentType:'image/png'}),'storage/unauthorized');
+    const ceoScoped = (await httpsCallable(ceoPreview.functions,'getTeamScopedData')({collection:'workers'})).data.rows;
+    assert.deepEqual(ceoScoped.map(row=>row.id).sort(),['wa','wc']); checks++;
+    await denied(httpsCallable(ceoPreview.functions,'teamWorkerRequests')({action:'review',id:'arbitrary'}));
+    await denied(httpsCallable(ceoPreview.functions,'createDevPreviewSession')({targetUid:'leader-b'}));
+    await db.doc('users/ceo-fixture').update({position:'팀장'});
+    await denied(getDoc(doc(ceoPreview.db,'workers','wa')));
+    await denied(getBytes(ref(ceoPreview.storage,'profiles/leader-a/avatar.png')),'storage/unauthorized');
+    await denied(httpsCallable(ceoPreview.functions,'getTeamScopedData')({collection:'workers'}));
+    await denied(httpsCallable(ceo.functions,'createDevPreviewSession')({targetUid:'leader-a'}));
+    await db.doc('users/ceo-fixture').update({position:'CEO',status:'suspended'});
+    await denied(httpsCallable(ceo.functions,'getDevPreviewAccounts')({}));
+    await db.doc('users/ceo-fixture').update({status:'active'});
     const worker = await client('worker-a');
     const readOwn = async collection => (await httpsCallable(worker.functions,'getTeamScopedData')({collection,filters:{}})).data.rows;
     assert.deepEqual((await readOwn('workers')).map(row=>row.id),['wc']); checks++;
@@ -98,7 +124,7 @@ try {
     const previewWorkers=(await httpsCallable(workerPreview.functions,'getTeamScopedData')({collection:'workers'})).data.rows;
     assert.deepEqual(previewWorkers.map(row=>row.id),['wc']); checks++;
     assert.equal((await db.doc('workers/wb').get()).data().name,'검증 팀장 B'); checks++;
-    console.log(JSON.stringify({checks,status:'passed',coverage:['target identity','own/foreign reads','all writes denied','storage read/write','reserved identity','expiry','DEV revocation','normal admin unaffected','directory','session issuance','scoped callable','callable mutations denied']}));
+    console.log(JSON.stringify({checks,status:'passed',coverage:['target identity','own/foreign reads','all writes denied','storage read/write','reserved identity','expiry','DEV/CEO revocation','inactive CEO denied','normal admin unaffected','DEV/CEO directory and session issuance','scoped callable','callable mutations denied']}));
 } finally {
     await Promise.all(clients.map(async item=>{await terminate(item.db);await deleteApp(item.app);}));
 }

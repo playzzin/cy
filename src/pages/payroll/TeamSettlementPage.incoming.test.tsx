@@ -6,6 +6,9 @@ import { teamSettlementService } from '../../services/teamSettlementService';
 import type { TeamSettlementDeductionItem, TeamSettlementDocument } from '../../types/teamSettlement';
 import { teamService } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
+import { useTeamSettlementAccess } from '../../hooks/useTeamSettlementAccess';
+
+jest.mock('../../hooks/useTeamSettlementAccess', () => ({ useTeamSettlementAccess: jest.fn() }));
 
 jest.mock('../../components/common/CompanyTeamSelector', () => ({ __esModule: true, default: () => null, readCompanyTeamOrder: () => [] }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.fn().mockResolvedValue([{ id: 'own', name: '조회팀', companyId: 'company', type: '시공팀' }]) } }));
@@ -46,6 +49,7 @@ beforeAll(() => {
 });
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(useTeamSettlementAccess).mockReturnValue({ loading: false, canWrite: true });
   localStorage.clear();
   for (const name of ['dailyReportService', 'laborExchangeService', 'supportRateService',
     'accommodationBillingService', 'accommodationAssignmentService', 'accommodationService',
@@ -75,6 +79,24 @@ async function expandOriginalDetails(siteName: string) {
   fireEvent.click(screen.getByRole('button', { name: /^상세$/ }));
   expect(await screen.findByText('작업자 상세 (' + siteName + ')')).toBeVisible();
 }
+
+it.each([false, true])('조회자는 정산의 확정 여부와 관계없이 모든 쓰기가 잠기고 새로고침은 가능하다 (확정=%s)', async confirmed => {
+  jest.mocked(useTeamSettlementAccess).mockReturnValue({ loading: false, canWrite: false });
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue({ ...document(), confirmedAt: confirmed ? document().confirmedAt : null });
+  render(<TeamSettlementPage />);
+  await screen.findByText(/조회 전용입니다/);
+  await waitFor(() => expect(teamSettlementService.getTeamSettlement).toHaveBeenCalledWith(expect.objectContaining({ persistSnapshot: false })));
+  const refresh = screen.getByRole('button', { name: '새로고침' });
+  await waitFor(() => expect(refresh).toBeEnabled());
+  expect(screen.getByRole('button', { name: '재집계' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '변경사항 없음' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: confirmed ? '확정 취소' : '저장 후 확정' })).toBeDisabled();
+  for (const button of screen.getAllByRole('button', { name: /수기.*추가|일괄.*적용/ })) expect(button).toBeDisabled();
+  fireEvent.click(refresh);
+  await waitFor(() => expect(teamSettlementService.getTeamSettlement).toHaveBeenCalledTimes(2));
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+  expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
+});
 
 function getAdjustmentRow(category: string) {
   return screen.getAllByRole('row').find(row => within(row).queryByDisplayValue(category))!;

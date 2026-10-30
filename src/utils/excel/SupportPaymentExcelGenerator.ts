@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import { formatLaborStatementPaymentAccountLabel } from '../payrollLaborStatementDefaults';
 
 export const MAX_DAY_COLUMNS = 31;
 export const DAY_LABELS_FIRST = Array.from({ length: 16 }, (_, i) => i + 1);
@@ -16,6 +17,7 @@ export interface SupportLaborStatementExcelRow {
     accountNumber?: string;
     accountHolder?: string;
     payType?: 'direct' | 'delegate';
+    accountPurpose?: 'default' | 'directPay';
     days: number[];
     totalManDay: number;
     unitPrice: number;
@@ -433,7 +435,7 @@ const formatDelegateAccountLabel = (row: Pick<SupportLaborStatementExcelRow, 'ba
 };
 
 const formatPaymentAccount = (row: SupportLaborStatementExcelRow): string => {
-    const paymentLabel = row.payType === 'delegate' ? '위임' : '직불';
+    const paymentLabel = formatLaborStatementPaymentAccountLabel(row.payType, row.accountPurpose);
     const bankLabel = [row.bankName, row.accountHolder, row.accountNumber]
         .map((value) => String(value ?? '').trim())
         .filter(Boolean)

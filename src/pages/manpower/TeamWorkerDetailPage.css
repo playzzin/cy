@@ -279,6 +279,15 @@
     display: none;
 }
 
+.tw-kpi-note {
+    grid-column: 2;
+    font-size: 11px;
+    color: #64748b;
+    overflow-wrap: anywhere;
+}
+
+.tw-kpi.tw-kpi--documents strong { font-size: 13px; line-height: 1.6; }
+
 .tw-mobile-filter-bar,
 .tw-mobile-team-context {
     display: none;
@@ -2549,3 +2558,19 @@
 .tw-profile-sections { display: flex; gap: 4px; margin: 10px 0; padding: 4px; background: #f1f5f9; border-radius: 9px; }
 .tw-profile-sections button { flex: 1; min-height: 44px; border: 0; border-radius: 7px; background: transparent; color: #475569; font-size: 14px; font-weight: 700; }
 .tw-profile-sections button[aria-selected=true] { background: #2563eb; color: #fff; }
+
+@media screen and (max-width: 768px) {
+    .tw-workspace--detail .mobile-list-return--worker {
+        position: fixed;
+        left: 16px;
+        right: 16px;
+        bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+        width: auto;
+        margin: 0;
+        z-index: 40;
+        animation: none;
+    }
+    .tw-workspace--detail .mobile-list-return--worker::after,
+    .tw-workspace--detail .mobile-list-return--worker svg { animation: none; }
+    .tw-workspace--detail .tw-detail-panel { padding-bottom: 150px; }
+}

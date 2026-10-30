@@ -6,13 +6,17 @@ import { invalidateTeamScopedCache } from './teamScopedReadService';
 import { notifyResourceStatusChange, ResourceStatusChange } from '../utils/resourceStatusChange';
 
 export type TeamResourceStatus = 'active' | 'completed' | '재직' | '퇴사';
-export type TeamResourceStatusResult = { id: string; status: TeamResourceStatus; isActive?: boolean };
+export type TeamResourceStatusResult = { id: string; status: TeamResourceStatus; isActive?: boolean; joinDate?: string; retirementDate?: string };
 export type TeamResourceStatusRequest = {
     kind: 'site' | 'worker';
     id: string;
     status: TeamResourceStatus;
     expectedStatus: string | null;
     expectedIsActive: boolean | null;
+    joinDate?: string;
+    retirementDate?: string;
+    expectedJoinDate?: string | null;
+    expectedRetirementDate?: string | null;
 };
 
 export const teamResourceStatusService = {

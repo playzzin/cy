@@ -33,3 +33,11 @@ test('등록된 팀 색상을 적용하고 밝은 색의 텍스트 대비와 미
     expect(recordedWorkTeam(unknown).color).toBe(recordedWorkTeam({ ...unknown, date: '2027-01-01' }).color);
     expect(recordedWorkTeam(row, [{ ...teams[0], color: 'invalid' }]).color).toMatch(/^#[0-9a-f]{6}$/);
 });
+
+test('팀 목록에 없는 지원팀도 서버가 전달한 통합 DB 색상을 사용하고 미확인 색상은 중립색으로 표시한다', () => {
+    const support = { ...row, workerTeamId: 'support', workerTeamColorHex: '#d96cbd' };
+    expect(recordedWorkTeam(support, teams).color).toBe('#d96cbd');
+    expect(recordedWorkTeam({ ...support, workerTeamColorHex: undefined }, teams).color).toBe('#64748b');
+    expect(recordedWorkTeam({ ...support, workerTeamColorHex: 'invalid' }, teams).color).toBe('#64748b');
+    expect(recordedWorkTeam({ ...row, workerTeamColorHex: '#d96cbd' }, teams).color).toBe('#ffffff');
+});

@@ -45,6 +45,8 @@ export const accommodationSchema = z.object({
     name: z.string(),
     address: z.string(),
     type: AccommodationType,
+    roomCount: z.number().int().min(1).max(999).nullable().optional(),
+    maxOccupants: z.number().int().min(1).max(999).nullable().optional(),
     utilityOverchargeThreshold: z.number().nonnegative().optional(),
     status: AccommodationStatus.default('active'),
     ownership: AccommodationOwnership,

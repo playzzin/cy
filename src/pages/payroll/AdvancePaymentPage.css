@@ -1,263 +1,140 @@
-/* 입력 금액, 표 머리글, 보조 정보와 조회 조건을 기존보다 2pt 확대한다. */
 .advance-payment-page {
-  font-size: calc(1rem + 2pt);
-}
-
-.advance-payment-page .text-\[10px\] {
-  font-size: calc(10px + 2pt);
-}
-
-.advance-payment-page .text-xs {
-  font-size: calc(0.75rem + 2pt);
-  line-height: 1.5;
-}
-
-.advance-payment-page .text-sm {
-  font-size: calc(0.875rem + 2pt);
-  line-height: 1.5;
-}
-
-.advance-payment-page #table-container input,
-.advance-payment-page #table-container textarea {
-  font-size: inherit;
-  line-height: 1.5;
-}
-
-.advance-filter-bar {
   display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 18px;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
-  margin-bottom: 14px;
-  padding: 12px 16px;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgb(15 23 42 / 3%);
-}
-
-.advance-team-selector {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.advance-filter-label {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-  color: #64748b;
-  font-size: calc(0.75rem + 2pt);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.advance-team-buttons {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  overflow-x: auto;
-  padding: 4px 2px;
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
-}
-
-.advance-team-button {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  height: 40px;
-  padding: 0 13px;
-  border: 1px solid;
-  border-radius: 10px;
-  font-size: calc(0.75rem + 2pt);
-  font-weight: 700;
-  white-space: nowrap;
-  transition: box-shadow 150ms, filter 150ms;
-}
-
-.advance-team-button:hover:not(:disabled) {
-  filter: brightness(0.96);
-}
-
-.advance-team-button[aria-pressed='true'] {
-  box-shadow: 0 2px 5px rgb(15 23 42 / 15%);
-}
-
-.advance-team-button--all {
-  border-color: #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
-}
-
-.advance-team-button--all[aria-pressed='true'] {
-  border-color: #334155;
-  background: #334155;
-  color: #fff;
-}
-
-.advance-team-marker {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  font-size: 11px;
-}
-
-.advance-team-marker > span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.advance-team-empty {
-  color: #64748b;
-  font-size: calc(0.75rem + 2pt);
-  white-space: nowrap;
-}
-
-.advance-month-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 10px;
-  padding-left: 18px;
-  border-left: 1px solid #e2e8f0;
-}
-
-.advance-month-picker {
-  display: flex;
-  align-items: center;
-  height: 40px;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  background: #f8fafc;
-}
-
-.advance-month-step {
-  flex: 0 0 auto;
-  width: 30px;
-  height: 36px;
-  border-radius: 8px;
-  color: #64748b;
+  overflow: auto;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  color: #172b46;
   font-size: 13px;
 }
 
-.advance-month-step:hover:not(:disabled) {
-  background: #e2e8f0;
-  color: #0f172a;
+.advance-payment-page * { box-sizing: border-box; }
+.advance-expanded-dialog { width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; background: #f5f7fa; }
+.advance-expanded-dialog::backdrop { background: #172b4680; }
+.advance-payment-page--expanded > :is(.advance-filter-bar, .advance-settings, .advance-totals, .advance-input-help) { display: none; }
+.advance-payment-page--expanded .advance-ledger { flex: 1 1 0; min-height: 180px; }
+.advance-page-header { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.advance-page-header h1 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; font-weight: 750; letter-spacing: -.4px; }
+.advance-page-header h1 svg { color: #0b8d69; font-size: 18px; padding: 6px; border-radius: 8px; background: #e5f4ef; box-sizing: content-box; }
+.advance-page-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.advance-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 9px 13px; border: 1px solid #cbd5e1; border-radius: 7px; background: white; color: #172b46; font-size: 13px; font-weight: 600; }
+.advance-action:hover, .advance-action[aria-expanded='true'] { background: #f0f8f4; border-color: #b9d9cd; color: #087655; }
+.advance-action--primary, .advance-search-button { background: #0b8d69; border-color: #0b8d69; color: white; }
+.advance-action--primary:hover, .advance-search-button:hover:not(:disabled) { background: #087655; border-color: #087655; color: white; }
+.advance-temp-data { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.advance-payment-page button:disabled, .advance-month-input:disabled { cursor: not-allowed; opacity: .5; }
+.advance-payment-page :is(button, a, input):focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+.advance-filter-bar { display: flex; flex: 0 0 auto; align-items: center; gap: 14px; min-width: 0; margin-bottom: 8px; padding: 6px 8px; border: 1px solid #e5eaf0; border-radius: 10px; background: white; }
+.advance-team-selector { display: flex; flex: 1 1 auto; align-items: center; gap: 10px; min-width: 0; }
+.advance-filter-label { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; color: #607086; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.advance-team-buttons { display: flex; flex: 1 1 auto; align-items: center; gap: 7px; min-width: 0; overflow-x: auto; padding: 3px 2px; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.advance-team-button { --advance-team-color: #0b8d69; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 7px; height: 38px; padding: 0 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: white; color: #475569; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.advance-team-button:hover:not(:disabled), .advance-team-button[aria-pressed='true'] { border-color: color-mix(in srgb, var(--advance-team-color) 45%, white); background: color-mix(in srgb, var(--advance-team-color) 12%, white); color: #172b46; }
+.advance-team-button[aria-pressed='true'] { box-shadow: inset 0 2px var(--advance-team-color); font-weight: 700; }
+.advance-team-marker { display: flex; align-items: center; justify-content: center; width: 12px; height: 12px; font-size: 11px; }
+.advance-team-marker > span { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.advance-team-empty { color: #64748b; font-size: 12px; white-space: nowrap; }
+.advance-month-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding-left: 14px; border-left: 1px solid #e5eaf0; }
+.advance-month-picker { display: flex; align-items: center; height: 38px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; }
+.advance-month-step { flex: 0 0 auto; width: 30px; height: 36px; border-radius: 5px; background: #f8fafc; color: #64748b; font-size: 13px; }
+.advance-month-step:hover:not(:disabled) { background: #e5f4ef; color: #087655; }
+.advance-month-input { width: 145px; min-width: 0; height: 36px; border: 0; padding: 4px 6px; background: transparent; color: #172b46; font-size: 13px; font-weight: 600; }
+.advance-search-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; padding: 0 15px; border: 1px solid #0b8d69; border-radius: 7px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.advance-settings { background: white; border-color: #e5eaf0; border-radius: 10px; }
+.advance-settings input { min-width: 0; }
+
+.advance-totals { display: grid; flex: 0 0 auto; grid-template-columns: 1.2fr 1fr 1fr 1fr; gap: 8px; margin: 0 0 8px; }
+.advance-totals > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 8px; min-width: 0; padding: 6px 10px; border: 1px solid #e5eaf0; border-radius: 7px; background: white; }
+.advance-totals .advance-total-main { border-color: #172b46; background: #172b46; color: white; }
+.advance-totals dt { color: #64748b; font-size: 12px; }
+.advance-total-main dt { color: #c7d7e8; }
+.advance-totals dd { min-width: 0; margin: 0; font-size: 18px; font-weight: 750; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.advance-totals small { margin-left: 4px; font-size: 12px; font-weight: 500; }
+.advance-worker-toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; padding: 6px 8px; border: 1px solid #e5eaf0; border-radius: 10px; background: white; }
+.advance-name-search { display: flex; align-items: center; height: 38px; padding: 0 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; }
+.advance-name-search input { width: 130px; min-width: 0; font-size: 13px; color: #172b46; }
+.advance-salary-tabs { display: flex; gap: 3px; padding: 3px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f1f5f9; }
+.advance-salary-tabs button { min-height: 32px; padding: 4px 12px; border: 1px solid transparent; border-radius: 6px; color: #607086; font-size: 12px; white-space: nowrap; }
+.advance-salary-tabs button:hover { background: #f8fafc; }
+.advance-salary-tabs button[aria-pressed='true'] { border-color: #b9d9cd; background: white; color: #087655; box-shadow: 0 1px 3px #172b4610; font-weight: 700; }
+.advance-worker-count { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-left: auto; color: #64748b; font-size: 12px; }
+.advance-worker-count b { color: #172b46; font-variant-numeric: tabular-nums; }
+.advance-unsaved { padding: 4px 8px; border-radius: 5px; background: #fff7ed; color: #b45309; font-size: 11px; font-weight: 600; }
+
+.advance-ledger { display: flex; flex: 1 0 280px; flex-direction: column; position: relative; min-width: 0; min-height: 280px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--advance-team-color) 30%, white); border-top: 3px solid var(--advance-team-color); border-radius: 8px; background: white; }
+.advance-ledger-heading { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; min-height: 38px; padding: 6px 10px; background: color-mix(in srgb, var(--advance-team-color) 12%, white); color: #172b46; }
+.advance-ledger-heading > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.advance-ledger-heading h2 { margin: 0; font-size: 13px; font-weight: 700; }
+.advance-ledger-heading span { font-size: 12px; }
+.advance-ledger-total { display: flex; align-items: baseline; gap: 8px; color: #607086; }
+.advance-ledger-total strong { color: #172b46; font-size: 14px; font-variant-numeric: tabular-nums; }
+.advance-ledger-heading .advance-ledger-view-actions { align-items: center; }
+.advance-fit-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 5px; background: white; color: #475569; font-size: 12px; white-space: nowrap; }
+.advance-fit-button[aria-pressed='true'] { border-color: #9dccb9; color: #087655; background: #f0f8f4; }
+.advance-table-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; overscroll-behavior-x: contain; scrollbar-color: #a1b4c2 #f1f5f8; }
+.advance-table-scroll:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+.advance-input-table { width: 100%; border-collapse: separate; border-spacing: 0; color: #172b46; font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.advance-input-table--fit { width: max-content; }
+.advance-input-table--fit .advance-money-input { width: 98px; }
+.advance-input-table--fit .advance-memo-input { width: 190px; }
+.advance-input-table th, .advance-input-table td { border-right: 1px solid #edf1f5; border-bottom: 1px solid #e5eaf0; vertical-align: middle; }
+.advance-input-table tr > :last-child { border-right: 0; }
+.advance-input-table thead th { padding: 9px 7px; background: #f8fafc; color: #607086; font-size: 13px; font-weight: 600; white-space: nowrap; text-align: center; }
+.advance-input-table thead .advance-corporate-heading { background: #eff5fc; color: #3d6188; }
+.advance-input-table thead .advance-labor-heading { background: #eef8f3; color: #39725a; }
+.advance-input-table tbody td { background: white; }
+.advance-input-table tbody tr { height: 42px; }
+.advance-input-table .advance-number-cell { width: 48px; min-width: 48px; color: #94a3b8; }
+.advance-input-table .advance-name-cell { width: 148px; min-width: 148px; font-weight: 700; }
+.advance-name-cell > div { margin-top: 2px; color: #64748b; font-size: 12px; line-height: 1.5; }
+.advance-input-table .advance-payment-breakdown { min-width: 200px; font-size: 12px; line-height: 1.7; }
+.advance-payment-breakdown > div { color: #607086; }
+.advance-payment-breakdown > div:first-child { color: #3d6188; }
+.advance-input-table .advance-row-total { min-width: 130px; padding: 8px 12px; color: #172b46; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.advance-money-input { display: block; width: 100%; min-width: 98px; height: 32px; padding: 5px 7px; border: 1px solid transparent; border-radius: 5px; background: white; color: #172b46; font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; text-align: right; outline: none; }
+.advance-money-input:hover { border-color: #cbd5e1; }
+.advance-money-input:focus { border-color: #0b8d69; box-shadow: inset 0 0 0 1px #0b8d69; background: #f4fbf8; }
+.advance-money-input--automatic { border-color: #d7ebe1; background: #edf8f1; color: #377758; }
+.advance-memo-input { width: 100%; min-width: 190px; min-height: 60px; padding: 8px; border: 1px dashed #e2d7b7; border-radius: 6px; background: #fffdf8; color: #886d30; font-size: 13px; text-align: left; }
+.advance-memo-input--filled { border-style: solid; background: #fff8dc; color: #665124; }
+.advance-input-table tbody .advance-worker-highlight td { background: #fffbeb; }
+.advance-input-table tfoot td { padding: 9px 7px; border-color: #2d4059; background: #172b46; color: white; font-size: 14px; font-weight: 650; white-space: nowrap; }
+.advance-input-table tfoot .advance-grand-total { color: #fde68a; }
+.advance-input-help { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 2px 16px; margin: 6px 2px 0; color: #6e7c8f; font-size: 11px; line-height: 1.7; }
+
+@media (max-width: 1100px) {
+  .advance-filter-bar { flex-wrap: wrap; gap: 10px; }
+  .advance-team-selector { flex-basis: 100%; }
+  .advance-month-actions { padding-left: 0; border-left: 0; }
 }
 
-.advance-month-input {
-  width: 150px;
-  min-width: 0;
-  height: 36px;
-  border: 0;
-  background: transparent;
-  color: #334155;
-  font-size: calc(0.75rem + 2pt);
-  font-weight: 700;
-}
-
-.advance-search-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 17px;
-  border-radius: 10px;
-  background: #2563eb;
-  color: #fff;
-  font-size: calc(0.75rem + 2pt);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.advance-search-button:hover:not(:disabled) {
-  background: #1d4ed8;
-}
-
-.advance-filter-bar button:disabled,
-.advance-month-input:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.advance-filter-bar button:focus-visible,
-.advance-month-input:focus-visible,
-.advance-salary-tabs button:focus-visible {
-  outline: 2px solid #2563eb;
-  outline-offset: 2px;
-}
-
-.advance-worker-toolbar {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-  overflow-x: auto;
-  padding: 2px;
-}
-
-.advance-worker-toolbar > * {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.advance-salary-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  background: #e9eef5;
-}
-
-.advance-salary-tabs button {
-  min-height: 32px;
-  padding: 4px 14px;
-  border-radius: 8px;
-  color: #64748b;
-  font-size: calc(0.75rem + 2pt);
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.advance-salary-tabs button:hover {
-  background: #f8fafc;
-  color: #334155;
-}
-
-.advance-salary-tabs button[aria-pressed='true'] {
-  background: #fff;
-  color: #1d4ed8;
-  box-shadow: 0 1px 4px rgb(15 23 42 / 10%);
-}
-
-@media (max-width: 1000px) {
-  .advance-filter-bar {
-    gap: 12px;
-    overflow-x: auto;
-    padding: 10px 12px;
-  }
-
-  .advance-team-selector {
-    min-width: 280px;
-  }
-
-  .advance-month-actions {
-    padding-left: 12px;
-  }
+@media (max-width: 700px) {
+  .advance-payment-page { padding: 10px; }
+  .advance-page-header { align-items: flex-start; }
+  .advance-page-actions { width: 100%; }
+  .advance-action { flex: 1 0 auto; min-height: 42px; padding: 8px 10px; }
+  .advance-totals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .advance-totals > div { padding: 6px 8px; }
+  .advance-team-selector { flex-wrap: wrap; gap: 5px; }
+  .advance-team-buttons { flex-basis: 100%; }
+  .advance-month-actions { flex-wrap: wrap; gap: 8px; width: 100%; }
+  .advance-month-actions > .advance-filter-label { flex-basis: 100%; }
+  .advance-month-picker { flex: 1; height: 42px; }
+  .advance-month-input { flex: 1; width: 110px; }
+  .advance-month-step { width: 34px; }
+  .advance-search-button { height: 42px; }
+  .advance-worker-toolbar { gap: 8px; }
+  .advance-name-search { flex: 1; }
+  .advance-name-search input { width: 100%; }
+  .advance-salary-tabs { width: 100%; }
+  .advance-salary-tabs button { flex: 1; min-height: 36px; padding: 4px 8px; }
+  .advance-worker-count { margin-left: 0; }
+  .advance-ledger-heading > div { gap: 6px 10px; }
+  .advance-money-input, .advance-memo-input { font-size: 16px; }
+  .advance-input-table .advance-name-cell { min-width: 116px; width: 116px; }
+  .advance-settings > .flex { flex-wrap: wrap; }
 }

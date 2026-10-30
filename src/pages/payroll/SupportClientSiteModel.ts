@@ -35,6 +35,7 @@ export interface SupportClientSiteWorkerRow {
     workerBankName: string;
     workerAccountNumber: string;
     workerAccountHolder: string;
+    workerDefaultAccount?: { bankName: string; accountNumber: string; accountHolder: string };
     workerLaborStatementPayType?: SupportStatementPayType;
     role?: string;
     manDay: number;
@@ -140,6 +141,7 @@ export interface SupportClientLaborStatementRow {
     contact: string;
     teamNames: string[];
     payType: SupportStatementPayType;
+    accountPurpose?: 'default' | 'directPay';
     bankName: string;
     accountNumber: string;
     accountHolder: string;
@@ -150,6 +152,7 @@ export interface SupportClientLaborStatementRow {
 }
 
 export interface SupportClientLaborStatementOptions {
+    workerAccountPurpose?: 'default' | 'directPay';
     unitPriceOverride: number;
     defaultPayType: SupportStatementPayType;
     workerPayTypes: Record<string, SupportStatementPayType>;
@@ -793,6 +796,9 @@ export const buildSupportClientLaborPreviews = (
         const workerKey = getSupportLaborStatementWorkerKey(row);
         const payType = statementOptions.workerPayTypes[workerKey] ?? statementOptions.defaultPayType;
         const useDelegateAccount = payType === 'delegate';
+        const workerBank = statementOptions.workerAccountPurpose === 'default'
+            ? row.workerDefaultAccount
+            : { bankName: row.workerBankName, accountNumber: row.workerAccountNumber, accountHolder: row.workerAccountHolder };
         if (!siteGroup.workerMap.has(workerKey)) {
             siteGroup.workerMap.set(workerKey, {
                 key: workerKey,
@@ -803,9 +809,10 @@ export const buildSupportClientLaborPreviews = (
                 contact: row.workerContact || '',
                 teamNames: [],
                 payType,
-                bankName: useDelegateAccount ? statementOptions.delegateBankName : row.workerBankName,
-                accountNumber: useDelegateAccount ? statementOptions.delegateAccountNumber : row.workerAccountNumber,
-                accountHolder: useDelegateAccount ? statementOptions.delegateAccountHolder : row.workerAccountHolder,
+                accountPurpose: statementOptions.workerAccountPurpose ?? 'directPay',
+                bankName: useDelegateAccount ? statementOptions.delegateBankName : workerBank?.bankName ?? '',
+                accountNumber: useDelegateAccount ? statementOptions.delegateAccountNumber : workerBank?.accountNumber ?? '',
+                accountHolder: useDelegateAccount ? statementOptions.delegateAccountHolder : workerBank?.accountHolder ?? '',
                 days: Array.from({ length: MAX_DAY_COLUMNS }, () => 0),
                 totalManDay: 0,
                 unitPrice: billingUnitPrice,
@@ -821,9 +828,9 @@ export const buildSupportClientLaborPreviews = (
             workerRow.accountNumber = statementOptions.delegateAccountNumber;
             workerRow.accountHolder = statementOptions.delegateAccountHolder;
         } else {
-            workerRow.bankName = workerRow.bankName || row.workerBankName;
-            workerRow.accountNumber = workerRow.accountNumber || row.workerAccountNumber;
-            workerRow.accountHolder = workerRow.accountHolder || row.workerAccountHolder;
+            workerRow.bankName = workerRow.bankName || workerBank?.bankName || '';
+            workerRow.accountNumber = workerRow.accountNumber || workerBank?.accountNumber || '';
+            workerRow.accountHolder = workerRow.accountHolder || workerBank?.accountHolder || '';
         }
         const day = new Date(row.date).getDate();
         if (day >= 1 && day <= MAX_DAY_COLUMNS) workerRow.days[day - 1] += row.manDay;
@@ -1921,6 +1928,11 @@ export const buildSupportRows = (
                     workerBankName,
                     workerAccountNumber,
                     workerAccountHolder,
+                    workerDefaultAccount: {
+                        bankName: workerProfile?.bankName ?? '',
+                        accountNumber: workerProfile?.accountNumber ?? '',
+                        accountHolder: workerProfile?.accountHolder ?? '',
+                    },
                     workerLaborStatementPayType,
                     role: reportWorker.role || undefined,
                     manDay,

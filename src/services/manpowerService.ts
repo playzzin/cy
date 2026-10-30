@@ -24,6 +24,7 @@ import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { resolveWorkerPayType, syncPayTypeFields } from '../utils/payType';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { devWorkers, updateDevWorker } from '../utils/devAdminFixtures';
+import { withEmploymentDates } from '../utils/workerEmploymentPeriod';
 
 export type { Worker };
 
@@ -233,7 +234,7 @@ export const manpowerService = {
 
     // Add a new worker
     addWorker: async (worker: any, _silent?: boolean): Promise<string> => {
-        const data = syncWorkerSalaryFields(worker) as Record<string, unknown>;
+        const data = withEmploymentDates(null, syncWorkerSalaryFields(worker)) as Record<string, unknown>;
         const id = await workerFirestoreService.addWorker(data as any);
         cachedWorkers = null;
         await recordWorkerIdentityChange(null, snapshotWorker(id, data));
@@ -252,7 +253,7 @@ export const manpowerService = {
         }
 
         const before = await manpowerService.getWorker(id);
-        const normalizedUpdates = stripUndefinedFields(syncWorkerSalaryFields(updates) as Record<string, unknown>);
+        const normalizedUpdates = stripUndefinedFields(withEmploymentDates(before, syncWorkerSalaryFields(updates)) as Record<string, unknown>);
         await workerFirestoreService.updateWorker(id, normalizedUpdates);
         cachedWorkers = null;
         await recordWorkerIdentityChange(before, snapshotWorker(id, { ...before, ...normalizedUpdates }));
@@ -310,32 +311,33 @@ export const manpowerService = {
     },
 
     // Retire a worker (set status to '??�궗')
-    retireWorker: async (id: string): Promise<void> => {
-        await manpowerService.updateWorker(id, { status: '\uD1F4\uC0AC' });
+    retireWorker: async (id: string, retirementDate?: string): Promise<void> => {
+        await manpowerService.updateWorker(id, { status: '\uD1F4\uC0AC', ...(retirementDate ? { retirementDate } : {}) });
     },
 
     // Retire multiple workers
-    retireWorkers: async (ids: string[]): Promise<void> => {
+    retireWorkers: async (ids: string[], retirementDate?: string): Promise<void> => {
         const beforeRows = await Promise.all(ids.map(async (id) => {
             const snap = await getDoc(doc(db, 'workers', id));
             return snap.exists() ? snapshotWorker(id, snap.data()) : null;
         }));
         const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
-        ids.forEach(id => {
+        const patches = beforeRows.map(before => withEmploymentDates(before, { status: '\uD1F4\uC0AC', ...(retirementDate ? { retirementDate } : {}) }));
+        ids.forEach((id, index) => {
             batch.update(doc(db, 'workers', id), {
-                status: '\uD1F4\uC0AC',
+                ...patches[index],
                 updatedAt
             });
         });
         await batch.commit();
         cachedWorkers = null;
-        await Promise.all(beforeRows.map((before) =>
+        await Promise.all(beforeRows.map((before, index) =>
             before
                 ? logWorkerChange(
                     'updated',
                     before,
-                    { ...before, status: '\uD1F4\uC0AC', updatedAt },
+                    { ...before, ...patches[index], updatedAt },
                     'manpowerService.retireWorkers'
                 )
                 : Promise.resolve()
@@ -539,6 +541,7 @@ export const manpowerService = {
             const snap = await getDoc(doc(db, 'workers', id));
             return snap.exists() ? snapshotWorker(id, snap.data()) : null;
         }));
+        preparedUpdates.forEach((entry, index) => { entry.updates = withEmploymentDates(beforeRows[index], entry.updates); });
         const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         preparedUpdates.forEach(({ id, updates: workerUpdates }) => {

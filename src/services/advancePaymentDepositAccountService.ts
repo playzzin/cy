@@ -11,7 +11,7 @@ export interface AdvancePaymentDepositAccountChange {
 export class AdvancePaymentDepositAccountError extends Error {}
 
 export const advancePaymentDepositAccountService = {
-    async save(changes: AdvancePaymentDepositAccountChange[]): Promise<void> {
+    async save(changes: AdvancePaymentDepositAccountChange[], collectionName: 'advance_payments' | 'advance_requests' = 'advance_payments'): Promise<void> {
         if (!changes.length) return;
         if (new Set(changes.map(change => change.id)).size !== changes.length
             || changes.some(change => !change.id || change.id !== change.id.trim() || change.id.includes('/')
@@ -20,7 +20,7 @@ export const advancePaymentDepositAccountService = {
             throw new AdvancePaymentDepositAccountError('저장할 입금계좌와 가불내역을 확인해 주세요.');
         }
         await runTransaction(db, async transaction => {
-            const entries = changes.map(change => ({ ...change, ref: doc(db, 'advance_payments', change.id) }));
+            const entries = changes.map(change => ({ ...change, ref: doc(db, collectionName, change.id) }));
             const snapshots = await Promise.all(entries.map(entry => transaction.get(entry.ref)));
             snapshots.forEach((snapshot, index) => {
                 if (!snapshot.exists()) {

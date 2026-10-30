@@ -17,6 +17,8 @@ export const WorkerSchema = z.object({
     teamType: z.string().optional().default('\uBBF8\uBC30\uC815'),
     teamName: z.string().optional().nullable(),
     status: WorkerStatusSchema,
+    joinDate: z.string().optional().nullable(),
+    retirementDate: z.string().optional().nullable(),
     unitPrice: z.number().optional().default(0),
     payType: z.string().optional().nullable(),
     salaryModel: z.string().optional().nullable(),

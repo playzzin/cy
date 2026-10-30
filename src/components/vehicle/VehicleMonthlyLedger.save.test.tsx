@@ -237,6 +237,48 @@ it('exports unsaved vehicle edits without running the save coordinator', async (
   expect(coordinator).not.toHaveBeenCalled();
 });
 
+it('filters by payment day without reloading or losing edits and exports only matching rows', async () => {
+  const vehicles = [vehicle('A'), vehicle('B')];
+  vehicles[0].contract!.paymentDay = 5;
+  vehicles[1].contract!.paymentDay = 15;
+  const teams: React.ComponentProps<typeof VehicleMonthlyLedger>['teams'] = [];
+  let view!: ReturnType<typeof render>;
+  // Flush the follow-up load triggered by worker hydration before editing.
+  // eslint-disable-next-line testing-library/no-unnecessary-act
+  await act(async () => { view = render(<VehicleMonthlyLedger vehicles={vehicles} teams={teams} loadingVehicles={false} />); });
+  const { rerender } = view;
+  await waitFor(() => expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeEnabled());
+  editAmount('A');
+  const readsBeforeFilter = resolvedReadCounts();
+
+  rerender(<VehicleMonthlyLedger vehicles={vehicles} teams={teams} loadingVehicles={false} paymentDayFilter="15" />);
+  expect(screen.queryByText('TEST-A')).not.toBeInTheDocument();
+  expect(screen.getByText('TEST-B')).toBeInTheDocument();
+  // Editing the second source row while it is the first visible row must target B.
+  editAmount('B');
+  fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+  await waitFor(() => expect(buildVehicleLedgerWorkbook).toHaveBeenCalledTimes(1));
+  expect(buildVehicleLedgerWorkbook).toHaveBeenLastCalledWith(expect.objectContaining({ hasUnsavedChanges: true }),
+    [expect.objectContaining({ vehicle: expect.objectContaining({ id: 'B' }), amounts: expect.objectContaining({ FUEL: 25 }), total: 125 })]);
+
+  rerender(<VehicleMonthlyLedger vehicles={vehicles} teams={teams} loadingVehicles={false} paymentDayFilter="15" searchText="TEST-A" />);
+  expect(screen.queryByText('TEST-A')).not.toBeInTheDocument();
+  expect(screen.queryByText('TEST-B')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeDisabled();
+
+  rerender(<VehicleMonthlyLedger vehicles={vehicles} teams={teams} loadingVehicles={false} />);
+  expect(screen.getByText('TEST-A')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+  await waitFor(() => expect(buildVehicleLedgerWorkbook).toHaveBeenCalledTimes(2));
+  expect(buildVehicleLedgerWorkbook).toHaveBeenLastCalledWith(expect.objectContaining({ hasUnsavedChanges: true }), [
+    expect.objectContaining({ vehicle: expect.objectContaining({ id: 'A' }), amounts: expect.objectContaining({ FUEL: 25 }), total: 125 }),
+    expect.objectContaining({ vehicle: expect.objectContaining({ id: 'B' }), amounts: expect.objectContaining({ FUEL: 25 }), total: 125 }),
+  ]);
+  expect(resolvedReadCounts()).toEqual(readsBeforeFilter);
+  expect(coordinator).not.toHaveBeenCalled();
+  expect(ledger).not.toHaveBeenCalled();
+});
+
 it('disables vehicle export after a failed month change', async () => {
   await ready();
   const error = jest.spyOn(console, 'error').mockImplementation(() => undefined);

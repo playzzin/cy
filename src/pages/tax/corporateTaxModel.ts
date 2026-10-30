@@ -1,26 +1,26 @@
 import type { WorkbookLedgerEntry } from '../../services/workbookLedgerService';
-import type { OfficeStaff } from '../../services/officeStaffService';
-import type { CardTransaction } from '../../types/card';
-import type { UtilityRecord } from '../../types/accommodation';
-import { dedupeImportedStatementTransactions } from '../../utils/cardStatementDeduplication';
+import type { Accommodation, UtilityRecord } from '../../types/accommodation';
 import { dedupeAccommodationUtilityRecords } from '../../utils/accommodationUtilityDeduplication';
-import { buildStaffDisplayRow, buildManualDisplayRow, calculatePayroll, getStaffRowId, normalizeStoredSettings, StoredPayrollData } from '../payroll/officeStaffPayrollModel';
 import { CorporateTaxSourceAmountError } from './corporateTaxLoadError';
 
-export const CORPORATE_TAX_STAFF = ['이재욱', '김정혜', '이창순', '고정은'];
+export const CORPORATE_TAX_COMPANIES = [
+    { key: 'cheongyeon', label: '청연', title: '(주)청연이엔지', ownership: 'Cheongyeon', ledgerPath: '/payroll/workbook-ledger' },
+    { key: 'dawon', label: '다원', title: '다원', ownership: 'Dawon', ledgerPath: '/payroll/workbook-ledger-dawon' },
+] as const;
+export type CorporateTaxCompany = typeof CORPORATE_TAX_COMPANIES[number]['key'];
 export const MANUAL_FIELDS = [
-    { key: 'invoice', label: '계산서발행' }, { key: 'depreciation', label: '감가상각비' },
+    { key: 'invoice', label: '계산서발행' }, { key: 'labor', label: '노무비신고' },
+    { key: 'salary', label: '급여' }, { key: 'card', label: '카드사용금액' }, { key: 'depreciation', label: '감가상각비' },
     { key: 'condolence', label: '경조사비' }, { key: 'other', label: '기타비용' },
 ] as const;
 export type ManualField = typeof MANUAL_FIELDS[number]['key'];
-export type AutoField = 'sales' | 'purchases' | 'labor' | 'salary' | 'card' | 'lodging';
+export type AutoField = 'sales' | 'purchases' | 'lodging';
 export type AmountField = AutoField | ManualField;
 export const AMOUNT_COLUMNS: Array<{ key: AmountField; label: string; auto: boolean }> = [
     { key: 'sales', label: '매출액', auto: true }, { key: 'purchases', label: '매입액', auto: true },
-    { key: 'invoice', label: '계산서발행', auto: false }, { key: 'labor', label: '노무비신고', auto: true },
-    { key: 'salary', label: '급여', auto: true },
-    { key: 'card', label: '카드사용금액', auto: true }, { key: 'lodging', label: '숙소비', auto: true },
-    ...MANUAL_FIELDS.filter(field => field.key !== 'invoice').map(field => ({ ...field, auto: false })),
+    ...MANUAL_FIELDS.slice(0, 4).map(field => ({ ...field, auto: false })),
+    { key: 'lodging', label: '숙소비', auto: true },
+    ...MANUAL_FIELDS.slice(4).map(field => ({ ...field, auto: false })),
 ];
 export interface ManualMonth { amounts: Partial<Record<ManualField, number>>; notes: Partial<Record<ManualField, string>> }
 export interface CorporateTaxManual {
@@ -31,9 +31,7 @@ export interface CorporateTaxManual {
     memo: string;
 }
 export interface Evidence { id: string; month: number; field: AutoField; label: string; description: string; amount: number; date?: string }
-export interface SalaryEvidence { rows: Evidence[]; warnings: string[]; missingMonths: number[]; unconfirmedMonths: number[] }
 export const emptyManual = (): CorporateTaxManual => ({ months: {}, taxRate: 10, interimPayment: 0, taxCredit: 0, memo: '' });
-const token = (value: unknown) => String(value ?? '').replace(/\s+/g, '').trim();
 export const numberValue = (value: unknown): number => {
     const parsed = typeof value === 'number' ? value : Number(String(value ?? '').replace(/,/g, ''));
     if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed)) throw new Error('금액은 원 단위 정수로 입력해 주세요.');
@@ -86,94 +84,24 @@ export function ledgerEvidence(year: number, entries: WorkbookLedgerEntry[]): Ev
     });
 }
 
-const CARD_CATEGORIES: Record<string, string> = { FUEL: '주유', TOLL: '통행료', MEAL: '식대', MATERIAL: '자재', OTHER: '기타' };
-export function cardEvidence(year: number, transactions: CardTransaction[]): Evidence[] {
-    return dedupeImportedStatementTransactions(transactions.filter(row => row.status !== 'CANCELLED' && !row.cancelledAt)).flatMap(row => {
-        const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(row.yearMonth);
-        if (!match || Number(match[1]) !== year || !CARD_CATEGORIES[row.category]) return [];
-        return [{ id: row.id, month: Number(match[2]), field: 'card' as const, label: row.cardLabel || '카드', date: row.date,
-            description: [CARD_CATEGORIES[row.category], row.merchant, row.memo].filter(Boolean).join(' · '), amount: sourceAmount(row.amount) }];
+/** 법인 명의 숙소의 월세·관리비만 집계한다. 공과금은 매입과 중복 반영하지 않는다. */
+export function lodgingEvidence(period: string, records: UtilityRecord[], accommodations: Accommodation[], company: CorporateTaxCompany): Evidence[] {
+    const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(period);
+    if (!match) throw new Error('숙소 집계 연월을 확인해 주세요.');
+    const ownership = CORPORATE_TAX_COMPANIES.find(item => item.key === company)?.ownership;
+    const saved = new Map(dedupeAccommodationUtilityRecords(records.filter(row => row.yearMonth === period)).map(row => [row.accommodationId, row]));
+    return accommodations.filter(room => room.ownership === ownership).flatMap(room => {
+        const row = saved.get(room.id);
+        const start = room.contract?.startDate?.slice(0, 7);
+        const end = room.contract?.endDate?.slice(0, 7);
+        // 저장된 월 자료는 종료된 계약도 보존한다. 기본값은 확인 가능한 계약기간에만 적용한다.
+        if (!row && (!start || period < start || (end && period > end) || (room.status === 'inactive' && !end))) return [];
+        const rent = sourceAmount(row?.costs.rent ?? room.contract?.monthlyRent ?? 0);
+        const maintenance = sourceAmount(row?.costs.maintenance ?? (room.costProfile?.maintenance === 'fixed' ? room.costProfile.fixedMaintenance ?? 0 : 0));
+        return [{ id: row?.id || 'contract-' + room.id + '-' + period, month: Number(match[2]), field: 'lodging' as const,
+            label: room.name, amount: rent + maintenance,
+            description: '월세 ' + rent.toLocaleString('ko-KR') + ' + 관리비 ' + maintenance.toLocaleString('ko-KR') + ' · ' + (row ? '월별 저장 자료 (미입력 항목은 계약 기본값)' : '계약 기본값') }];
     });
-}
-
-const LODGING_COSTS = [ ['rent', '월세'], ['electricity', '전기'], ['gas', '가스'], ['water', '수도'], ['internet', '인터넷'], ['maintenance', '관리비'], ['other', '기타'] ] as const;
-export function lodgingEvidence(year: number, records: UtilityRecord[]): Evidence[] {
-    return dedupeAccommodationUtilityRecords(records).flatMap(row => {
-        const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(row.yearMonth);
-        if (!match || Number(match[1]) !== year) return [];
-        const description = LODGING_COSTS.map(([key, label]) => ({ label, amount: sourceAmount(row.costs[key] ?? 0) }))
-            .filter(item => item.amount !== 0).map(item => `${item.label} ${item.amount.toLocaleString('ko-KR')}`).join(' + ');
-        return [{ id: row.id, month: Number(match[2]), field: 'lodging' as const, label: row.accommodationName,
-            description: description || '숙소 통합관리대장 합계', amount: sourceAmount(row.costs.total) }];
-    });
-}
-
-export interface FreelancerReportRow { id?: string; name?: string; teamId?: string; teamName?: string; [key: string]: unknown }
-/** 프리랜서 신고 화면의 팀별 월 합계. 연간 합계/성과급/신고가능액은 재합산하지 않는다. */
-export function freelancerEvidence(rows: FreelancerReportRow[], teams: Array<{ id?: string; legacyId?: string | null; name: string; companyId?: string | null }>, companies: Array<{ id?: string; name: string }>): Evidence[] {
-    const companyIds = new Set(companies.filter(company => company.name?.includes('청연')).map(company => company.id).filter(Boolean));
-    const scopedTeams = teams.filter(team => team.companyId && companyIds.has(team.companyId)).sort((a, b) => a.name.localeCompare(b.name));
-    const ids = new Map<string, string>(), names = new Map<string, string>(), teamNames = new Map<string, string>();
-    scopedTeams.forEach(team => {
-        const id = team.id || team.legacyId;
-        if (!id) return;
-        if (team.id) ids.set(team.id, id);
-        if (team.legacyId) ids.set(team.legacyId, id);
-        teamNames.set(id, team.name);
-        if (team.id && !names.has(token(team.name))) names.set(token(team.name), team.id);
-    });
-    const restrictTeams = scopedTeams.some(team => !!team.id);
-    const totals = new Map<string, Evidence & { count: number }>();
-    rows.forEach(row => {
-        if (row.isEmpty || row.isFooter) return;
-        const teamId = row.teamId ? ids.get(row.teamId) || row.teamId : names.get(token(row.teamName));
-        if (restrictTeams && (!teamId || !ids.has(teamId))) return;
-        const teamName = (teamId && teamNames.get(teamId)) || row.teamName || '소속 없음';
-        const teamKey = teamId ? `id:${teamId}` : `name:${token(teamName)}`;
-        for (let i = 0; i < 12; i += 1) {
-            const key = `m${String(i + 1).padStart(2, '0')}`;
-            const amount = sourceAmount(row[key] ?? 0);
-            if (amount === 0) continue;
-            const id = `${teamKey}-${key}`;
-            const total = totals.get(id) || { id, month: i + 1, field: 'labor', label: teamName, description: '', amount: 0, count: 0 };
-            total.amount += amount;
-            total.count += 1;
-            totals.set(id, total);
-        }
-    });
-    return Array.from(totals.values()).sort((a, b) => a.month - b.month || a.label.localeCompare(b.label, 'ko'))
-        .map(({ count, ...row }) => ({ ...row, description: `프리랜서 신고 ${row.month}월 합계 · 신고 내역 ${count}건` }));
-}
-
-export function salaryEvidence(year: number, staff: OfficeStaff[], stored: StoredPayrollData): SalaryEvidence {
-    const rows: Evidence[] = [], warnings: string[] = [], missingMonths: number[] = [];
-    const unconfirmed = new Set<number>();
-    for (let month = 1; month <= 12; month += 1) {
-        const period = `${year}-${String(month).padStart(2, '0')}`, saved = stored[period];
-        if (!saved) { missingMonths.push(month); unconfirmed.add(month); continue; }
-        const hasSnapshot = Array.isArray(saved.grossPaySnapshot);
-        const settings = normalizeStoredSettings(saved.settings);
-        const sourceRows = hasSnapshot ? saved.grossPaySnapshot! : [
-            ...staff.map((person, index) => buildStaffDisplayRow(person, index, saved.rowInputs?.[getStaffRowId(person, index)])),
-            ...(saved.manualRows || []).map(buildManualDisplayRow),
-        ].map(row => ({ ...row, grossPay: calculatePayroll(row, settings).grossPay }));
-        if (!hasSnapshot) {
-            unconfirmed.add(month);
-            warnings.push(`${month}월 급여: 기존 월 입력값과 현재 직원 기본급으로 계산했습니다. 사무실 직원급여에서 확인해 주세요.`);
-        }
-        CORPORATE_TAX_STAFF.forEach(name => {
-            const matches = sourceRows.filter(row => token(row.name) === name);
-            if (matches.length !== 1) {
-                unconfirmed.add(month);
-                warnings.push(`${month}월 ${name}: ${matches.length ? '동명이인 또는 중복 행' : '급여 자료 없음'} — 합계에서 제외했습니다.`);
-                return;
-            }
-            const row = matches[0];
-            rows.push({ id: `${period}-${row.id}`, month, field: 'salary', label: name, amount: sourceAmount(row.grossPay),
-                description: `기본급 ${row.baseSalary.toLocaleString('ko-KR')} + 상여 ${row.bonus.toLocaleString('ko-KR')} · ${row.payBasis === 'net' ? '세후 입력 → 세전 환산' : '세전 총액'} · ${hasSnapshot ? '월 저장본' : '기존 입력값'}` });
-        });
-    }
-    return { rows, warnings, missingMonths, unconfirmedMonths: Array.from(unconfirmed) };
 }
 
 /** 0.57% × 10,000원의 이진 부동소수점 오차가 57원을 56원으로 내리지 않도록 한다. */
@@ -195,7 +123,7 @@ export function buildCorporateTaxReport(evidence: Evidence[], manual: CorporateT
     const months = Array.from({ length: 12 }, (_, index) => {
         const month = index + 1;
         const amounts = Object.fromEntries(AMOUNT_COLUMNS.map(({ key }) => [key, 0])) as Record<AmountField, number>;
-        evidence.filter(row => row.month === month).forEach(row => { amounts[row.field] += row.amount; });
+        evidence.filter(row => row.month === month && AMOUNT_COLUMNS.some(col => col.auto && col.key === row.field)).forEach(row => { amounts[row.field] += row.amount; });
         MANUAL_FIELDS.forEach(({ key }) => { amounts[key] = manual.months[month]?.amounts[key] ?? 0; });
         const expenses = AMOUNT_COLUMNS.filter(col => col.key !== 'sales').reduce((sum, col) => sum + amounts[col.key], 0);
         return { month, amounts, expenses, profit: amounts.sales - expenses };

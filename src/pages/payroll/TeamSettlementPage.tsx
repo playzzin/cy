@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
 import './TeamSettlementPage.css';
+import { useTeamSettlementAccess } from '../../hooks/useTeamSettlementAccess';
 import CompanyTeamSelector, { readCompanyTeamOrder } from '../../components/common/CompanyTeamSelector';
 import { applySupportTeamOrder } from '../../utils/supportTeamOrder';
 import { calculateTeamSettlementOfficeExpense, LEGACY_TEAM_SETTLEMENT_OFFICE_RATES } from '../../utils/teamSettlementOfficeExpense';
@@ -649,6 +650,7 @@ const buildMonthRange = (yearMonth: string): { startDate: string; endDate: strin
 };
 
 export const TeamSettlementPage: React.FC = () => {
+  const { canWrite, loading: accessLoading } = useTeamSettlementAccess();
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
   const [yearMonth, setYearMonth] = useState<string>(buildDefaultYearMonth());
@@ -938,11 +940,11 @@ export const TeamSettlementPage: React.FC = () => {
   settlementScope.current = `${selectedTeamId}:${yearMonth}`;
   const loadSettlement = useCallback(async () => {
     const sequence = ++settlementLoadGeneration.current;
-    if (!selectedTeamId || !yearMonth) return;
+    if (accessLoading || !selectedTeamId || !yearMonth) return;
 
     setLoadState({ status: 'loading' });
     try {
-      const loaded = await teamSettlementService.getTeamSettlement({ yearMonth, teamId: selectedTeamId });
+      const loaded = await teamSettlementService.getTeamSettlement({ yearMonth, teamId: selectedTeamId, persistSnapshot: canWrite });
       if (sequence !== settlementLoadGeneration.current) return;
       const nextDoc = stripSupportOriginalLines(loaded);
       setDoc(nextDoc);
@@ -953,7 +955,7 @@ export const TeamSettlementPage: React.FC = () => {
       console.error(error);
       if (sequence === settlementLoadGeneration.current) setLoadState({ status: 'error', message: '팀정산 데이터를 불러오지 못했습니다.' });
     }
-  }, [selectedTeamId, yearMonth]);
+  }, [accessLoading, canWrite, selectedTeamId, yearMonth]);
 
   useEffect(() => {
     void loadSettlement();
@@ -1431,11 +1433,12 @@ export const TeamSettlementPage: React.FC = () => {
   }, [doc]);
 
   const updateDoc = useCallback((updater: (prev: TeamSettlementDocument) => TeamSettlementDocument) => {
+    if (!canWrite || saveStateRef.current === 'saving') return;
     setDoc((prev) => {
-      if (!prev) return prev;
+      if (!prev || prev.confirmedAt) return prev;
       return updater(prev);
     });
-  }, []);
+  }, [canWrite]);
 
   const handleAddManualSale = useCallback((kind: TeamSettlementWorkKind = '직영') => {
     updateDoc((prev) => {
@@ -1495,7 +1498,7 @@ export const TeamSettlementPage: React.FC = () => {
   }, [updateDoc]);
 
   const persistCurrentDocument = useCallback(async (showSuccessToast = true): Promise<TeamSettlementDocument | null> => {
-    if (!doc || saveStateRef.current === 'saving') return null;
+    if (!canWrite || !doc || doc.confirmedAt || saveStateRef.current === 'saving') return null;
 
     const scopeAtSave = settlementScope.current;
     const nextDoc: TeamSettlementDocument = {
@@ -1522,7 +1525,7 @@ export const TeamSettlementPage: React.FC = () => {
       toast.error('저장하지 못했습니다. 네트워크 상태를 확인해 주세요.');
       return null;
     }
-  }, [doc, selectedTeamName]);
+  }, [canWrite, doc, selectedTeamName]);
 
   const confirmBeforeDiscard = useCallback(async (nextAction: string): Promise<boolean> => {
     if (!isDirty) return true;
@@ -1555,7 +1558,7 @@ export const TeamSettlementPage: React.FC = () => {
   }, [confirmBeforeDiscard, loadSettlement]);
 
   const handleRecalculate = useCallback(async () => {
-    if (!selectedTeamId || !yearMonth) return;
+    if (!canWrite || !selectedTeamId || !yearMonth) return;
     if (!(await confirmBeforeDiscard('재집계'))) return;
 
     const isConfirmed = Boolean(doc?.confirmedAt);
@@ -1597,10 +1600,10 @@ export const TeamSettlementPage: React.FC = () => {
       console.error(error);
       toast.error('재집계 실패');
     }
-  }, [confirmBeforeDiscard, doc?.confirmedAt, loadSettlement, selectedTeamId, yearMonth]);
+  }, [canWrite, confirmBeforeDiscard, doc?.confirmedAt, loadSettlement, selectedTeamId, yearMonth]);
 
   const handleConfirm = useCallback(async () => {
-    if (!doc) return;
+    if (!canWrite || !doc || doc.confirmedAt || saveStateRef.current === 'saving') return;
 
     if (confirmationIssues.length > 0) {
       await Swal.fire({
@@ -1655,11 +1658,11 @@ export const TeamSettlementPage: React.FC = () => {
       setSaveState('error');
       toast.error('확정 실패');
     }
-  }, [confirmationIssues, doc, handleValidationIssueClick, isDirty, loadSettlement, selectedTeamName]);
+  }, [canWrite, confirmationIssues, doc, handleValidationIssueClick, isDirty, loadSettlement, selectedTeamName]);
 
   const handleUnconfirm = useCallback(async () => {
     const isSaving = () => saveStateRef.current === 'saving';
-    if (!doc?.confirmedAt || isSaving()) return;
+    if (!canWrite || !doc?.confirmedAt || isSaving()) return;
     const scope = settlementScope.current;
 
     const result = await Swal.fire({
@@ -1700,9 +1703,9 @@ export const TeamSettlementPage: React.FC = () => {
         setSaveState('idle');
       }
     }
-  }, [doc]);
+  }, [canWrite, doc]);
 
-  const canEdit = isEditable(doc) && saveState !== 'saving';
+  const canEdit = canWrite && isEditable(doc) && saveState !== 'saving';
 
   const primaryButtonClassName =
     'inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed';
@@ -2787,6 +2790,7 @@ export const TeamSettlementPage: React.FC = () => {
                         type="button"
                         className="rounded-md border border-rose-300 bg-white px-3 py-1.5 text-xs font-black text-rose-800 hover:bg-rose-100"
                         onClick={() => void handleRecalculate()}
+                        disabled={!canWrite || saveState === 'saving'}
                       >
                         재집계해서 맞추기
                       </button>
@@ -3576,8 +3580,9 @@ export const TeamSettlementPage: React.FC = () => {
         issueCount={doc ? confirmationIssues.length : 0}
         saveState={saveState}
         loading={loadState.status === 'loading'}
+        canWrite={canWrite}
         canEdit={Boolean(doc && canEdit)}
-        canRecalculate={Boolean(selectedTeamId && yearMonth)}
+        canRecalculate={Boolean(canWrite && selectedTeamId && yearMonth)}
         onRefresh={handleRefresh}
         onRecalculate={handleRecalculate}
         onSave={handleSave}
@@ -3972,6 +3977,12 @@ export const TeamSettlementPage: React.FC = () => {
                     <span className="font-extrabold text-slate-900">{formatCurrency(transactionSectionTotals.salesDirect.amount)}원</span>
                     <span className="font-semibold text-slate-700">공수</span>
                     <span className="font-extrabold text-slate-900">{formatManDay1(transactionSectionTotals.salesDirect.manDay)}공</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-blue-50 px-3 py-2 text-sm" role="group" aria-label="도급 + 직영 총금액">
+                    <span className="font-semibold text-blue-700">도급 + 직영 총금액</span>
+                    <span className="whitespace-nowrap font-extrabold text-blue-900">
+                      {formatCurrency(transactionSectionTotals.salesContract.amount + transactionSectionTotals.salesDirect.amount)}원
+                    </span>
                   </div>
                 </div>
               </div>

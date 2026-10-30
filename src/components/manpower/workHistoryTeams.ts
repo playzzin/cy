@@ -5,7 +5,6 @@ import { getReadableAccentColor, hexToRgba, normalizeHexColor } from '../../util
 export type WorkHistoryTeam = Pick<Team, 'id' | 'legacyId' | 'name' | 'color'>;
 const text = (value: unknown) => String(value ?? '').trim();
 const nameKey = (value: unknown) => text(value).replace(/\s+/g, '').toLowerCase();
-const palette = ['#2563eb', '#0d9488', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#4f46e5', '#65a30d', '#ea580c', '#475569'];
 const findTeam = (id: string, name: string, teams: WorkHistoryTeam[]) =>
     id ? teams.find(team => team.id === id || team.legacyId === id)
         : teams.find(team => nameKey(team.name) === nameKey(name));
@@ -27,8 +26,10 @@ export function recordedWorkTeam(row: DailyReportWorkerRow, teams: WorkHistoryTe
     const support = teamId && canonicalResponsibleId ? teamId !== canonicalResponsibleId
         : workerName && responsibleName ? nameKey(workerName) !== nameKey(responsibleName)
             : row.isSiteSupport === true;
-    const hash = [...key].reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0);
-    const color = normalizeHexColor(team?.color, palette[hash % palette.length]);
+    // Team leaders receive only their own team catalog. Support attendance
+    // carries the current DB color without exposing the other team's details.
+    // Missing colors stay neutral instead of inventing a different team color.
+    const color = normalizeHexColor(team?.color, normalizeHexColor(row.workerTeamColorHex));
     return { key, name, support, color };
 }
 

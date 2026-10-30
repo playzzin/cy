@@ -8,11 +8,12 @@ interface Props {
     onOpenChange: (open: boolean) => void;
     title: string;
     description: string;
+    className?: string;
     children: React.ReactNode;
 }
 
 /** A focus-trapped desktop dialog that becomes a scrollable sheet on phones. */
-export default function ResponsiveDetailDialog({ open, onOpenChange, title, description, children }: Props) {
+export default function ResponsiveDetailDialog({ open, onOpenChange, title, description, className = '', children }: Props) {
     const returnFocus = useRef<HTMLElement | null>(null);
     const close = useRef(onOpenChange);
     close.current = onOpenChange;
@@ -32,7 +33,7 @@ export default function ResponsiveDetailDialog({ open, onOpenChange, title, desc
     return <Dialog.Root open={open} onOpenChange={onOpenChange}>
         <Dialog.Portal>
             <Dialog.Overlay className="cy-detail-dialog__overlay" />
-            <Dialog.Content className="cy-detail-dialog"
+            <Dialog.Content className={`cy-detail-dialog ${className}`.trim()}
                 onOpenAutoFocus={() => { returnFocus.current = document.activeElement as HTMLElement; }}
                 onCloseAutoFocus={event => { event.preventDefault(); if (returnFocus.current?.isConnected) returnFocus.current.focus(); }}>
                 <header className="cy-detail-dialog__header">

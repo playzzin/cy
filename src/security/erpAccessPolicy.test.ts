@@ -68,6 +68,13 @@ describe('erpAccessPolicy', () => {
     expect(canAccessErpCollection(['메니저1'], 'accommodation_billing_documents', 'write')).toBe(true);
   });
 
+  it.each(['매니저', 'manager'])('preserves support access without granting admin access to %s', (role) => {
+    expect(getErpRoleGroupsForRoles([role])).toEqual(expect.arrayContaining(['site', 'support']));
+    expect(canAccessErpCollection([role], 'accommodations', 'write')).toBe(true);
+    expect(canAccessErpCollection([role], 'settings', 'update')).toBe(false);
+    expect(canAccessErpCollection([role], 'users', 'update')).toBe(false);
+  });
+
   it('documents why collection policies exist', () => {
     expect(getErpCollectionAccessPolicy('daily_reports')?.description).toBeTruthy();
     expect(getErpCollectionAccessPolicy('settings')?.write).toEqual(['admin']);

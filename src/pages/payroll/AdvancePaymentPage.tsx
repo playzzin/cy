@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { teamService } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { advancePaymentService, AdvancePayment } from '../../services/advancePaymentService';
@@ -27,12 +28,15 @@ import type { AccommodationAssignment } from '../../types/accommodationAssignmen
 import type { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
 import type { UtilityRecord } from '../../types/accommodation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight, faUsers, faCheck } from '@fortawesome/free-solid-svg-icons';
-import Swal from 'sweetalert2';
+import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight, faUsers, faCheck, faExpand, faCompress } from '@fortawesome/free-solid-svg-icons';
+import SweetAlert from 'sweetalert2';
 import { Link, useSearchParams } from 'react-router-dom';
 import { shiftYearMonth } from '../../components/common/MonthNavigator';
-import { getContrastingTextColor, hexToRgba, normalizeHexColor } from '../../utils/color';
+import { normalizeHexColor } from '../../utils/color';
 import './AdvancePaymentPage.css';
+
+// Keep feedback and confirmations inside the active view, including the modal top layer.
+const Swal = SweetAlert.mixin({ target: '.advance-payment-page', keydownListenerCapture: true });
 
 // 임시저장 데이터 타입
 type AdvanceTempData = {
@@ -639,6 +643,58 @@ const AdvancePaymentPage: React.FC = () => {
     const { currentUser } = useAuth();
     const [searchParams] = useSearchParams();
     const [canUseAdvanceManagement, setCanUseAdvanceManagement] = useState<boolean | null>(null);
+    const [expandedDialog, setExpandedDialog] = useState<HTMLDialogElement | null>(null);
+    const [fitTableToWidth, setFitTableToWidth] = useState(() => window.innerWidth >= 900);
+    const [tableScale, setTableScale] = useState(1);
+    const tableScrollRef = useRef<HTMLDivElement>(null);
+    const tableRef = useRef<HTMLTableElement>(null);
+    const expandButtonRef = useRef<HTMLButtonElement>(null);
+    const isExpanded = expandedDialog !== null;
+
+    useEffect(() => {
+        if (!expandedDialog) return;
+
+        const previousOverflow = document.body.style.overflow;
+        const closeExpandedView = (event: Event) => {
+            // Let an open confirmation or memo dialog handle Escape first.
+            event.preventDefault();
+            if (!Swal.isVisible()) setExpandedDialog(null);
+        };
+        expandedDialog.className = 'advance-expanded-dialog';
+        expandedDialog.setAttribute('aria-label', '가불 및 공제 전체 보기');
+        expandedDialog.addEventListener('cancel', closeExpandedView);
+        document.body.appendChild(expandedDialog);
+        document.body.style.overflow = 'hidden';
+        expandedDialog.showModal();
+        expandButtonRef.current?.focus();
+
+        return () => {
+            expandedDialog.removeEventListener('cancel', closeExpandedView);
+            expandedDialog.close();
+            expandedDialog.remove();
+            document.body.style.overflow = previousOverflow;
+            expandButtonRef.current?.focus();
+        };
+    }, [expandedDialog]);
+
+    useLayoutEffect(() => {
+        const scroll = tableScrollRef.current;
+        const table = tableRef.current;
+        if (!scroll || !table || !fitTableToWidth) return;
+
+        const fit = () => {
+            if (!scroll.clientWidth || !table.offsetWidth) return;
+            const scale = table.offsetWidth <= scroll.clientWidth
+                ? 1
+                : Math.floor((scroll.clientWidth - 1) / table.offsetWidth * 10000) / 10000;
+            setTableScale(previous => previous === scale ? previous : scale);
+        };
+        const observer = new ResizeObserver(fit);
+        observer.observe(scroll);
+        observer.observe(table);
+        fit();
+        return () => observer.disconnect();
+    }, [fitTableToWidth, isExpanded]);
 
     const parseNumberFromInput = useCallback((raw: string): number => {
         const cleaned = String(raw ?? '').replace(/,/g, '').replace(/[^0-9-]/g, '').trim();
@@ -1044,18 +1100,6 @@ const AdvancePaymentPage: React.FC = () => {
             isCancelled = true;
         };
     }, [canUseAdvanceManagement]);
-
-    // Lock main content scroll
-    useEffect(() => {
-        const mainContent = document.getElementById('main-content');
-        if (mainContent) {
-            const originalOverflow = mainContent.style.overflow;
-            mainContent.style.overflow = 'hidden';
-            return () => {
-                mainContent.style.overflow = originalOverflow;
-            };
-        }
-    }, []);
 
     // 1. Load Initial Teams/Companies
     useEffect(() => {
@@ -1961,6 +2005,27 @@ const AdvancePaymentPage: React.FC = () => {
             .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR'));
     }, [salaryModelFilter, selectedMonthSalaryModels, workerNameQuery, workers]);
 
+    const displayedLedger = useMemo(() => {
+        const teamIds = new Set<string>();
+        let total = 0;
+        let corporate = 0;
+        let labor = 0;
+        visibleWorkers.forEach((worker) => {
+            const advance = advances[worker.id!];
+            const teamId = advance?.teamId || getAdvanceTeamId(worker, '');
+            if (teamId) teamIds.add(teamId);
+            total += advance?.totalDeduction || 0;
+            corporateAdvanceItems.forEach(({ key }) => { corporate += getDeductionValue(advance, key); });
+            laborAdvanceItems.forEach(({ key }) => { labor += getDeductionValue(advance, key); });
+        });
+        const team = teamIds.size === 1 ? allTeamOptions.find((item) => teamIds.has(item.id)) : undefined;
+        return {
+            total, corporate, labor,
+            color: team ? normalizeHexColor(team.color) : '#0b8d69',
+            title: team?.name || (teamIds.size > 1 ? `전체 ${teamIds.size}개 팀` : '가불·공제 내역')
+        };
+    }, [visibleWorkers, advances, allTeamOptions, corporateAdvanceItems, laborAdvanceItems, getDeductionValue]);
+
     const inputRefMap = useRef(new Map<string, HTMLInputElement>());
 
     const setInputRef = useCallback((workerId: string, deductionId: string, rowNum: 0 | 1) => {
@@ -2393,11 +2458,6 @@ const AdvancePaymentPage: React.FC = () => {
     const renderDeductionInput = (workerId: string, deductionId: string, rowNum: 0 | 1) => {
         const inputKey = buildAutoImportedCellKey(workerId, deductionId);
         const isAutoImported = Boolean(autoImportedCellMap[inputKey]);
-        // 윗칸/아랫칸 색상 구분
-        let rowBg = '';
-        if (!isAutoImported) {
-            rowBg = rowNum === 0 ? 'bg-blue-50 focus:bg-blue-100' : 'bg-white focus:bg-blue-50';
-        }
         return (
             <input
                 type="text"
@@ -2421,10 +2481,7 @@ const AdvancePaymentPage: React.FC = () => {
                 }}
                 onKeyDown={(e) => handleArrowNavigation(e, workerId, deductionId, rowNum)}
                 ref={setInputRef(workerId, deductionId, rowNum)}
-                className={`w-full text-right outline-none rounded px-1 transition-colors ${isAutoImported
-                    ? 'bg-emerald-50 text-emerald-800 font-bold ring-1 ring-emerald-200 focus:bg-emerald-100 focus:ring-2 focus:ring-emerald-300'
-                    : `${rowBg} focus:ring-2 focus:ring-blue-500` 
-                    }`}
+                className={`advance-money-input${isAutoImported ? ' advance-money-input--automatic' : ''}`}
                 onFocus={(e) => e.target.select()}
             />
         );
@@ -2432,47 +2489,56 @@ const AdvancePaymentPage: React.FC = () => {
 
     // rowNum: 0(윗칸), 1(아랫칸)
     const renderAdvanceItemInput = (workerId: string, itemKey: string, rowNum: 0 | 1) => {
-        let rowBg = rowNum === 0 ? 'bg-blue-100 focus:bg-blue-200' : 'bg-emerald-100 focus:bg-emerald-200';
         return (
             <input
                 type="text"
                 inputMode="numeric"
+                aria-label={`${advances[workerId]?.workerName || ''} ${advanceItemLabels[itemKey as AdvanceItemLabelKey] || itemKey}`}
                 value={formatNumberForInput(getDeductionValue(advances[workerId], itemKey) || 0)}
                 onChange={(e) => handleAdvanceItemChange(workerId, itemKey, e.target.value)}
                 onKeyDown={(e) => handleArrowNavigation(e, workerId, itemKey, rowNum)}
                 ref={setInputRef(workerId, itemKey, rowNum)}
-                className={`w-full text-right outline-none rounded px-1 transition-colors ${rowBg} focus:ring-2 focus:ring-amber-400`}
+                className="advance-money-input"
                 onFocus={(e) => e.target.select()}
             />
         );
     };
 
     // 5. Render
-    return (
-        <div className="advance-payment-page flex flex-col h-full min-w-0 bg-slate-100 p-4">
-            <div className="flex flex-wrap gap-3 justify-between items-center mb-4 shrink-0">
-                <h1 className="text-2xl font-bold flex items-center gap-2">
-                    <FontAwesomeIcon icon={faCalculator} className="text-blue-600" />
+    const pageContent = (
+        <div className={`advance-payment-page${isExpanded ? ' advance-payment-page--expanded' : ''}`}>
+            <div className="advance-page-header">
+                <h1>
+                    <FontAwesomeIcon icon={faCalculator} />
                     가불 및 공제 관리
                 </h1>
-                <div className="flex items-center gap-2">
-                    {canUseAdvanceManagement && (
+                <div className="advance-page-actions">
+                    <button
+                        type="button"
+                        ref={expandButtonRef}
+                        className="advance-action"
+                        aria-expanded={isExpanded}
+                        onClick={() => setExpandedDialog(isExpanded ? null : document.createElement('dialog'))}
+                    >
+                        <FontAwesomeIcon icon={isExpanded ? faCompress : faExpand} />
+                        {isExpanded ? '전체 보기 닫기' : '전체 보기'}
+                    </button>
+                    {canUseAdvanceManagement && !isExpanded && (
                         <Link
                             to={`/payroll/advance-summary?${new URLSearchParams({ yearMonth: selectedMonth,
                                 ...(selectedTeamId && selectedTeamId !== ALL_TEAMS_VALUE ? { teamId: selectedTeamId } : {}) })}`}
-                            className="px-3 py-2 rounded font-bold bg-white text-blue-700 hover:bg-blue-50 border border-blue-200"
+                            className="advance-action"
                         >
                             팀별 가불내역
                         </Link>
                     )}
                     {/* Settings Toggle */}
-                    {canUseAdvanceManagement && (
+                    {canUseAdvanceManagement && !isExpanded && (
                         <button
                             onClick={() => setIsDeductionSettingsOpen(!isDeductionSettingsOpen)}
-                            className={`px-3 py-2 rounded font-bold transition-colors flex items-center gap-2 ${isDeductionSettingsOpen
-                                ? 'bg-slate-700 text-white shadow-inner'
-                                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
-                                }`}
+                            className="advance-action"
+                            aria-expanded={isDeductionSettingsOpen}
+                            aria-controls="advance-deduction-settings"
                             title="가불항목 추가/설정"
                         >
                             <FontAwesomeIcon icon={faCalculator} />
@@ -2481,8 +2547,8 @@ const AdvancePaymentPage: React.FC = () => {
                     )}
 
                     {/* Temp Data Restoration */}
-                    {hasTempData && (
-                        <div className="flex items-center gap-2 mr-2 animate-pulse">
+                    {hasTempData && !isExpanded && (
+                        <div className="advance-temp-data">
                             <span className="text-xs text-amber-600 font-bold">
                                 {tempDataSavedAt ? new Date(tempDataSavedAt).toLocaleTimeString() : ''} 임시저장됨
                             </span>
@@ -2508,7 +2574,7 @@ const AdvancePaymentPage: React.FC = () => {
                         <button
                             onClick={handleSave}
                             disabled={saving}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow-lg flex items-center gap-2 animate-bounce-subtle"
+                            className="advance-action advance-action--primary"
                         >
                             <FontAwesomeIcon icon={saving ? faSpinner : faFloppyDisk} spin={saving} />
                             <span>{saving ? '저장 중...' : '변경사항 저장'}</span>
@@ -2548,15 +2614,11 @@ const AdvancePaymentPage: React.FC = () => {
                                     disabled={loading && !autoSearchRequested}
                                     onClick={() => setSelectedTeamId(team.id)}
                                     title={team.name}
-                                    style={{
-                                        backgroundColor: isSelected ? color : hexToRgba(color, 0.1),
-                                        borderColor: isSelected ? color : hexToRgba(color, 0.3),
-                                        color: isSelected ? getContrastingTextColor(color) : '#334155'
-                                    }}
+                                    style={{ '--advance-team-color': color } as React.CSSProperties}
                                 >
                                     <span
                                         className="advance-team-marker"
-                                        style={{ color: isSelected ? 'inherit' : color }}
+                                        style={{ color }}
                                         aria-hidden="true"
                                     >
                                         {isSelected ? <FontAwesomeIcon icon={faCheck} /> : <span />}
@@ -2617,7 +2679,7 @@ const AdvancePaymentPage: React.FC = () => {
 
             {/* Deduction Settings Panel */}
             {isDeductionSettingsOpen && (
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 shrink-0 animate-fade-in-down">
+                <div id="advance-deduction-settings" className="advance-settings bg-slate-50 border border-slate-200 rounded-lg p-4 mb-4 shrink-0">
                     <h3 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
                         <FontAwesomeIcon icon={faCalculator} />
                         공제항목 건별 설정
@@ -2729,9 +2791,16 @@ const AdvancePaymentPage: React.FC = () => {
                 </div>
             )}
 
+            <dl className="advance-totals" aria-label="조회 목록 합계">
+                <div className="advance-total-main"><dt>공제 합계</dt><dd>{displayedLedger.total.toLocaleString()}<small>원</small></dd></div>
+                <div><dt>법인 가불</dt><dd>{displayedLedger.corporate.toLocaleString()}<small>원</small></dd></div>
+                <div><dt>노무 가불</dt><dd>{displayedLedger.labor.toLocaleString()}<small>원</small></dd></div>
+                <div><dt>조회 인원</dt><dd>{visibleWorkers.length.toLocaleString()}<small>명</small></dd></div>
+            </dl>
+
             {/* Keyword Filter & Salary Type Filter */}
             <div className="advance-worker-toolbar">
-                <div className="flex h-10 items-center bg-white border border-slate-200 rounded-xl px-3">
+                <div className="advance-name-search">
                     <FontAwesomeIcon icon={faSearch} className="text-slate-400 mr-2" />
                     <input
                         type="text"
@@ -2772,20 +2841,36 @@ const AdvancePaymentPage: React.FC = () => {
                         용역팀
                     </button>
                 </div>
-                <div className="text-xs text-slate-500 ml-auto flex items-center gap-4">
+                <div className="advance-worker-count">
                     <span>총 인원: <b>{visibleWorkers.length}</b>명</span>
-                    {hasChanges && <span className="text-red-500 font-bold animate-pulse">※ 변경된 내용이 있습니다. 저장해주세요.</span>}
+                    {hasChanges && <span className="advance-unsaved">변경사항 저장 필요</span>}
                 </div>
             </div>
 
             {/* Table Area */}
-                <div className="flex-1 bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col relative" id="table-container">
-                <div className="overflow-auto flex-1 relative">
-                    <table className="w-full text-xs border-collapse">
+            <div className="advance-ledger" id="table-container" style={{ '--advance-team-color': displayedLedger.color } as React.CSSProperties}>
+                <div className="advance-ledger-heading">
+                    <div><h2>{displayedLedger.title}</h2><span>{selectedMonth} · {visibleWorkers.length}명 · 가불 및 공제</span></div>
+                    <div className="advance-ledger-view-actions">
+                        <span className="advance-ledger-total">공제 합계 <strong>{displayedLedger.total.toLocaleString()}원</strong></span>
+                        <button
+                            type="button"
+                            className="advance-fit-button"
+                            aria-pressed={fitTableToWidth}
+                            title={fitTableToWidth ? '원본 크기로 보기' : '모든 열을 화면 너비에 맞춰 보기'}
+                            onClick={() => setFitTableToWidth(fit => !fit)}
+                        >
+                            {fitTableToWidth && <FontAwesomeIcon icon={faCheck} />}
+                            너비 맞춤{fitTableToWidth ? ` ${Math.round(tableScale * 100)}%` : ''}
+                        </button>
+                    </div>
+                </div>
+                <div ref={tableScrollRef} className="advance-table-scroll" role="region" aria-label="가불 및 공제 입력표" tabIndex={0}>
+                    <table ref={tableRef} className={`advance-input-table${fitTableToWidth ? ' advance-input-table--fit' : ''}`} style={{ zoom: fitTableToWidth ? tableScale : 1 }}>
                         <thead className="bg-slate-100 sticky top-0 z-30 text-slate-700 font-bold border-b border-slate-300 h-10">
                             <tr>
-                                <th rowSpan={2} className="p-2 border-r border-slate-300 w-12 text-center bg-slate-100 sticky left-0 z-40 shadow-[1px_0_2px_rgba(0,0,0,0.1)]">No</th>
-                                <th rowSpan={2} className="p-2 border-r border-slate-300 w-24 text-center bg-slate-100 sticky left-12 z-40 shadow-[1px_0_2px_rgba(0,0,0,0.1)] min-w-[80px]">이름</th>
+                                <th rowSpan={2} className="advance-number-cell sticky left-0 z-40">No</th>
+                                <th rowSpan={2} className="advance-name-cell sticky left-12 z-40">이름</th>
                                 <th rowSpan={2} className="p-2 border-r border-slate-300 w-44 text-center min-w-[170px]">노무/계산서</th>
 
                                 {/* Top Row Headers */}
@@ -2796,7 +2881,7 @@ const AdvancePaymentPage: React.FC = () => {
                                 ))}
 
                                 {corporateAdvanceItems.map((item) => (
-                                    <th key={item.key} className="p-3 border-r border-slate-300 min-w-[112px] bg-yellow-100">
+                                    <th key={item.key} className="advance-corporate-heading p-3 border-r border-slate-300 min-w-[112px]">
                                         {item.label}
                                     </th>
                                 ))}
@@ -2807,7 +2892,7 @@ const AdvancePaymentPage: React.FC = () => {
                             <tr>
                                 {/* Bottom Row Headers - ColSpan handled by rowSpan above for common cols */}
                                 {bottomDeductionItems.map((item) => (
-                                    <th key={item.id} className={getDeductionHeaderClassName(item.id)} style={{ backgroundColor: '#fdfdfd' }}>
+                                    <th key={item.id} className={getDeductionHeaderClassName(item.id)}>
                                         {item.label}
                                     </th>
                                 ))}
@@ -2817,7 +2902,7 @@ const AdvancePaymentPage: React.FC = () => {
                                 ))}
 
                                 {laborAdvanceItems.map((item) => (
-                                    <th key={item.key} className="p-3 border-r border-slate-300 min-w-[112px] bg-yellow-50">
+                                    <th key={item.key} className="advance-labor-heading p-3 border-r border-slate-300 min-w-[112px]">
                                         {item.label}
                                     </th>
                                 ))}
@@ -2841,7 +2926,7 @@ const AdvancePaymentPage: React.FC = () => {
                             ) : (
                                 visibleWorkers.map((worker, index) => {
                                     const isHighlighted = worker.id === highlightWorkerId;
-                                    const rowClass = isHighlighted ? 'bg-yellow-50 animate-pulse' : 'hover:bg-blue-50/30';
+                                    const rowClass = isHighlighted ? 'advance-worker-highlight' : '';
                                     const advance = advances[worker.id!] || createEmptyAdvance(worker, selectedTeamId, selectedMonth);
                                     const workerPaymentSummary =
                                         workerPaymentSummaryMap[worker.id!]
@@ -2855,15 +2940,15 @@ const AdvancePaymentPage: React.FC = () => {
                                                 ref={isHighlighted ? highlightedRowRef : null}
                                                 className={`transition-colors h-10 ${rowClass}`}
                                             >
-                                                <td rowSpan={2} className="p-2 text-center border-r border-slate-200 sticky left-0 z-20 bg-white">{index + 1}</td>
-                                                <td rowSpan={2} className="p-2 text-center border-r border-slate-200 font-medium sticky left-12 z-20 bg-white shadow-[1px_0_2px_rgba(0,0,0,0.05)]">
+                                                <td rowSpan={2} className="advance-number-cell p-2 text-center sticky left-0 z-20">{index + 1}</td>
+                                                <td rowSpan={2} className="advance-name-cell p-2 text-center sticky left-12 z-20">
                                                     {worker.name}
                                                     <div className="text-[10px] text-slate-400 font-normal">{worker.rank || '-'}</div>
                                                     <div className="text-[10px] text-slate-500 font-semibold">
                                                         {worker.teamName || '-'} · {resolveWorkerPayType(worker) || '-'}
                                                     </div>
                                                 </td>
-                                                <td rowSpan={2} className="p-1.5 text-center border-r border-slate-200 text-[10px] leading-tight min-w-[170px]">
+                                                <td rowSpan={2} className="advance-payment-breakdown p-2 text-center">
                                                     <div className="font-semibold text-indigo-700 whitespace-nowrap">
                                                         노무 {workerPaymentSummary.laborManDay.toFixed(1)}공수 / {workerPaymentSummary.laborAmount.toLocaleString()}원
                                                     </div>
@@ -2888,7 +2973,7 @@ const AdvancePaymentPage: React.FC = () => {
                                                     </td>
                                                 ))}
 
-                                                <td rowSpan={2} className="p-2 text-right font-bold text-slate-700 bg-white">
+                                                <td rowSpan={2} className="advance-row-total text-right">
                                                     {advance.totalDeduction.toLocaleString()}
                                                 </td>
                                                 <td rowSpan={2} className="p-1 border-r border-slate-200">
@@ -2896,7 +2981,8 @@ const AdvancePaymentPage: React.FC = () => {
                                                         type="text"
                                                         value={advance.memo || ''}
                                                         onChange={(e) => handleMemoChange(worker.id!, e.target.value)}
-                                                        className="w-full h-full min-h-[60px] bg-transparent outline-none px-2 text-xs text-slate-600 resize-none whitespace-pre-wrap text-center"
+                                                        className={`advance-memo-input${advance.memo ? ' advance-memo-input--filled' : ''}`}
+                                                        aria-label={`${worker.name} 메모`}
                                                         placeholder="메모..."
                                                     />
                                                 </td>
@@ -2953,7 +3039,7 @@ const AdvancePaymentPage: React.FC = () => {
                                         </td>
                                     ))}
 
-                                    <td rowSpan={2} className="p-3 text-right text-amber-400 bg-slate-800 border-l border-slate-700 text-sm">
+                                    <td rowSpan={2} className="advance-grand-total text-right">
                                         {visibleWorkers.reduce((sum, w) => sum + (advances[w.id!]?.totalDeduction || 0), 0).toLocaleString()}
                                     </td>
                                     <td rowSpan={2} className="p-3 border-r border-slate-700"></td>
@@ -2988,18 +3074,16 @@ const AdvancePaymentPage: React.FC = () => {
                 </div>
             </div>
 
-            <div className="mt-4 text-xs text-slate-500 shrink-0">
+            <div className="advance-input-help">
                 <span>* 방향키로 셀을 이동할 수 있습니다. (상/하/좌/우)</span>
-                <br />
                 <span>* 숫자를 입력하면 자동으로 합계가 계산됩니다. 입력 후 반드시 [저장] 버튼을 눌러주세요.</span>
-                <br />
                 <span>* <span className="text-emerald-600 font-bold">연녹색 배경</span>: 자동 반영된 값 (숙소/공과금 등, 수정 불가)</span>
-                <br />
                 <span>* 흰색 입력칸: 직접 입력 항목 (관리비·기타 포함, 음수 금액 입력 가능)</span>
             </div>
         </div>
     );
 
+    return expandedDialog ? createPortal(pageContent, expandedDialog) : pageContent;
 };
 
 export default AdvancePaymentPage;

@@ -53,6 +53,19 @@ test('월 범위 밖의 무제한·잘못된 현장 공수 조회를 거절한�
     }
 });
 
+test('지원팀 색상은 일보의 임의 값이 아니라 현재 팀 DB에서 가져오며 비공개 정보는 제외한다', () => {
+    const source = [{ ...reports[0], workers: [{ ...reports[0].workers[1], workerTeamColorHex: '#111111' }] }];
+    const team = { id: 'b', legacyId: 'legacy-b', name: '지원팀', color: '#d96cbd', bankAccount: 'private' };
+    const projected = projectSiteWorkReports(source, sites, scope, [], [team])[0].workers[0];
+    assert.equal(projected.workerTeamColorHex, '#d96cbd');
+    assert.equal(projected.teamId, 'b');
+    assert.equal(projected.isSiteSupport, true);
+    assert.equal(projected.unitPrice, undefined);
+    assert.equal(projected.bankAccount, undefined);
+    assert.equal(projectSiteWorkReports(source, sites, scope, [], [{ ...team, color: '#3a729f' }])[0].workers[0].workerTeamColorHex, '#3a729f');
+    assert.equal(projectSiteWorkReports(source, sites, scope, [], [{ ...team, color: 'invalid' }])[0].workers[0].workerTeamColorHex, undefined);
+});
+
 test('실제 callable은 담당 현장 지원 공수를 반환하고 일반 작업자와 담당 해제를 차단한다',
     { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
     const app = admin.initializeApp({ projectId: 'demo-site-support-tests' });
@@ -60,7 +73,7 @@ test('실제 callable은 담당 현장 지원 공수를 반환하고 일반 작�
     const fixtures: Record<string, unknown> = {
         'users/leader': { status: 'active', position: '팀장', linkedWorkerIds: ['own'] },
         'users/member': { status: 'active', accountType: 'worker', linkedWorkerIds: ['own'] },
-        'teams/a': { name: '담당팀', legacyId: 'legacy-a' }, 'teams/b': { name: '지원팀', legacyId: 'legacy-b' },
+        'teams/a': { name: '담당팀', legacyId: 'legacy-a' }, 'teams/b': { name: '지원팀', legacyId: 'legacy-b', color: '#d96cbd' },
         'workers/own': { teamId: 'a', name: '소속인원' }, 'workers/guest': { teamId: 'b', name: '지원인원', contact: 'private' },
         'sites/site': sites[0], 'sites/assignment': sites[1],
         'daily_reports/r': reports[0],
@@ -78,6 +91,7 @@ test('실제 callable은 담당 현장 지원 공수를 반환하고 일반 작�
         const support = result.rows.flatMap((row: any) => row.workers).filter((row: any) => row.isSiteSupport);
         assert.equal(support.length, 2);
         assert.ok(support.every((row: any) => row.workerTeamName === '지원팀' && !('unitPrice' in row) && !('contact' in row)));
+        assert.ok(support.every((row: any) => row.workerTeamColorHex === '#d96cbd'));
         assert.ok((await call('daily_reports')).rows.every((row: any) => row.workers.every((worker: any) => worker.workerId === 'own')));
         await assert.rejects(call('site_work_reports', 'member'), (error: any) => error.code === 'permission-denied');
         await db.doc('sites/site').update({ responsibleTeamId: 'b' });

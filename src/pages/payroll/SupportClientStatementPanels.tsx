@@ -1,5 +1,7 @@
 import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
 import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
+import { useLaborStatementWorkerRefresh } from '../../hooks/useLaborStatementWorkerRefresh';
+import { formatLaborStatementPaymentAccountLabel, getWorkerMasterLaborStatementPayType } from '../../utils/payrollLaborStatementDefaults';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronRight, faCircleCheck, faCopy, faDownload, faFileInvoice, faFileInvoiceDollar, faPlus, faReceipt, faShareNodes, faSave, faSpinner, faTrash, faTriangleExclamation, faUsers, faXmark } from '@fortawesome/free-solid-svg-icons';
@@ -289,14 +291,14 @@ export const SupportClientLaborStatementPreview: React.FC<{
     const statementTableMinWidth = statementColumns.reduce((sum, column) => sum + column.width, 0);
     const statementSheetMinWidth = statementTableMinWidth + 82;
     const footerRowSpan = viewOptions.isSplitView ? 2 : 1;
-    const getPaymentLabel = (payType: SupportStatementPayType) => payType === 'delegate' ? '위임' : '직불';
+    const getPaymentLabel = formatLaborStatementPaymentAccountLabel;
     const formatBankInfo = (row: SupportClientLaborStatementRow) =>
         [row.bankName, row.accountHolder, row.accountNumber].filter(Boolean).join(' / ');
     const getAddressContent = (row: SupportClientLaborStatementRow) => {
         const parts = [row.address || '-'];
         if (viewOptions.showBankUnderAddress) {
             const bankInfo = formatBankInfo(row);
-            parts.push(bankInfo ? `${bankInfo} (${getPaymentLabel(row.payType)})` : getPaymentLabel(row.payType));
+            parts.push(bankInfo ? `${bankInfo} (${getPaymentLabel(row.payType, row.accountPurpose)})` : getPaymentLabel(row.payType, row.accountPurpose));
         }
         return parts;
     };
@@ -382,7 +384,7 @@ export const SupportClientLaborStatementPreview: React.FC<{
                             )}
                             {viewOptions.showBankColumn && (
                                 <td rowSpan={viewOptions.isSplitView ? 2 : 1} className={`break-words border-2 border-slate-800 px-1.5 py-1.5 text-[10px] leading-snug ${row.payType === 'delegate' ? 'bg-yellow-100 text-yellow-900' : 'bg-white text-slate-700'}`}>
-                                    <div className="font-black">{getPaymentLabel(row.payType)}</div>
+                                    <div className="font-black">{getPaymentLabel(row.payType, row.accountPurpose)}</div>
                                     <div className="mt-1 font-semibold">{formatBankInfo(row) || '-'}</div>
                                 </td>
                             )}
@@ -441,6 +443,7 @@ export const SupportClientLaborStatementPanel: React.FC<{
     onOutputSaved?: () => Promise<void> | void;
     onClose: () => void;
 }> = ({ target, yearMonth, statementKey, outputSource = 'support-client-site', onOutputSaved, onClose }) => {
+    const { findWorker: findRefreshedWorker, refresh: refreshWorkerDb, loading: loadingWorkerDb, error: workerDbError } = useLaborStatementWorkerRefresh();
     const [statementOptionPreset, setStatementOptionPreset] = useState<StatementIssueOptionPreset>(() => loadStatementIssueOptionPreset());
     const [showBankColumn, setShowBankColumn] = useState(() => loadSupportClientLaborStatementDefaults(statementOptionPreset).showBankColumn);
     const [showBillingColumns, setShowBillingColumns] = useState(() => loadSupportClientLaborStatementDefaults(statementOptionPreset).showBillingColumns);
@@ -468,13 +471,14 @@ export const SupportClientLaborStatementPanel: React.FC<{
     const delegateAccountHolder = pagePrimaryAccount.account?.accountHolder ?? legacyDelegateAccountHolder;
     const delegateAccountNumber = pagePrimaryAccount.account?.accountNumber ?? legacyDelegateAccountNumber;
     const statementOptions = useMemo<SupportClientLaborStatementOptions>(() => ({
+        workerAccountPurpose: useWorkerMasterPayType ? 'directPay' : 'default',
         unitPriceOverride: appliedBulkUnitPrice,
         defaultPayType: 'direct',
-        workerPayTypes,
+        workerPayTypes: useWorkerMasterPayType ? workerPayTypes : {},
         delegateBankName,
         delegateAccountHolder,
         delegateAccountNumber
-    }), [appliedBulkUnitPrice, workerPayTypes, delegateBankName, delegateAccountHolder, delegateAccountNumber]);
+    }), [appliedBulkUnitPrice, workerPayTypes, delegateBankName, delegateAccountHolder, delegateAccountNumber, useWorkerMasterPayType]);
     const statementViewOptions = useMemo<SupportClientLaborStatementViewOptions>(() => ({
         showBankColumn,
         showBillingColumns,
@@ -483,8 +487,14 @@ export const SupportClientLaborStatementPanel: React.FC<{
         showTeamUnderName
     }), [showBankColumn, showBillingColumns, isSplitView, showBankUnderAddress, showTeamUnderName]);
     const previews = useMemo(
-        () => buildSupportClientLaborPreviews(target.rows, target.billingRateBySiteKey, target.billingRateByRowId, statementOptions),
-        [target.rows, target.billingRateBySiteKey, target.billingRateByRowId, statementOptions]
+        () => buildSupportClientLaborPreviews(target.rows.map(row => {
+            if (!findRefreshedWorker) return row;
+            const worker = findRefreshedWorker(row);
+            return { ...row, workerBankName: worker?.directPayBankName ?? '',
+                workerDefaultAccount: { bankName: worker?.bankName ?? '', accountNumber: worker?.accountNumber ?? '', accountHolder: worker?.accountHolder ?? '' },
+                workerAccountNumber: worker?.directPayAccountNumber ?? '', workerAccountHolder: worker?.directPayAccountHolder ?? '' };
+        }), target.billingRateBySiteKey, target.billingRateByRowId, statementOptions),
+        [target.rows, target.billingRateBySiteKey, target.billingRateByRowId, statementOptions, findRefreshedWorker]
     );
     const [statusMessage, setStatusMessage] = useState('');
     const [busyAction, setBusyAction] = useState<'copy' | 'send' | 'excel' | null>(null);
@@ -497,13 +507,13 @@ export const SupportClientLaborStatementPanel: React.FC<{
         if (!useWorkerMasterPayType) return [];
         const missingByKey = new Map<string, string>();
         target.rows.forEach((row) => {
-            if (row.workerLaborStatementPayType) return;
+            if (findRefreshedWorker ? getWorkerMasterLaborStatementPayType(findRefreshedWorker(row)) : row.workerLaborStatementPayType) return;
             const key = getSupportLaborStatementWorkerKey(row);
             if (!key || missingByKey.has(key)) return;
             missingByKey.set(key, row.workerName || row.workerId || '이름 없음');
         });
         return Array.from(missingByKey.values());
-    }, [target.rows, useWorkerMasterPayType]);
+    }, [target.rows, useWorkerMasterPayType, findRefreshedWorker]);
     const statementText = useMemo(
         () => buildSupportClientLaborStatementText(target, previews, yearMonth),
         [target, previews, yearMonth]
@@ -651,14 +661,19 @@ export const SupportClientLaborStatementPanel: React.FC<{
         setBulkUnitPriceInput('');
     }, []);
 
-    const handleUseWorkerMasterPayTypeChange = useCallback((checked: boolean) => {
+    const handleUseWorkerMasterPayTypeChange = async (checked: boolean) => {
+        const findWorker = checked ? await refreshWorkerDb() : findRefreshedWorker;
+        if (checked && !findWorker) return;
         setUseWorkerMasterPayType(checked);
         setWorkerPayTypes(buildSupportWorkerPayTypesFromDefaults(
-            target.rows,
+            findWorker ? target.rows.map(row => ({ ...row,
+                workerLaborStatementPayType: getWorkerMasterLaborStatementPayType(findWorker(row)),
+            })) : target.rows,
             checked,
             loadSupportClientLaborStatementDefaults(statementOptionPreset)
         ));
-    }, [statementOptionPreset, target.rows]);
+        if (checked && !showBankUnderAddress) setShowBankColumn(true);
+    };
 
     const handleStatementOptionPresetChange = useCallback((value: StatementIssueOptionPreset) => {
         setStatementOptionPreset(value);
@@ -783,6 +798,7 @@ export const SupportClientLaborStatementPanel: React.FC<{
                 accountNumber: row.accountNumber,
                 accountHolder: row.accountHolder,
                 payType: row.payType,
+                accountPurpose: row.accountPurpose,
                 days: row.days,
                 totalManDay: row.totalManDay,
                 unitPrice: row.unitPrice,
@@ -924,11 +940,14 @@ export const SupportClientLaborStatementPanel: React.FC<{
                             <input
                                 type="checkbox"
                                 checked={useWorkerMasterPayType}
+                                disabled={loadingWorkerDb}
                                 onChange={(event) => handleUseWorkerMasterPayTypeChange(event.target.checked)}
                                 className="accent-blue-600"
                             />
                             DB 직불여부 적용
                         </label>
+                        {loadingWorkerDb && <span role="status" className="text-xs text-slate-500">직불 정보 불러오는 중…</span>}
+                        {workerDbError && <span role="alert" className="text-xs text-red-600">{workerDbError}</span>}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
                         <span className="text-xs font-black text-slate-500">옵션 저장</span>

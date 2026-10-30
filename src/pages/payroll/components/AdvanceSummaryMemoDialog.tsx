@@ -66,10 +66,10 @@ export default function AdvanceSummaryMemoDialog({ workerName, context, sources,
         </header>
         <div className="cy-detail-dialog__body">
         <form className="as-memo-form" onSubmit={save} aria-busy={saving}>
-            {sources.length > 1 && <p className="as-memo-help">급여 구분별로 저장된 비고를 수정할 수 있습니다.</p>}
+            {sources.length > 1 && <p className="as-memo-help">신청별로 저장된 비고를 수정할 수 있습니다.</p>}
             {sources.map((source, index) => <label key={source.id} className="as-memo-field">
-                <span>{sources.length > 1 ? `${source.salaryModel} · 내역 ${index + 1}` : '비고'}</span>
-                <textarea aria-label={sources.length > 1 ? `${source.salaryModel} 비고 ${index + 1}` : '비고 내용'}
+                <span>{sources.length > 1 ? `${source.label} · 내역 ${index + 1}` : '비고'}</span>
+                <textarea aria-label={sources.length > 1 ? `${source.label} 비고 ${index + 1}` : '비고 내용'}
                     value={drafts[index]} maxLength={4000} rows={sources.length > 1 ? 4 : 6} disabled={saving}
                     placeholder="비고를 입력하세요" onChange={event => {
                         const value = event.target.value;

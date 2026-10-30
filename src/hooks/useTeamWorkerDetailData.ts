@@ -72,9 +72,9 @@ export function useTeamWorkerDetailData({ startDate, endDate }: { startDate: str
             ? { ...value, workers: value.workers.map(worker => String(worker.id ?? '') === id ? { ...worker, signatureUrl: url } : worker) }
             : value);
     }, [masterKey]);
-    const updateWorkerStatus = useCallback((id: string, status: string, isActive: boolean) => {
+    const updateWorkerStatus = useCallback((id: string, status: string, isActive: boolean, dates: Pick<Worker, 'joinDate' | 'retirementDate'> = {}) => {
         setMaster(value => value.key === masterKey && currentKeys.current.masterKey === masterKey
-            ? { ...value, workers: value.workers.map(worker => String(worker.id ?? '') === id ? { ...worker, status, isActive } : worker) }
+            ? { ...value, workers: value.workers.map(worker => String(worker.id ?? '') === id ? { ...worker, status, isActive, ...dates } : worker) }
             : value);
     }, [masterKey]);
 

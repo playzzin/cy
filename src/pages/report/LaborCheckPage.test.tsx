@@ -151,6 +151,34 @@ describe('LaborCheckPage', () => {
         </MemoryRouter>
     );
 
+    it('출역이 전혀 없어도 재직 기간에 해당하는 월에는 표시하고 입사 전과 퇴사 후에는 제외한다', async () => {
+        (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{
+            id: 'period-worker', name: '기간검증', teamId: 'team-1', teamName: '김효동팀', status: '퇴사',
+            joinDate: '2026-07-15', retirementDate: '2026-09-10',
+        }]);
+        (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([]);
+        (dailyReportService.getReportWorkerRowsByRange as jest.Mock).mockResolvedValue([]);
+        renderSeptember();
+        await screen.findByText('기간검증 (퇴사)');
+        expect(screen.getByRole('checkbox', { name: '이번 달 출역자만' })).not.toBeChecked();
+        expect(cell('기간검증', 1)).toHaveClass('bg-yellow-200');
+        expect(cell('기간검증', 11)).toHaveClass('bg-slate-100');
+        fireEvent.click(screen.getByRole('checkbox', { name: '이번 달 출역자만' }));
+        expect(screen.queryByText('기간검증 (퇴사)')).toBeNull();
+        fireEvent.click(screen.getByRole('checkbox', { name: '이번 달 출역자만' }));
+        for (let i = 0; i < 2; i++) {
+            fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
+            await screen.findByText('기간검증 (퇴사)');
+        }
+        expect(cell('기간검증', 14)).toHaveClass('bg-slate-100');
+        expect(cell('기간검증', 15)).toHaveClass('bg-yellow-200');
+        fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
+        await screen.findByText('선택한 조건에 해당하는 재직·출역 인원이 없습니다.');
+        fireEvent.change(screen.getByLabelText('조회 월'), { target: { value: '2026-10' } });
+        await waitFor(() => expect(dailyReportService.getReportWorkerRowsByRange).toHaveBeenLastCalledWith(expect.objectContaining({ startDate: '2026-10-01' })));
+        expect(screen.queryByText('기간검증 (퇴사)')).toBeNull();
+    });
+
     it.each([
         { status: '퇴사', isActive: true },
         { status: 'inactive', isActive: true },
@@ -180,7 +208,7 @@ describe('LaborCheckPage', () => {
             await screen.findByText('검증 퇴사자 (퇴사)');
         }
         fireEvent.click(screen.getByRole('button', { name: '다음 달' }));
-        await screen.findByText('선택한 달의 출역 기록이 없습니다.');
+        await screen.findByText('선택한 조건에 해당하는 재직·출역 인원이 없습니다.');
         expect(screen.queryByText('검증 퇴사자 (퇴사)')).toBeNull();
         fireEvent.click(screen.getByRole('checkbox', { name: '이번 달 출역자만' }));
         expect(screen.queryByText('검증 퇴사자 (퇴사)')).toBeNull();
@@ -209,7 +237,7 @@ describe('LaborCheckPage', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '퇴사자 숨기기' }));
         expect(screen.queryByText('김효동 (퇴사)')).toBeNull();
-        fireEvent.click(screen.getByRole('button', { name: '출역 퇴사자 보기' }));
+        fireEvent.click(screen.getByRole('button', { name: '퇴사자 보기' }));
         expect(screen.getByText('김효동 (퇴사)')).toBeInTheDocument();
         expect(dailyWorkerReportSiteService.save).not.toHaveBeenCalled();
         expect(dailyWorkerReportSiteService.delete).not.toHaveBeenCalled();
@@ -317,24 +345,21 @@ describe('LaborCheckPage', () => {
         expect(cell('김효동', 2)).toHaveClass('bg-yellow-200');
     });
 
-    it('과거 출역만 있는 인원은 이번 달 출역자 필터를 해제했을 때만 월초부터 표시한다', async () => {
+    it('재직자는 최초 출역 이후 출역 없는 달에도 기본 표시하고 출역자 필터로만 숨긴다', async () => {
         (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([output('worker-1', '2026-07-31')]);
         (dailyReportService.getReportWorkerRowsByRange as jest.Mock).mockResolvedValue([]);
         renderSeptember();
-        await screen.findByText('선택한 달의 출역 기록이 없습니다.');
-        expect(screen.queryByText('김효동')).toBeNull();
-        fireEvent.click(screen.getByRole('checkbox', { name: '이번 달 출역자만' }));
         await screen.findByRole('button', { name: '김효동 2026-09-01 대체 현장명' });
         expect(cell('김효동', 1)).toHaveClass('bg-yellow-200');
+        fireEvent.click(screen.getByRole('checkbox', { name: '이번 달 출역자만' }));
+        expect(screen.queryByText('김효동')).toBeNull();
     });
 
-    it('출역 이력이 전혀 없는 인원은 전체 조회에서도 임의로 월초부터 색칠하지 않는다', async () => {
+    it('입사일과 출역이 모두 없는 인원은 재직 기간을 추정하지 않고 날짜 입력을 안내한다', async () => {
         (dailyReportService.getReportWorkerRowsByRange as jest.Mock).mockResolvedValue([]);
         renderSeptember();
-        await screen.findByText('선택한 달의 출역 기록이 없습니다.');
-        fireEvent.click(screen.getByRole('checkbox', { name: '이번 달 출역자만' }));
-        await screen.findByText('김효동');
-        expect(cell('김효동', 1)).toHaveClass('bg-slate-100');
-        expect(cell('김효동', 1)).toHaveAttribute('title', '출역 이력 없음 · 신고 대상 아님');
+        await screen.findByText('선택한 조건에 해당하는 재직·출역 인원이 없습니다.');
+        expect(screen.queryByText('김효동')).toBeNull();
+        expect(screen.getByText(/입·퇴사일 확인이 필요한 작업자가 1명/)).toBeInTheDocument();
     });
 });

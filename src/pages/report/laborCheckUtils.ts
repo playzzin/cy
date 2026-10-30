@@ -1,6 +1,7 @@
 export type LaborCheckWorkerLike = {
     workerKey: string;
     retired: boolean;
+    employedInMonth?: boolean;
 };
 
 export type LaborCheckOutputLike = {
@@ -13,10 +14,12 @@ export const getVisibleLaborCheckWorkers = <T extends LaborCheckWorkerLike>(
     workerKeysWithOutput: Set<string>,
     showRetired: boolean,
     showOnlyWorkersWithOutput: boolean,
-): T[] => workers.filter((worker) => (
-    (!showOnlyWorkersWithOutput || workerKeysWithOutput.has(worker.workerKey))
-    && (!worker.retired || (showRetired && workerKeysWithOutput.has(worker.workerKey)))
-));
+): T[] => workers.filter((worker) => {
+    const hasOutput = workerKeysWithOutput.has(worker.workerKey);
+    // 날짜 기반 대상 여부가 없는 이전 호출은 기존 필터를 유지한다.
+    const eligible = worker.employedInMonth === undefined ? !worker.retired : worker.employedInMonth;
+    return (hasOutput || eligible) && (!showOnlyWorkersWithOutput || hasOutput) && (!worker.retired || showRetired);
+});
 
 export const getFirstOutputDateByWorker = (
     outputRows: LaborCheckOutputLike[],

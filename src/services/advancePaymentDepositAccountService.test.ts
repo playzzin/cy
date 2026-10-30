@@ -14,9 +14,16 @@ beforeEach(() => {
 
 test('선택값만 저장하고 금액·비고·급여 우선순위 시각은 변경하지 않는다', async () => {
     transaction.get.mockResolvedValue({ exists: () => true, data: () => ({ items: { laborAdvance1: 50000 }, memo: '유지할 비고', updatedAt: 'financial-time' }) });
-    await advancePaymentDepositAccountService.save([{ id: 'original', expectedDepositAccount: '', depositAccount: 'cheongyeon' }]);
+    await advancePaymentDepositAccountService.save([{ id: 'original', expectedDepositAccount: '', depositAccount: 'corporate' }]);
     expect(doc).toHaveBeenCalledWith({}, 'advance_payments', 'original');
-    expect(transaction.update).toHaveBeenCalledWith('advance_payments/original', { depositAccount: 'cheongyeon', depositAccountUpdatedAt: 'selection-time' });
+    expect(transaction.update).toHaveBeenCalledWith('advance_payments/original', { depositAccount: 'corporate', depositAccountUpdatedAt: 'selection-time' });
+});
+
+test('신청 요약의 입금계좌는 가불관리 대신 신청 원본에만 저장한다', async () => {
+    transaction.get.mockResolvedValue({ exists: () => true, data: () => ({ depositAccount: '' }) });
+    await advancePaymentDepositAccountService.save([{ id: 'request', expectedDepositAccount: '', depositAccount: 'other' }], 'advance_requests');
+    expect(doc).toHaveBeenCalledWith({}, 'advance_requests', 'request');
+    expect(transaction.update).toHaveBeenCalledWith('advance_requests/request', { depositAccount: 'other', depositAccountUpdatedAt: 'selection-time' });
 });
 
 test('합산한 원본을 모두 읽은 뒤 같은 선택을 저장하고 선택을 해제할 수 있다', async () => {

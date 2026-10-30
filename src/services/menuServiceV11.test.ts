@@ -97,15 +97,15 @@ describe('menuServiceV11 canonical Firestore document', () => {
 
   it('preserves multiple separators and their appearance through save and reload', async () => {
     const config = { admin: { name: '테스트', icon: 'faFolder', menu: [
-      { text: '-', path: '/invalid-link', icon: 'faLink', dividerStyle: 'dashed', dividerSpacing: 'relaxed' },
+      { text: '-', path: '/invalid-link', icon: 'faLink', dividerTitle: '업무 관리', dividerStyle: 'dashed', dividerSpacing: 'relaxed' },
       { text: '그룹', sub: ['-', { text: '항목', path: '/test' }, '-'] },
       { text: '-' }
-    ] } } as any;
+    ], linkedPositionDivider: { dividerTitle: '직책별 메뉴', dividerStyle: 'dashed', dividerSpacing: 'compact', hide: true } } } as any;
     const saved = await menuServiceV11.saveMenuConfig(config);
     const dividers = saved.admin.menu.filter(item => item.text === '-');
     expect(dividers).toHaveLength(2);
     expect(new Set(dividers.map(item => item.id)).size).toBe(2);
-    expect(dividers[0]).toMatchObject({ dividerStyle: 'dashed', dividerSpacing: 'relaxed' });
+    expect(dividers[0]).toMatchObject({ dividerTitle: '업무 관리', dividerStyle: 'dashed', dividerSpacing: 'relaxed' });
     expect(dividers[0]).not.toHaveProperty('path');
     expect(dividers[0]).not.toHaveProperty('icon');
     const nested = saved.admin.menu.find(item => item.text === '그룹')!.sub as any[];
@@ -114,6 +114,7 @@ describe('menuServiceV11 canonical Firestore document', () => {
     menuServiceV11.clearCache();
     const loaded = await menuServiceV11.getMenuConfig();
     expect(loaded!.admin.menu.filter(item => item.text === '-')).toEqual(dividers);
+    expect(loaded!.admin.linkedPositionDivider).toEqual(config.admin.linkedPositionDivider);
     await menuServiceV11.pruneDuplicates();
     const pruned = await menuServiceV11.getMenuConfig();
     expect(pruned!.admin.menu.filter(item => item.text === '-')).toHaveLength(2);

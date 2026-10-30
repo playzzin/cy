@@ -1,101 +1,90 @@
-import type { AdvancePayment } from '../../../services/advancePaymentService';
-import { buildAdvanceSummary } from './advanceSummary';
+import type { AdvanceRequest } from '../../../services/advanceRequestService';
+import { buildAdvanceSummary, isAdvanceSummaryFilter } from './advanceSummary';
 
-jest.mock('../../../services/firestoreCrudCompat', () => ({}));
-
-const teams = [{ id: 'team-a', legacyId: 'old-a', name: '테스트 A팀' }, { id: 'team-b', name: '테스트 B팀' }];
+const teams = [{ id: 'team-a', legacyId: 'old-a', name: '검증 A팀' }, { id: 'team-b', name: '검증 B팀' }];
 const filters = { yearMonth: '2026-10', teamId: '', item: 'all' as const, query: '' };
-const payment = (overrides: Partial<AdvancePayment> = {}): AdvancePayment => ({
-    id: 'payment-a', workerId: 'worker-a', workerName: '테스트 작업자', teamId: 'team-a', teamName: '과거 팀명',
-    yearMonth: '2026-10', salaryModel: '일급제', items: { corporateAdvance1: 100000, laborAdvance2: 50000 },
-    prevMonthCarryover: 20000, accommodation: 30000, privateRoom: 0, gloves: 0, deposit: 0, fines: 0,
-    electricity: 0, gas: 0, internet: 0, water: 0, totalDeduction: 200000, ...overrides,
+const request = (overrides: Partial<AdvanceRequest> = {}): AdvanceRequest => ({
+    id: 'request-a', workerId: 'worker-a', workerName: '검증 작업자', teamId: 'team-a',
+    yearMonth: '2026-10', periodStart: '2026-09-01', periodEnd: '2026-10-31',
+    currentMonthEarned: 900000, previousMonthEarned: 500000, earnedAmountSnapshot: 1400000,
+    existingAdvanceAmountSnapshot: 300000, activeRequestAmountSnapshot: 200000, availableAmountSnapshot: 900000,
+    requestedAmount: 100000, category: 'first', status: 'requested', ...overrides,
 });
 
-test('가불만 합산하고 이월·공제·사용자 정의 공제와 다른 월/팀은 제외한다', () => {
+test('신청금액만 분류별로 합산하고 가능액·다른 월·팀·취소·반려는 제외한다', () => {
     const result = buildAdvanceSummary([
-        payment({ items: { corporateAdvance1: 100000, laborAdvance2: 50000, customDeduction: 90000 } }),
-        payment({ id: 'other-month', yearMonth: '2026-09' }), payment({ id: 'outside', teamId: 'outside-scope' }),
+        request(), request({ id: 'second', category: 'second', requestedAmount: 50000, status: 'approved' }),
+        request({ id: 'legacy', category: undefined, requestedAmount: 20000, status: 'paid' }),
+        request({ id: 'month', yearMonth: '2026-09' }), request({ id: 'outside', teamId: 'outside' }),
+        request({ id: 'cancelled', status: 'cancelled' }), request({ id: 'rejected', status: 'rejected' }),
     ], teams, filters);
-    expect(result.total).toBe(150000);
-    expect(result.corporate).toBe(100000);
-    expect(result.labor).toBe(50000);
-    expect(result.workerCount).toBe(1);
-    expect(result.groups[0].total).toBe(150000);
+    expect(result).toMatchObject({ total: 170000, first: 100000, second: 50000, other: 0, unclassified: 20000, workerCount: 1 });
+    expect(result.groups[0].rows[0].items).toEqual({ first: 100000, second: 50000, unclassified: 20000 });
+    expect(result.groups[0].total).toBe(170000);
 });
 
-test('legacy 팀 ID와 여러 급여 구분을 같은 작업자 행에 합치고 비고를 보존한다', () => {
+test('분류 필터는 합산 금액·비고·입금계좌의 대상 신청에 함께 적용된다', () => {
     const result = buildAdvanceSummary([
-        payment({ teamId: 'old-a', memo: '테스트 메모 A' }),
-        payment({ id: 'monthly', salaryModel: '월급제', items: { corporateAdvance1: 25000 }, memo: '테스트 메모 B' }),
-    ], teams, filters);
-    expect(result.groups).toHaveLength(1);
-    expect(result.groups[0].rows).toHaveLength(1);
-    expect(result.groups[0].rows[0]).toMatchObject({ amount: 175000, memos: ['테스트 메모 A', '테스트 메모 B'] });
+        request({ teamId: 'old-a', memo: '1회차 메모', depositAccount: 'cheongyeon' }),
+        request({ id: 'second', category: 'second', memo: '2회차 메모', depositAccount: 'dawon' }),
+    ], teams, { ...filters, item: 'first', teamId: 'team-a' });
+    expect(result.total).toBe(100000);
+    expect(result.groups[0].rows[0]).toMatchObject({ memos: ['1회차 메모'],
+        memoSources: [{ id: 'request-a', memo: '1회차 메모', label: '1회차' }],
+        depositAccountSources: [{ id: 'request-a', depositAccount: 'cheongyeon' }] });
 });
 
-test('동명이인을 합치지 않고 같은 작업자의 다른 팀 내역도 구분한다', () => {
-    const result = buildAdvanceSummary([
-        payment(), payment({ id: 'another-person', workerId: 'worker-b' }), payment({ id: 'other-team', teamId: 'team-b' }),
-    ], teams, filters);
+test('같은 작업자의 여러 신청은 합산하고 동명이인과 다른 팀은 구분한다', () => {
+    const result = buildAdvanceSummary([request(), request({ id: 'repeat', requestedAmount: 25000 }),
+        request({ id: 'another', workerId: 'worker-b' }), request({ id: 'team', teamId: 'team-b' })], teams, filters);
     expect(result.groups.map(group => group.rows.length)).toEqual([2, 1]);
+    expect(result.groups[0].rows.find(row => row.workerId === 'worker-a')?.amount).toBe(125000);
     expect(result.workerCount).toBe(2);
-    expect(result.total).toBe(450000);
+    expect(result.total).toBe(325000);
 });
 
-test('합산된 급여 구분별 입금계좌와 원본 ID를 필터에서도 보존한다', () => {
-    const result = buildAdvanceSummary([
-        payment({ depositAccount: 'cheongyeon' }),
-        payment({ id: 'monthly', salaryModel: '월급제', depositAccount: 'dawon', items: { laborAdvance1: 20000 } }),
-    ], teams, { ...filters, item: 'corporate' });
-    expect(result.groups[0].rows[0].depositAccountSources).toEqual([
-        { id: 'payment-a', depositAccount: 'cheongyeon' }, { id: 'monthly', depositAccount: 'dawon' },
-    ]);
+test('혼합된 작업자 행도 신청 원본별 입금 구분으로 정확히 합산하고 모든 조회 조건을 적용한다', () => {
+    const requests = [
+        request({ depositAccount: 'corporate' }),
+        request({ id: 'second', category: 'second', requestedAmount: 50000, depositAccount: 'personal' }),
+        request({ id: 'other', category: 'other', source: 'manual-prepayment', requestedAmount: 30000, depositAccount: 'other', teamId: 'team-b', workerName: '다른 작업자' }),
+        request({ id: 'empty', requestedAmount: 10000 }),
+        request({ id: 'legacy', requestedAmount: 20000, depositAccount: 'dawon' }),
+        request({ id: 'cancelled', depositAccount: 'corporate', status: 'cancelled' }),
+    ];
+    const result = buildAdvanceSummary(requests, teams, filters);
+    expect(result.depositTotals).toEqual({ corporate: 100000, personal: 50000, other: 30000, unclassified: 30000 });
+    expect(Object.values(result.depositTotals).reduce((sum, amount) => sum + amount, 0)).toBe(result.total);
+    expect(buildAdvanceSummary(requests, teams, { ...filters, item: 'second' }).depositTotals).toEqual({ corporate: 0, personal: 50000, other: 0, unclassified: 0 });
+    expect(buildAdvanceSummary(requests, teams, { ...filters, teamId: 'team-a' }).depositTotals.other).toBe(0);
+    expect(buildAdvanceSummary(requests, teams, { ...filters, query: '다른 작업자' }).depositTotals).toEqual({ corporate: 0, personal: 0, other: 30000, unclassified: 0 });
 });
 
-test('법인·노무·개별 항목과 팀·검색 조건이 소계 및 전체 합계에 동일하게 적용된다', () => {
-    const records = [payment({ memo: '검색용 메모' }), payment({ id: 'b', workerId: 'worker-b', teamId: 'team-b' })];
-    expect(buildAdvanceSummary(records, teams, { ...filters, item: 'corporate', teamId: 'old-a' }).total).toBe(100000);
-    expect(buildAdvanceSummary(records, teams, { ...filters, item: 'labor', query: '검색용' }).total).toBe(50000);
-    expect(buildAdvanceSummary(records, teams, { ...filters, item: 'laborAdvance2', teamId: 'team-a' }).total).toBe(50000);
-    expect(buildAdvanceSummary(records, teams, { ...filters, item: 'corporateAdvance4' }).groups).toHaveLength(0);
+test('검색·팀·분류 조건이 합계에 적용되며 잘못된 금액은 제외한다', () => {
+    const records = [request({ memo: '검색용' }), request({ id: 'b', teamId: 'team-b', category: 'other', source: 'manual-prepayment', requestedAmount: 30000 })];
+    expect(buildAdvanceSummary(records, teams, { ...filters, query: '검색용' }).total).toBe(100000);
+    expect(buildAdvanceSummary(records, teams, { ...filters, item: 'other' }).total).toBe(30000);
+    expect(buildAdvanceSummary(records, teams, { ...filters, teamId: 'old-a' }).total).toBe(100000);
     expect(buildAdvanceSummary(records, teams, { ...filters, teamId: 'unknown' }).groups).toHaveLength(0);
+    expect(buildAdvanceSummary(records, teams, { ...filters, item: 'second' }).groups).toHaveLength(0);
+    expect(isAdvanceSummaryFilter('corporate')).toBe(false);
+    expect(buildAdvanceSummary([0, -1, NaN, Infinity, 1.5].map(requestedAmount => request({ requestedAmount })), teams, filters).groups).toHaveLength(0);
 });
 
-test('음수 조정과 상쇄되는 가불을 보존하며 가불 없는 공제 전용 행은 숨긴다', () => {
-    const result = buildAdvanceSummary([
-        payment({ items: { corporateAdvance1: 50000, laborAdvance1: -50000 } }),
-        payment({ id: 'zero', workerId: 'worker-b', items: {} }),
-    ], teams, filters);
+test('현재 ID와 기존 ID의 신청을 합치고 현재 등록 계좌를 연결한다', () => {
+    const result = buildAdvanceSummary([request(), request({ id: 'legacy', workerId: 'legacy-a' })], teams, filters,
+        [{ id: 'worker-a', legacyId: 'legacy-a', bankName: '검증은행', accountNumber: ' 000-000 ', accountHolder: ' 예금주 ' }]);
     expect(result.groups[0].rows).toHaveLength(1);
-    expect(result.total).toBe(0);
-    expect(result.corporate).toBe(50000);
-    expect(result.labor).toBe(-50000);
+    expect(result.groups[0].rows[0]).toMatchObject({ amount: 200000, bankName: '검증은행', accountNumber: '000-000', accountHolder: '예금주' });
 });
 
-test('작업자 ID와 legacy ID로 현재 계좌를 연결하고 동명이인 계좌를 섞지 않는다', () => {
-    const result = buildAdvanceSummary([
-        payment(), payment({ id: 'b', workerId: 'legacy-b' }), payment({ id: 'missing', workerId: 'missing-worker' }),
-    ], teams, filters, [
-        { id: 'worker-a', bankName: '테스트 A은행', accountNumber: ' 000-0000-0000 ', accountHolder: ' 등록 예금주 A ' },
-        { id: 'worker-b', legacyId: 'legacy-b', bankName: '테스트 B은행', accountNumber: '000-1111-0000', accountHolder: '등록 예금주 B' },
+test('현재 ID를 우선하고 중복 기존 ID나 동명이인에게 타인의 계좌를 연결하지 않는다', () => {
+    const result = buildAdvanceSummary([request(), request({ id: 'duplicate', workerId: 'shared' }), request({ id: 'missing', workerId: 'missing' })], teams, filters, [
+        { id: 'worker-a', accountNumber: '000-0000' }, { id: 'worker-b', legacyId: 'worker-a', accountNumber: '000-1111' },
+        { id: 'worker-c', legacyId: 'shared', accountNumber: '000-2222' }, { id: 'worker-d', legacyId: 'shared', accountNumber: '000-3333' },
     ]);
     const rows = new Map(result.groups[0].rows.map(row => [row.workerId, row]));
-    expect(rows.get('worker-a')).toMatchObject({ bankName: '테스트 A은행', accountNumber: '000-0000-0000', accountHolder: '등록 예금주 A' });
-    expect(rows.get('legacy-b')).toMatchObject({ bankName: '테스트 B은행', accountNumber: '000-1111-0000', accountHolder: '등록 예금주 B' });
-    expect(rows.get('missing-worker')).toMatchObject({ bankName: '', accountNumber: '', accountHolder: '' });
-    expect(result.total).toBe(450000);
-});
-
-test('현재 ID를 legacy ID보다 우선하고 중복 legacy ID의 계좌는 표시하지 않는다', () => {
-    const result = buildAdvanceSummary([payment(), payment({ id: 'duplicate', workerId: 'shared-legacy' })], teams, filters, [
-        { id: 'worker-a', accountNumber: '000-0000-0000' },
-        { id: 'worker-b', legacyId: 'worker-a', accountNumber: '000-1111-0000' },
-        { id: 'worker-c', legacyId: 'shared-legacy', accountNumber: '000-2222-0000' },
-        { id: 'worker-d', legacyId: 'shared-legacy', accountNumber: '000-3333-0000' },
-    ]);
-    const rows = new Map(result.groups[0].rows.map(row => [row.workerId, row]));
-    expect(rows.get('worker-a')?.accountNumber).toBe('000-0000-0000');
-    expect(rows.get('worker-a')?.accountHolder).toBe('');
-    expect(rows.get('shared-legacy')?.accountNumber).toBe('');
+    expect(rows.get('worker-a')?.accountNumber).toBe('000-0000');
+    expect(rows.get('shared')?.accountNumber).toBe('');
+    expect(rows.get('missing')?.accountNumber).toBe('');
 });

@@ -5,6 +5,10 @@ import { MemoryRouter } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import type { QuarterVatPaymentRecord } from '../../services/quarterVatPaymentService';
 
+// These workflows render, save, reload and export the real ledger. Keep the
+// assertions intact while allowing the same release-run budget as the issue list.
+jest.setTimeout(15_000);
+
 const mockPayments: QuarterVatPaymentRecord[] = [];
 const mockGetPayments = jest.fn();
 const mockAddPayment = jest.fn();

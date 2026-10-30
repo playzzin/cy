@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation, useNavigationType, type NavigateOptions } from 'react-router-dom';
 import { useMobileShellScroll } from '../../hooks/useMobileScroll';
+import { useTeamLeaderTypography } from '../../hooks/useTeamLeaderTypography';
 import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
 // ROLE_SITE_MAP removed - now fully dynamic
@@ -29,13 +30,14 @@ import {
 } from '../../utils/themeMode';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
+import { canPreviewUsers as hasUserPreviewAccess } from '../../utils/userPreviewAccess';
 import { getPositionMenuView, isDevPositionSite } from '../../utils/linkedPositionMenus';
 import { getSidebarSide } from '../../utils/sidebarSide';
 import { getDevPreviewSession, isDevPreviewFrame } from '../../utils/devPreviewRuntime';
 import DevUserPreview from '../developer/DevUserPreview';
 import DevPreviewRouteGuard from '../developer/DevPreviewRouteGuard';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
-import { filterTeamWorkflowMenu } from '../../utils/teamWorkflowPolicy';
+import { filterTeamWorkflowMenu, isTeamLeaderRole } from '../../utils/teamWorkflowPolicy';
 
 // Removed hardcoded siteData in favor of dynamic loading
 
@@ -82,6 +84,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     // Dynamic Menu State
     const [siteData, setSiteData] = useState<SiteDataType | null>(null);
     const [canPreviewUsers, setCanPreviewUsers] = useState(false);
+    const [ownPositionId, setOwnPositionId] = useState<string>();
     const [userPreview, setUserPreview] = useState<{ positionId: string; path: string } | null>(null);
 
     const autoAppliedPositionForUserRef = useRef('');
@@ -374,14 +377,28 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     );
 
     useEffect(() => {
+        if (!siteData || !positions.length || currentPosition === 'full' || isDevPreviewFrame) return;
+        if (positions.some(position => position.id === currentPosition)) return;
+        // A removed/merged menu can leave a stale manual choice in localStorage.
+        // Let the account's current position resolve again after configuration changes.
+        setUserManuallyChangedPosition(false);
+        localStorage.removeItem(getMenuModeStorageKey('cy_position_manual', currentUser?.uid));
+        autoAppliedPositionForUserRef.current = '';
+    }, [siteData, positions, currentPosition, currentUser?.uid]);
+
+    useEffect(() => {
         let alive = true;
         setCanPreviewUsers(false);
+        setOwnPositionId(undefined);
         if (isDevPreviewFrame || !currentUser?.uid || !siteData) return;
         void import('../../services/userService').then(({ userService }) => userService.getUser(currentUser.uid, true)).then(profile => {
-            const roles = [profile?.role, profile?.position, ...(profile?.additionalPositions || [])].map(role => String(role || '').trim().toLowerCase().replace(/^pos_/, ''));
-            const allowed = profile?.status === 'active' && (roles.some(role => ['dev', 'developer', '개발', '개발자'].includes(role))
-                || positions.some(position => isDevPositionSite(siteData, getPositionSiteKey(position.id)) && roles.includes(position.id.toLowerCase().replace(/^pos_/, ''))));
-            if (alive) { setCanPreviewUsers(Boolean(allowed)); if (!allowed) setUserPreview(null); }
+            const allowed = hasUserPreviewAccess(profile, positions);
+            if (alive) {
+                setCanPreviewUsers(Boolean(allowed));
+                // Resolve the actor's menu even when a saved manual menu disables auto-selection.
+                setOwnPositionId(allowed ? resolveUserMenuPositionId(positions, profile) : undefined);
+                if (!allowed) setUserPreview(null);
+            }
         }).catch(() => { if (alive) { setCanPreviewUsers(false); setUserPreview(null); } });
         return () => { alive = false; };
     }, [currentUser?.uid, siteData, positions]);
@@ -499,6 +516,10 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         ? (siteData[effectiveSite] || siteData[fallbackSite] || null)
         : null;
     const restrictedTeam = useRestrictedTeamWorkflow();
+    useTeamLeaderTypography(!isSiteLayerMode && !userPreview && (
+        restrictedTeam || effectiveSite === 'pos_leader' ||
+        isTeamLeaderRole(positions.find(position => position.id === currentPosition)?.name)
+    ));
     const currentSiteData = sourceSiteData && siteData
         ? { ...sourceSiteData, menu: restrictedTeam ? filterTeamWorkflowMenu(getPositionMenuView(siteData, effectiveSite)) : getPositionMenuView(siteData, effectiveSite),
             ...(restrictedTeam && sourceSiteData.headerActions ? { headerActions: filterTeamWorkflowMenu(sourceSiteData.headerActions) } : {}) }
@@ -605,8 +626,14 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         console.log('Position changed to:', positionId);
     };
 
+    const exitUserPreview = () => {
+        // "My screen" restores the signed-in position, including its persisted menu mode.
+        changePosition(ownPositionId || currentPosition);
+        closeAll();
+    };
+
     const selectPositionMode = (positionId: string) => {
-        if (canPreviewUsers && positionId !== 'full' && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) {
+        if (canPreviewUsers && positionId !== 'full' && positionId !== ownPositionId && positionId !== currentPosition && !isDevPositionSite(siteData, getPositionSiteKey(positionId))) {
             openUserPreview(positionId);
         } else {
             changePosition(positionId);
@@ -659,6 +686,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         toggleDarkMode
     };
     const isMemoFullBleedPage = location.pathname === '/memos';
+    const isAdvancePaymentPage = location.pathname === '/payroll/advance-payment';
     const isWorkbookLedgerFullBleedPage = [
         '/payroll/workbook-ledger',
         '/payroll/workbook-ledger-dawon',
@@ -678,8 +706,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     ].includes(location.pathname);
     const mainContentClassName = [
         location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : '',
-        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage || location.pathname === '/tools/excel-converter' ? 'page-full-bleed' : '',
-        isDailyReportListPage ? 'page-contained-scroll' : '',
+        isMemoFullBleedPage || isWorkbookLedgerFullBleedPage || isAdvancePaymentPage || ['/tools/excel-converter', '/assignment/team-accommodation'].includes(location.pathname) ? 'page-full-bleed' : '',
+        isDailyReportListPage || isAdvancePaymentPage ? 'page-contained-scroll' : '',
         isSupportManagementHubPage ? 'page-support-management' : '',
     ].filter(Boolean).join(' ');
 
@@ -691,12 +719,12 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         );
     }
 
-    // The selected user owns the viewport without an enclosing DEV shell.
+    // The selected user owns the viewport without the actor's enclosing shell.
     if (userPreview && canPreviewUsers && currentUser) {
         return <SiteModeProvider {...siteModeValue}>
             <DevUserPreview key={currentUser.uid} actorUid={currentUser.uid} positionId={userPreview.positionId} path={userPreview.path}
                 positions={positions} onPosition={positionId => openUserPreview(positionId)}
-                onPath={path => setUserPreview(previous => previous ? { ...previous, path } : previous)} onExit={() => setUserPreview(null)} />
+                onPath={path => setUserPreview(previous => previous ? { ...previous, path } : previous)} onExit={exitUserPreview} />
         </SiteModeProvider>;
     }
     const routedContent = isDevPreviewFrame

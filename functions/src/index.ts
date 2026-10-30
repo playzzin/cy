@@ -157,6 +157,7 @@ export { analyzeExcelStructure } from './excelStructurePlanning';
 
 export { getTeamScopedData } from './teamScopedRead';
 export { saveTeamVehicleOil } from './teamVehicleOilWrite';
+export { getTeamAccommodationBoard, saveTeamAccommodationBoard } from './teamAccommodationBoard';
 export { teamExpenseRequests } from './teamExpenseRequests';
 export { teamWorkerRequests } from './teamWorkerRequests';
 
@@ -166,6 +167,7 @@ export { teamOffDutyRequests } from './teamOffDutyRequests';
 
 export { workerSignatures } from './workerSignatures';
 export { workerBankPhotos } from './workerBankPhotos';
+export { supportTeamDocuments } from './supportTeamDocuments';
 
 export { aiWorkspace } from './aiWorkspace';
 export { dailyReportAnalyticsAi } from './dailyReportAnalyticsAi';

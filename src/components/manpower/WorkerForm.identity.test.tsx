@@ -18,6 +18,20 @@ const input = () => screen.getByLabelText('AI 신분증 사진 선택') as HTMLI
 beforeEach(() => jest.clearAllMocks());
 afterEach(() => jest.restoreAllMocks());
 
+it('입사일과 퇴사일을 보존해 저장하고 역전된 기간은 저장하지 않는다', async () => {
+  render(<WorkerForm {...props} isEditMode initialData={{ id: 'fixture-worker', ...result, status: '퇴사', joinDate: '2026-07-01', retirementDate: '2026-09-30' } as any} />);
+  expect(screen.getByLabelText('입사일')).toHaveValue('2026-07-01');
+  expect(screen.getByLabelText('퇴사일')).toHaveValue('2026-09-30');
+  fireEvent.change(screen.getByLabelText('입사일'), { target: { value: '2026-10-01' } });
+  const form = screen.getByRole('form', { name: '작업자 등록·수정' });
+  fireEvent.submit(form);
+  await waitFor(() => expect(showErrorAlert).toHaveBeenCalledWith('재직 기간 확인', expect.stringContaining('빠를 수 없습니다')));
+  expect(props.onSave).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('입사일'), { target: { value: '2026-07-01' } });
+  fireEvent.submit(form);
+  await waitFor(() => expect(props.onSave).toHaveBeenCalledWith(expect.objectContaining({ joinDate: '2026-07-01', retirementDate: '2026-09-30' }), null));
+});
+
 it.each([false, true])('attaches the recognized photo when saving (edit=%s)', async isEditMode => {
   (geminiService.analyzeImage as jest.Mock).mockResolvedValue(result);
   render(<WorkerForm {...props} isEditMode={isEditMode}

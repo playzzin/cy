@@ -36,7 +36,7 @@ const workers = [
 beforeEach(() => {
     jest.clearAllMocks();
     (showConfirmAlert as jest.Mock).mockResolvedValue({ isConfirmed: true });
-    (teamResourceStatusService.update as jest.Mock).mockImplementation(async input => ({ id: input.id, status: input.status, isActive: input.status === '재직' }));
+    (teamResourceStatusService.update as jest.Mock).mockImplementation(async input => ({ id: input.id, status: input.status, isActive: input.status === '재직', joinDate: input.joinDate, retirementDate: input.retirementDate }));
     (useAuth as jest.Mock).mockReturnValue({ currentUser: { uid: 'team-detail-test' } });
     (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
     window.matchMedia = jest.fn().mockReturnValue({ matches: false });
@@ -79,13 +79,13 @@ test('급여명세서는 이름 검색 후 명시적으로 선택하며 동명�
     expect(screen.getByText('조건에 맞는 작업자가 없습니다.')).toBeInTheDocument();
 });
 
-test('출력일보에서 작업자 선택, 목록 전환, 조회월 변경을 바로 수행한다', async () => {
+test('작업자 출력일보에서 달력 상세와 조회월 변경을 바로 수행한다', async () => {
     render(<TeamWorkerDetailPage view="dailyReport" />);
     fireEvent.change(screen.getByLabelText('작업자 빠른 검색', { selector: 'input' }), { target: { value: '가상하나' } });
     fireEvent.click(await screen.findByRole('button', { name: /가상하나.*검증팀/ }));
     expect(await screen.findByLabelText(/가상하나의 .* 출력일보 달력/)).toBeInTheDocument();
     expect(screen.queryByLabelText('월별 노임명세서')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: /목록보기/ }));
+    expect(screen.queryByRole('tab', { name: /목록보기/ })).not.toBeInTheDocument();
     expect(screen.getAllByText('one 검증현장').length).toBeGreaterThan(0);
     const firstMonth = (dailyReportService.getWorkerRows as jest.Mock).mock.calls[0][0].startDate;
     fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
@@ -150,20 +150,56 @@ test('재직중이 기본이며 퇴사와 기타 비활성을 구분하고 소�
     expect(screen.getByRole('button', { name: /퇴사검증.*검증팀/ })).toBeInTheDocument();
 });
 
+test('인원과 서류 요약은 재직자를 기준으로 표시하고 퇴사·비활성 서류를 합산하지 않는다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
+        { ...workers[0], fileNameSaved: 'sample.png', signatureUrl: 'sample-signature' },
+        workers[1],
+        { ...workers[0], id: 'retired', name: '퇴사검증', status: '퇴사', fileNameSaved: 'old.png', signatureUrl: 'old-signature' },
+        { ...workers[0], id: 'blocked', name: '비활성검증', status: '출입금지', fileNameSaved: 'blocked.png' },
+    ]);
+    render(<TeamWorkerDetailPage />);
+    await screen.findByRole('button', { name: /가상하나.*검증팀/ });
+    const people = screen.getByLabelText('팀 재직 인원');
+    expect(people).toHaveTextContent('재직 인원2명');
+    expect(people).toHaveTextContent('퇴사 1명 · 비활성 1명 별도');
+    const documents = screen.getByLabelText('재직자 서류 등록 현황');
+    expect(documents).toHaveTextContent('신분증 1명');
+    expect(documents).toHaveTextContent('서명 1명');
+    expect(documents).toHaveTextContent('재직 2명 기준');
+    fireEvent.click(screen.getByRole('button', { name: '퇴사자 (1)' }));
+    expect(documents).toHaveTextContent('재직 2명 기준');
+    expect(people).toHaveTextContent('재직 인원2명');
+});
+
 test('팀장은 작업자정보에서 퇴사 처리 후 재직중으로 복귀하며 선택과 인원수가 갱신된다', async () => {
     (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
     render(<TeamWorkerDetailPage view="profile" />);
     fireEvent.click(await screen.findByRole('button', { name: /가상하나.*검증팀/ }));
     fireEvent.click(screen.getByRole('button', { name: '퇴사 처리' }));
-    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenCalledWith({ kind: 'worker', id: 'one', status: '퇴사', expectedStatus: '재직', expectedIsActive: null }));
+    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenCalledWith(expect.objectContaining({ kind: 'worker', id: 'one', status: '퇴사', expectedStatus: '재직', expectedIsActive: null, retirementDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) })));
     expect(await screen.findByRole('button', { name: '재직중으로 변경' })).toBeEnabled();
     expect(screen.getByRole('heading', { name: '가상하나' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '퇴사자 (1)' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('button', { name: /가상둘.*검증팀/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '재직중으로 변경' }));
-    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenLastCalledWith({ kind: 'worker', id: 'one', status: '재직', expectedStatus: '퇴사', expectedIsActive: false }));
+    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'worker', id: 'one', status: '재직', expectedStatus: '퇴사', expectedIsActive: false, retirementDate: '' })));
     expect(await screen.findByRole('button', { name: '퇴사 처리' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '재직중 (3)' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('팀장은 퇴사 적용일을 선택하고 역전된 기간을 저장할 수 없다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(true);
+    render(<TeamWorkerDetailPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /가상하나.*검증팀/ }));
+    fireEvent.change(screen.getByLabelText('재직 시작일'), { target: { value: '2026-10-01' } });
+    fireEvent.change(screen.getByLabelText('퇴사 적용일'), { target: { value: '2026-09-30' } });
+    fireEvent.click(screen.getByRole('button', { name: '퇴사 처리' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('빠를 수 없습니다');
+    expect(teamResourceStatusService.update).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('재직 시작일'), { target: { value: '2026-07-01' } });
+    fireEvent.click(screen.getByRole('button', { name: '퇴사 처리' }));
+    await waitFor(() => expect(teamResourceStatusService.update).toHaveBeenCalledWith(expect.objectContaining({ joinDate: '2026-07-01', retirementDate: '2026-09-30' })));
+    expect(screen.getByLabelText('퇴사 적용일')).toHaveValue('2026-09-30');
 });
 
 test('퇴사 취소와 저장 실패 시 기존 상태를 유지하고 중복 저장을 막는다', async () => {

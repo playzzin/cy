@@ -38,6 +38,33 @@ beforeEach(() => {
 const openEditor = () => render(<MemoryRouter initialEntries={['/admin/menu-manager?site=pos_dev']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AdvancedMenuManager /></MemoryRouter>);
 const openLinked = () => fireEvent.click(screen.getByRole('button', { name: '팀장 연결 메뉴 펼치기' }));
 
+it('자동 연결 구분선을 선택해 제목과 모양을 저장하고 다시 열어도 유지한다', async () => {
+    const view = openEditor();
+    fireEvent.click(screen.getByRole('button', { name: '구분선 설정 열기' }));
+    expect(screen.getByRole('heading', { name: '구분선 설정' })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: '구분선 제목' }), { target: { value: '직책별 메뉴' } });
+    fireEvent.click(screen.getByRole('button', { name: '점선' }));
+    fireEvent.click(screen.getByRole('button', { name: '좁게' }));
+    await waitFor(() => expect(stored.pos_dev.linkedPositionDivider).toEqual({
+        dividerTitle: '직책별 메뉴', dividerStyle: 'dashed', dividerSpacing: 'compact'
+    }));
+    expect(stored.pos_dev.menu).toEqual(config().pos_dev.menu);
+    expect(stored.pos_leader.menu).toEqual(config().pos_leader.menu);
+    expect(JSON.stringify(stored)).not.toContain('__linked_position__');
+    view.unmount();
+    openEditor();
+    fireEvent.click(screen.getByRole('button', { name: '구분선 설정 열기' }));
+    expect(screen.getByRole('textbox', { name: '구분선 제목' })).toHaveValue('직책별 메뉴');
+    expect(screen.getByRole('button', { name: '점선' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('checkbox', { name: '구분선 표시' }));
+    await waitFor(() => expect(stored.pos_dev.linkedPositionDivider?.hide).toBe(true));
+    fireEvent.click(screen.getByTitle('실행 취소 (Undo)'));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: '구분선 표시' })).toBeChecked());
+    fireEvent.click(screen.getByRole('button', { name: '구분선 추가' }));
+    await waitFor(() => expect(stored.pos_dev.menu).toHaveLength(2));
+    expect(stored.pos_dev.menu[1]).toMatchObject({ text: '-' });
+});
+
 it('DEV 연결 메뉴와 해당 직책 양쪽에서 수정하고 실시간 갱신·연결 해제를 처리한다', async () => {
     const view = openEditor();
     openLinked();

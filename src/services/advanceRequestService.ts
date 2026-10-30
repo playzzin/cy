@@ -13,6 +13,8 @@ import { auth, db, functions } from '../config/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { getTeamScopedRows } from './teamScopedReadService';
+import { getAdvanceRequestCategory, normalizeAdvanceRequestCategory, type AdvanceRequestCategory } from '../types/advanceRequestCategory';
+import { normalizeAdvancePaymentDepositAccount, type AdvancePaymentDepositAccount } from '../types/advancePaymentDepositAccount';
 
 export type AdvanceRequestStatus = 'requested' | 'approved' | 'rejected' | 'paid' | 'cancelled';
 
@@ -35,6 +37,9 @@ export interface AdvanceRequest {
     activeRequestAmountSnapshot: number;
     availableAmountSnapshot: number;
     requestedAmount: number;
+    category?: AdvanceRequestCategory;
+    source?: 'manual-prepayment';
+    depositAccount?: AdvancePaymentDepositAccount;
     bankName?: string;
     accountNumber?: string;
     accountHolder?: string;
@@ -119,10 +124,14 @@ const mapRequest = (id: string, data: Record<string, unknown>): AdvanceRequest =
     activeRequestAmountSnapshot: toFiniteNumber(data.activeRequestAmountSnapshot),
     availableAmountSnapshot: toFiniteNumber(data.availableAmountSnapshot),
     requestedAmount: toFiniteNumber(data.requestedAmount),
+    category: getAdvanceRequestCategory(data),
+    source: data.source === 'manual-prepayment' ? 'manual-prepayment' : undefined,
+    depositAccount: normalizeAdvancePaymentDepositAccount(data.depositAccount),
     bankName: normalizeText(data.bankName),
     accountNumber: normalizeText(data.accountNumber),
     accountHolder: normalizeText(data.accountHolder),
-    memo: normalizeText(data.memo),
+    // Keep the stored value intact for optimistic conflict checks when editing notes.
+    memo: String(data.memo ?? ''),
     status: normalizeStatus(data.status),
     reviewedById: normalizeText(data.reviewedById),
     reviewedByName: normalizeText(data.reviewedByName),
@@ -163,6 +172,16 @@ const listByField = async (field: 'workerId' | 'requesterUid', value: string): P
 };
 
 export const advanceRequestService = {
+    listByYearMonth: async (yearMonth: string): Promise<AdvanceRequest[]> => {
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) throw new Error('조회 월을 확인해 주세요.');
+        const scoped = await getTeamScopedRows<Record<string, unknown> & { id: string }>(COLLECTION_NAME, { yearMonth });
+        if (scoped !== null) {
+            return sortNewestFirst(scoped.map(row => mapRequest(row.id, row)).filter(row => row.yearMonth === yearMonth));
+        }
+        const snapshot = await getDocs(query(collection(db, COLLECTION_NAME), where('yearMonth', '==', yearMonth)));
+        return sortNewestFirst(snapshot.docs.map(entry => mapRequest(entry.id, entry.data() as Record<string, unknown>)));
+    },
+
     listAll: async (): Promise<AdvanceRequest[]> => {
         const snapshot = await getDocs(collection(db, COLLECTION_NAME));
         return sortNewestFirst(
@@ -215,12 +234,30 @@ export const advanceRequestService = {
     createRequest: async (input: AdvanceRequestCreateInput, requestId = makeRequestId(input.workerId)): Promise<string> => {
         const uid = auth.currentUser?.uid;
         if (!uid) throw new Error('로그인이 필요합니다.');
-        const result = await httpsCallable<Record<string, unknown>, { id: string }>(functions, 'teamAdvanceRequests')({
+        if (input.category !== 'first' && input.category !== 'second') throw new Error('신청 회차를 선택해 주세요.');
+        const result = await httpsCallable<Record<string, unknown>, { id: string; category?: AdvanceRequestCategory }>(functions, 'teamAdvanceRequests')({
             action: 'create', requestId, workerId: input.workerId, yearMonth: input.yearMonth,
-            requestedAmount: input.requestedAmount, memo: input.memo || '',
+            requestedAmount: input.requestedAmount, category: normalizeAdvanceRequestCategory(input.category), memo: input.memo || '',
         });
         if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
+        if (result.data.category !== normalizeAdvanceRequestCategory(input.category)) {
+            throw new Error('request-category-not-saved');
+        }
         return result.data.id;
+    },
+
+    setCategory: async (id: string, category: AdvanceRequestCategory, expectedCategory: AdvanceRequestCategory): Promise<void> => {
+        const uid = auth.currentUser?.uid;
+        if (!uid) throw new Error('로그인이 필요합니다.');
+        await httpsCallable(functions, 'teamAdvanceRequests')({ action: 'setCategory', id, category, expectedCategory });
+        if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
+    },
+
+    setPrepayment: async (workerId: string, yearMonth: string, amount: number, expectedAmount: number): Promise<void> => {
+        const uid = auth.currentUser?.uid;
+        if (!uid) throw new Error('로그인이 필요합니다.');
+        await httpsCallable(functions, 'teamAdvanceRequests')({ action: 'setPrepayment', workerId, yearMonth, amount, expectedAmount });
+        if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
     },
 
     cancelRequest: async (id: string, requesterUid?: string): Promise<void> => {

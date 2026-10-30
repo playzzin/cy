@@ -43,7 +43,7 @@ import { addMenuItemsSafely } from './menuBulkApply';
 import { isDevAdminSessionEnabled } from '../../../utils/devAdminSession';
 import { useSiteMode } from '../../../contexts/SiteModeContext';
 import { createMenuDivider, isMenuDivider } from '../../../utils/menuDivider';
-import { getLinkedMenuRef, getPositionMenuView, isLinkedMenuContainer, linkedMenuId, setPositionMenuView } from '../../../utils/linkedPositionMenus';
+import { getLinkedMenuRef, getPositionMenuView, isLinkedMenuContainer, linkedMenuId, LINKED_POSITION_DIVIDER_ID, setPositionMenuView } from '../../../utils/linkedPositionMenus';
 
 import { useMenuEditorPersistence } from './useMenuEditorPersistence';
 
@@ -310,7 +310,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         const items: MenuItem[] = [];
         selectedIds.forEach(id => {
             const item = findMenuItemInTree(surfaceItems, id);
-            if (item && !isLinkedMenuContainer(item.id)) items.push(item);
+            if (item && (!isLinkedMenuContainer(item.id) || item.id === LINKED_POSITION_DIVIDER_ID)) items.push(item);
         });
         return items;
     }, [menuData, selectedSite, selectedSurface, selectedIds]);
@@ -324,7 +324,6 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
     // Actions
     const handleNodeSelect = useCallback((id: string, multiSelect: boolean = false) => {
-        if (isLinkedMenuContainer(id) && !getLinkedMenuRef(id)) return;
         if (multiSelect) {
             setSelectedIds(prev => {
                 if (isLinkedMenuContainer(id) || prev.some(isLinkedMenuContainer)) return [id];
@@ -435,7 +434,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     };
 
     const handleInspectorUpdate = (updatedItem: MenuItem) => {
-        if (!menuData || isLinkedMenuContainer(updatedItem.id)) return;
+        if (!menuData || (isLinkedMenuContainer(updatedItem.id) && updatedItem.id !== LINKED_POSITION_DIVIDER_ID)) return;
         const newMenu = updateMenuItemInTree(getSurfaceItems(menuData, selectedSite, selectedSurface), updatedItem);
         const newData = { ...menuData };
         setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
@@ -583,7 +582,9 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         const displayId = editingSourceSite === selectedSite ? id : linkedMenuId(editingSourceSite, id);
         const divider = createMenuDivider(displayId);
         const target = selectedIds.length === 1 ? findRef(items, selectedIds[0]) : null;
-        if (target && isLinkedMenuContainer(selectedIds[0])) {
+        if (target && selectedIds[0] === LINKED_POSITION_DIVIDER_ID) {
+            target.list.splice(target.index, 0, divider);
+        } else if (target && isLinkedMenuContainer(selectedIds[0])) {
             const group = target.list[target.index] as MenuItem;
             group.sub = [...(group.sub || []), divider];
         } else if (target) target.list.splice(target.index + 1, 0, divider);

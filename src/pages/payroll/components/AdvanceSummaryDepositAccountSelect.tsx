@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ADVANCE_DEPOSIT_ACCOUNTS, isAdvancePaymentDepositAccount } from '../../../types/advancePaymentDepositAccount';
+import { ADVANCE_DEPOSIT_ACCOUNTS, LEGACY_ADVANCE_DEPOSIT_ACCOUNTS, isAdvancePaymentDepositAccount } from '../../../types/advancePaymentDepositAccount';
 import { AdvancePaymentDepositAccountError, type AdvancePaymentDepositAccountChange } from '../../../services/advancePaymentDepositAccountService';
 import type { AdvanceSummaryRow } from '../utils/advanceSummary';
 
@@ -17,7 +17,9 @@ export default function AdvanceSummaryDepositAccountSelect({ label, sources, dis
     const pending = useRef(false);
     const values = new Set(sources.map(source => source.depositAccount));
     const value = values.size > 1 ? 'mixed' : sources[0]?.depositAccount || '';
-    const selectedLabel = value === 'mixed' ? '혼합' : ADVANCE_DEPOSIT_ACCOUNTS.find(option => option.value === value)?.label || '미선택';
+    const legacyOption = LEGACY_ADVANCE_DEPOSIT_ACCOUNTS.find(option => option.value === value);
+    const selectedLabel = value === 'mixed' ? '혼합' : legacyOption ? `기존: ${legacyOption.label}`
+        : ADVANCE_DEPOSIT_ACCOUNTS.find(option => option.value === value)?.label || '미선택';
 
     const save = async (next: string) => {
         if (pending.current || disabled || !isAdvancePaymentDepositAccount(next) || next === value) return;
@@ -42,9 +44,10 @@ export default function AdvanceSummaryDepositAccountSelect({ label, sources, dis
     return <div className="as-deposit-control" aria-busy={saving}>
         <select className={`as-deposit-select as-deposit-${value || 'none'}`} aria-label={label}
             value={value} disabled={disabled || saving || !sources.length || sources.some(source => !source.id)}
-            title={value === 'mixed' ? '급여 구분별 선택이 다릅니다. 새로 선택하면 이 행의 모든 내역에 적용됩니다.' : '선택하면 자동 저장됩니다.'}
+            title={value === 'mixed' ? '신청별 선택이 다릅니다. 새로 선택하면 현재 조회 중인 이 행의 모든 신청에 적용됩니다.' : '선택하면 자동 저장됩니다.'}
             onChange={event => void save(event.target.value)}>
             {value === 'mixed' && <option value="mixed" disabled>혼합</option>}
+            {legacyOption && <option value={legacyOption.value} disabled>{selectedLabel}</option>}
             <option value="">미선택</option>
             {ADVANCE_DEPOSIT_ACCOUNTS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>

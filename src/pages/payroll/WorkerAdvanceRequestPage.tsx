@@ -24,6 +24,8 @@ import {
     AdvanceRequestStatus,
 } from '../../services/advanceRequestService';
 import { ADVANCE_ITEM_LABEL_KEYS } from '../../services/payrollConfigService';
+import { ADVANCE_REQUEST_CATEGORIES, ADVANCE_REQUEST_ROUNDS, ADVANCE_REQUEST_CATEGORY_LABELS, normalizeAdvanceRequestCategory, getAdvanceRequestCategory, type AdvanceRequestCategory } from '../../types/advanceRequestCategory';
+import AdvanceRequestMobileInput from './components/AdvanceRequestMobileInput';
 import './WorkerAdvanceRequestPage.css';
 
 type EarnedSummary = {
@@ -228,12 +230,26 @@ export default function WorkerAdvanceRequestPage() {
     const [loading, setLoading] = useState(true);
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [amountInput, setAmountInput] = useState('');
+    const [amountDrafts, setAmountDrafts] = useState<Record<string, string>>({});
     const [memo, setMemo] = useState('');
+    const [category, setCategory] = useState<AdvanceRequestCategory>('first');
+    const [historyCategory, setHistoryCategory] = useState<'all' | AdvanceRequestCategory>('all');
     const [message, setMessage] = useState('');
     const [summaryError, setSummaryError] = useState('');
     const [loadedSummaryKey, setLoadedSummaryKey] = useState('');
     const summaryRequestId = useRef(0);
+    const [isMobile, setIsMobile] = useState(() => window.matchMedia?.('(max-width: 767px)').matches ?? false);
+    useEffect(() => {
+        const media = window.matchMedia?.('(max-width: 767px)');
+        if (!media) return;
+        const update = () => setIsMobile(media.matches);
+        media.addEventListener('change', update);
+        return () => media.removeEventListener('change', update);
+    }, []);
+    const draftKeyFor = (workerId: string) => `${currentUser?.uid}:${selectedYearMonth}:${category}:${workerId}`;
+    const draftKey = draftKeyFor(selectedWorkerId);
+    const amountInput = amountDrafts[draftKey] || '';
+    const setAmountInput = (value: string) => setAmountDrafts(current => ({ ...current, [draftKey]: value }));
 
     const previousYearMonth = useMemo(() => shiftYearMonth(selectedYearMonth, -1), [selectedYearMonth]);
     const periodStart = useMemo(() => getMonthStart(previousYearMonth), [previousYearMonth]);
@@ -268,7 +284,7 @@ export default function WorkerAdvanceRequestPage() {
         return workerPool
             .filter((worker) => {
                 if (!term) return true;
-                return normalizeKey(`${worker.name} ${worker.teamName || ''} ${worker.role || ''}`).includes(term);
+                return normalizeKey(`${worker.name} ${worker.teamName || ''}`).includes(term);
             })
             .slice(0, 80);
     }, [workerPool, workerSearch]);
@@ -281,9 +297,13 @@ export default function WorkerAdvanceRequestPage() {
     const selectedWorkerRequests = useMemo(() => {
         if (!selectedWorker) return [];
         return requests
-            .filter((request) => matchesWorker(selectedWorker, request))
+            .filter((request) => matchesWorker(selectedWorker, request) && request.status !== 'cancelled')
             .sort((left, right) => toDateMillis(right.createdAt) - toDateMillis(left.createdAt));
     }, [requests, selectedWorker]);
+
+    const visibleWorkerRequests = useMemo(() => selectedWorkerRequests.filter(request =>
+        historyCategory === 'all' || getAdvanceRequestCategory(request) === historyCategory),
+    [selectedWorkerRequests, historyCategory]);
 
     const requestedAmount = useMemo(() => parseAmountInput(amountInput), [amountInput]);
     const summaryKey = `${currentUser?.uid || ''}:${selectedWorker?.id || ''}:${selectedYearMonth}`;
@@ -395,10 +415,6 @@ export default function WorkerAdvanceRequestPage() {
                 workRows: matchedWorkRows,
             });
             setLoadedSummaryKey(summaryKey);
-            setAmountInput((prev) => {
-                const currentAmount = parseAmountInput(prev);
-                return currentAmount > availableAmount ? formatAmountInput(availableAmount) : prev;
-            });
         } catch (error) {
             if (requestId !== summaryRequestId.current) return;
             console.error('[WorkerAdvanceRequestPage] Failed to load summary', error);
@@ -459,7 +475,7 @@ export default function WorkerAdvanceRequestPage() {
                 currentUser?.email ||
                 selectedWorker.name;
 
-            const key = JSON.stringify([currentUser?.uid, selectedWorker.id, selectedYearMonth, requestedAmount, memo]);
+            const key = JSON.stringify([currentUser?.uid, selectedWorker.id, selectedYearMonth, requestedAmount, memo, category]);
             if (submission.current?.key !== key) submission.current = { key, id: crypto.randomUUID() };
             await advanceRequestService.createRequest({
                 workerId: selectedWorker.id,
@@ -479,6 +495,7 @@ export default function WorkerAdvanceRequestPage() {
                 activeRequestAmountSnapshot: summary.activeRequestAmount,
                 availableAmountSnapshot: summary.availableAmount,
                 requestedAmount,
+                category,
                 bankName: normalizeText(selectedWorker.bankName),
                 accountNumber: normalizeText(selectedWorker.accountNumber),
                 accountHolder: normalizeText(selectedWorker.accountHolder || selectedWorker.name),
@@ -494,7 +511,26 @@ export default function WorkerAdvanceRequestPage() {
             console.error('[WorkerAdvanceRequestPage] Failed to submit request', error);
             setMessage(error instanceof Error && error.message === 'requested-amount-exceeds-available'
                 ? '신청 가능액을 초과했습니다.'
+                : error instanceof Error && error.message === 'request-category-not-saved'
+                    ? '신청은 저장됐지만 회차 저장을 확인하지 못했습니다. 같은 내용으로 다시 시도하거나 신청 내역에서 분류를 수정해 주세요.'
                 : '가불 신청 저장에 실패했습니다.');
+        } finally {
+            savingLock.current = false;
+            setSaving(false);
+        }
+    };
+
+    const handleCategoryChange = async (request: AdvanceRequest, next: AdvanceRequestCategory) => {
+        if (!request.id || savingLock.current) return;
+        savingLock.current = true;
+        setSaving(true);
+        setMessage('');
+        try {
+            await advanceRequestService.setCategory(request.id, next, getAdvanceRequestCategory(request));
+            await latestSummaryLoader.current();
+            setMessage('신청 분류를 수정했습니다.');
+        } catch {
+            setMessage('신청 분류를 수정하지 못했습니다. 새로고침 후 다시 선택해 주세요.');
         } finally {
             savingLock.current = false;
             setSaving(false);
@@ -563,7 +599,7 @@ export default function WorkerAdvanceRequestPage() {
 
             <main className="advance-request-workspace grid min-h-0 grid-cols-1 gap-4 p-4 xl:grid-cols-[380px_minmax(0,1fr)]">
                 <aside className="min-h-0 rounded-lg border border-slate-200 bg-white">
-                    <div className="border-b border-slate-200 p-4">
+                    {!isMobile && <div className="border-b border-slate-200 p-4">
                         <div className="flex items-center justify-between gap-3">
                             <div>
                                 <div className="text-xs font-black text-slate-500">작업자</div>
@@ -581,17 +617,23 @@ export default function WorkerAdvanceRequestPage() {
                                 </span>
                             )}
                         </div>
-                    </div>
+                    </div>}
 
                     <div className="p-4">
-                        {workerPool.length > 1 || linkedWorkerCandidates.length === 0 ? (
+                        {isMobile ? <AdvanceRequestMobileInput workers={filteredWorkers} selectedWorkerId={selectedWorkerId}
+                            category={category} onCategory={setCategory} onSelect={setSelectedWorkerId}
+                            amountFor={id => amountDrafts[draftKeyFor(id)] || ''} onAmount={(id, value) => {
+                                setSelectedWorkerId(id);
+                                setAmountDrafts(current => ({ ...current, [draftKeyFor(id)]: formatAmountInput(parseAmountInput(value)) }));
+                            }} onSubmit={() => void handleSubmit()} canSubmit={canSubmit} saving={saving} loading={loading}
+                            search={workerSearch} onSearch={setWorkerSearch} /> : workerPool.length > 1 || linkedWorkerCandidates.length === 0 ? (
                             <>
                                 <div className="relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                                     <input
                                         value={workerSearch}
                                         onChange={(event) => setWorkerSearch(event.target.value)}
-                                        placeholder="이름, 팀, 직무 검색"
+                                        placeholder="이름, 팀 검색"
                                         className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-semibold outline-none focus:border-blue-400 focus:bg-white"
                                     />
                                 </div>
@@ -617,7 +659,7 @@ export default function WorkerAdvanceRequestPage() {
                                                 <span className="min-w-0 flex-1">
                                                     <span className="block truncate text-sm font-black text-slate-900">{worker.name}</span>
                                                     <span className="block truncate text-xs font-bold text-slate-500">
-                                                        {worker.teamName || '팀 미배정'} · {worker.role || '직무 미입력'}
+                                                        {worker.teamName || '팀 미배정'}
                                                     </span>
                                                 </span>
                                             </button>
@@ -740,11 +782,22 @@ export default function WorkerAdvanceRequestPage() {
                                     </div>
                                 </details>
 
-                                <div className="advance-input rounded-lg border border-slate-200 p-4">
+                                {!isMobile && <div className="advance-input rounded-lg border border-slate-200 p-4">
                                     <div className="flex items-center gap-2 text-sm font-black text-slate-800">
                                         <Send size={16} />
                                         신청 입력
                                     </div>
+
+                                    <fieldset className="mt-4" disabled={saving}>
+                                        <legend className="mb-2 text-xs font-black text-slate-500">신청 분류</legend>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {ADVANCE_REQUEST_ROUNDS.map(value => <button key={value} type="button"
+                                                aria-pressed={category === value} onClick={() => setCategory(value)}
+                                                className={`h-11 rounded-lg border text-sm font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-50 ${category === value ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50'}`}>
+                                                {ADVANCE_REQUEST_CATEGORY_LABELS[value]}
+                                            </button>)}
+                                        </div>
+                                    </fieldset>
 
                                     <label className="mt-4 block">
                                         <span className="mb-2 block text-xs font-black text-slate-500">신청 금액</span>
@@ -818,7 +871,7 @@ export default function WorkerAdvanceRequestPage() {
                                         <Send size={16} />
                                         {saving ? '저장 중' : '가불 신청'}
                                     </button>
-                                </div>
+                                </div>}
                             </div>
                         </div>
                     </section>
@@ -833,26 +886,44 @@ export default function WorkerAdvanceRequestPage() {
                                 <h2 className="mt-1 text-lg font-black text-slate-950">{selectedWorker?.name || '작업자'}</h2>
                             </div>
                             <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-600">
-                                {selectedWorkerRequests.length}건
+                                {visibleWorkerRequests.length}건
                             </span>
                         </div>
 
-                        <div className="advance-request-history max-h-[calc(100dvh-170px)] overflow-y-auto p-4">
+                        <label className="flex items-center gap-3 border-b border-slate-200 px-4 py-3 text-xs font-bold text-slate-500">
+                            신청 분류
+                            <select aria-label="신청 내역 분류" value={historyCategory}
+                                onChange={event => setHistoryCategory(event.target.value === 'all' ? 'all' : normalizeAdvanceRequestCategory(event.target.value))}
+                                className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700">
+                                <option value="all">전체 신청</option>
+                                {ADVANCE_REQUEST_CATEGORIES.map(value => <option key={value} value={value}>{ADVANCE_REQUEST_CATEGORY_LABELS[value]}</option>)}
+                                <option value="unclassified">회차 미지정</option>
+                            </select>
+                        </label>
+                        <div className="advance-request-history max-h-[calc(100dvh-230px)] overflow-y-auto p-4">
                             {summaryLoading ? (
                                 <div className="grid min-h-[240px] place-items-center text-sm font-bold text-slate-400">
                                     불러오는 중
                                 </div>
-                            ) : selectedWorkerRequests.length === 0 ? (
+                            ) : visibleWorkerRequests.length === 0 ? (
                                 <div className="grid min-h-[240px] place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm font-bold text-slate-400">
-                                    {summaryError ? '신청 내역 확인 필요' : '신청 내역 없음'}
+                                    {summaryError ? '신청 내역 확인 필요' : historyCategory === 'all' ? '신청 내역 없음' : '선택한 분류의 신청 내역 없음'}
                                 </div>
                             ) : (
                                 <div className="space-y-3">
-                                    {selectedWorkerRequests.map((request) => (
+                                    {visibleWorkerRequests.map((request) => (
                                         <article key={request.id} className="rounded-lg border border-slate-200 bg-white p-4">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0">
                                                     <div className="text-lg font-black text-slate-950">{formatCurrency(request.requestedAmount)}</div>
+                                                    {request.source !== 'manual-prepayment' && request.status === 'requested' && request.requesterUid === currentUser?.uid ? <select
+                                                        aria-label={`${formatCurrency(request.requestedAmount)} 신청 분류 수정`}
+                                                        value={getAdvanceRequestCategory(request)} disabled={saving}
+                                                        onChange={event => void handleCategoryChange(request, normalizeAdvanceRequestCategory(event.target.value))}
+                                                        className="mt-1 h-9 rounded-md border border-blue-200 bg-blue-50 px-2 text-sm font-bold text-blue-700">
+                                                        <option value="unclassified" disabled>회차 미지정</option>
+                                                        {ADVANCE_REQUEST_ROUNDS.map(value => <option key={value} value={value}>{ADVANCE_REQUEST_CATEGORY_LABELS[value]}</option>)}
+                                                    </select> : <div className="mt-1 text-sm font-bold text-blue-700">{ADVANCE_REQUEST_CATEGORY_LABELS[getAdvanceRequestCategory(request)]}</div>}
                                                     <div className="mt-1 text-xs font-bold text-slate-500">
                                                         {request.periodStart} ~ {request.periodEnd}
                                                     </div>
@@ -862,16 +933,12 @@ export default function WorkerAdvanceRequestPage() {
                                                 </span>
                                             </div>
 
-                                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                            <div className="mt-3 text-xs">
                                                 <div className="rounded-md bg-slate-50 px-2 py-2">
                                                     <div className="font-black text-slate-500">신청일</div>
                                                     <div className="mt-1 font-bold text-slate-800">
                                                         {formatCreatedAt(request)}
                                                     </div>
-                                                </div>
-                                                <div className="rounded-md bg-slate-50 px-2 py-2">
-                                                    <div className="font-black text-slate-500">당시 가능액</div>
-                                                    <div className="mt-1 font-bold text-slate-800">{formatCurrency(request.availableAmountSnapshot)}</div>
                                                 </div>
                                             </div>
 

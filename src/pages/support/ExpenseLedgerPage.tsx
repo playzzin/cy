@@ -35,6 +35,7 @@ import {
 
 interface ExpenseLedgerPageProps {
   embedded?: boolean;
+  workspaceHeader?: React.ReactNode;
 }
 
 const tableColumns: Array<{ key: ExpenseLedgerDetailItemKey | 'total'; label: string; className?: string }> = [
@@ -71,7 +72,7 @@ type SummaryCard = {
   tone: string;
 };
 
-const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false }) => {
+const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false, workspaceHeader }) => {
   const [yearMonth, setYearMonth] = useState(getSupportManagementYearMonth);
   const [selectedTeamId, setSelectedTeamId] = useState('all');
   const [selectedDetailItemKey, setSelectedDetailItemKey] = useState<ExpenseLedgerDetailItemKey | null>(null);
@@ -150,6 +151,8 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
   return (
     <div className={`expense-ledger-page ${embedded ? 'min-h-0 w-full' : 'min-h-screen bg-slate-50 p-4 xl:p-6'}`}>
       <div className="mx-auto w-full min-w-0 max-w-full space-y-4">
+        <div className="expense-ledger-frozen-header space-y-4">
+          {workspaceHeader}
         <div className={`flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm lg:flex-row lg:items-center lg:justify-between ${embedded ? 'gap-2 px-3 py-2' : 'gap-3 p-4'}`}>
           <div>
             <h1 className={embedded ? 'text-sm font-black text-slate-950' : 'text-xl font-black text-slate-950'}>팀별 경비내역</h1>
@@ -206,6 +209,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
           ariaLabel="경비내역 팀 선택"
           showTeamIcons
         />
+        </div>
 
         {loading && (
           <div role="status" className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-800">

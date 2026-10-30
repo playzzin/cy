@@ -11,6 +11,21 @@ const validId = (value: unknown): value is string => typeof value === 'string' &
 const activeWorker = (row: any) => row && row.isActive !== false && !/퇴사|출입금지/.test(text(row.status))
     && !['inactive', 'retired', 'resigned', 'archived', 'blocked'].includes(text(row.status).toLowerCase());
 
+const validEmploymentDate = (value: unknown) => typeof value === 'string' && (!value || (/^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value));
+
+export function workerEmploymentPatch(before: any, input: any, today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date())) {
+    const joinDate = input.joinDate ?? before.joinDate ?? '';
+    const retirementDate = input.status === '퇴사'
+        ? input.retirementDate ?? (before.retirementDate || (activeWorker(before) ? today : '')) : '';
+    if (!validEmploymentDate(joinDate) || !validEmploymentDate(retirementDate)
+        || (input.status === '퇴사' && input.retirementDate === '')
+        || (joinDate && retirementDate && joinDate > retirementDate)) {
+        fail('invalid-argument', '입사일과 퇴사일을 확인해 주세요. 퇴사일은 입사일보다 빠를 수 없습니다.');
+    }
+    return { status: input.status, isActive: input.status === '재직', joinDate, retirementDate };
+}
+
 export async function saveTeamResourceStatus(input: any, context: functions.https.CallableContext) {
     if (isPreviewIdentity(context.auth?.uid, context.auth?.token || {})) fail('permission-denied', '미리보기에서는 상태를 변경할 수 없습니다.');
     const auth = requireCallableAuth(context)!;
@@ -48,26 +63,31 @@ export async function saveTeamResourceStatus(input: any, context: functions.http
         if ((before!.status ?? null) !== input.expectedStatus || (kind === 'worker' && (before!.isActive ?? null) !== input.expectedIsActive)) {
             fail('failed-precondition', '다른 사용자가 상태를 변경했습니다. 새로고침 후 다시 확인해 주세요.');
         }
+        if (kind === 'worker' && (('expectedJoinDate' in input && (before!.joinDate ?? null) !== input.expectedJoinDate)
+            || ('expectedRetirementDate' in input && (before!.retirementDate ?? null) !== input.expectedRetirementDate))) {
+            fail('failed-precondition', '다른 사용자가 재직 기간을 변경했습니다. 새로고침 후 다시 확인해 주세요.');
+        }
         if (kind === 'worker' && input.status === '퇴사' && anchors.some(doc => doc.id === ref.id)
             && !anchors.some(doc => doc.id !== ref.id && allowedTeams.has(text(doc.data()?.teamId)))) {
             fail('failed-precondition', '팀장 본인의 퇴사 처리는 사무실에 요청해 주세요. 팀장 계정의 마지막 재직 연결은 유지해야 합니다.');
         }
-        const patch = kind === 'worker' ? { status: input.status, isActive: input.status === '재직' } : { status: input.status };
+        const patch = kind === 'worker' ? workerEmploymentPatch(before, input) : { status: input.status };
         const result = { id: ref.id, ...patch };
         if (Object.entries(patch).every(([key, value]) => before![key] === value)) return result;
         const now = Timestamp.now();
         tx.update(ref, { ...patch, updatedAt: now });
-        // Store only status changes; identity documents, bank details and payroll stay out of the audit payload.
+        // Only status and employment dates belong in this audit payload.
         const log = db.collection('database_logs').doc();
         const fieldChanges = Object.entries(patch).filter(([key, value]) => before![key] !== value)
-            .map(([field, after]) => ({ field, label: field === 'status' ? '상태' : '사용 여부', before: before![field] ?? null, after }));
+            .map(([field, after]) => ({ field, label: ({ status: '상태', isActive: '사용 여부', joinDate: '입사일', retirementDate: '퇴사일' } as Record<string, string>)[field], before: before![field] ?? null, after }));
         const summary = `${kind === 'site' ? '현장' : '작업자'} 상태 변경: ${text(before!.name)} → ${input.status}`;
         tx.create(log, { id: log.id, action: 'updated', actionLabel: '수정', entityType: kind, entityLabel: kind === 'site' ? '현장' : '작업자',
             entityId: ref.id, entityName: text(before!.name), actor: { uid: auth.uid, name: text(user!.displayName || user!.name) || '팀장', email: null },
-            source: 'teamResourceStatus', before: { status: before!.status ?? null, ...(kind === 'worker' ? { isActive: before!.isActive ?? null } : {}) },
+            source: 'teamResourceStatus', before: Object.fromEntries(Object.keys(patch).map(key => [key, before![key] ?? null])),
             after: patch, fieldChanges, changeCount: fieldChanges.length, summaryLines: [summary], summaryText: summary, createdAt: now, createdAtIso: now.toDate().toISOString() });
         return result;
     });
 }
 
-export const updateTeamResourceStatus = protectedRegion.https.onCall(saveTeamResourceStatus);
+// Preserve the deployed memory allocation when publishing this endpoint.
+export const updateTeamResourceStatus = protectedRegion.runWith({ memory: '1GB' }).https.onCall(saveTeamResourceStatus);

@@ -158,10 +158,9 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         ],
         positionConfig: [
             { id: 'full', name: '전체 메뉴', icon: 'fa-shield-halved', color: 'from-red-600 to-red-400', order: 0 },
+            { id: 'dev', name: 'DEV', icon: 'fa-code', color: 'from-teal-600 to-emerald-400', order: 99 },
             { id: 'ceo', name: 'CEO', icon: 'fa-crown', color: 'from-amber-500 to-yellow-400', order: 1 },
-            { id: 'manager1', name: '메니저1', icon: 'fa-user-tie', color: 'from-blue-600 to-blue-400', order: 2 },
-            { id: 'manager2', name: '메니저2', icon: 'fa-user-tie', color: 'from-indigo-600 to-indigo-400', order: 3 },
-            { id: 'manager3', name: '메니저3', icon: 'fa-user-tie', color: 'from-purple-600 to-purple-400', order: 4 },
+            { id: 'manager', name: '매니저', icon: 'fa-user-tie', color: 'from-blue-600 to-blue-400', order: 2 },
             ...BUSINESS_PARTNER_POSITION_CONFIGS,
             { id: 'newbie', name: '신규', icon: 'fa-user-plus', color: 'from-pink-500 to-rose-400', order: 8 }
         ]
@@ -209,6 +208,11 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         ]
     },
     // === 직책별 메뉴 (Position Mode) ===
+    pos_dev: {
+        name: 'DEV', icon: 'fa-code', menu: [{ text: '구성메뉴', icon: 'fa-layer-group', sub: [
+            { text: '우리 팀 숙소 배정', icon: 'fa-house', path: '/assignment/team-accommodation' }
+        ] }]
+    },
     pos_ceo: {
         name: "CEO",
         icon: "fa-crown",
@@ -249,44 +253,8 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             }
         ]
     },
-    pos_manager1: {
-        name: "메니저1",
-        icon: "fa-user-tie",
-        menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
-            { text: "통합DB", icon: "fa-circle-info" },
-            { text: "시공계획서", icon: "fa-file-circle-check", path: "/construction-plans" },
-            { text: "현장 실행기록", icon: "fa-clipboard-list", path: "/construction-plan-records" },
-            { text: "검토·승인함", icon: "fa-clipboard-check", path: "/construction-plan-approvals" },
-            { text: "PDF 발행이력", icon: "fa-file-pdf", path: "/construction-plan-exports" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
-            {
-                text: "급여관리",
-                icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "사무실 직원 급여", "외부지원간곳", "외부지원온곳", "내부지원간곳", "내부지원온곳", "협력사별 지원 출력", "기성관리", "기성청구서", "바이백 정리", "팀정산 관리", "팀정산 통계", "팀별 연간 통계", { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }]
-            }
-        ]
-    },
-    pos_manager2: {
-        name: "메니저2",
-        icon: "fa-user-tie",
-        menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
-            { text: "통합DB", icon: "fa-circle-info" },
-            { text: "시공계획서", icon: "fa-file-circle-check", path: "/construction-plans" },
-            { text: "현장 실행기록", icon: "fa-clipboard-list", path: "/construction-plan-records" },
-            { text: "검토·승인함", icon: "fa-clipboard-check", path: "/construction-plan-approvals" },
-            { text: "PDF 발행이력", icon: "fa-file-pdf", path: "/construction-plan-exports" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
-            {
-                text: "급여관리",
-                icon: "fa-money-bill-wave",
-                sub: ["일급제", "월급제", "사무실 직원 급여", "외부지원간곳", "외부지원온곳", "내부지원간곳", "내부지원온곳", "협력사별 지원 출력", "기성관리", "기성청구서", "바이백 정리", "팀정산 관리", "팀정산 통계", "팀별 연간 통계", { text: "가불관리", sub: ["가불신청", "가불등록", "세금/가불"] }]
-            }
-        ]
-    },
-    pos_manager3: {
-        name: "메니저3",
+    pos_manager: {
+        name: "매니저",
         icon: "fa-user-tie",
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },

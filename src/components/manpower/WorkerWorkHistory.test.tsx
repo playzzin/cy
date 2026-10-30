@@ -22,25 +22,13 @@ test('같은 날짜의 모든 현장과 금액을 상세에서 확인하고 닫�
     await waitFor(() => expect(day).toHaveFocus());
 });
 
-test('목록을 펼쳐 현장별 공수를 보고 별도 상세에서 단가를 확인한 뒤 포커스가 돌아온다', async () => {
+test('작업자 근무내역은 달력으로 통합하고 날짜에서 모든 현장의 상세를 확인한다', () => {
     render(<WorkerWorkHistory {...props} />);
-    fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
-    const row = screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false });
-    expect(within(row).getByText('150,000원')).toBeInTheDocument();
-    expect(screen.queryByText('단가')).not.toBeInTheDocument();
-    fireEvent.click(row);
-    expect(row).toHaveAttribute('aria-expanded', 'true');
-    const sites = screen.getByRole('list', { name: '2026-10-01 현장별 근무내역' });
-    expect(within(sites).getAllByRole('listitem')).toHaveLength(2);
-    expect(within(sites).getByText('0.5공수')).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.queryByText('단가')).not.toBeInTheDocument();
-    const detail = screen.getByRole('button', { name: '2026-10-01 근무 상세' });
-    detail.focus(); fireEvent.click(detail);
+    expect(screen.queryByRole('tab', { name: '목록보기' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '근무내역 달력' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역 1.5공수' }));
     expect(within(screen.getByRole('dialog')).getAllByText('단가')).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: '상세 닫기' }));
-    await waitFor(() => expect(detail).toHaveFocus());
-    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(within(screen.getByRole('dialog')).getByText('0.5공수')).toBeInTheDocument();
 });
 
 test('빈 날짜와 월 변경은 이전 상세를 보여주지 않는다', () => {
@@ -159,4 +147,53 @@ test('달력의 오늘과 주말을 구분하고 빈 월에서도 보기 전환�
     expect(screen.getByText('일')).toHaveClass('worker-history__sunday');
     fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
     expect(screen.getByText('선택한 기간의 근무내역이 없습니다.')).toBeInTheDocument();
+});
+
+test.each(['calendar', 'list'])('%s 날짜 상세는 등록된 팀 색상으로 묶고 지원 급여를 숨긴 채 개별 기록을 보존한다', mode => {
+    const attendance = [
+        { reportId: 'own', date: '2026-10-01', workerId: 'own', workerName: '동명', workerTeamId: 'a', workerTeamName: '가람팀', responsibleTeamId: 'a', manDay: 1, unitPrice: 100000, workContent: '외벽 작업' },
+        { reportId: 'support-1', date: '2026-10-01', workerId: 'support', workerName: '동명', workerTeamId: 'b', workerTeamName: '나래팀', responsibleTeamId: 'a', manDay: 0.25, isSiteSupport: true, unitPrice: 900000, amount: 225000 },
+        { reportId: 'support-2', date: '2026-10-01', workerId: 'support', workerName: '동명', workerTeamId: 'b', workerTeamName: '나래팀', responsibleTeamId: 'a', manDay: 0.5, isSiteSupport: true, unitPrice: 900000, amount: 450000 },
+    ] as DailyReportWorkerRow[];
+    render(<WorkerWorkHistory rows={attendance} teams={[{ id: 'a', name: '가람팀', color: '#2563eb' }, { id: 'b', name: '나래팀', color: '#0d9488' }]}
+        month="2026-10" siteName="검증현장" loading={false} error="" />);
+    if (mode === 'list') {
+        fireEvent.click(screen.getByRole('tab', { name: '목록보기' }));
+        fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역', expanded: false }));
+        fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무 상세' }));
+    } else fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역 1.75공수' }));
+    const dialog = screen.getByRole('dialog');
+    const summary = within(dialog).getByRole('region', { name: '일일 출력 요약' });
+    expect(summary).toHaveTextContent('총 공수1.75공수투입 인원2명참여 팀2개');
+    expect(summary).toHaveTextContent('조회 가능 노무비100,000원');
+    const own = within(dialog).getByRole('region', { name: '가람팀 출력 내역' });
+    const support = within(dialog).getByRole('region', { name: '나래팀 출력 내역' });
+    expect(own.style.getPropertyValue('--work-team-color')).toBe('#2563eb');
+    expect(support.style.getPropertyValue('--work-team-color')).toBe('#0d9488');
+    expect(within(own).getByText('외벽 작업')).toBeInTheDocument();
+    expect(within(support).getAllByRole('article')).toHaveLength(2);
+    expect(support).toHaveTextContent('작업자 1명');
+    expect(support).toHaveTextContent('팀 합계0.75공수');
+    expect(within(support).queryByText('단가')).not.toBeInTheDocument();
+    expect(within(support).queryByText('금액')).not.toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/900,000|225,000|450,000|775,000/);
+});
+
+test('지원 기록만 있는 날짜에는 노무비 합계와 급여 정보를 표시하지 않는다', () => {
+    render(<WorkerWorkHistory rows={[{ ...rows[0], isSiteSupport: true, workerTeamName: '지원팀', unitPrice: 100000, amount: 100000 }]}
+        month="2026-10" siteName="검증현장" loading={false} error="" />);
+    fireEvent.click(screen.getByRole('button', { name: '2026-10-01 근무내역 1공수' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).not.toHaveTextContent(/노무비|단가|급여방식|100,000원/);
+});
+
+test('지원팀 목록이 없어도 서버에서 전달된 DB 색상이 달력과 날짜 상세에 동일하게 적용된다', () => {
+    const attendance = [{ ...rows[0], workerTeamId: 'support', workerTeamName: '지원검증팀', workerTeamColorHex: '#d96cbd', isSiteSupport: true }];
+    render(<WorkerWorkHistory rows={attendance} teams={[]} month="2026-10" siteName="검증현장" loading={false} error="" />);
+    const day = screen.getByRole('button', { name: '2026-10-01 근무내역 1공수' });
+    expect(within(day).getByTitle('지원검증팀 1공수').style.getPropertyValue('--work-team-color')).toBe('#d96cbd');
+    fireEvent.click(day);
+    const team = within(screen.getByRole('dialog')).getByRole('region', { name: '지원검증팀 출력 내역' });
+    expect(team.style.getPropertyValue('--work-team-color')).toBe('#d96cbd');
+    expect(within(team).queryByText('단가')).not.toBeInTheDocument();
 });

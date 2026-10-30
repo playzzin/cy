@@ -120,7 +120,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                 {isDivider ? (
                     <button type="button" aria-label="구분선 설정 열기" className="flex min-w-0 flex-1 items-center gap-3 rounded py-1 text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
                         <span aria-hidden="true" className="min-w-4 flex-1 border-t border-slate-500/60" style={{ borderTopStyle: divider.lineStyle }} />
-                        <span className="shrink-0 text-[11px] font-normal tracking-wide">구분선{item.hide ? ' · 숨김' : ''}</span>
+                        <span className="min-w-0 max-w-[70%] truncate text-[11px] font-normal tracking-wide" title={divider.title || undefined}>{divider.title || '구분선'}{item.hide ? ' · 숨김' : ''}</span>
                         <span aria-hidden="true" className="min-w-4 flex-1 border-t border-slate-500/60" style={{ borderTopStyle: divider.lineStyle }} />
                     </button>
                 ) : (

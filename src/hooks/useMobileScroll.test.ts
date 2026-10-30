@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { useMobileDetailNavigation, useMobileShellScroll } from './useMobileScroll';
 
 beforeEach(() => {
@@ -29,6 +29,27 @@ it('데스크톱의 목록/상세 전환은 스크롤 위치를 바꾸지 않는
     act(() => result.current[1]('list'));
     expect(scrollIntoView).not.toHaveBeenCalled();
     expect(window.scrollTo).not.toHaveBeenCalled();
+});
+
+it('모바일 상세는 브라우저 뒤로 가기와 목록 버튼으로 복귀하고 앞으로 가기도 지원한다', async () => {
+    window.history.replaceState({ idx: 0, usr: { retained: true } }, '', '/workers');
+    const { result } = renderHook(() => useMobileDetailNavigation<'list' | 'detail'>('list', true));
+    const before = window.history.length;
+    act(() => result.current[1]('detail'));
+    act(() => result.current[1]('detail'));
+    expect(window.history.length).toBe(before + 1);
+    expect(window.history.state.usr).toEqual({ retained: true });
+    act(() => window.history.back());
+    await waitFor(() => expect(result.current[0]).toBe('list'));
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ top: 900, left: 0, behavior: 'auto' });
+    act(() => window.history.forward());
+    await waitFor(() => expect(result.current[0]).toBe('detail'));
+    const back = jest.spyOn(window.history, 'back');
+    act(() => { result.current[1]('list'); result.current[1]('list'); });
+    expect(back).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(window.history.state.mobileDetailKey).toBeUndefined());
+    expect(result.current[0]).toBe('list');
+    back.mockRestore();
 });
 
 it('모바일 메뉴가 열린 동안만 배경을 고정하고 닫으면 원래 스타일과 위치를 복원한다', () => {

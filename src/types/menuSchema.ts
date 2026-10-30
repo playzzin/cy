@@ -13,6 +13,7 @@ export const MenuItemSchema: z.ZodType<any> = z.lazy(() =>
         iconColor: z.string().optional(),
         activeColor: z.string().optional(),
         hide: z.boolean().optional(),
+        dividerTitle: z.string().optional(),
         dividerStyle: z.enum(['solid', 'dashed']).optional(),
         dividerSpacing: z.enum(['compact', 'normal', 'relaxed']).optional(),
         sub: z.array(z.string().or(MenuItemSchema)).optional()
@@ -28,6 +29,12 @@ export const SiteDataSchema = z.object({
     headerActions: z.array(MenuItemSchema).optional(),
     sidebarSearchEnabled: z.boolean().optional(),
     linkedPositionMenusEnabled: z.boolean().optional(),
+    linkedPositionDivider: z.object({
+        dividerTitle: z.string().optional(),
+        dividerStyle: z.enum(['solid', 'dashed']).optional(),
+        dividerSpacing: z.enum(['compact', 'normal', 'relaxed']).optional(),
+        hide: z.boolean().optional()
+    }).optional(),
     trash: z.array(MenuItemSchema).optional(),
     deletedItems: z.array(z.string()).optional(),
     systemPageLabels: z.record(z.string(), z.string().min(1)).optional(),

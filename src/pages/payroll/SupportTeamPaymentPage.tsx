@@ -2,6 +2,7 @@ import { PagePrimaryAccountSettings } from '../../components/accounts/PagePrimar
 import { PrimaryAccountPage } from '../../services/primaryAccountService';
 import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
 import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
+import { useLaborStatementWorkerRefresh } from '../../hooks/useLaborStatementWorkerRefresh';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -44,6 +45,7 @@ import { statementOutputService } from '../../services/statementOutputService';
 import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
 import type { StatementOutputRecord } from '../../types/statementOutput';
 import {
+    formatLaborStatementPaymentAccountLabel,
     getLaborStatementWorkerPayType,
     getWorkerMasterLaborStatementPayType,
     loadLaborStatementPresetDefaults,
@@ -60,10 +62,13 @@ import { db, storage } from '../../config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { getDownloadURL, ref } from 'firebase/storage';
 import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
+import SupportTeamHierarchy, { getInternalCounterTeamLabel } from './SupportTeamHierarchy';
 
 type SupportStatementPayType = SharedLaborStatementPayType;
 
 interface SupportLaborExcelRow {
+    workerDefaultAccount?: { bankName: string; accountNumber: string; accountHolder: string };
+    accountPurpose?: 'default' | 'directPay';
     aggregateId: string;
     workerId: string;
     workerName: string;
@@ -217,6 +222,7 @@ interface SupportLaborStatementViewOptions {
 }
 
 interface SupportLaborStatementOptions {
+    workerAccountPurpose?: 'default' | 'directPay';
     unitPriceOverride: number;
     defaultPayType: SupportStatementPayType;
     workerPayTypes: Record<string, SupportStatementPayType>;
@@ -532,7 +538,6 @@ const formatFullIdNumber = (value?: string | null): string => {
 
 const EXTERNAL_SUPPORT_OUT_DIRECTION: SupportDirection = '외부지원간곳';
 const EXTERNAL_SUPPORT_SITE_DISPLAY_NAME = '외부지원간곳';
-const EXTERNAL_SUPPORT_SITE_TOTAL_LABEL = '외부지원간곳 전체';
 const SUPPORT_DIRECTION_ORDER: SupportDirection[] = [EXTERNAL_SUPPORT_OUT_DIRECTION, '외부지원온곳', '내부지원간곳', '내부지원온곳'];
 const EXTERNAL_SUPPORT_DIRECTIONS: SupportDirection[] = [EXTERNAL_SUPPORT_OUT_DIRECTION];
 const INCOMING_SUPPORT_DIRECTIONS: SupportDirection[] = ['외부지원온곳'];
@@ -572,9 +577,7 @@ const getDefaultSelectedDirection = (scope: SupportTeamPaymentScope): 'all' | Su
 };
 
 const getDefaultExpandedDirectionGroups = (directions: SupportDirection[]): Set<SupportDirection> =>
-    directions.includes(EXTERNAL_SUPPORT_OUT_DIRECTION)
-        ? new Set<SupportDirection>([EXTERNAL_SUPPORT_OUT_DIRECTION])
-        : new Set<SupportDirection>();
+    new Set(directions);
 
 const SUPPORT_DIRECTION_META: Record<SupportDirection, { label: string; cellClass: string; badgeClass: string; rule: string }> = {
     외부지원간곳: {
@@ -931,6 +934,7 @@ const applySupportLaborStatementOptions = (
         const workerKey = getSupportLaborStatementWorkerKey(row);
         const payType = options.workerPayTypes[workerKey] ?? options.defaultPayType;
         const useDelegateAccount = payType === 'delegate';
+        const workerBank = options.workerAccountPurpose === 'default' ? row.workerDefaultAccount : row;
         const billingUnitPrice = options.unitPriceOverride > 0
             ? options.unitPriceOverride
             : row.billingUnitPrice;
@@ -939,9 +943,10 @@ const applySupportLaborStatementOptions = (
         return {
             ...row,
             payType,
-            bankName: useDelegateAccount ? options.delegateBankName : row.bankName,
-            accountHolder: useDelegateAccount ? options.delegateAccountHolder : row.accountHolder,
-            accountNumber: useDelegateAccount ? options.delegateAccountNumber : row.accountNumber,
+            accountPurpose: options.workerAccountPurpose ?? 'directPay',
+            bankName: useDelegateAccount ? options.delegateBankName : workerBank?.bankName ?? '',
+            accountHolder: useDelegateAccount ? options.delegateAccountHolder : workerBank?.accountHolder ?? '',
+            accountNumber: useDelegateAccount ? options.delegateAccountNumber : workerBank?.accountNumber ?? '',
             billingUnitPrice,
             billingAmount,
             issuedAmount: billingAmount
@@ -1320,6 +1325,7 @@ const buildLaborStatementExcelBlock = (preview: SitePreviewBlock): SupportLaborS
         accountNumber: row.accountNumber,
         accountHolder: row.accountHolder,
         payType: row.payType,
+        accountPurpose: row.accountPurpose,
         days: row.days,
         totalManDay: row.totalManDay,
         unitPrice: row.unitPrice,
@@ -1997,6 +2003,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
     );
     const [expandedAggregates, setExpandedAggregates] = useState<Set<string>>(new Set());
     const [expandedSiteRows, setExpandedSiteRows] = useState<Set<string>>(new Set());
+    const [internalSiteSettlementKey, setInternalSiteSettlementKey] = useState<string | null>(null);
 
     const manualAdjustments = manualAdjustmentState.month === selectedMonth ? manualAdjustmentState.data : {};
     const monthlyRateOverrides = monthlyRateOverrideState.month === selectedMonth
@@ -2038,6 +2045,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
         setExpandedDirectionGroups(getDefaultExpandedDirectionGroups(scopedDirections));
         setExpandedAggregates(new Set());
         setExpandedSiteRows(new Set());
+        setInternalSiteSettlementKey(null);
     }, [defaultSelectedDirection, scope, scopedDirections]);
 
     const updateManualAdjustment = useCallback((
@@ -2062,6 +2070,7 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
         const isCollapsing = expandedAggregates.has(aggKey);
         setExpandedAggregates(isCollapsing ? new Set() : new Set([aggKey]));
         setExpandedSiteRows(new Set());
+        setInternalSiteSettlementKey(null);
     };
 
     const toggleSiteRowExpand = (siteKey: string) => {
@@ -2074,7 +2083,13 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
         setExpandedDirectionGroups(isCollapsing ? new Set() : new Set([direction]));
         setExpandedAggregates(new Set());
         setExpandedSiteRows(new Set());
+        setInternalSiteSettlementKey(null);
     };
+
+    const getVisibleSettlementSites = (aggregate: SupportCompanyAggregate) =>
+        getInternalCounterTeamLabel(aggregate.direction)
+            ? aggregate.sites.filter(site => getAggregateSiteRowKey(aggregate, site) === internalSiteSettlementKey)
+            : aggregate.sites;
 
     const fetchInitialData = useCallback(async () => {
         try {
@@ -2709,9 +2724,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                             siteName: entry.siteName ?? siteInfo?.name ?? '',
                             teamId: entry.workerTeamId ?? entry.teamId,
                             teamNames,
-                            bankName: workerInfo?.bankName ?? '',
-                            accountNumber: workerInfo?.accountNumber ?? '',
-                            accountHolder: workerInfo?.accountHolder ?? workerInfo?.name ?? entry.workerName ?? '',
+                            bankName: workerInfo?.directPayBankName ?? '',
+                            workerDefaultAccount: { bankName: workerInfo?.bankName ?? '',
+                                accountNumber: workerInfo?.accountNumber ?? '', accountHolder: workerInfo?.accountHolder ?? '' },
+                            accountNumber: workerInfo?.directPayAccountNumber ?? '',
+                            accountHolder: workerInfo?.directPayAccountHolder ?? '',
                             workerLaborStatementPayType: getWorkerMasterLaborStatementPayType(workerInfo),
                             days: Array.from({ length: MAX_DAY_COLUMNS }, () => 0),
                             totalManDay: 0,
@@ -3197,7 +3214,10 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
     );
     const scopedTeamBasisLabel = scope === 'internalOut' ? '작업팀' : scope === 'internalIn' ? '현장담당팀' : '정산 주체';
     const scopedAllTeamLabel = scope === 'internalOut' ? '전체 작업팀' : scope === 'internalIn' ? '전체 현장담당팀' : '전체 기준팀';
-    const scopedTeamColumnLabel = scope === 'external' ? '담당팀 / 현장' : scope === 'internalOut' ? '작업팀' : scope === 'internalIn' ? '현장담당팀' : '팀 명';
+    const scopedTeamColumnLabel = getInternalCounterTeamLabel(scopedDirections[0])
+        ? getSettlementBasisLabel(scopedDirections[0])
+        : `${getSettlementBasisLabel(scopedDirections[0])} / 현장`;
+    const hierarchyLabels = [getSettlementBasisLabel(scopedDirections[0]), getInternalCounterTeamLabel(scopedDirections[0]), '현장', '작업자 상세'].filter(Boolean).join(' → ');
     const scopedSidebarFilterLabel = scope === 'internalOut' ? '작업팀 필터' : scope === 'internalIn' ? '현장담당팀 필터' : '기준팀 필터';
 
     if (loading && aggregates.length === 0) {
@@ -3402,17 +3422,15 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                 {activeSourceTeamId ? sidebarTeams.find(t => t.id === activeSourceTeamId)?.name : scopedAllTeamLabel} {pageTitle} 정산 요약
                             </h2>
                             <span className="text-[11px] font-bold text-slate-500">
-                                {scope === 'external'
-                                    ? '외부지원간곳은 1단 외부지원간곳 · 2단 현장담당팀 · 3단 현장 · 4단 작업자 상세로 표시합니다.'
-                                    : '팀 행을 클릭하면 현장 상세가 열립니다.'}
+                                {hierarchyLabels} 순으로 펼쳐볼 수 있습니다.
                             </span>
                         </div>
                         <div className="overflow-x-auto">
-                            <table className="w-full min-w-[1700px] border-collapse text-[13px]">
+                            <table className="w-full min-w-[1700px] table-fixed border-collapse text-[13px]">
                                 <thead>
                                     <tr className="text-center font-black text-slate-950">
                                         <th className="w-14 border border-slate-900 bg-gradient-to-br from-yellow-100 via-yellow-400 to-white p-2"></th>
-                                        <th className={`border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 py-2 ${scope === 'external' ? 'w-36 px-1 text-left tracking-[0.05em]' : 'w-36 px-2 tracking-[0.35em]'}`}>
+                                        <th className="w-56 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 px-2 py-2 text-left tracking-[0.05em]">
                                             {scopedTeamColumnLabel}
                                         </th>
                                         <th className="w-24 border border-slate-900 bg-gradient-to-br from-white via-amber-50 to-amber-200 p-2 tracking-[0.15em]">결제구분</th>
@@ -3449,51 +3467,55 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                             const groupAdditional = group.aggregates.reduce((sum, agg) => sum + getAggregateAdditionalAmount(agg, manualAdjustments), 0);
                                             const groupTotal = group.aggregates.reduce((sum, agg) => sum + getAggregateTotalWithAdditional(agg, manualAdjustments), 0);
                                             const groupPaymentMethod = summarizePaymentMethods(group.aggregates.flatMap(agg => agg.sites.map(site => site.paymentMethod)));
-                                            const isExternalSupportGroup = group.direction === EXTERNAL_SUPPORT_OUT_DIRECTION;
-                                            const isDirectionExpanded = !isExternalSupportGroup || expandedDirectionGroups.has(group.direction);
+                                            const isDirectionExpanded = expandedDirectionGroups.has(group.direction);
                                             const visibleAggregates = isDirectionExpanded ? group.aggregates : [];
                                             const groupExpandedSiteCount = visibleAggregates.reduce((sum, agg) => {
                                                 if (!expandedAggregates.has(agg.aggregateId)) return sum;
-                                                const expandedWorkerDetailCount = agg.sites.filter(site =>
+                                                const visibleSites = getVisibleSettlementSites(agg);
+                                                const expandedWorkerDetailCount = visibleSites.filter(site =>
                                                     expandedSiteRows.has(getAggregateSiteRowKey(agg, site))
                                                 ).length;
-                                                return sum + agg.sites.length + expandedWorkerDetailCount;
+                                                const internalRows = getInternalCounterTeamLabel(agg.direction) ? 1 + (visibleSites.length ? 1 : 0) : 0;
+                                                return sum + internalRows + visibleSites.length + expandedWorkerDetailCount;
                                             }, 0);
                                             const groupLaborPanelRowCount = visibleAggregates.reduce((sum, agg) => {
                                                 const aggregatePanelCount = isLaborStatementPanelOpen(agg.aggregateId) ? 1 : 0;
                                                 const sitePanelCount = expandedAggregates.has(agg.aggregateId)
-                                                    ? agg.sites.filter(site =>
+                                                    ? getVisibleSettlementSites(agg).filter(site =>
                                                         isLaborStatementPanelOpen(agg.aggregateId, getAggregateSiteRowKey(agg, site))
                                                     ).length
                                                     : 0;
                                                 return sum + aggregatePanelCount + sitePanelCount;
                                             }, 0);
-                                            const groupRowSpan = isExternalSupportGroup
-                                                ? 1 + (isDirectionExpanded ? group.aggregates.length + groupExpandedSiteCount + groupLaborPanelRowCount : 0)
-                                                : group.aggregates.length + groupExpandedSiteCount + groupLaborPanelRowCount + 1;
+                                            const groupRowSpan = 1 + visibleAggregates.length + groupExpandedSiteCount + groupLaborPanelRowCount;
                                             const groupAverageUnitPrice = groupManDay > 0 ? Math.round(groupAmount / groupManDay) : 0;
                                             const groupAverageBillingUnitPrice = groupManDay > 0 ? Math.round(groupBillingAmount / groupManDay) : 0;
 
                                             return (
                                                 <React.Fragment key={group.label}>
-                                                    {isExternalSupportGroup && (
                                                         <tr
                                                             onClick={() => toggleDirectionGroup(group.direction)}
                                                             className="cursor-pointer bg-white transition-colors hover:bg-emerald-50"
                                                         >
                                                             <td
                                                                 rowSpan={groupRowSpan}
-                                                                className="border border-slate-900 bg-gradient-to-br from-yellow-100 via-yellow-400 to-white text-center align-middle text-lg font-black text-slate-950"
+                                                                className={`border border-slate-900 text-center align-middle text-lg font-black ${getTeamCellClass(group.direction)}`}
                                                             >
                                                                 <div className="mx-auto leading-8" style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }}>
                                                                     {group.label}
                                                                 </div>
                                                             </td>
                                                             <td className="border border-slate-900 py-2 pl-1 pr-1 font-black text-slate-950">
-                                                                <span className="inline-flex min-w-0 items-center gap-1">
+                                                                <button
+                                                                    type="button"
+                                                                    aria-label={`${group.label} 팀 목록`}
+                                                                    aria-expanded={isDirectionExpanded}
+                                                                    onClick={(event) => { event.stopPropagation(); toggleDirectionGroup(group.direction); }}
+                                                                    className="inline-flex w-full min-w-0 items-center gap-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-600"
+                                                                >
                                                                     <FontAwesomeIcon icon={faChevronRight} className={`text-[11px] text-emerald-700 transition-transform ${isDirectionExpanded ? 'rotate-90' : ''}`} />
-                                                                    <span className="truncate">{EXTERNAL_SUPPORT_SITE_TOTAL_LABEL}</span>
-                                                                </span>
+                                                                    <span>{group.label} 전체</span>
+                                                                </button>
                                                             </td>
                                                             <td className="border border-slate-900 px-2 py-2 text-center">
                                                                 <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-black ${getPaymentMethodBadgeClassName(groupPaymentMethod)}`}>
@@ -3516,16 +3538,17 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                             <td className="border border-slate-900 px-2 py-2 text-right font-mono text-[16px] font-black text-slate-950">{formatNumber(groupTotal)}</td>
                                                             <td className="border border-slate-900 px-2 py-2 text-center text-[12px] font-black text-slate-500">-</td>
                                                             <td className="border border-slate-900 px-2 py-2 text-center text-[12px] font-bold text-slate-500">
-                                                                2단 현장담당팀 · 3단 현장 · 4단 작업자
+                                                                {[getSettlementBasisLabel(group.direction), getInternalCounterTeamLabel(group.direction), '현장'].filter(Boolean).join(' → ')}
                                                             </td>
                                                             <td className="border border-slate-900 px-2 py-2 text-center text-[12px] font-bold text-slate-500">
-                                                                {formatNumber(group.aggregates.length)}개 담당팀
+                                                                {formatNumber(group.aggregates.length)}개 팀
                                                             </td>
                                                         </tr>
-                                                    )}
-                                                    {visibleAggregates.map((agg, index) => {
+                                                    {visibleAggregates.map((agg) => {
                                                         const aggKey = agg.aggregateId;
                                                         const isExpanded = expandedAggregates.has(aggKey);
+                                                        const counterTeamLabel = getInternalCounterTeamLabel(agg.direction);
+                                                        const visibleSettlementSites = getVisibleSettlementSites(agg);
                                                         const manualAdjustment = getAdjustment(manualAdjustments, aggKey);
                                                         const manualAdditionalAmount = manualAdjustment.additionalAmount;
                                                         const expenseClaimAmount = getAggregateExpenseClaimAmount(agg);
@@ -3541,34 +3564,26 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                             <React.Fragment key={aggKey}>
                                                                 <tr
                                                                     onClick={() => toggleAggregateExpand(aggKey)}
-                                                                    className={`cursor-pointer transition-colors ${progressOption ? '' : isExternalSupportGroup ? 'bg-white hover:bg-slate-50' : `${isExpanded ? 'bg-slate-50' : 'bg-white'} hover:bg-slate-50`}`}
+                                                                    className={`cursor-pointer transition-colors ${progressOption ? '' : `${isExpanded ? 'bg-slate-50' : 'bg-white'} hover:bg-slate-50`}`}
                                                                     style={progressOption ? { backgroundColor: progressOption.rowColor } : undefined}
                                                                 >
-                                                                    {!isExternalSupportGroup && index === 0 && (
-                                                                        <td
-                                                                            rowSpan={groupRowSpan}
-                                                                            className={`border border-slate-900 text-center align-middle text-lg font-black ${getTeamCellClass(group.direction)}`}
-                                                                        >
-                                                                            <div className="mx-auto leading-8" style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }}>
-                                                                                {group.label}
-                                                                            </div>
-                                                                        </td>
-                                                                    )}
                                                                     <td
-                                                                        className={`border border-slate-900 py-1.5 font-black text-slate-950 ${isExternalSupportGroup ? 'bg-white px-1 text-left' : 'px-2 text-center'} ${progressOption ? '' : isExternalSupportGroup ? '' : getTeamCellClass(agg.direction)}`}
+                                                                        className="border border-slate-900 py-1.5 pl-3 pr-2 text-left font-black text-slate-950"
                                                                         style={progressOption ? { backgroundColor: progressOption.rowColor } : undefined}
                                                                     >
                                                                         <div className="min-w-0">
-                                                                            <span className="inline-flex min-w-0 items-center gap-1">
+                                                                            <button
+                                                                                type="button"
+                                                                                aria-label={`${agg.companyName} ${counterTeamLabel ? `${counterTeamLabel} 목록` : '현장 목록'}`}
+                                                                                aria-expanded={isExpanded}
+                                                                                onClick={(event) => { event.stopPropagation(); toggleAggregateExpand(aggKey); }}
+                                                                                className="inline-flex w-full min-w-0 items-center gap-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-600"
+                                                                            >
                                                                                 <FontAwesomeIcon icon={faChevronRight} className={`shrink-0 text-[10px] ${isExpanded ? 'rotate-90' : ''}`} />
-                                                                                {isExternalSupportGroup && (
-                                                                                    <span className="shrink-0 rounded bg-emerald-700 px-1.5 py-0.5 text-[10px] font-black text-white">2단</span>
-                                                                                )}
-                                                                                {agg.companyName}
-                                                                            </span>
-                                                                            <div className={`mt-1 truncate text-[10px] font-semibold ${agg.accountNumber ? 'text-slate-600' : 'text-rose-600'}`}>
-                                                                                {getSettlementAccountLabel(agg) || '계좌 정보 없음'}
-                                                                            </div>
+                                                                                <span className="shrink-0 rounded bg-emerald-700 px-1.5 py-0.5 text-[10px] font-black text-white">{getSettlementBasisLabel(agg.direction)}</span>
+                                                                                <span>{agg.companyName}</span>
+                                                                                <span className="shrink-0 text-[10px] text-slate-500">현장 {agg.sites.length}개</span>
+                                                                            </button>
                                                                         </div>
                                                                     </td>
                                                                     <td className="border border-slate-900 px-2 py-1.5 text-center">
@@ -3655,9 +3670,11 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                             className="h-7 w-full bg-transparent px-1 text-center text-[12px] font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
                                                                             placeholder={remarkPlaceholder}
                                                                         />
-                                                                        <div className={`mt-1 truncate px-1 text-[10px] font-semibold ${agg.accountNumber ? 'text-slate-600' : 'text-rose-600'}`}>
-                                                                            {getSettlementAccountLabel(agg) || '계좌 정보 없음'}
-                                                                        </div>
+                                                                        {agg.direction === '외부지원온곳' && (
+                                                                            <div className={`mt-1 truncate px-1 text-[10px] font-semibold ${agg.accountNumber ? 'text-slate-600' : 'text-rose-600'}`}>
+                                                                                {getSettlementAccountLabel(agg) || '계좌 정보 없음'}
+                                                                            </div>
+                                                                        )}
                                                                     </td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
                                                                         <div className="flex flex-col gap-1">
@@ -3703,7 +3720,30 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                     </td>
                                                                 </tr>
                                                                 {renderLaborStatementPanelRow(agg.aggregateId)}
-                                                                {isExpanded && agg.sites.map(site => {
+                                                                {isExpanded && counterTeamLabel && <tr>
+                                                                    <td colSpan={12} className="border border-slate-900 bg-slate-50 py-3 pl-4 pr-3">
+                                                                        <SupportTeamHierarchy
+                                                                            key={`${agg.aggregateId}-${selectedMonth}`}
+                                                                            direction={agg.direction}
+                                                                            teamName={agg.companyName}
+                                                                            sites={agg.sites}
+                                                                            onOpenSiteSettlement={(selectedSite) => {
+                                                                                const site = agg.sites.find(candidate => candidate.siteId === selectedSite.siteId);
+                                                                                if (site) setInternalSiteSettlementKey(getAggregateSiteRowKey(agg, site));
+                                                                                setExpandedSiteRows(new Set());
+                                                                            }}
+                                                                        />
+                                                                    </td>
+                                                                </tr>}
+                                                                {isExpanded && counterTeamLabel && visibleSettlementSites.length > 0 && <tr>
+                                                                    <td colSpan={12} className="border border-slate-900 bg-amber-50 px-4 py-2">
+                                                                        <div className="flex items-center justify-between gap-3">
+                                                                            <span className="font-bold">{visibleSettlementSites[0].siteName} 전체 정산 · 이 팀의 해당 현장 내역을 합산합니다. 단가와 명세서는 현장 전체에 적용됩니다.</span>
+                                                                            <button type="button" onClick={() => setInternalSiteSettlementKey(null)} className="rounded border border-slate-400 px-3 py-1">현장 정산 닫기</button>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>}
+                                                                {isExpanded && visibleSettlementSites.map(site => {
                                                                     const siteExpenseClaimAmount = getSiteExpenseClaimAmount(site);
                                                                     const siteKey = getAggregateSiteRowKey(agg, site);
                                                                     const isSiteExpanded = expandedSiteRows.has(siteKey);
@@ -3720,14 +3760,18 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                                                 className={`cursor-pointer transition-colors ${siteProgressOption ? '' : 'bg-slate-50 hover:bg-slate-100'}`}
                                                                                 style={siteProgressOption ? { backgroundColor: siteProgressOption.rowColor } : undefined}
                                                                             >
-                                                                                <td className="border border-slate-900 py-1 pl-1 pr-1 text-left text-[12px] font-bold text-slate-600">
-                                                                                    <span className="inline-flex min-w-0 items-center gap-1">
+                                                                                <td className="border border-slate-900 py-1 pl-6 pr-2 text-left text-[12px] font-bold text-slate-600">
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        aria-label={`${agg.companyName} ${site.siteName} 작업자 상세`}
+                                                                                        aria-expanded={isSiteExpanded}
+                                                                                        onClick={(event) => { event.stopPropagation(); toggleSiteRowExpand(siteKey); }}
+                                                                                        className="inline-flex w-full min-w-0 items-center gap-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-600"
+                                                                                    >
                                                                                         <FontAwesomeIcon icon={faChevronRight} className={`shrink-0 text-[10px] text-slate-500 ${isSiteExpanded ? 'rotate-90' : ''}`} />
-                                                                                        {isExternalSupportGroup && (
-                                                                                            <span className="shrink-0 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] font-black text-white">3단</span>
-                                                                                        )}
-                                                                                        <span className="truncate">{site.siteName}</span>
-                                                                                    </span>
+                                                                                        <span className="shrink-0 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] font-black text-white">현장</span>
+                                                                                        <span>{site.siteName}</span>
+                                                                                    </button>
                                                                                 </td>
                                                                                 <td className="border border-slate-900 px-2 py-1 text-center">
                                                                                     <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-black ${getPaymentMethodBadgeClassName(site.paymentMethod)}`}>
@@ -3895,21 +3939,6 @@ const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope =
                                                             </React.Fragment>
                                                         );
                                                     })}
-                                                    {!isExternalSupportGroup && (
-                                                        <tr className="bg-white font-black">
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-center tracking-[0.35em]">합 계</td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-center font-mono text-[16px]">{formatDayValue(groupManDay)}</td>
-                                                            <td className="border border-slate-900 px-2 py-1.5"></td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px]">{formatNumber(groupAmount)}</td>
-                                                            <td className="border border-slate-900 px-2 py-1.5"></td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px] text-slate-950">{formatNumber(groupIssuedAmount)}</td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatOptionalMoney(groupAdditional)}</td>
-                                                            <td className="border border-slate-900 px-2 py-1.5 text-right font-mono text-[16px]">{formatNumber(groupTotal)}</td>
-                                                            <td className="border border-slate-900 px-2 py-1.5"></td>
-                                                            <td className="border border-slate-900 px-2 py-1.5"></td>
-                                                            <td className="border border-slate-900 px-2 py-1.5"></td>
-                                                        </tr>
-                                                    )}
                                                 </React.Fragment>
                                             );
                                         })
@@ -4056,6 +4085,7 @@ const SupportLaborStatementPanel: React.FC<{
     logoUrl?: string | null;
     onClose: () => void;
 }> = ({ primaryAccountScope, aggregate, previews, yearMonth, adjustment, onClose }) => {
+    const { findWorker: findRefreshedWorker, refresh: refreshWorkerDb, loading: loadingWorkerDb, error: workerDbError } = useLaborStatementWorkerRefresh();
     const [statementOptionPreset, setStatementOptionPreset] = useState<StatementIssueOptionPreset>(() => loadStatementIssueOptionPreset());
     const [showBankColumn, setShowBankColumn] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).showBankColumn);
     const [showBillingColumns, setShowBillingColumns] = useState(() => loadSupportLaborStatementDefaults(statementOptionPreset).showBillingColumns);
@@ -4084,13 +4114,14 @@ const SupportLaborStatementPanel: React.FC<{
     const delegateAccountHolder = pagePrimaryAccount.account?.accountHolder ?? legacyDelegateAccountHolder;
     const delegateAccountNumber = pagePrimaryAccount.account?.accountNumber ?? legacyDelegateAccountNumber;
     const statementOptions = useMemo<SupportLaborStatementOptions>(() => ({
+        workerAccountPurpose: useWorkerMasterPayType ? 'directPay' : 'default',
         unitPriceOverride: appliedBulkUnitPrice,
         defaultPayType: 'direct',
-        workerPayTypes,
+        workerPayTypes: useWorkerMasterPayType ? workerPayTypes : {},
         delegateBankName,
         delegateAccountHolder,
         delegateAccountNumber
-    }), [appliedBulkUnitPrice, workerPayTypes, delegateBankName, delegateAccountHolder, delegateAccountNumber]);
+    }), [appliedBulkUnitPrice, workerPayTypes, delegateBankName, delegateAccountHolder, delegateAccountNumber, useWorkerMasterPayType]);
     const statementViewOptions = useMemo<SupportLaborStatementViewOptions>(() => ({
         showBankColumn,
         showBillingColumns,
@@ -4099,8 +4130,17 @@ const SupportLaborStatementPanel: React.FC<{
         showTeamUnderName
     }), [showBankColumn, showBillingColumns, isSplitView, showBankUnderAddress, showTeamUnderName]);
     const statementPreviews = useMemo(
-        () => applySupportLaborStatementOptions(previews, statementOptions),
-        [previews, statementOptions]
+        () => applySupportLaborStatementOptions(previews.map(preview => ({
+            ...preview,
+            rows: preview.rows.map(row => {
+                if (!findRefreshedWorker) return row;
+                const worker = findRefreshedWorker(row);
+                return { ...row, bankName: worker?.directPayBankName ?? '',
+                    workerDefaultAccount: { bankName: worker?.bankName ?? '', accountNumber: worker?.accountNumber ?? '', accountHolder: worker?.accountHolder ?? '' },
+                    accountNumber: worker?.directPayAccountNumber ?? '', accountHolder: worker?.directPayAccountHolder ?? '' };
+            }),
+        })), statementOptions),
+        [previews, statementOptions, findRefreshedWorker]
     );
     const statementTotalManDay = statementPreviews.reduce((sum, preview) => sum + preview.rows.reduce((rowSum, row) => rowSum + row.totalManDay, 0), 0);
     const statementTotalAmount = statementPreviews.reduce((sum, preview) => sum + preview.rows.reduce((rowSum, row) => rowSum + row.billingAmount, 0), 0);
@@ -4201,13 +4241,13 @@ const SupportLaborStatementPanel: React.FC<{
         if (!useWorkerMasterPayType) return [];
         const missingByKey = new Map<string, string>();
         flatPreviewRows.forEach((row) => {
-            if (row.workerLaborStatementPayType) return;
+            if (findRefreshedWorker ? getWorkerMasterLaborStatementPayType(findRefreshedWorker(row)) : row.workerLaborStatementPayType) return;
             const key = getSupportLaborStatementWorkerKey(row);
             if (!key || missingByKey.has(key)) return;
             missingByKey.set(key, row.workerName || row.workerId || '이름 없음');
         });
         return Array.from(missingByKey.values());
-    }, [flatPreviewRows, useWorkerMasterPayType]);
+    }, [flatPreviewRows, useWorkerMasterPayType, findRefreshedWorker]);
 
     useEffect(() => {
         setActivePreviewIndex(0);
@@ -4279,14 +4319,19 @@ const SupportLaborStatementPanel: React.FC<{
         setBulkUnitPriceInput('');
     }, []);
 
-    const handleUseWorkerMasterPayTypeChange = useCallback((checked: boolean) => {
+    const handleUseWorkerMasterPayTypeChange = async (checked: boolean) => {
+        const findWorker = checked ? await refreshWorkerDb() : findRefreshedWorker;
+        if (checked && !findWorker) return;
         setUseWorkerMasterPayType(checked);
         setWorkerPayTypes(buildSupportLaborWorkerPayTypesFromDefaults(
-            flatPreviewRows,
+            findWorker ? flatPreviewRows.map(row => ({ ...row,
+                workerLaborStatementPayType: getWorkerMasterLaborStatementPayType(findWorker(row)),
+            })) : flatPreviewRows,
             checked,
             loadSupportLaborStatementDefaults(statementOptionPreset)
         ));
-    }, [flatPreviewRows, statementOptionPreset]);
+        if (checked && !showBankUnderAddress) setShowBankColumn(true);
+    };
 
     const handleStatementOptionPresetChange = useCallback((value: StatementIssueOptionPreset) => {
         setStatementOptionPreset(value);
@@ -4532,11 +4577,14 @@ const SupportLaborStatementPanel: React.FC<{
                             <input
                                 type="checkbox"
                                 checked={useWorkerMasterPayType}
+                                disabled={loadingWorkerDb}
                                 onChange={(event) => handleUseWorkerMasterPayTypeChange(event.target.checked)}
                                 className="accent-blue-600"
                             />
                             DB 직불여부 적용
                         </label>
+                        {loadingWorkerDb && <span role="status" className="text-xs text-slate-500">직불 정보 불러오는 중…</span>}
+                        {workerDbError && <span role="alert" className="text-xs text-red-600">{workerDbError}</span>}
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
                         <span className="text-xs font-black text-slate-500">옵션 저장</span>
@@ -4915,14 +4963,14 @@ const LaborStatementPreview: React.FC<{
     const statementTableMinWidth = statementColumns.reduce((sum, column) => sum + column.width, 0);
     const statementSheetMinWidth = statementTableMinWidth + 82;
     const footerRowSpan = viewOptions.isSplitView ? 2 : 1;
-    const getPaymentLabel = (payType?: SupportStatementPayType) => payType === 'delegate' ? '위임' : '직불';
+    const getPaymentLabel = formatLaborStatementPaymentAccountLabel;
     const formatBankInfo = (row: SupportLaborExcelRow) =>
         [row.bankName, row.accountHolder, row.accountNumber].filter(Boolean).join(' / ');
     const getAddressContent = (row: SupportLaborExcelRow) => {
         const parts = [row.address || row.siteAddress || '-'];
         if (viewOptions.showBankUnderAddress) {
             const bankInfo = formatBankInfo(row);
-            parts.push(bankInfo ? `${bankInfo} (${getPaymentLabel(row.payType)})` : getPaymentLabel(row.payType));
+            parts.push(bankInfo ? `${bankInfo} (${getPaymentLabel(row.payType, row.accountPurpose)})` : getPaymentLabel(row.payType, row.accountPurpose));
         }
         return parts;
     };
@@ -5013,7 +5061,7 @@ const LaborStatementPreview: React.FC<{
                                     )}
                                     {viewOptions.showBankColumn && (
                                         <td rowSpan={viewOptions.isSplitView ? 2 : 1} className={`break-words border-2 border-slate-800 px-1.5 py-1.5 text-[10px] leading-snug ${row.payType === 'delegate' ? 'bg-yellow-100 text-yellow-900' : 'bg-white text-slate-700'}`}>
-                                            <div className="font-black">{getPaymentLabel(row.payType)}</div>
+                                            <div className="font-black">{getPaymentLabel(row.payType, row.accountPurpose)}</div>
                                             <div className="mt-1 font-semibold">{formatBankInfo(row) || '-'}</div>
                                         </td>
                                     )}

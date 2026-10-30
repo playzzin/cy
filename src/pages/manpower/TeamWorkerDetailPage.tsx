@@ -346,7 +346,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [dailyReportDisplayMode, setDailyReportDisplayMode] = useState<DailyReportDisplayMode>('calendar');
     const [profileSection, setProfileSection] = useState<'info' | 'work'>(() => new URLSearchParams(window.location.search).get('section') === 'work' ? 'work' : 'info');
-    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list');
+    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list', true);
     const [showSensitive, setShowSensitive] = useState(true);
     const [idCardImage, setIdCardImage] = useState({ workerId: '', url: '' });
     const idCardUrl = idCardImage.workerId === selectedWorkerId ? idCardImage.url : '';
@@ -512,13 +512,17 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
     const teamStats = useMemo(() => {
         const totalManDay = teamOutputRows.reduce((sum, row) => sum + asNumber(row.manDay), 0);
         const totalAmount = teamOutputRows.reduce((sum, row) => sum + getReportRowAmount(row), 0);
-        const activeWorkers = allTeamWorkers.filter(worker => !isInactiveWorker(worker)).length;
-        const idCardCount = allTeamWorkers.filter(worker => String(worker.fileNameSaved ?? '').trim()).length;
-        const signatureCount = allTeamWorkers.filter(worker => String(worker.signatureUrl ?? '').trim()).length;
+        const activeTeamWorkers = allTeamWorkers.filter(worker => !isInactiveWorker(worker));
+        const activeWorkers = activeTeamWorkers.length;
+        const retiredWorkers = allTeamWorkers.filter(worker => getWorkerStatusGroup(worker) === 'retired').length;
+        const idCardCount = activeTeamWorkers.filter(worker => String(worker.fileNameSaved ?? '').trim()).length;
+        const signatureCount = activeTeamWorkers.filter(worker => String(worker.signatureUrl ?? '').trim()).length;
 
         return {
             totalWorkers: allTeamWorkers.length,
             activeWorkers,
+            retiredWorkers,
+            inactiveWorkers: allTeamWorkers.length - activeWorkers - retiredWorkers,
             totalManDay,
             totalAmount,
             idCardCount,
@@ -916,10 +920,11 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
             )}
 
             <section className="tw-kpi-grid" aria-label="팀 요약">
-                <div className="tw-kpi">
+                <div className="tw-kpi" aria-label="팀 재직 인원">
                     <Users size={20} />
-                    <span>작업자</span>
-                    <strong>{teamStats.activeWorkers}/{teamStats.totalWorkers}</strong>
+                    <span>재직 인원</span>
+                    <strong>{teamStats.activeWorkers}명</strong>
+                    <small className="tw-kpi-note">퇴사 {teamStats.retiredWorkers}명{teamStats.inactiveWorkers > 0 ? ` · 비활성 ${teamStats.inactiveWorkers}명` : ''} 별도</small>
                 </div>
                 <div className="tw-kpi">
                     <CalendarDays size={20} />
@@ -931,10 +936,11 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                     <span>출력 금액</span>
                     <strong>{monthlyPendingText ?? formatCurrency(teamStats.totalAmount)}</strong>
                 </div>
-                <div className="tw-kpi">
+                <div className="tw-kpi tw-kpi--documents" aria-label="재직자 서류 등록 현황">
                     <ShieldCheck size={20} />
-                    <span>증빙</span>
-                    <strong>{teamStats.idCardCount}/{teamStats.signatureCount}</strong>
+                    <span>재직자 서류</span>
+                    <strong>신분증 {teamStats.idCardCount}명<br />서명 {teamStats.signatureCount}명</strong>
+                    <small className="tw-kpi-note">재직 {teamStats.activeWorkers}명 기준</small>
                 </div>
             </section>
 
@@ -990,7 +996,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                     <strong>{selectedTeam?.name || '청연이엔지 소속팀 선택'}</strong>
                                 </span>
                                 <span className="tw-team-picker-button__meta">
-                                    {teamStats.activeWorkers}/{teamStats.totalWorkers}명
+                                    재직 {teamStats.activeWorkers}명
                                 </span>
                                 <ChevronDown size={18} className={isTeamPickerOpen ? 'tw-team-picker-button__chevron tw-team-picker-button__chevron--open' : 'tw-team-picker-button__chevron'} />
                             </button>
@@ -1136,7 +1142,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                 {restrictedTeam && accessScope.mode === 'team' && !accessScope.loading && <TeamResourceStatusControl
                                     key={selectedWorker.id} kind="worker" resource={selectedWorker}
                                     onSaved={result => {
-                                        updateWorkerStatus(result.id, result.status, result.isActive === true);
+                                        updateWorkerStatus(result.id, result.status, result.isActive === true, { joinDate: result.joinDate, retirementDate: result.retirementDate });
                                         setStatusFilter(result.status === '퇴사' ? 'retired' : 'active');
                                     }} />}
                                 <section className="tw-detail-section">

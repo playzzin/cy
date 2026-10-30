@@ -11,6 +11,7 @@ import { faUserTag, faCamera, faCheck, faTimes, faSpinner } from '@fortawesome/f
 import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import SingleSelectPopover from '../common/SingleSelectPopover';
 import { prepareIdCardAnalysisImage } from '../../utils/idCardAnalysisImage';
+import { employmentToday, validateEmploymentPeriod } from '../../utils/workerEmploymentPeriod';
 
 interface WorkerFormProps {
     initialData?: Worker | null;
@@ -338,6 +339,12 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
 
         let finalData = { ...formData };
 
+        const periodError = validateEmploymentPeriod(finalData);
+        if (periodError) {
+            await showErrorAlert('재직 기간 확인', periodError);
+            return;
+        }
+
         if (!finalData.name || !finalData.idNumber) {
             await showErrorAlert('입력 오류', '이름과 주민번호는 필수입니다.');
             return;
@@ -386,7 +393,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
     };
 
     return (
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl overflow-hidden max-w-5xl mx-auto border border-slate-200">
+        <form aria-label="작업자 등록·수정" onSubmit={handleSubmit} className="bg-white rounded-xl shadow-xl overflow-hidden max-w-5xl mx-auto border border-slate-200">
             {/* Header */}
             <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
                 <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
@@ -532,7 +539,10 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                 <select
                                     name="status"
                                     value={formData.status || '미배정'}
-                                    onChange={handleChange}
+                                    onChange={event => {
+                                        const status = event.target.value;
+                                        setFormData(current => ({ ...current, status, retirementDate: status === '퇴사' ? current.retirementDate || employmentToday() : '' }));
+                                    }}
                                     className="w-full md:w-1/2 border-slate-200 rounded text-sm py-1.5 px-3 font-medium cursor-pointer focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white"
                                 >
                                     <option value="미배정">미배정</option>
@@ -540,6 +550,15 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                     <option value="퇴사">퇴사</option>
                                     <option value="휴직">휴직</option>
                                 </select>
+                                <div className="mt-3 flex flex-wrap gap-3">
+                                    <label className="text-sm">입사일
+                                        <input type="date" name="joinDate" aria-label="입사일" value={formData.joinDate || ''} onChange={handleChange} className="ml-2 rounded border px-2 py-1.5" />
+                                    </label>
+                                    <label className="text-sm">퇴사일
+                                        <input type="date" name="retirementDate" aria-label="퇴사일" value={formData.retirementDate || ''} onChange={handleChange} min={formData.joinDate || undefined} disabled={formData.status !== '퇴사'} className="ml-2 rounded border px-2 py-1.5" />
+                                    </label>
+                                </div>
+                                <p className="mt-2 text-xs text-slate-600">재직 기간은 입사일부터 퇴사일까지입니다. 노임체크는 출역 없는 달도 이 기간에 포함되면 표시합니다. 과거 날짜는 확인 후 입력해 주세요.</p>
                             </div>
                         </div>
                     </div>

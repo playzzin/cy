@@ -2,6 +2,7 @@ import React from 'react';
 import type { MenuItem } from '../../../../types/menu';
 import MenuDivider from '../../../../components/layout/MenuDivider';
 import { getDividerAppearance } from '../../../../utils/menuDivider';
+import { LINKED_POSITION_DIVIDER_ID } from '../../../../utils/linkedPositionMenus';
 
 interface DividerSettingsProps {
     item: MenuItem;
@@ -14,7 +15,17 @@ const DividerSettings: React.FC<DividerSettingsProps> = ({ item, onChange }) => 
 
     return (
         <div className="space-y-6">
-            <p className="text-xs leading-relaxed text-slate-400">메뉴 그룹 사이에 선과 여백을 넣어 구역을 나눕니다. 원하는 위치로 드래그해 배치하세요.</p>
+            <p className="text-xs leading-relaxed text-slate-400">{item.id === LINKED_POSITION_DIVIDER_ID
+                ? 'DEV 메뉴와 직책별 연결 메뉴 사이의 구분선입니다. 제목, 선 모양, 간격과 표시 여부를 설정하세요.'
+                : '메뉴 그룹 사이에 선과 여백을 넣어 구역을 나눕니다. 원하는 위치로 드래그해 배치하세요.'}</p>
+            <div className="space-y-2">
+                <label htmlFor="menu-divider-title" className="block text-sm font-semibold text-slate-200">구분선 제목</label>
+                <input id="menu-divider-title" type="text" value={item.dividerTitle || ''} maxLength={60}
+                    placeholder="예: 현장 관리" aria-describedby="menu-divider-title-help"
+                    onChange={event => onChange({ ...item, dividerTitle: event.target.value })}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-200 placeholder:text-slate-600 focus:border-blue-400 focus:outline-none" />
+                <p id="menu-divider-title-help" className="text-[11px] leading-relaxed text-slate-500">선 가운데 작은 글씨로 표시합니다. 비워두면 선만 표시합니다.</p>
+            </div>
             <fieldset className="space-y-3">
                 <legend className="text-sm font-semibold text-slate-200">선 모양</legend>
                 <div className="flex gap-2">

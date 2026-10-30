@@ -128,13 +128,18 @@ test('저장 중 원래 값으로 되돌린 편집도 새 저장 기준과 비�
 
 test('저장 실패 시 변경 내용을 남기며 재시도할 수 있다', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
-    (service.updateIssuesBatch as jest.Mock).mockRejectedValueOnce(new Error('synthetic failure'));
+    const failedSave = deferred<void>();
+    const retrySave = deferred<void>();
+    (service.updateIssuesBatch as jest.Mock).mockReturnValueOnce(failedSave.promise).mockReturnValueOnce(retrySave.promise);
     mount(); await ready(); edit('품목', '보존할 입력');
     fireEvent.click(screen.getByRole('button', { name: '변경사항 저장 (1)' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '변경사항 저장 (1)' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: '변경사항 저장 (1)' })).toBeDisabled();
+    await act(async () => { failedSave.reject(new Error('synthetic failure')); });
+    expect(screen.getByRole('button', { name: '변경사항 저장 (1)' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '품목 값 편집, 현재 보존할 입력' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '변경사항 저장 (1)' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: '변경사항 저장 (0)' })).toBeDisabled());
+    await act(async () => { retrySave.resolve(); });
+    expect(screen.getByRole('button', { name: '변경사항 저장 (0)' })).toBeDisabled();
 });
 
 test('충돌 항목은 최신 값으로 바꾸고 나머지 내 입력과 서버의 다른 칸은 보존한다', async () => {

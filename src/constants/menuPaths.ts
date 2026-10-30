@@ -1,4 +1,5 @@
 export const MENU_PATHS: { [key: string]: string } = {
+    '우리 팀 숙소 배정': '/assignment/team-accommodation',
     '활동 내역': '/activity',
     '팀별 가불내역': '/payroll/advance-summary',
     '국민은행 송금': '/payroll/bank-transfer',

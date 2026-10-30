@@ -5,18 +5,20 @@ export const PREVIEW_SECONDS = 15 * 60;
 export const isPreviewIdentity = (uid: unknown, token: Record<string, any> = {}) =>
     String(uid || '').startsWith(PREVIEW_UID_PREFIX) || token.devPreview === true || 'previewTargetUid' in token;
 export const normalizePreviewRole = (value: unknown) => String(value || '').trim().toLowerCase().replace(/^pos_/, '');
-const devNames = new Set(['dev', 'developer', '개발', '개발자']);
-export function previewDevRole(profile: any, positions: Array<{ id: string; name: string }> = []): string | null {
+const previewNames = new Set(['dev', 'developer', '개발', '개발자', 'ceo', '대표', '대표이사', '사장']);
+export function previewActorRole(profile: any, positions: Array<{ id: string; name: string }> = []): string | null {
     if (!profile || profile.status !== 'active') return null;
     const rawRoles = [profile.role, profile.position, profile.systemRole, ...(profile.roles || []), ...(profile.additionalPositions || [])];
-    return rawRoles.find(value => typeof value === 'string' && (devNames.has(normalizePreviewRole(value))
-        || positions.some(position => normalizePreviewRole(position.id) === normalizePreviewRole(value) && devNames.has(normalizePreviewRole(position.name))))) || null;
+    return rawRoles.find(value => typeof value === 'string' && (previewNames.has(normalizePreviewRole(value))
+        || positions.some(position => normalizePreviewRole(position.id) === normalizePreviewRole(value) && previewNames.has(normalizePreviewRole(position.name))))) || null;
 }
 
 // Explicitly audited read operations. New endpoints fail closed until reviewed.
 const reads = new Set(['getTeamScopedData', 'listGeminiUsageLogs', 'getCardExpenseAuditDashboard', 'listCardStatementFiles', 'getCardStatementFileDetail',
+    'getTeamAccommodationBoard',
     'getMyAccountLinkCandidate', 'getMyAccountLinkStatus', 'searchAccountLinkCompanies', 'getWelfareGameConfig', 'getNoticeDeliveryReport', 'getNoticeBoard', 'getCardStatementImportJobStatus']);
 const readActions: Record<string, string[]> = {
+    supportTeamDocuments: ['list', 'read'],
     teamExpenseRequests: ['list', 'receipt'],
     teamWorkerRequests: ['list', 'document'],
     teamAccountApprovals: ['list'],
