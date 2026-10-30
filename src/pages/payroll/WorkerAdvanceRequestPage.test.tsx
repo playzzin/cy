@@ -35,6 +35,7 @@ beforeEach(() => {
     (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([
         { id: 'request-a', workerId: 'worker-a', yearMonth: month(), requestedAmount: 20000, status: 'requested' },
     ]);
+    (advanceRequestService.cancelRequest as jest.Mock).mockResolvedValue(undefined);
 });
 
 it('모바일은 팀 색상과 이름 옆 금액으로 회차별 신청하며 직책·당시 가능액을 숨긴다', async () => {
@@ -51,11 +52,11 @@ it('모바일은 팀 색상과 이름 옆 금액으로 회차별 신청하며 �
         expect(screen.queryByText('당시 가능액')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '선입금' })).not.toBeInTheDocument();
         fireEvent.change(first, { target: { value: '10000' } });
-        fireEvent.click(screen.getByRole('button', { name: '2회차', exact: true }));
+        fireEvent.click(screen.getByRole('button', { name: '2회차' }));
         const second = screen.getByRole('textbox', { name: '테스트 팀장 2회차 신청 금액' });
         expect(second).toHaveValue('');
         fireEvent.change(second, { target: { value: '20000' } });
-        fireEvent.click(screen.getByRole('button', { name: '1회차', exact: true }));
+        fireEvent.click(screen.getByRole('button', { name: '1회차' }));
         expect(screen.getByRole('textbox', { name: '테스트 팀장 1회차 신청 금액' })).toHaveValue('10,000');
         fireEvent.click(screen.getByRole('button', { name: '테스트 팀장 가불 신청' }));
         await screen.findByText('가불 신청을 등록했습니다.');
@@ -82,12 +83,22 @@ it('팀장이 서버에서 허용한 소속 팀원을 선택해 가불을 대신
 
 it('신청 취소 후 내역 재조회가 완료되어도 취소 안내를 유지한다', async () => {
     const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    (advanceRequestService.cancelRequest as jest.Mock).mockImplementation(async () => {
+        (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([
+            { id: 'request-a', workerId: 'worker-a', yearMonth: month(), requestedAmount: 20000, status: 'cancelled' },
+        ]);
+    });
     try {
         render(<WorkerAdvanceRequestPage />);
         fireEvent.click(await screen.findByRole('button', { name: '신청 취소' }));
         await waitFor(() => expect(advanceRequestService.cancelRequest).toHaveBeenCalled());
         await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
         expect(screen.getByText('신청을 취소했습니다.')).toBeInTheDocument();
+        expect(screen.queryByRole('article')).not.toBeInTheDocument();
+        expect(screen.getByText('신청 내역 없음')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+        await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
+        expect(screen.queryByRole('article')).not.toBeInTheDocument();
     } finally { confirm.mockRestore(); }
 });
 

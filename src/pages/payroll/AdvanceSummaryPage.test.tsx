@@ -58,7 +58,7 @@ test('선입금은 수기로 저장하고 신청이 없는 작업자도 추가�
         (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([{ ...record, id: 'manual', source: 'manual-prepayment', category: 'other', status: 'paid', requestedAmount: 30000 }]);
     });
     renderPage();
-    fireEvent.click(await screen.findByRole('button', { name: '선입금 수기 입력', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: '선입금 수기 입력' }));
     const dialog = screen.getByRole('dialog', { name: '선입금 수기 입력' });
     fireEvent.change(within(dialog).getByLabelText('선입금 작업자'), { target: { value: 'test-worker' } });
     fireEvent.change(within(dialog).getByLabelText('선입금 금액'), { target: { value: '30000' } });

@@ -297,7 +297,7 @@ export default function WorkerAdvanceRequestPage() {
     const selectedWorkerRequests = useMemo(() => {
         if (!selectedWorker) return [];
         return requests
-            .filter((request) => matchesWorker(selectedWorker, request))
+            .filter((request) => matchesWorker(selectedWorker, request) && request.status !== 'cancelled')
             .sort((left, right) => toDateMillis(right.createdAt) - toDateMillis(left.createdAt));
     }, [requests, selectedWorker]);
 
