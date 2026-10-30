@@ -23,6 +23,8 @@ import AdvanceSummaryDepositAccountSelect from './components/AdvanceSummaryDepos
 import AdvanceSummaryTeamLayout, { type AdvanceSummaryLayout } from './components/AdvanceSummaryTeamLayout';
 import AdvanceSummaryFitTable from './components/AdvanceSummaryFitTable';
 import AdvancePrepaymentDialog from './components/AdvancePrepaymentDialog';
+import AdvanceKBExportDialog from './components/AdvanceKBExportDialog';
+import type { AdvanceKBExportSource } from './utils/advanceSummaryKBExport';
 import { advancePaymentDepositAccountService, type AdvancePaymentDepositAccountChange } from '../../services/advancePaymentDepositAccountService';
 import './AdvanceSummaryPage.css';
 
@@ -56,6 +58,8 @@ const AdvanceSummaryPage: React.FC = () => {
     const [savingDepositAccount, setSavingDepositAccount] = useState(false);
     const [prepaymentWorker, setPrepaymentWorker] = useState<string | null>(null);
     const [savingCategory, setSavingCategory] = useState(false);
+    const [kbExport, setKbExport] = useState<{ contextKey: string; result: LoadResult; source: AdvanceKBExportSource } | null>(null);
+    const kbContextKey = JSON.stringify([uid, yearMonth, teamId, item, query]);
     const categoryPending = useRef(false);
     const depositAccountPending = useRef(false);
     const reportRef = useRef<HTMLDivElement>(null);
@@ -100,6 +104,7 @@ const AdvanceSummaryPage: React.FC = () => {
     };
 
     useEffect(() => { setMemoEditor(null); setPrepaymentWorker(null); setSaveMessage(''); }, [uid, yearMonth]);
+    useEffect(() => { setKbExport(null); }, [kbContextKey, result]);
 
     useEffect(() => {
         let cancelled = false;
@@ -215,6 +220,11 @@ const AdvanceSummaryPage: React.FC = () => {
                 </div>
                 <div className="as-actions">
                     <Link to="/payroll/advance-request">가불 신청</Link>
+                    <button type="button" className="as-kb-trigger" disabled={status !== 'ready' || !summary.groups.length || savingDepositAccount || savingCategory}
+                        onClick={() => setKbExport({ contextKey: kbContextKey, result, source: {
+                            groups: summary.groups, yearMonth, teamLabel: selectedTeam?.name || '전체 팀',
+                            categoryLabel: itemLabel, query, createdAtIso: new Date().toISOString(),
+                        } })}><FileSpreadsheet size={15} />국민은행용 엑셀</button>
                     <button type="button" onClick={() => setRefresh(value => value + 1)} disabled={status === 'loading' || savingDepositAccount}>
                         <FontAwesomeIcon icon={faRotateRight} /> 새로고침
                     </button>
@@ -370,6 +380,8 @@ const AdvanceSummaryPage: React.FC = () => {
             {prepaymentWorker !== null && status === 'ready' && <AdvancePrepaymentDialog key={`${uid}/${yearMonth}/${prepaymentWorker}`}
                 workers={manualWorkers} teams={result.teams} initialWorkerId={prepaymentWorker} initialTeamId={teamId} amounts={prepaymentAmounts} month={monthLabel}
                 onSave={savePrepayment} onClose={() => setPrepaymentWorker(null)} />}
+            {kbExport && status === 'ready' && kbExport.contextKey === kbContextKey && kbExport.result === result
+                && <AdvanceKBExportDialog source={kbExport.source} onClose={() => setKbExport(null)} />}
         </div>
     );
 };
