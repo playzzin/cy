@@ -60,7 +60,7 @@ test('선입금은 수기로 저장하고 신청이 없는 작업자도 추가�
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: '선입금 수기 입력' }));
     const dialog = screen.getByRole('dialog', { name: '선입금 수기 입력' });
-    fireEvent.change(within(dialog).getByLabelText('선입금 작업자'), { target: { value: 'test-worker' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: '검증 A팀 검증 작업자 선택' }));
     fireEvent.change(within(dialog).getByLabelText('선입금 금액'), { target: { value: '30000' } });
     fireEvent.click(within(dialog).getByRole('button', { name: '선입금 저장' }));
     await screen.findByRole('rowheader', { name: '검증 작업자' });
