@@ -76,7 +76,7 @@ test('저장한 가불을 팀별로 표시하고 검색·구분 필터와 원본
     expect(screen.getByRole('link', { name: '가불 신청' })).toHaveAttribute('href', '/payroll/advance-request');
     const totals = screen.getByLabelText('조회 결과 합계');
     expect(within(totals).getAllByText('150,000')[0]).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('신청 분류'), { target: { value: 'first' } });
+    fireEvent.click(within(screen.getByRole('group', { name: '목록 신청 분류' })).getByRole('button', { name: '1회차' }));
     expect(within(totals).getAllByText('150,000')).toHaveLength(2);
     fireEvent.change(screen.getByLabelText('이름·팀·비고 검색'), { target: { value: '존재하지 않는 검색어' } });
     expect(screen.getByRole('status')).toHaveTextContent('조회 조건에 맞는 가불내역이 없습니다');
@@ -124,11 +124,11 @@ test('검색·팀·가불 필터를 한 번에 초기화하고 조회 월은 유
     renderPage();
     await screen.findByRole('rowheader', { name: '검증 작업자' });
     fireEvent.change(screen.getByLabelText('팀 선택'), { target: { value: 'test-team' } });
-    fireEvent.change(screen.getByLabelText('신청 분류'), { target: { value: 'first' } });
+    fireEvent.click(within(screen.getByRole('group', { name: '목록 신청 분류' })).getByRole('button', { name: '1회차' }));
     fireEvent.change(screen.getByLabelText('이름·팀·비고 검색'), { target: { value: '없는 이름' } });
     fireEvent.click(screen.getByRole('button', { name: '검색·필터 초기화' }));
     expect(screen.getByLabelText('팀 선택')).toHaveValue('');
-    expect(screen.getByLabelText('신청 분류')).toHaveValue('all');
+    expect(within(screen.getByRole('group', { name: '목록 신청 분류' })).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByLabelText('이름·팀·비고 검색')).toHaveValue('');
     expect(screen.getByLabelText('조회 월')).toHaveValue('2026-10');
     expect(screen.getByRole('rowheader', { name: '검증 작업자' })).toBeInTheDocument();
@@ -251,7 +251,7 @@ test('회차별 금액을 별도 열과 팀 소계에 표시하고 분류 필터
     expect(within(subtotal).getAllByRole('cell').slice(0, 4).map(cell => cell.textContent)).toEqual(['150,000', '50,000', '0', '200,000']);
     const personalTotal = screen.getByRole('group', { name: '개인입금 총액' });
     expect(within(personalTotal).getByText('50,000')).toBeVisible();
-    fireEvent.change(screen.getByLabelText('신청 분류'), { target: { value: 'first' } });
+    fireEvent.click(within(screen.getByRole('group', { name: '목록 신청 분류' })).getByRole('button', { name: '1회차' }));
     expect(within(row).getAllByRole('cell').slice(1, 3).map(cell => cell.textContent)).toEqual(['150,000', '150,000']);
     expect(screen.queryByRole('columnheader', { name: '2회차' })).not.toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: '선입금' })).not.toBeInTheDocument();
@@ -266,7 +266,7 @@ test('목록의 회차 버튼은 조회 조건과 동기화되고 빈 분류에�
     await screen.findByRole('rowheader', { name: '검증 작업자' });
     const filters = screen.getByRole('group', { name: '목록 신청 분류' });
     fireEvent.click(within(filters).getByRole('button', { name: '2회차' }));
-    expect(screen.getByLabelText('신청 분류')).toHaveValue('second');
+    expect(screen.queryByRole('combobox', { name: '신청 분류' })).not.toBeInTheDocument();
     expect(screen.queryByRole('rowheader', { name: '검증 작업자' })).not.toBeInTheDocument();
     expect(screen.getByRole('rowheader', { name: '2회차 작업자' })).toBeInTheDocument();
     expect(within(filters).getByRole('button', { name: '2회차' })).toHaveAttribute('aria-pressed', 'true');
@@ -275,7 +275,7 @@ test('목록의 회차 버튼은 조회 조건과 동기화되고 빈 분류에�
     fireEvent.click(within(filters).getByRole('button', { name: '전체' }));
     expect(screen.getByRole('rowheader', { name: '검증 작업자' })).toBeInTheDocument();
     expect(screen.getByRole('rowheader', { name: '2회차 작업자' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('신청 분류'), { target: { value: 'first' } });
+    fireEvent.click(within(screen.getByRole('group', { name: '목록 신청 분류' })).getByRole('button', { name: '1회차' }));
     expect(within(filters).getByRole('button', { name: '1회차' })).toHaveAttribute('aria-pressed', 'true');
 });
 

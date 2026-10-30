@@ -242,23 +242,14 @@ const AdvanceSummaryPage: React.FC = () => {
                         {result.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
                     </select>
                 </label>
-                <label>신청 분류
-                    <select aria-label="신청 분류" value={item} onChange={event => updateFilter('item', event.target.value)}>
-                        <option value="all">전체 신청</option>
-                        {ADVANCE_REQUEST_CATEGORIES.map(key => <option key={key} value={key}>{ADVANCE_REQUEST_CATEGORY_LABELS[key]}</option>)}
-                    </select>
-                </label>
                 <label className="as-search">이름·팀·비고 검색
                     <input type="search" value={query} placeholder="검색어를 입력하세요" onChange={event => setQuery(event.target.value)} />
                 </label>
                 {(teamId || item !== 'all' || query) && <button type="button" className="as-reset" onClick={resetFilters}>검색·필터 초기화</button>}
             </section>
-            <p className="as-note">1·2회차는 가불 신청금액, 선입금은 수기 입력금액입니다. 취소·반려 건은 제외하며 회차 미지정 금액은 별도 안내합니다. 계좌번호와 예금주는 현재 작업자 등록 정보입니다.</p>
             {saveMessage && <p className="as-save-message" role="status">{saveMessage}</p>}
-            {status === 'ready' && <div className="as-manual-tools"><button type="button" onClick={() => setPrepaymentWorker('')}>선입금 수기 입력</button><span>1·2회차는 가불 신청에서 가져오며 선입금은 직접 입력합니다.</span></div>}
             {status === 'ready' && unclassifiedIds.size > 0 && <details className="as-unclassified" open>
                 <summary>회차 미지정 {unclassifiedIds.size}건 · {won(unclassified.total)}원 — 1회차 또는 2회차를 선택해 주세요.</summary>
-                <p>이전 신청의 회차가 저장되지 않아 회차별 합계에서 빠져 있습니다. 선입금에는 포함하지 않습니다.</p>
                 {result.requests.filter(request => request.id && unclassifiedIds.has(request.id)).map(request => <div key={request.id}>
                     <span>{request.workerName} · {won(request.requestedAmount)}원</span>
                     {ADVANCE_REQUEST_ROUNDS.map(round => <button key={round} type="button" disabled={savingCategory}
@@ -289,20 +280,23 @@ const AdvanceSummaryPage: React.FC = () => {
                     {summary.depositTotals.unclassified > 0 && <div className="as-deposit-none" role="group" aria-label="미선택·기존 구분"><dt>미선택·기존 구분</dt><dd>{won(summary.depositTotals.unclassified)}<small>원</small></dd></div>}
                 </dl>
                 <div ref={teamNavRef} className="as-team-tools">
-                    <div className="as-category-filter" role="group" aria-label="목록 신청 분류">
-                        <span>신청 분류</span>
-                        <button type="button" aria-pressed={item === 'all'} onClick={() => updateFilter('item', 'all')}>전체</button>
-                        {ADVANCE_REQUEST_CATEGORIES.map(category => <button key={category} type="button"
-                            aria-pressed={item === category} onClick={() => updateFilter('item', category)}>{ADVANCE_REQUEST_CATEGORY_LABELS[category]}</button>)}
-                    </div>
-                    <div className="as-view-controls">
-                        <div><strong>{summary.groups.length}개 팀 가불내역</strong><span>팀을 누르면 해당 목록으로 이동합니다.</span></div>
+                    <div className="as-toolbar-row">
+                        <div className="as-category-actions">
+                            <div className="as-category-filter" role="group" aria-label="목록 신청 분류">
+                                <span>신청 분류</span>
+                                <button type="button" aria-pressed={item === 'all'} onClick={() => updateFilter('item', 'all')}>전체</button>
+                                {ADVANCE_REQUEST_CATEGORIES.map(category => <button key={category} type="button"
+                                    aria-pressed={item === category} onClick={() => updateFilter('item', category)}>{ADVANCE_REQUEST_CATEGORY_LABELS[category]}</button>)}
+                            </div>
+                            <button type="button" className="as-manual-entry" onClick={() => setPrepaymentWorker('')}>선입금 수기 입력</button>
+                        </div>
                         <div className="as-view-switch" role="group" aria-label="팀 목록 보기 방식">
                             <button type="button" aria-pressed={layout === 'wide'} onClick={() => setLayout('wide')}><List size={16} />한 팀씩 넓게</button>
                             <button type="button" aria-pressed={layout === 'compact'} onClick={() => setLayout('compact')}><FileSpreadsheet size={16} />엑셀형 · 4개씩</button>
                         </div>
                     </div>
                     <nav className="as-team-jumps" aria-label="팀 바로가기">
+                        <strong className="as-team-count">{summary.groups.length}개 팀 가불내역</strong>
                         {summary.groups.map(group => <button type="button" key={group.team.id} onClick={() => goToTeam(group.team.id)}
                             aria-label={`${group.team.name} 가불내역으로 이동`}>
                             <span className="as-team-dot" style={{ backgroundColor: normalizeHexColor(group.team.color, '#2563eb') }} />
