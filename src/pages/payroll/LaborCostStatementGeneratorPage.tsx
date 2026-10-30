@@ -724,51 +724,62 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     }));
   };
 
-  const setRowPayType = (rowId: number, payType: PayType | 'default') => {
-    setRows((prev) => prev.map((r) => {
-      if (r.id !== rowId) return r;
+  const applyRowPayType = (r: RowState, payType: PayType | 'default'): RowState => {
+    if (payType === 'default') {
+      const worker = (r.workerId ? workerById.get(r.workerId) : undefined) ?? workerByName.get(r.workerName);
+      return { ...r, ...buildBankFieldsForPayType('direct', getDirectBankInfo(r), {
+        bankName: worker?.bankName ?? '', bankOwner: worker?.accountHolder ?? '', bankAccount: worker?.accountNumber ?? ''
+      }, 'default') };
+    }
 
-      if (payType === 'default') {
-        const worker = (r.workerId ? workerById.get(r.workerId) : undefined) ?? workerByName.get(r.workerName);
-        return { ...r, ...buildBankFieldsForPayType('direct', getDirectBankInfo(r), {
-          bankName: worker?.bankName ?? '', bankOwner: worker?.accountHolder ?? '', bankAccount: worker?.accountNumber ?? ''
-        }, 'default') };
-      }
+    if (payType === 'delegate') {
+      const directBank = r.payType === 'direct' && r.accountPurpose === 'directPay'
+        ? {
+            bankName: r.bankName,
+            bankOwner: r.bankOwner,
+            bankAccount: r.bankAccount
+          }
+        : getDirectBankInfo(r);
 
-      if (payType === 'delegate') {
-        const directBank = r.payType === 'direct' && r.accountPurpose === 'directPay'
-          ? {
-              bankName: r.bankName,
-              bankOwner: r.bankOwner,
-              bankAccount: r.bankAccount
-            }
-          : getDirectBankInfo(r);
-
-        return {
-          ...r,
-          payType: 'delegate',
-          bankName: masterBank,
-          bankOwner: masterOwner,
-          bankAccount: masterAccount,
-          directBankName: directBank.bankName,
-          directBankOwner: directBank.bankOwner,
-          directBankAccount: directBank.bankAccount
-        };
-      }
-
-      const directBank = getDirectBankInfo(r);
       return {
         ...r,
-        payType: 'direct',
-        accountPurpose: 'directPay',
-        bankName: directBank.bankName,
-        bankOwner: directBank.bankOwner,
-        bankAccount: directBank.bankAccount,
+        payType: 'delegate',
+        bankName: masterBank,
+        bankOwner: masterOwner,
+        bankAccount: masterAccount,
         directBankName: directBank.bankName,
         directBankOwner: directBank.bankOwner,
         directBankAccount: directBank.bankAccount
       };
-    }));
+    }
+
+    const directBank = getDirectBankInfo(r);
+    return {
+      ...r,
+      payType: 'direct',
+      accountPurpose: 'directPay',
+      bankName: directBank.bankName,
+      bankOwner: directBank.bankOwner,
+      bankAccount: directBank.bankAccount,
+      directBankName: directBank.bankName,
+      directBankOwner: directBank.bankOwner,
+      directBankAccount: directBank.bankAccount
+    };
+  };
+
+  const setRowPayType = (rowId: number, payType: PayType | 'default') => {
+    setRows(current => current.map(row => row.id === rowId ? applyRowPayType(row, payType) : row));
+  };
+
+  const filledRows = rows.filter(row => row.workerName.trim().length > 0);
+  const delegatedRowCount = filledRows.filter(row => row.payType === 'delegate').length;
+  const bulkPayTypeDisabled = filledRows.length === 0 || loadingReports || loadingAttendance || loadingWorkerDb || pagePrimaryAccount.loading;
+
+  const handleDelegateAll = () => {
+    if (bulkPayTypeDisabled || !ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
+    setRows(current => current.map(row => row.workerName.trim() ? applyRowPayType(row, 'delegate') : row));
+    setPayTypeAutoWarnings([]);
+    setShowBankColumn(true);
   };
 
   const buildRowsForWorkerMasterPayTypeSetting = (
@@ -1910,6 +1921,21 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">총 인건비 합계</span>
             <span className="text-xl font-black text-slate-800 tabular-nums leading-none mt-0.5">{statementSummary.totalAmount.toLocaleString()}<span className="text-xs font-medium text-slate-400 ml-1">원</span></span>
           </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 bg-white px-6 py-2">
+          <span className="text-sm font-bold text-slate-700">지급구분 일괄 변경</span>
+          <button
+            type="button"
+            onClick={handleDelegateAll}
+            disabled={bulkPayTypeDisabled}
+            className="min-h-[44px] rounded-lg bg-red-600 px-5 py-2 text-sm font-bold text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+          >
+            전체 위임
+          </button>
+          <span role="status" aria-label="위임 현황" className="text-sm text-slate-600">
+            현재 명세서 {filledRows.length}명 중 위임 {delegatedRowCount}명
+          </span>
+          <span className="text-xs text-slate-500">이름이 있는 모든 행에 적용됩니다. 개별 지급구분은 표에서 다시 변경할 수 있습니다.</span>
         </div>
         {payTypeAutoWarnings.length > 0 && (
           <div className="border-t border-amber-200 bg-amber-50 px-6 py-2 text-xs font-bold text-amber-800">
