@@ -21,6 +21,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faCar, faChartPie, faTableCellsLarge, faRotateRight, faCircleExclamation, faHistory, faSearch, faOilCan, faScrewdriverWrench } from '@fortawesome/free-solid-svg-icons';
 import { VehicleMonthlyLedger } from '../../components/vehicle/VehicleMonthlyLedger';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
+import { getVehiclePaymentDay, matchesVehiclePaymentDay } from '../../utils/vehiclePaymentDay';
 import { appendOfficeAssignmentTeam, isOfficeAssignmentReference, isOfficeAssignmentTeam, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 import './VehicleManagerPage.css';
 
@@ -79,6 +80,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedPaymentDay, setSelectedPaymentDay] = useState('');
     const [exportButtonContainer, setExportButtonContainer] = useState<HTMLDivElement | null>(null);
 
     // Tab State
@@ -138,6 +140,20 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
     useEffect(() => {
         loadData();
     }, [refreshKey]);
+
+    const paymentDayOptions = React.useMemo(() => {
+        const days = vehicles.map(getVehiclePaymentDay);
+        return {
+            days: Array.from(new Set(days.filter((day): day is number => day !== null))).sort((a, b) => a - b),
+            hasUnset: days.includes(null)
+        };
+    }, [vehicles]);
+
+    useEffect(() => {
+        if (!loading && !loadError && selectedPaymentDay && !vehicles.some((vehicle) => matchesVehiclePaymentDay(vehicle, selectedPaymentDay))) {
+            setSelectedPaymentDay('');
+        }
+    }, [vehicles, loading, loadError, selectedPaymentDay]);
 
     const teamByAnyId = React.useMemo(() => {
         const map = new Map<string, Team>();
@@ -281,9 +297,9 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                 v.insurance?.expiryDate
             ].some(value => String(value ?? '').toLowerCase().includes(query));
 
-            return teamMatches && searchMatches;
+            return teamMatches && searchMatches && matchesVehiclePaymentDay(v, selectedPaymentDay);
         });
-    }, [vehicles, selectedTeamId, selectedTeamIdentity, teamByAnyId, teamByName, workerByAnyId, workerByName, searchTerm, officeStaffRows]);
+    }, [vehicles, selectedTeamId, selectedTeamIdentity, teamByAnyId, teamByName, workerByAnyId, workerByName, searchTerm, selectedPaymentDay, officeStaffRows]);
 
     // 핸들러 함수들
     const handleRefresh = () => {
@@ -525,7 +541,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
             />
 
             {/* 필터 및 탭 섹션 */}
-            <div className="flex max-w-full flex-col gap-2 overflow-hidden bg-white p-2 rounded-2xl border border-slate-200 shadow-sm xl:flex-row xl:items-center">
+            <div className="flex max-w-full flex-col gap-2 overflow-hidden bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:items-center">
                     <SupportSegmentedTabs
                         options={vehicleTabs}
@@ -542,8 +558,25 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                     />}
                 </div>
 
-                {!(activeTab === 'ledger' && repairView) && <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
+                {!(activeTab === 'ledger' && repairView) && <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                     {activeTab === 'status' && <div ref={setExportButtonContainer} className="contents" />}
+                    {activeTab !== 'history' && (
+                        <label className="flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                            <span className="whitespace-nowrap">결제일자</span>
+                            <select
+                                aria-label="결제일자"
+                                value={selectedPaymentDay}
+                                onChange={(e) => setSelectedPaymentDay(e.target.value)}
+                                className="min-w-0 flex-1 rounded bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                            >
+                                <option value="">전체</option>
+                                {paymentDayOptions.days.map((day) => (
+                                    <option key={day} value={String(day)}>매월 {day}일</option>
+                                ))}
+                                {paymentDayOptions.hasUnset && <option value="unset">미설정</option>}
+                            </select>
+                        </label>
+                    )}
                     <span className="whitespace-nowrap px-1 text-xs font-bold text-slate-400">
                         조회 {filteredVehicles.length} / {vehicles.length}
                     </span>
@@ -598,6 +631,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                         teams={teams}
                         teamFilterId={selectedTeamId}
                         searchText={searchTerm}
+                        paymentDayFilter={selectedPaymentDay}
                         loadingVehicles={loading}
                         onOpenSetup={openAssignmentVehicle}
                     />}
