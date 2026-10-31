@@ -4,6 +4,63 @@ import * as admin from 'firebase-admin';
 import { advanceRequestFingerprint, handleTeamAdvanceRequest, parseAdvanceRequestCategory } from './teamAdvanceRequests';
 import { createHash } from 'crypto';
 
+test('취소·삭제는 신청자와 소속 시공사·관리자만 처리하며 지급 내역과 재시도를 보호한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
+    assert.equal(process.env.GCLOUD_PROJECT, 'demo-team-worker-request');
+    const app = admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT });
+    const db = app.firestore();
+    const call = (action: string, requestId: string, uid = 'manage-owner') => handleTeamAdvanceRequest({ action, id: requestId }, { auth: { uid, token: {} } } as any);
+    const base = { workerId: 'manage-worker', teamId: 'manage-team-legacy', requesterUid: 'manage-owner', yearMonth: '2026-10', requestedAmount: 10000, category: 'first', status: 'requested' };
+    const paths = ['users/manage-owner', 'users/manage-other', 'users/manage-admin', 'users/manage-staff', 'users/manage-inactive',
+        'workers/manage-staff', 'workers/manage-worker', 'teams/manage-team', 'companies/manage-company'];
+    try {
+        for (const uid of ['manage-owner', 'manage-other', 'manage-staff']) await db.doc(`users/${uid}`).set({ status: 'active', role: 'user', linkedWorkerIds: uid === 'manage-owner' ? ['manage-worker'] : [] });
+        await db.doc('users/manage-admin').set({ status: 'active', role: 'admin' });
+        await db.doc('users/manage-inactive').set({ status: 'inactive', role: 'admin' });
+        await db.doc('workers/manage-staff').set({ uid: 'manage-staff', companyId: 'manage-company' });
+        await db.doc('workers/manage-worker').set({ name: 'fixture', status: '재직', teamId: 'manage-team' });
+        await db.doc('teams/manage-team').set({ legacyId: 'manage-team-legacy', companyId: 'manage-company' });
+        await db.doc('companies/manage-company').set({ type: '시공사' });
+        for (const state of ['requested', 'approved', 'paid', 'cancelled', 'rejected']) {
+            const requestId = `manage-${state}`;
+            await db.doc(`advance_requests/${requestId}`).set({ ...base, status: state });
+            for (const action of ['cancel', 'delete']) {
+                await assert.rejects(call(action, requestId, 'manage-other'), (e: any) => e.code === 'permission-denied');
+                await assert.rejects(call(action, requestId, 'manage-inactive'), (e: any) => e.code === 'permission-denied');
+            }
+            if (['requested', 'approved', 'paid'].includes(state)) {
+                await assert.rejects(call('delete', requestId, 'manage-admin'), (e: any) => e.code === 'failed-precondition');
+                assert.equal((await db.doc(`advance_requests/${requestId}`).get()).data()?.deletedAt, undefined);
+            }
+            if (['approved', 'paid', 'rejected'].includes(state)) await assert.rejects(call('cancel', requestId, 'manage-admin'), (e: any) => e.code === 'failed-precondition');
+        }
+        await call('cancel', 'manage-requested', 'manage-staff');
+        await call('cancel', 'manage-requested', 'manage-staff');
+        assert.equal((await db.doc('advance_requests/manage-requested').get()).data()?.cancelledById, 'manage-staff');
+        await call('delete', 'manage-requested', 'manage-staff');
+        await call('delete', 'manage-requested', 'manage-staff');
+        assert.equal((await db.doc('advance_requests/manage-requested').get()).data()?.deletedById, 'manage-staff');
+        await assert.rejects(call('cancel', 'manage-requested'), (e: any) => e.code === 'failed-precondition');
+        await call('delete', 'manage-cancelled');
+        await call('delete', 'manage-rejected', 'manage-admin');
+        await db.doc('workers/manage-staff').update({ companyId: 'another-company' });
+        await assert.rejects(call('delete', 'manage-cancelled', 'manage-staff'), (e: any) => e.code === 'permission-denied');
+        await db.doc('advance_requests/manage-manual').set({ ...base, source: 'manual-prepayment', status: 'paid' });
+        for (const action of ['cancel', 'delete']) await assert.rejects(call(action, 'manage-manual', 'manage-admin'), (e: any) => e.code === 'failed-precondition');
+        const replayId = createHash('sha256').update('manage-owner:manage-retry').digest('hex');
+        await db.doc(`advance_requests/${replayId}`).set({ ...base, status: 'cancelled', deletedAt: admin.firestore.Timestamp.now(),
+            requestFingerprint: advanceRequestFingerprint(base.workerId, base.yearMonth, base.requestedAmount, '', 'first') });
+        await handleTeamAdvanceRequest({ action: 'create', requestId: 'manage-retry', workerId: base.workerId, yearMonth: base.yearMonth, requestedAmount: base.requestedAmount, category: 'first' }, { auth: { uid: 'manage-owner', token: {} } } as any);
+        const replay = (await db.doc(`advance_requests/${replayId}`).get()).data()!;
+        assert.equal(replay.status, 'cancelled');
+        assert.ok(replay.deletedAt);
+    } finally {
+        const requests = await db.collection('advance_requests').where('workerId', '==', 'manage-worker').get();
+        await Promise.all(requests.docs.map(doc => doc.ref.delete()));
+        await Promise.all(paths.map(path => db.doc(path).delete()));
+        await app.delete();
+    }
+});
+
 test('분류를 검증하고 기존 클라이언트의 재시도 지문을 유지한다', () => {
     for (const category of ['first', 'second', 'other']) assert.equal(parseAdvanceRequestCategory(category), category);
     assert.equal(parseAdvanceRequestCategory(undefined), 'other');

@@ -19,7 +19,7 @@ jest.mock('../../services/advancePaymentMemoService', () => ({ ...jest.requireAc
 jest.mock('../../services/advancePaymentDepositAccountService', () => ({ ...jest.requireActual('../../services/advancePaymentDepositAccountService'), advancePaymentDepositAccountService: { save: jest.fn() } }));
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'test-admin' } }) }));
 jest.mock('../../services/firestoreCrudCompat', () => ({}));
-jest.mock('../../services/advanceRequestService', () => ({ advanceRequestService: { listByYearMonth: jest.fn(), setCategory: jest.fn(), setPrepayment: jest.fn() } }));
+jest.mock('../../services/advanceRequestService', () => ({ advanceRequestService: { listByYearMonth: jest.fn(), setCategory: jest.fn(), setPrepayment: jest.fn(), cancelRequest: jest.fn(), deleteRequest: jest.fn() } }));
 jest.mock('../../services/advancePaymentService', () => ({ advancePaymentService: { getAdvancePaymentsByYearMonth: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.fn() } }));
 jest.mock('../../services/companyService', () => ({ companyService: { getCompaniesByType: jest.fn(), getCompanyById: jest.fn() } }));
@@ -40,6 +40,81 @@ beforeEach(() => {
     (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([record]);
     (advancePaymentMemoService.save as jest.Mock).mockResolvedValue(undefined);
     (advancePaymentDepositAccountService.save as jest.Mock).mockResolvedValue(undefined);
+    (advanceRequestService.cancelRequest as jest.Mock).mockResolvedValue(undefined);
+    (advanceRequestService.deleteRequest as jest.Mock).mockResolvedValue(undefined);
+});
+
+test('개별 신청 취소는 합계에서 제외하고 취소 내역은 관리 창에서 삭제한다', async () => {
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+        renderPage();
+        fireEvent.click(await screen.findByRole('button', { name: '검증 A팀 검증 작업자 신청 관리' }));
+        const dialog = screen.getByRole('dialog', { name: '가불 신청 관리' });
+        fireEvent.click(within(dialog).getByRole('button', { name: '신청 취소' }));
+        await within(dialog).findByText('신청을 취소했습니다.');
+        expect(advanceRequestService.cancelRequest).toHaveBeenCalledWith('entry');
+        expect(within(dialog).getByText('취소')).toBeInTheDocument();
+        expect(screen.queryByRole('rowheader', { name: '검증 작업자', hidden: true })).not.toBeInTheDocument();
+        fireEvent.click(within(dialog).getByRole('button', { name: '삭제' }));
+        await within(dialog).findByText('신청 내역을 삭제했습니다.');
+        expect(advanceRequestService.deleteRequest).toHaveBeenCalledWith('entry');
+        expect(within(dialog).queryByRole('article')).not.toBeInTheDocument();
+    } finally { confirm.mockRestore(); }
+});
+
+test('합계가 없어도 취소·반려 내역을 관리하고 승인·지급·선입금은 삭제하지 않는다', async () => {
+    (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([
+        ...['cancelled', 'rejected', 'approved', 'paid'].map(status => ({ ...record, id: status, status })),
+        { ...record, id: 'manual', source: 'manual-prepayment', status: 'paid', category: 'other' },
+        { ...record, id: 'outside', teamId: 'outside-team', status: 'cancelled' },
+        { ...record, id: 'deleted', status: 'cancelled', deletedAt: '2026-10-01' },
+    ]);
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('button', { name: '신청 취소·삭제' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '신청 취소·삭제' }));
+    const dialog = screen.getByRole('dialog', { name: '가불 신청 관리' });
+    expect(within(dialog).getAllByRole('article')).toHaveLength(4);
+    expect(within(dialog).getAllByRole('button', { name: '삭제' })).toHaveLength(2);
+    expect(within(dialog).queryByRole('button', { name: '신청 취소' })).not.toBeInTheDocument();
+});
+
+test('취소 확인을 거절하면 변경하지 않고 처리 중에는 중복 요청을 막는다', async () => {
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    let resolveSave!: () => void;
+    (advanceRequestService.cancelRequest as jest.Mock).mockImplementationOnce(() => new Promise<void>(resolve => { resolveSave = resolve; }));
+    try {
+        renderPage();
+        fireEvent.click(await screen.findByRole('button', { name: '검증 A팀 검증 작업자 신청 관리' }));
+        const button = screen.getByRole('button', { name: '신청 취소' });
+        fireEvent.click(button);
+        expect(advanceRequestService.cancelRequest).not.toHaveBeenCalled();
+        confirm.mockReturnValue(true);
+        fireEvent.click(button);
+        fireEvent.click(button);
+        expect(button).toBeDisabled();
+        expect(screen.getByRole('button', { name: '신청 관리 닫기' })).toBeDisabled();
+        expect(advanceRequestService.cancelRequest).toHaveBeenCalledTimes(1);
+        await act(async () => resolveSave());
+        await screen.findByText('신청을 취소했습니다.');
+    } finally { confirm.mockRestore(); }
+});
+
+test('삭제 실패 시 내역을 유지하고 월 변경 시 이전 관리 창을 닫는다', async () => {
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([{ ...record, status: 'cancelled' }]);
+    (advanceRequestService.deleteRequest as jest.Mock).mockRejectedValueOnce(new Error('permission-denied'));
+    try {
+        renderPage();
+        await waitFor(() => expect(screen.getByRole('button', { name: '신청 취소·삭제' })).toBeEnabled());
+        const monthInput = screen.getByLabelText('조회 월');
+        fireEvent.click(screen.getByRole('button', { name: '신청 취소·삭제' }));
+        fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+        expect(await screen.findByRole('alert')).toHaveTextContent('처리하지 못했습니다');
+        expect(screen.getByRole('article')).toBeInTheDocument();
+        fireEvent.change(monthInput, { target: { value: '2026-11' } });
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        await screen.findByRole('heading', { name: '2026년 11월 가불내역' });
+    } finally { confirm.mockRestore(); }
 });
 
 test('국민은행 미리보기는 선택한 회차와 표시 문구를 같은 양식으로 다운로드한다', async () => {
@@ -182,7 +257,7 @@ test('검색·팀·가불 필터를 한 번에 초기화하고 조회 월은 유
 
 test('금액·입금구분·비고는 한 행에 표시하고 계좌는 바로 아래 행에서 최신 정보를 보여준다', async () => {
     renderPage();
-    const account = await screen.findByRole('cell', { name: '계좌 테스트은행 000-0000-0000 예금주 등록 예금주' });
+    const account = await screen.findByRole('cell', { name: /^계좌 테스트은행 000-0000-0000 예금주 등록 예금주/ });
     const cells = within(screen.getByRole('row', { name: /검증 작업자/ })).getAllByRole('cell');
     expect(cells[1]).toHaveClass('as-money');
     expect(cells[5]).toHaveClass('as-deposit');
@@ -194,7 +269,7 @@ test('금액·입금구분·비고는 한 행에 표시하고 계좌는 바로 �
     expect(screen.getAllByRole('columnheader').map(header => header.textContent)).toEqual(['번호', '이름', '1회차', '2회차', '선입금', '총금액', '입금구분', '비고']);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ id: 'test-worker', bankName: '변경은행', accountNumber: '000-1111-0000', accountHolder: '변경 예금주' }]);
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
-    expect(await screen.findByRole('cell', { name: '계좌 변경은행 000-1111-0000 예금주 변경 예금주' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: /^계좌 변경은행 000-1111-0000 예금주 변경 예금주/ })).toBeInTheDocument();
     expect(manpowerService.getWorkers).toHaveBeenLastCalledWith(true);
     expect(screen.queryByText('000-0000-0000')).not.toBeInTheDocument();
     expect(screen.queryByText('등록 예금주')).not.toBeInTheDocument();
@@ -203,7 +278,7 @@ test('금액·입금구분·비고는 한 행에 표시하고 계좌는 바로 �
 test('등록된 계좌가 없으면 미등록을 표시하고 조회 오류를 미등록으로 숨기지 않는다', async () => {
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([]);
     renderPage();
-    expect(await screen.findByRole('cell', { name: '계좌 미등록 예금주 미등록' })).toBeInTheDocument();
+    expect(await screen.findByRole('cell', { name: /^계좌 미등록 예금주 미등록/ })).toBeInTheDocument();
     (manpowerService.getWorkers as jest.Mock).mockRejectedValueOnce(new Error('test account lookup failed'));
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('불러오지 못했습니다');

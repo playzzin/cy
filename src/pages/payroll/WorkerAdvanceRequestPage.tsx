@@ -11,7 +11,6 @@ import {
     Send,
     UserRound,
     WalletCards,
-    XCircle,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -26,6 +25,7 @@ import {
 import { ADVANCE_ITEM_LABEL_KEYS } from '../../services/payrollConfigService';
 import { ADVANCE_REQUEST_CATEGORIES, ADVANCE_REQUEST_ROUNDS, ADVANCE_REQUEST_CATEGORY_LABELS, normalizeAdvanceRequestCategory, getAdvanceRequestCategory, type AdvanceRequestCategory } from '../../types/advanceRequestCategory';
 import AdvanceRequestMobileInput from './components/AdvanceRequestMobileInput';
+import AdvanceRequestActions, { confirmAdvanceRequestAction, type AdvanceRequestAction } from './components/AdvanceRequestActions';
 import './WorkerAdvanceRequestPage.css';
 
 type EarnedSummary = {
@@ -297,7 +297,7 @@ export default function WorkerAdvanceRequestPage() {
     const selectedWorkerRequests = useMemo(() => {
         if (!selectedWorker) return [];
         return requests
-            .filter((request) => matchesWorker(selectedWorker, request) && request.status !== 'cancelled')
+            .filter((request) => matchesWorker(selectedWorker, request) && !request.deletedAt)
             .sort((left, right) => toDateMillis(right.createdAt) - toDateMillis(left.createdAt));
     }, [requests, selectedWorker]);
 
@@ -537,21 +537,20 @@ export default function WorkerAdvanceRequestPage() {
         }
     };
 
-    const handleCancel = async (request: AdvanceRequest) => {
+    const handleRequestAction = async (request: AdvanceRequest, action: AdvanceRequestAction) => {
         if (!request.id || savingLock.current) return;
-        const ok = window.confirm(`${formatCurrency(request.requestedAmount)} 신청을 취소할까요?`);
-        if (!ok) return;
+        if (!confirmAdvanceRequestAction(request, action)) return;
 
         savingLock.current = true;
         setSaving(true);
         setMessage('');
         try {
-            await advanceRequestService.cancelRequest(request.id, currentUser?.uid);
+            if (action === 'cancel') await advanceRequestService.cancelRequest(request.id, currentUser?.uid);
+            else await advanceRequestService.deleteRequest(request.id);
             await latestSummaryLoader.current();
-            setMessage('신청을 취소했습니다.');
+            setMessage(action === 'cancel' ? '신청을 취소했습니다.' : '신청 내역을 삭제했습니다.');
         } catch (error) {
-            console.error('[WorkerAdvanceRequestPage] Failed to cancel request', error);
-            setMessage('신청 취소에 실패했습니다.');
+            setMessage('처리하지 못했습니다. 신청 상태와 권한을 확인하고 새로고침 후 다시 시도해 주세요.');
         } finally {
             savingLock.current = false;
             setSaving(false);
@@ -948,19 +947,10 @@ export default function WorkerAdvanceRequestPage() {
                                                 </div>
                                             ) : null}
 
-                                            {request.status === 'requested' ? (
-                                                <div className="mt-4 flex justify-end border-t border-slate-100 pt-3">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleCancel(request)}
-                                                        disabled={saving}
-                                                        className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-black text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-slate-300"
-                                                    >
-                                                        <XCircle size={14} />
-                                                        신청 취소
-                                                    </button>
-                                                </div>
-                                            ) : null}
+                                            <div className="mt-3 flex justify-end">
+                                                <AdvanceRequestActions request={request} canManage={Boolean(currentUser?.uid && request.requesterUid === currentUser.uid)}
+                                                    disabled={saving || !summaryReady} onAction={(row, action) => void handleRequestAction(row, action)} />
+                                            </div>
                                         </article>
                                     ))}
                                 </div>

@@ -5,6 +5,16 @@ jest.mock('../config/firebase', () => ({ db: {}, functions: {}, auth: { currentU
 jest.mock('./teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
 
+test('신청 취소·삭제는 서버 callable에서 검증하며 클라이언트 권한 값을 보내지 않는다', async () => {
+    const call = jest.fn().mockResolvedValue({ data: { id: 'saved' } });
+    (httpsCallable as jest.Mock).mockReturnValue(call);
+    await advanceRequestService.cancelRequest('saved', 'untrusted-client-uid');
+    await advanceRequestService.deleteRequest('saved');
+    expect(call.mock.calls).toEqual([[{ action: 'cancel', id: 'saved' }], [{ action: 'delete', id: 'saved' }]]);
+    call.mockRejectedValueOnce(new Error('permission-denied'));
+    await expect(advanceRequestService.deleteRequest('saved')).rejects.toThrow('permission-denied');
+});
+
 test.each(['first', 'second'] as const)('%s 분류를 신청 금액과 함께 서버에 전달한다', async category => {
     const call = jest.fn().mockResolvedValue({ data: { id: 'saved', category } });
     (httpsCallable as jest.Mock).mockReturnValue(call);

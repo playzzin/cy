@@ -54,11 +54,12 @@ export interface AdvanceRequest {
     paidAt?: unknown;
     createdAt?: unknown;
     updatedAt?: unknown;
+    deletedAt?: unknown;
 }
 
 export type AdvanceRequestCreateInput = Omit<
     AdvanceRequest,
-    'id' | 'status' | 'createdAt' | 'updatedAt' | 'reviewedById' | 'reviewedByName' | 'reviewMemo' | 'reviewedAt'
+    'id' | 'status' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'reviewedById' | 'reviewedByName' | 'reviewMemo' | 'reviewedAt'
 >;
 
 const COLLECTION_NAME = 'advance_requests';
@@ -142,17 +143,18 @@ const mapRequest = (id: string, data: Record<string, unknown>): AdvanceRequest =
     paidAt: data.paidAt,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
+    deletedAt: data.deletedAt,
 });
 
 const sortNewestFirst = (requests: AdvanceRequest[]): AdvanceRequest[] =>
-    [...requests].sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt));
+    requests.filter(request => !request.deletedAt).sort((left, right) => toMillis(right.createdAt) - toMillis(left.createdAt));
 
 const getRequestById = async (id: string): Promise<AdvanceRequest> => {
     const requestId = normalizeText(id);
     if (!requestId) throw new Error('request-id-required');
 
     const snapshot = await getDoc(doc(db, COLLECTION_NAME, requestId));
-    if (!snapshot.exists()) throw new Error('request-not-found');
+    if (!snapshot.exists() || snapshot.data()?.deletedAt) throw new Error('request-not-found');
 
     return mapRequest(snapshot.id, snapshot.data() as Record<string, unknown>);
 };
@@ -264,6 +266,13 @@ export const advanceRequestService = {
         const uid = auth.currentUser?.uid;
         if (!uid) throw new Error('로그인이 필요합니다.');
         await httpsCallable(functions, 'teamAdvanceRequests')({ action: 'cancel', id });
+        if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
+    },
+
+    deleteRequest: async (id: string): Promise<void> => {
+        const uid = auth.currentUser?.uid;
+        if (!uid) throw new Error('로그인이 필요합니다.');
+        await httpsCallable(functions, 'teamAdvanceRequests')({ action: 'delete', id });
         if (auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다.');
     },
 

@@ -13,7 +13,7 @@ jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorke
 jest.mock('../../services/userService', () => ({ userService: { getUser: async () => ({ linkedWorkerIds: ['worker-a'] }) } }));
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getWorkerRows: jest.fn() } }));
 jest.mock('../../services/advancePaymentService', () => ({ advancePaymentService: { getAdvancePaymentsByYearMonth: jest.fn() } }));
-jest.mock('../../services/advanceRequestService', () => ({ advanceRequestService: { listForWorkerIds: jest.fn(), createRequest: jest.fn(), cancelRequest: jest.fn(), setCategory: jest.fn() } }));
+jest.mock('../../services/advanceRequestService', () => ({ advanceRequestService: { listForWorkerIds: jest.fn(), createRequest: jest.fn(), cancelRequest: jest.fn(), deleteRequest: jest.fn(), setCategory: jest.fn() } }));
 jest.mock('../../services/payrollConfigService', () => ({ ADVANCE_ITEM_LABEL_KEYS: ['advance1'] }));
 
 const worker = { id: 'worker-a', legacyId: 'legacy-a', uid: 'leader', name: '테스트 팀장', teamId: 'team-a', status: '재직' };
@@ -33,9 +33,10 @@ beforeEach(() => {
     (advancePaymentService.getAdvancePaymentsByYearMonth as jest.Mock).mockImplementation(async (year, m) =>
         `${year}-${String(m).padStart(2, '0')}` === month() ? [{ workerId: 'worker-a', items: { advance1: 50000 } }] : []);
     (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([
-        { id: 'request-a', workerId: 'worker-a', yearMonth: month(), requestedAmount: 20000, status: 'requested' },
+        { id: 'request-a', workerId: 'worker-a', requesterUid: 'leader', yearMonth: month(), requestedAmount: 20000, status: 'requested' },
     ]);
     (advanceRequestService.cancelRequest as jest.Mock).mockResolvedValue(undefined);
+    (advanceRequestService.deleteRequest as jest.Mock).mockResolvedValue(undefined);
 });
 
 it('모바일은 팀 색상과 이름 옆 금액으로 회차별 신청하며 직책·당시 가능액을 숨긴다', async () => {
@@ -81,12 +82,15 @@ it('팀장이 서버에서 허용한 소속 팀원을 선택해 가불을 대신
     expect(screen.getByText('가불 신청을 등록했습니다.')).toBeInTheDocument();
 });
 
-it('신청 취소 후 내역 재조회가 완료되어도 취소 안내를 유지한다', async () => {
+it('신청 취소 후 취소 내역과 삭제 버튼을 유지하고 삭제하면 재조회에서도 사라진다', async () => {
     const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
     (advanceRequestService.cancelRequest as jest.Mock).mockImplementation(async () => {
         (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([
-            { id: 'request-a', workerId: 'worker-a', yearMonth: month(), requestedAmount: 20000, status: 'cancelled' },
+            { id: 'request-a', workerId: 'worker-a', requesterUid: 'leader', yearMonth: month(), requestedAmount: 20000, status: 'cancelled' },
         ]);
+    });
+    (advanceRequestService.deleteRequest as jest.Mock).mockImplementation(async () => {
+        (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([]);
     });
     try {
         render(<WorkerAdvanceRequestPage />);
@@ -94,12 +98,43 @@ it('신청 취소 후 내역 재조회가 완료되어도 취소 안내를 유�
         await waitFor(() => expect(advanceRequestService.cancelRequest).toHaveBeenCalled());
         await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
         expect(screen.getByText('신청을 취소했습니다.')).toBeInTheDocument();
-        expect(screen.queryByRole('article')).not.toBeInTheDocument();
-        expect(screen.getByText('신청 내역 없음')).toBeInTheDocument();
+        expect(within(screen.getByRole('article')).getByText('취소')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '신청 취소' })).not.toBeInTheDocument();
+        expect(screen.getAllByText('250,000원').length).toBeGreaterThan(0);
+        fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+        await screen.findByText('신청 내역을 삭제했습니다.');
+        expect(advanceRequestService.deleteRequest).toHaveBeenCalledWith('request-a');
         fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
         await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
         expect(screen.queryByRole('article')).not.toBeInTheDocument();
     } finally { confirm.mockRestore(); }
+});
+
+it('확인에서 돌아오거나 서버가 거부하면 신청을 유지한다', async () => {
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    try {
+        render(<WorkerAdvanceRequestPage />);
+        fireEvent.click(await screen.findByRole('button', { name: '신청 취소' }));
+        expect(advanceRequestService.cancelRequest).not.toHaveBeenCalled();
+        confirm.mockReturnValue(true);
+        (advanceRequestService.cancelRequest as jest.Mock).mockRejectedValueOnce(new Error('failed-precondition'));
+        fireEvent.click(screen.getByRole('button', { name: '신청 취소' }));
+        await screen.findByText(/처리하지 못했습니다/);
+        expect(screen.getByRole('article')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '신청 취소' })).toBeEnabled();
+    } finally { confirm.mockRestore(); }
+});
+
+it('타인 신청과 승인·지급 내역에는 취소·삭제를 제공하지 않는다', async () => {
+    (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([
+        { id: 'other', workerId: 'worker-a', requesterUid: 'other', requestedAmount: 10000, status: 'requested' },
+        { id: 'other-cancelled', workerId: 'worker-a', requesterUid: 'other', requestedAmount: 10000, status: 'cancelled' },
+        ...['approved', 'paid'].map(status => ({ id: status, workerId: 'worker-a', requesterUid: 'leader', requestedAmount: 10000, status })),
+    ]);
+    render(<WorkerAdvanceRequestPage />);
+    await screen.findAllByRole('article');
+    expect(screen.queryByRole('button', { name: '신청 취소' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '삭제' })).not.toBeInTheDocument();
 });
 
 it('1회차·2회차만 신청할 수 있고 기존 회차 누락은 미지정으로 표시한다', async () => {

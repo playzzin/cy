@@ -13,6 +13,21 @@ const scoped = getTeamScopedRows as jest.Mock;
 const read = getDocs as jest.Mock;
 beforeEach(() => { jest.clearAllMocks(); });
 
+it('삭제된 내역은 팀 범위와 관리자 직접 조회 모두에서 제외하고 취소 내역은 유지한다', async () => {
+    const rows = [
+        { id: 'cancelled', workerId: 'worker-a', yearMonth: '2026-10', status: 'cancelled' },
+        { id: 'deleted', workerId: 'worker-a', yearMonth: '2026-10', status: 'cancelled', deletedAt: { seconds: 1 } },
+    ];
+    scoped.mockResolvedValue(rows);
+    expect((await advanceRequestService.listByYearMonth('2026-10')).map(row => row.id)).toEqual(['cancelled']);
+    expect((await advanceRequestService.listForWorkerIds(['worker-a'])).map(row => row.id)).toEqual(['cancelled']);
+    scoped.mockResolvedValue(null);
+    read.mockResolvedValue({ docs: rows.map(row => ({ id: row.id, data: () => row })) });
+    expect((await advanceRequestService.listByYearMonth('2026-10')).map(row => row.id)).toEqual(['cancelled']);
+    expect((await advanceRequestService.listAll()).map(row => row.id)).toEqual(['cancelled']);
+    expect((await advanceRequestService.listForWorkerIds(['worker-a'])).map(row => row.id)).toEqual(['cancelled']);
+});
+
 it('팀장은 허용된 팀 응답에서 작업자와 기존 ID 신청만 읽는다', async () => {
     scoped.mockResolvedValue([
         { id: 'old', workerId: 'legacy-a', requestedAmount: '10,000', createdAt: '2026-09-01' },

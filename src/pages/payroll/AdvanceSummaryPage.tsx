@@ -24,6 +24,8 @@ import AdvanceSummaryTeamLayout, { type AdvanceSummaryLayout } from './component
 import AdvanceSummaryFitTable from './components/AdvanceSummaryFitTable';
 import AdvancePrepaymentDialog from './components/AdvancePrepaymentDialog';
 import AdvanceKBExportDialog from './components/AdvanceKBExportDialog';
+import AdvanceRequestManageDialog from './components/AdvanceRequestManageDialog';
+import type { AdvanceRequestAction } from './components/AdvanceRequestActions';
 import type { AdvanceKBExportSource } from './utils/advanceSummaryKBExport';
 import { advancePaymentDepositAccountService, type AdvancePaymentDepositAccountChange } from '../../services/advancePaymentDepositAccountService';
 import './AdvanceSummaryPage.css';
@@ -58,6 +60,7 @@ const AdvanceSummaryPage: React.FC = () => {
     const [savingDepositAccount, setSavingDepositAccount] = useState(false);
     const [prepaymentWorker, setPrepaymentWorker] = useState<string | null>(null);
     const [savingCategory, setSavingCategory] = useState(false);
+    const [requestManager, setRequestManager] = useState<{ uid: string; month: string; workerId?: string } | null>(null);
     const [kbExport, setKbExport] = useState<{ contextKey: string; result: LoadResult; source: AdvanceKBExportSource } | null>(null);
     const kbContextKey = JSON.stringify([uid, yearMonth, teamId, item, query]);
     const categoryPending = useRef(false);
@@ -103,7 +106,7 @@ const AdvanceSummaryPage: React.FC = () => {
         }
     };
 
-    useEffect(() => { setMemoEditor(null); setPrepaymentWorker(null); setSaveMessage(''); }, [uid, yearMonth]);
+    useEffect(() => { setMemoEditor(null); setPrepaymentWorker(null); setRequestManager(null); setSaveMessage(''); }, [uid, yearMonth]);
     useEffect(() => { setKbExport(null); }, [kbContextKey, result]);
 
     useEffect(() => {
@@ -149,6 +152,17 @@ const AdvanceSummaryPage: React.FC = () => {
     const summary = useMemo(() => buildAdvanceSummary(status === 'ready' ? result.requests : [], result.teams,
         { yearMonth, teamId, item, query }, result.workers), [status, result.requests, result.teams, result.workers, yearMonth, teamId, item, query]);
     const selectedTeam = result.teams.find(team => team.id === teamId || team.legacyId === teamId);
+    const manageableRequests = result.requests.filter(request => {
+        if (request.deletedAt || request.source === 'manual-prepayment' || request.yearMonth !== yearMonth) return false;
+        const team = result.teams.find(entry => entry.id === request.teamId || entry.legacyId === request.teamId);
+        if (!team || (teamId && team.id !== selectedTeam?.id)) return false;
+        if (item !== 'all' && getAdvanceRequestCategory(request) !== item) return false;
+        if (requestManager?.workerId) {
+            const worker = result.workers.find(entry => entry.id === requestManager.workerId);
+            if (request.workerId !== requestManager.workerId && (!worker?.legacyId || request.workerId !== worker.legacyId)) return false;
+        }
+        return !query.trim() || `${request.workerName} ${team.name} ${request.memo || ''}`.toLocaleLowerCase('ko-KR').includes(query.trim().toLocaleLowerCase('ko-KR'));
+    });
     const unclassified = useMemo(() => buildAdvanceSummary(status === 'ready' ? result.requests : [], result.teams,
         { yearMonth, teamId, item: 'unclassified', query }, result.workers), [status, result.requests, result.teams, result.workers, yearMonth, teamId, query]);
     const unclassifiedIds = new Set(unclassified.groups.flatMap(group => group.rows.flatMap(row => row.memoSources.map(source => source.id))));
@@ -173,6 +187,16 @@ const AdvanceSummaryPage: React.FC = () => {
         });
         setMemoEditor(current => current === editor ? null : current);
         setSaveMessage('비고를 저장했습니다.');
+    };
+
+    const manageRequest = async (request: AdvanceRequest, action: AdvanceRequestAction) => {
+        if (!request.id || status !== 'ready') throw new Error('request-not-ready');
+        if (action === 'cancel') await advanceRequestService.cancelRequest(request.id);
+        else await advanceRequestService.deleteRequest(request.id);
+        setResult(current => current.uid !== uid || current.month !== yearMonth ? current : {
+            ...current, requests: action === 'delete' ? current.requests.filter(row => row.id !== request.id)
+                : current.requests.map(row => row.id === request.id ? { ...row, status: 'cancelled' } : row),
+        });
     };
 
     const savePrepayment = async (workerId: string, amount: number, expectedAmount: number) => {
@@ -220,6 +244,8 @@ const AdvanceSummaryPage: React.FC = () => {
                 </div>
                 <div className="as-actions">
                     <Link to="/payroll/advance-request">가불 신청</Link>
+                    <button type="button" disabled={status !== 'ready'} aria-haspopup="dialog"
+                        onClick={() => setRequestManager({ uid, month: yearMonth })}>신청 취소·삭제</button>
                     <button type="button" className="as-kb-trigger" disabled={status !== 'ready' || !summary.groups.length || savingDepositAccount || savingCategory}
                         onClick={() => setKbExport({ contextKey: kbContextKey, result, source: {
                             groups: summary.groups, yearMonth, teamLabel: selectedTeam?.name || '전체 팀',
@@ -362,6 +388,8 @@ const AdvanceSummaryPage: React.FC = () => {
                                         <span>{row.accountNumber || '미등록'}</span>
                                         <span className="as-account-holder"><small>예금주</small><span>{row.accountHolder || '미등록'}</span></span>
                                         {!!row.items.unclassified && <small className="as-unclassified-amount">회차 미지정 {won(row.items.unclassified)}원</small>}
+                                        <button type="button" className="as-request-manage" aria-haspopup="dialog" aria-label={`${group.team.name} ${row.workerName} 신청 관리`}
+                                            onClick={() => setRequestManager({ uid, month: yearMonth, workerId: row.workerId })}>신청 관리</button>
                                     </td>
                                 </tr></React.Fragment>)}</tbody>
                                 <tfoot><tr><th scope="row" colSpan={2}>팀 소계</th>
@@ -382,6 +410,9 @@ const AdvanceSummaryPage: React.FC = () => {
                 onSave={savePrepayment} onClose={() => setPrepaymentWorker(null)} />}
             {kbExport && status === 'ready' && kbExport.contextKey === kbContextKey && kbExport.result === result
                 && <AdvanceKBExportDialog source={kbExport.source} onClose={() => setKbExport(null)} />}
+            {requestManager && requestManager.uid === uid && requestManager.month === yearMonth && status === 'ready'
+                && <AdvanceRequestManageDialog requests={manageableRequests} context={`${monthLabel} · ${selectedTeam?.name || '전체 팀'} · ${itemLabel}`}
+                    onAction={manageRequest} onClose={() => setRequestManager(null)} />}
         </div>
     );
 };

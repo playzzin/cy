@@ -122,6 +122,7 @@
 .as-unclassified > div > span { flex: 1; }
 .as-account .as-unclassified-amount { margin-left: 12px; color: #92400e; font-weight: 700; }
 .as-prepayment-edit { min-width: 36px; padding: 4px; border: 1px dashed #cbd5e1; border-radius: 4px; background: #fffbeb; color: #92400e; font: inherit; cursor: pointer; }
+.as-request-manage { margin-left: 10px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: white; color: #b91c1c; font: inherit; cursor: pointer; }
 @media print { .as-prepayment-edit { border: 0; padding: 0; background: none; color: inherit; } }
 .as-memo-form { display: flex; flex-direction: column; gap: 16px; }
 .as-memo-help { color: #64748b; font-size: 13px; }
@@ -229,7 +230,7 @@
     .as-team th, .as-team td { padding: 6px 4px; }
     .as-team thead { display: table-header-group; }
     .as-team tr { break-inside: avoid; }
-    .as-memo-edit { display: none; }
+    .as-memo-edit, .as-request-manage { display: none; }
     .as-memo-print { display: block; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
     .as-deposit-select, .as-deposit-status, .as-deposit-error { display: none; }
     .as-deposit-print { display: inline-block; font-size: 10px; padding: 3px 6px; }

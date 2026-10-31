@@ -40,7 +40,7 @@ async function requireSummaryWriteAccess(transaction: FirebaseFirestore.Transact
     const staff = await transaction.get(db.collection('workers').where('uid', '==', uid).limit(2));
     const companyIds = [...new Set(staff.docs.map(doc => text(doc.data().companyId)).filter(Boolean))];
     const teamId = text(worker.teamId);
-    if (!companyIds.length || !teamId || teamId.includes('/')) fail('permission-denied', '선입금 및 회차 수정 권한이 없습니다.');
+    if (!companyIds.length || !teamId || teamId.includes('/')) fail('permission-denied', '가불내역 관리 권한이 없습니다.');
     const [direct, legacy] = await Promise.all([transaction.get(db.doc(`teams/${teamId}`)), transaction.get(db.collection('teams').where('legacyId', '==', teamId))]);
     const companyId = text(direct.data()?.companyId || legacy.docs[0]?.data().companyId);
     if (!companyId || companyId.includes('/') || !companyIds.includes(companyId)) fail('permission-denied', '소속 시공사의 내역만 수정할 수 있습니다.');
@@ -51,7 +51,7 @@ async function requireSummaryWriteAccess(transaction: FirebaseFirestore.Transact
 export async function handleTeamAdvanceRequest(input: any, context: functions.https.CallableContext) {
     const { uid } = requireCallableAuth(context);
     const db = admin.firestore();
-    if (!['create', 'cancel', 'setCategory', 'setPrepayment'].includes(input?.action)) fail('invalid-argument', '지원하지 않는 요청입니다.');
+    if (!['create', 'cancel', 'delete', 'setCategory', 'setPrepayment'].includes(input?.action)) fail('invalid-argument', '지원하지 않는 요청입니다.');
     const requestId = input.action === 'create'
         ? createHash('sha256').update(`${uid}:${id(input.requestId)}`).digest('hex') : input.action === 'setPrepayment'
             ? `prepayment_${createHash('sha256').update(`${id(input.workerId)}:${text(input.yearMonth)}`).digest('hex')}` : id(input.id);
@@ -86,7 +86,7 @@ export async function handleTeamAdvanceRequest(input: any, context: functions.ht
         if (input.action === 'setCategory') {
             const row = saved.data();
             if (!row) return fail('not-found', '신청을 찾을 수 없습니다.');
-            if (row.source === 'manual-prepayment' || !['requested', 'approved', 'paid'].includes(row.status)) fail('permission-denied', '유효한 가불 신청의 회차만 수정할 수 있습니다.');
+            if (row.deletedAt || row.source === 'manual-prepayment' || !['requested', 'approved', 'paid'].includes(row.status)) fail('permission-denied', '유효한 가불 신청의 회차만 수정할 수 있습니다.');
             if (row.requesterUid !== uid || row.status !== 'requested') {
                 const worker = (await transaction.get(db.doc(`workers/${id(row.workerId)}`))).data();
                 if (!worker) return fail('not-found', '작업자를 찾을 수 없습니다.');
@@ -100,13 +100,23 @@ export async function handleTeamAdvanceRequest(input: any, context: functions.ht
             transaction.update(ref, { category, categoryUpdatedAt: admin.firestore.Timestamp.now(), categoryUpdatedById: uid });
             return { id: ref.id, category };
         }
-        if (input.action === 'cancel') {
+        if (input.action === 'cancel' || input.action === 'delete') {
             const row = saved.data();
             if (!row) return fail('not-found', '신청을 찾을 수 없습니다.');
-            if (row.requesterUid !== uid) fail('permission-denied', '본인 신청만 취소할 수 있습니다.');
+            if (row.requesterUid !== uid) await requireSummaryWriteAccess(transaction, uid, { teamId: row.teamId }, privileged);
+            if (row.source === 'manual-prepayment') fail('failed-precondition', '선입금은 수기 입력에서 수정해 주세요.');
+            const now = admin.firestore.Timestamp.now();
+            if (input.action === 'delete') {
+                if (!['cancelled', 'rejected'].includes(row.status)) fail('failed-precondition', '취소 또는 반려된 신청만 삭제할 수 있습니다. 대기 중인 신청은 먼저 취소해 주세요.');
+                if (row.deletedAt) return { id: ref.id };
+                // Keep the request ID reserved so a delayed create retry cannot restore a deleted request.
+                transaction.update(ref, { deletedAt: now, deletedById: uid, updatedAt: now });
+                return { id: ref.id };
+            }
+            if (row.deletedAt) fail('failed-precondition', '삭제된 신청입니다. 새로고침해 주세요.');
             if (row.status === 'cancelled') return { id: ref.id };
             if (row.status !== 'requested') fail('failed-precondition', '이미 처리된 신청은 취소할 수 없습니다.');
-            transaction.update(ref, { status: 'cancelled', updatedAt: admin.firestore.Timestamp.now() });
+            transaction.update(ref, { status: 'cancelled', cancelledAt: now, cancelledById: uid, updatedAt: now });
             return { id: ref.id };
         }
         const workerId = id(input.workerId);
