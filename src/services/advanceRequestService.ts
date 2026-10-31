@@ -4,6 +4,7 @@ import {
     getDoc,
     getDocs,
     query,
+    runTransaction,
     setDoc,
     Timestamp,
     updateDoc,
@@ -288,20 +289,21 @@ export const advanceRequestService = {
         const requestId = normalizeText(id);
         if (!requestId) throw new Error('request-id-required');
 
-        const request = await getRequestById(requestId);
-        if (request.status !== 'requested') {
-            throw new Error('request-not-reviewable');
-        }
-
-        const now = Timestamp.now();
-        await updateDoc(doc(db, COLLECTION_NAME, requestId), stripUndefinedFields({
-            status: input.decision,
-            reviewedById: normalizeText(input.reviewedById),
-            reviewedByName: normalizeText(input.reviewedByName),
-            reviewMemo: normalizeText(input.reviewMemo),
-            reviewedAt: now,
-            updatedAt: now,
-        } as Record<string, unknown>));
+        const ref = doc(db, COLLECTION_NAME, requestId);
+        await runTransaction(db, async transaction => {
+            const snapshot = await transaction.get(ref);
+            if (!snapshot.exists() || snapshot.data().deletedAt) throw new Error('request-not-found');
+            if (normalizeStatus(snapshot.data().status) !== 'requested') throw new Error('request-not-reviewable');
+            const now = Timestamp.now();
+            transaction.update(ref, stripUndefinedFields({
+                status: input.decision,
+                reviewedById: normalizeText(input.reviewedById),
+                reviewedByName: normalizeText(input.reviewedByName),
+                reviewMemo: normalizeText(input.reviewMemo),
+                reviewedAt: now,
+                updatedAt: now,
+            } as Record<string, unknown>));
+        });
     },
 
     markPaid: async (

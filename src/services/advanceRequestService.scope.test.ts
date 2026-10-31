@@ -1,4 +1,4 @@
-import { getDocs, where } from 'firebase/firestore';
+import { getDocs, runTransaction, where } from 'firebase/firestore';
 import { getTeamScopedRows } from './teamScopedReadService';
 import { advanceRequestService } from './advanceRequestService';
 
@@ -6,12 +6,25 @@ jest.mock('../config/firebase', () => ({ db: {} }));
 jest.mock('./teamScopedReadService', () => ({ getTeamScopedRows: jest.fn() }));
 jest.mock('firebase/firestore', () => ({
     collection: jest.fn(), doc: jest.fn(), getDoc: jest.fn(), getDocs: jest.fn(),
-    query: jest.fn(), setDoc: jest.fn(), updateDoc: jest.fn(), where: jest.fn(),
-    Timestamp: class { toMillis() { return 0; } },
+    query: jest.fn(), runTransaction: jest.fn(), setDoc: jest.fn(), updateDoc: jest.fn(), where: jest.fn(),
+    Timestamp: class { static now() { return new this(); } toMillis() { return 0; } },
 }));
 const scoped = getTeamScopedRows as jest.Mock;
 const read = getDocs as jest.Mock;
 beforeEach(() => { jest.clearAllMocks(); });
+
+it('승인을 저장하기 전에 취소가 확정되면 트랜잭션 재시도에서 승인을 거부한다', async () => {
+    const attempt = (status: string) => ({ get: async () => ({ exists: () => true, data: () => ({ status }) }), update: jest.fn() });
+    const beforeCancel = attempt('requested');
+    const retry = attempt('cancelled');
+    (runTransaction as jest.Mock).mockImplementationOnce(async (_, review) => {
+        await review(beforeCancel); // The SDK discards writes from an attempt with a conflicting document version.
+        return review(retry);
+    });
+    await expect(advanceRequestService.reviewRequest('request', { decision: 'approved' })).rejects.toThrow('request-not-reviewable');
+    expect(beforeCancel.update).toHaveBeenCalledTimes(1);
+    expect(retry.update).not.toHaveBeenCalled();
+});
 
 it('삭제된 내역은 팀 범위와 관리자 직접 조회 모두에서 제외하고 취소 내역은 유지한다', async () => {
     const rows = [
