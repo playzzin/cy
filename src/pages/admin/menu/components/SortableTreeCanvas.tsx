@@ -8,9 +8,11 @@ import { faFolder, faLink, faGripVertical, faEye, faEyeSlash, faArrowRight, faAr
 import { resolveIcon } from '../../../../constants/iconMap';
 import { getDividerAppearance, isMenuDivider } from '../../../../utils/menuDivider';
 import { getLinkedMenuRef, isLinkedMenuContainer } from '../../../../utils/linkedPositionMenus';
+import { sidebarRowStyle, sidebarColors, SidebarColorSource } from '../../../../utils/sidebarColors';
 
 // --- Recursive Sortable Item ---
 interface SortableItemProps {
+    colorSource?: SidebarColorSource;
     item: MenuItem;
     depth: number;
     onSelect: (id: string, multiSelect?: boolean) => void;
@@ -25,7 +27,7 @@ interface SortableItemProps {
     isFirst: boolean;
 }
 
-const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, selectedIds, onDelete, onIndent, onOutdent, onToggleVisibility, isSourceRoot, isMultiSelectMode, index, isFirst }) => {
+const SortableMenuNode: React.FC<SortableItemProps> = ({ item, colorSource, depth, onSelect, selectedIds, onDelete, onIndent, onOutdent, onToggleVisibility, isSourceRoot, isMultiSelectMode, index, isFirst }) => {
     const isLinkedContainer = isLinkedMenuContainer(item.id);
     const isLinkedGroup = isLinkedContainer && Boolean(getLinkedMenuRef(item.id));
     const [groupOpen, setGroupOpen] = React.useState(false);
@@ -62,20 +64,23 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
         if (isDivider && isSelected) rowRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
     }, [isDivider, isSelected]);
 
-    // --- Dynamic Style Logic (Matching Sidebar.tsx) ---
-    const activeColor = item.activeColor || '#1abc9c';
-    const iconColor = item.iconColor;
+    const colors = sidebarColors(item, colorSource?.(item.id));
+    const activeColor = colors.active;
+    const iconColor = colorSource ? colors.icon : item.iconColor;
 
-    const effectiveIconColor = isSelected || isHovered
+    const effectiveIconColor = isSelected || (!colorSource && isHovered)
         ? activeColor
         : (iconColor || undefined);
 
-    const effectiveTextColor = isSelected || isHovered
+    const effectiveTextColor = !colorSource && (isSelected || isHovered)
         ? activeColor
         : undefined;
 
-    const effectiveBorderColor = isSelected ? activeColor : 'transparent';
-    const effectiveBgColor = isSelected ? `${activeColor}20` : (isHovered ? `${activeColor}10` : 'rgba(31, 41, 55, 0.4)');
+    const effectiveBorderColor = isSelected && (!colorSource || isDivider) ? activeColor : 'transparent';
+    const tint = isSelected ? 15 : 7;
+    const effectiveBgColor = isSelected || isHovered
+        ? `color-mix(in srgb, ${activeColor} ${tint}%, transparent)`
+        : 'rgba(31, 41, 55, 0.4)';
 
     return (
         <>
@@ -84,12 +89,13 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                 style={{
                     ...style,
                     backgroundColor: isDivider && !isSelected && !isHovered ? 'transparent' : effectiveBgColor,
+                    ...(colorSource && !isDivider ? sidebarRowStyle(colors, isSelected && !item.sub?.length) : {}),
                     borderColor: effectiveBorderColor,
                     borderWidth: '1px',
                     ...(isDivider ? { paddingTop: divider.gap, paddingBottom: divider.gap } : {}),
                 }}
                 data-menu-kind={isDivider ? 'divider' : 'menu'}
-                className={`group relative flex items-center gap-3 p-2 rounded-md mb-1 transition-all duration-200
+                className={`group relative flex items-center gap-3 p-2 rounded-md mb-1 transition-all duration-200 ${colorSource && !isDivider ? 'sidebar-interactive-row' : ''}
                     ${isSelected ? 'font-bold' : 'text-gray-300'}
                 `}
                 onClick={(e) => {
@@ -127,7 +133,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                     <>
                         {/* Dynamic Icon */}
                         <div
-                            className="w-6 h-6 flex items-center justify-center transition-colors duration-200"
+                            className="sidebar-editor-row-icon w-6 h-6 flex items-center justify-center transition-colors duration-200"
                             style={{ color: effectiveIconColor || '#9ca3af' }}
                         >
                             <FontAwesomeIcon icon={IconComponent} />
@@ -142,7 +148,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                             >
                                 {item.text}
                             </span>
-                            {item.path && <span className="text-[10px] text-gray-600 font-mono leading-none mt-0.5">{item.path}</span>}
+                            {item.path && <span className="sidebar-editor-path text-[10px] text-gray-600 font-mono leading-none mt-0.5" style={colorSource ? { color: isSelected && !item.sub?.length ? colors.selectedInk : colors.ink } : undefined}>{item.path}</span>}
                         </div>
                     </>
                 )}
@@ -224,6 +230,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                             const childItem = typeof child === 'string' ? { id: child, text: child } : child;
                             return (
                                 <SortableMenuNode
+                                    colorSource={colorSource}
                                     key={childItem.id || `fallback_${idx}_${childItem.text}`}
                                     item={childItem}
                                     depth={depth + 1}
@@ -248,6 +255,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
 };
 
 interface SortableTreeCanvasProps {
+    colorSource?: SidebarColorSource;
     siteId?: string; // Made optional as it's not always passed or strictly needed for logic
     title?: string;
     emptyMessage?: string;
@@ -264,7 +272,7 @@ interface SortableTreeCanvasProps {
     headerActions?: React.ReactNode;
 }
 
-const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, title, emptyMessage, emptyHint, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, onToggleVisibility, isMultiSelectMode, headerActions }) => {
+const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, colorSource, title, emptyMessage, emptyHint, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, onToggleVisibility, isMultiSelectMode, headerActions }) => {
     // Flatten items to get list of IDs for SortableContext (only top level here, children handled recursively)
     const topLevelIds = items.map(i => i.id || i.text);
 
@@ -295,6 +303,7 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, title, 
                     ) : (
                         items.map((item, idx) => (
                             <SortableMenuNode
+                                colorSource={colorSource}
                                 key={item.id || item.text}
                                 item={item}
                                 depth={0}

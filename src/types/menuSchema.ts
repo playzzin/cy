@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const hexColor = z.string().regex(/^#[\da-f]{6}$/i);
+
 // Recursive schema definition for MenuItem
 export const MenuItemSchema: z.ZodType<any> = z.lazy(() =>
     z.object({
@@ -12,6 +14,8 @@ export const MenuItemSchema: z.ZodType<any> = z.lazy(() =>
         hoverColor: z.string().optional(), // Rollover Color
         iconColor: z.string().optional(),
         activeColor: z.string().optional(),
+        backgroundColor: hexColor.optional(),
+        selectedBackgroundColor: hexColor.optional(),
         hide: z.boolean().optional(),
         dividerTitle: z.string().optional(),
         dividerStyle: z.enum(['solid', 'dashed']).optional(),
@@ -28,6 +32,9 @@ export const SiteDataSchema = z.object({
     menu: z.array(MenuItemSchema),
     headerActions: z.array(MenuItemSchema).optional(),
     sidebarSearchEnabled: z.boolean().optional(),
+    sidebarAccentColor: hexColor.optional(),
+    sidebarBackgroundColor: hexColor.optional(),
+    sidebarSelectedBackgroundColor: hexColor.optional(),
     linkedPositionMenusEnabled: z.boolean().optional(),
     linkedPositionDivider: z.object({
         dividerTitle: z.string().optional(),

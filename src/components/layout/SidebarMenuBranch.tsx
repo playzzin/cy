@@ -1,12 +1,14 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronRight, faCircle, faUpRightFromSquare } from '@fortawesome/free-solid-svg-icons';
-import type { MenuItem } from '../../types/menu';
+import type { MenuItem, SiteData } from '../../types/menu';
 import { resolveIcon } from '../../constants/iconMap';
 import { isMenuDivider } from '../../utils/menuDivider';
 import MenuDivider from './MenuDivider';
+import { sidebarRowStyle, sidebarColors } from '../../utils/sidebarColors';
 
 interface Props {
+    sourceSite?: SiteData;
     items: (MenuItem | string)[];
     parentId: string;
     expanded: Record<string, boolean>;
@@ -36,19 +38,19 @@ const SidebarMenuBranch: React.FC<Props> = props => {
             const hasChildren = Boolean(item.sub?.length);
             const open = panel ? !closedPanelItems[id] : Boolean(expanded[id]);
             const active = hasActive(item);
-            const color = item.activeColor || '#1abc9c';
+            const colors = sidebarColors(item, props.sourceSite);
             const label = displayText(item.text);
             const style: React.CSSProperties = {
                 paddingLeft: panel ? 12 + depth * 14 : 38 + depth * 14,
-                color: active ? color : undefined,
-                fontWeight: active ? 'bold' : undefined,
+                ...sidebarRowStyle(colors, active && !hasChildren),
+                ...(active && hasChildren ? { fontWeight: 600 } : {}),
             };
             const content = <span className="submenu-link-main">
-                <FontAwesomeIcon icon={resolveIcon(iconName(item.text, path, item.icon), faCircle)} className="submenu-leaf-icon" style={{ color: active ? color : item.iconColor }} />
+                <FontAwesomeIcon icon={resolveIcon(iconName(item.text, path, item.icon), faCircle)} className="submenu-leaf-icon" style={{ color: active ? colors.active : colors.icon }} />
                 <span>{label}</span>
             </span>;
             if (hasChildren) return <li key={id} className="nested-submenu">
-                <button type="button" className="submenu-header-btn" aria-expanded={open} style={style} onClick={() => {
+                <button type="button" className="submenu-header-btn sidebar-interactive-row" aria-expanded={open} style={style} onClick={() => {
                     if (panel) setClosedPanelItems(previous => ({ ...previous, [id]: !previous[id] }));
                     else onToggle(id);
                 }}>
@@ -59,11 +61,14 @@ const SidebarMenuBranch: React.FC<Props> = props => {
                 </ul>}
             </li>;
             return <li key={id} className="submenu-leaf-item has-open-btn">
-                <a href={path || '#'} className={`submenu-leaf-link ${active ? 'active' : ''}`} style={style}
+                <a href={path || '#'} className="submenu-leaf-link sidebar-interactive-row" aria-current={active ? 'page' : undefined} style={style}
                     onClick={event => { event.preventDefault(); if (path) onNavigate(path, item.id); }}>
                     {content}
                 </a>
-                {path && <button type="button" className="submenu-open-new-btn" title="새 창에서 열기" aria-label={`${label} 새 창에서 열기`}
+                {path && <button type="button" className="submenu-open-new-btn" style={{
+                    color: active ? colors.selectedInk : colors.ink,
+                    '--sidebar-highlight-ink': colors.selectedInk || 'var(--text-light)'
+                } as React.CSSProperties} title="새 창에서 열기" aria-label={`${label} 새 창에서 열기`}
                     onClick={() => window.open(path, '_blank', 'noopener,noreferrer')}>
                     <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
                 </button>}

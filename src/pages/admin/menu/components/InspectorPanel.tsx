@@ -9,12 +9,15 @@ import { resolveIcon } from '../../../../constants/iconMap';
 import { MenuItem } from '../../../../services/menuServiceV11';
 import IconPicker from './IconPicker';
 import DividerSettings from './DividerSettings';
+import SidebarColorSettings from './SidebarColorSettings';
+import type { SidebarColorSource } from '../../../../utils/sidebarColors';
 import { isMenuDivider } from '../../../../utils/menuDivider';
 import { getLinkedMenuRef } from '../../../../utils/linkedPositionMenus';
 import * as Fas from '@fortawesome/free-solid-svg-icons';
 import { IconName } from '@fortawesome/fontawesome-svg-core';
 
 interface InspectorPanelProps {
+    colorSource?: SidebarColorSource;
     isOpen: boolean;
     toggle: () => void;
     selectedItems: MenuItem[];
@@ -23,6 +26,7 @@ interface InspectorPanelProps {
 }
 
 export const InspectorPanel: React.FC<InspectorPanelProps> = ({
+    colorSource,
     isOpen,
     toggle,
     selectedItems,
@@ -167,8 +171,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                 </div>
                             </div>
 
-                            {/* Batch Colors */}
-                            <div className="space-y-4">
+                            {colorSource ? <SidebarColorSettings items={selectedItems} source={colorSource} onChange={onBatchUpdate} /> : <div className="space-y-4">
                                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center gap-2">
                                     <FontAwesomeIcon icon={faPalette} /> 색상 일괄 변경
                                 </h3>
@@ -202,7 +205,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                         </button>
                                     </div>
                                 </div>
-                            </div>
+                            </div>}
                         </div>
                     ) : localState && isMenuDivider(localState) ? (
                         <DividerSettings item={localState} onChange={updated => { setLocalState(updated); onUpdate(updated); }} />
@@ -312,8 +315,11 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                     </button>
                                 </div>
 
-                                {/* Colors Grid */}
-                                <div className="grid grid-cols-2 gap-4">
+                                {colorSource ? <SidebarColorSettings items={[localState]} source={colorSource} onChange={patch => {
+                                    const next = { ...localState, ...patch };
+                                    setLocalState(next);
+                                    onUpdate(next);
+                                }} /> : <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-1">
                                         <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center justify-between">
                                             <span>아이콘 색상</span>
@@ -381,7 +387,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                             </div>
                                         </div>
                                     </div>
-                                </div>
+                                </div>}
                             </div>
 
                             <div className="w-full h-px bg-gray-800"></div>

@@ -9,7 +9,7 @@
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 8px;
     background: rgba(0, 0, 0, 0.15);
-    color: #cbd5e1;
+    color: var(--sidebar-custom-ink, #cbd5e1);
 }
 
 .sidebar-search-field:focus-within {
@@ -24,11 +24,11 @@
     border: 0;
     outline: 0;
     background: transparent;
-    color: #f8fafc;
+    color: var(--sidebar-custom-ink, #f8fafc);
     font-size: 13px;
 }
 
-.sidebar-search-field input::placeholder { color: #cbd5e1; }
+.sidebar-search-field input::placeholder { color: var(--sidebar-custom-ink, #cbd5e1); }
 .sidebar-search-field input::-webkit-search-cancel-button { display: none; }
 
 .sidebar-search-field button {
@@ -38,7 +38,7 @@
     width: 28px;
     height: 32px;
     border-radius: 4px;
-    color: #cbd5e1;
+    color: var(--sidebar-custom-ink, #cbd5e1);
 }
 
 .sidebar-search-expand {
@@ -48,13 +48,13 @@
     height: 40px;
     margin-top: 12px;
     border-radius: 8px;
-    color: #cbd5e1;
+    color: var(--sidebar-custom-ink, #cbd5e1);
 }
 
 .sidebar-search-status {
     padding: 10px 16px;
     font-size: 12px;
-    color: #cbd5e1;
+    color: var(--sidebar-custom-ink, #cbd5e1);
     white-space: normal;
 }
 
@@ -71,8 +71,7 @@
     overflow-wrap: anywhere;
 }
 
-.sidebar-search-result small { color: #cbd5e1; font-size: 11px; }
-.sidebar-search-result[aria-current="page"] { background: rgba(26, 188, 156, 0.16); color: #5eead4; }
+.sidebar-search-result small { color: var(--sidebar-custom-ink, #cbd5e1); font-size: 11px; }
 .sidebar-search-result:hover,
 .sidebar-search-expand:hover,
 .sidebar-search-field button:hover { background: rgba(255, 255, 255, 0.1); }

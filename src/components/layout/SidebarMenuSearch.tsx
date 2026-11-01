@@ -3,8 +3,10 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMagnifyingGlass, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { MenuItem } from '../../types/menu';
 import './SidebarMenuSearch.css';
+import { sidebarRowStyle, sidebarColors, SidebarColorSource } from '../../utils/sidebarColors';
 
 interface SidebarMenuSearchProps {
+    colorSource: SidebarColorSource;
     enabled: boolean;
     collapsed: boolean;
     // Receive only the menu entries already filtered by the sidebar's permissions.
@@ -18,6 +20,7 @@ interface SidebarMenuSearchProps {
 }
 
 interface SearchResult {
+    colors: ReturnType<typeof sidebarColors>;
     label: string;
     path: string;
     parents: string[];
@@ -26,7 +29,7 @@ interface SearchResult {
 const normalizeSearch = (text: string) => text.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, '');
 
 const SidebarMenuSearch: React.FC<SidebarMenuSearchProps> = ({
-    enabled, collapsed, items, menuPaths, displayText, isActive, onNavigate, onExpand, children
+    enabled, collapsed, items, menuPaths, displayText, isActive, onNavigate, onExpand, children, colorSource
 }) => {
     const [query, setQuery] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
@@ -56,13 +59,15 @@ const SidebarMenuSearch: React.FC<SidebarMenuSearchProps> = ({
                 }
                 const path = typeof entry === 'string' ? menuPaths[entry] : entry.path || menuPaths[entry.text];
                 if (path && normalizeSearch([...parents, label].join(' ')).includes(searchTerm)) {
-                    matches.push({ label, path, parents });
+                    const item = typeof entry === 'string' ? {} : entry;
+                    const colors = sidebarColors(item, colorSource(typeof entry === 'string' ? undefined : entry.id));
+                    matches.push({ label, path, parents, colors });
                 }
             });
         };
         visit(items, []);
         return matches;
-    }, [isSearching, items, menuPaths, displayText, searchTerm]);
+    }, [isSearching, items, menuPaths, displayText, searchTerm, colorSource]);
 
     const clearSearch = () => {
         setQuery('');
@@ -121,8 +126,9 @@ const SidebarMenuSearch: React.FC<SidebarMenuSearchProps> = ({
                             <li key={`${result.path}-${index}`}>
                                 <a
                                     href={result.path}
-                                    className="sidebar-search-result"
+                                    className="sidebar-search-result sidebar-interactive-row"
                                     aria-current={isActive(result.path) ? 'page' : undefined}
+                                    style={sidebarRowStyle(result.colors, isActive(result.path))}
                                     onClick={event => {
                                         if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
                                         event.preventDefault();

@@ -764,6 +764,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                     {/* Same Sidebar as Admin ERP (Left Side) */}
                     <RuntimeErrorBoundary>
                         <Sidebar
+                            siteData={siteData}
                             side={sidebarSide}
                             currentSite={effectiveSite}
                             currentSiteData={currentSiteData}
@@ -848,6 +849,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
                 <RuntimeErrorBoundary>
                     <Sidebar
+                        siteData={siteData}
                         side={sidebarSide}
                         currentSite={effectiveSite}
                         currentSiteData={currentSiteData}

@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { MenuItem, SiteData } from '../../types/menu';
+import { linkedMenuId } from '../../utils/linkedPositionMenus';
 
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: null }) }));
 jest.mock('../../config/firebase', () => ({ db: {} }));
@@ -46,6 +47,89 @@ const app = (props: Partial<React.ComponentProps<typeof Sidebar>> = {}) => (
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Sidebar {...defaults} {...props} /><LocationProbe /></MemoryRouter>
 );
 const searchFor = (value: string) => fireEvent.change(screen.getByRole('searchbox', { name: '메뉴 검색' }), { target: { value } });
+
+it('경로가 바뀌면 이전 메뉴의 일반 배경을 복원하고 현재 페이지만 메뉴·직책 선택 배경으로 표시한다', async () => {
+    const group = linkedMenuId('pos_leader');
+    const currentSiteData: SiteData = { ...site, sidebarBackgroundColor: '#183355', sidebarSelectedBackgroundColor: '#ffeeaa', menu: [
+        { id: 'home', text: '홈', path: '/' },
+        { id: group, text: '팀장', sub: [
+            { id: linkedMenuId('pos_leader', 'first'), text: '일보', path: '/daily', backgroundColor: '#ffffff', selectedBackgroundColor: '#102030' },
+            { id: linkedMenuId('pos_leader', 'second'), text: '작업목록', path: '/jobs' }
+        ] }
+    ] };
+    const props = { currentSiteData, siteData: { pos_leader: { ...site, sidebarBackgroundColor: '#335577', sidebarSelectedBackgroundColor: '#eeeeee' } }, activeMenuItems: { [group]: true } };
+    const view = render(app(props));
+    const home = screen.getByRole('link', { name: '홈' });
+    const daily = screen.getByRole('link', { name: '일보' });
+    const jobs = screen.getByRole('link', { name: '작업목록' });
+    expect(home).toHaveStyle({ backgroundColor: '#ffeeaa', color: '#000000' });
+    expect(daily).toHaveStyle({ backgroundColor: '#ffffff' });
+    expect(daily.style.getPropertyValue('--sidebar-highlight-bg')).toBe('#102030');
+    expect(jobs.style.getPropertyValue('--sidebar-highlight-bg')).toBe('#eeeeee');
+    fireEvent.click(daily);
+    expect(home).toHaveStyle({ backgroundColor: '#183355', color: '#ffffff' });
+    expect(daily).toHaveStyle({ backgroundColor: '#102030', color: '#ffffff' });
+    expect(screen.getByRole('button', { name: '팀장' })).toHaveStyle({ backgroundColor: '#335577' });
+    fireEvent.click(jobs);
+    expect(jobs).toHaveStyle({ backgroundColor: '#eeeeee', color: '#000000' });
+    expect(daily).toHaveStyle({ backgroundColor: '#ffffff', color: '#000000' });
+    view.rerender(app({ ...props, isSidebarCollapsed: true }));
+    fireEvent.click(screen.getByRole('button', { name: '팀장' }));
+    expect(screen.getByRole('link', { name: '작업목록' })).toHaveStyle({ backgroundColor: '#eeeeee' });
+    view.rerender(app(props));
+    searchFor('작업목록');
+    expect(screen.getByRole('link', { name: /작업목록/ })).toHaveStyle({ backgroundColor: '#eeeeee' });
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/jobs'));
+});
+
+it('사이드바 바탕과 연결 직책·메뉴 행의 배경을 펼침·접힘·검색 상태에 적용한다', async () => {
+    const group = linkedMenuId('pos_leader');
+    const currentSiteData: SiteData = { ...site, sidebarBackgroundColor: '#111111', menu: [
+        { id: group, text: '팀장', sub: [
+            { id: linkedMenuId('pos_leader', 'daily'), text: '일보', path: '/', backgroundColor: '#ffffff' },
+            { id: linkedMenuId('pos_leader', 'list'), text: '일보 목록', path: '/list' }
+        ] }
+    ] };
+    const props = { currentSiteData, siteData: { pos_leader: { ...site, sidebarBackgroundColor: '#224466' } }, activeMenuItems: { [group]: true } };
+    const view = render(app(props));
+    expect(screen.getByRole('navigation')).toHaveStyle({ backgroundColor: '#111111' });
+    expect(screen.getByRole('button', { name: '팀장' })).toHaveStyle({ backgroundColor: '#224466' });
+    expect(screen.getByRole('link', { name: '일보' })).toHaveStyle({ backgroundColor: '#ffffff', color: '#000000' });
+    expect(screen.getByRole('link', { name: '일보 목록' })).toHaveStyle({ backgroundColor: '#224466', color: '#ffffff' });
+    view.rerender(app({ ...props, isSidebarCollapsed: true }));
+    fireEvent.click(screen.getByRole('button', { name: '팀장' }));
+    expect(screen.getByRole('link', { name: '일보' })).toHaveStyle({ backgroundColor: '#ffffff' });
+    view.rerender(app(props));
+    searchFor('일보');
+    expect(screen.getByRole('link', { name: '일보 팀장' })).toHaveStyle({ backgroundColor: '#ffffff' });
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('검색 결과 2개'));
+});
+
+it('직책 기본색과 메뉴별 예외를 현재 경로, 연결된 하위 메뉴, 접힌 패널 및 검색에 반영한다', async () => {
+    const group = linkedMenuId('pos_leader');
+    const currentSiteData: SiteData = { ...site, sidebarAccentColor: '#9933cc', menu: [
+        { id: 'home', text: '시작', path: '/' },
+        { id: group, text: '팀장', sub: [
+            { id: linkedMenuId('pos_leader', 'report'), text: '보고', path: '/report', activeColor: '#ffaa22' }
+        ] }
+    ] };
+    const props = { currentSiteData, siteData: { pos_leader: { ...site, sidebarAccentColor: '#2288cc' } }, activeMenuItems: { [group]: true } };
+    const view = render(app(props));
+    expect(screen.getByRole('link', { name: '시작' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('button', { name: '팀장' })).not.toHaveAttribute('aria-current');
+    const report = screen.getByRole('link', { name: '보고' });
+    expect(within(report).getByRole('img', { hidden: true })).toHaveStyle({ color: '#2288cc' });
+    fireEvent.click(report);
+    expect(report).toHaveAttribute('aria-current', 'page');
+    expect(within(report).getByRole('img', { hidden: true })).toHaveStyle({ color: '#ffaa22' });
+    view.rerender(app({ ...props, isSidebarCollapsed: true }));
+    fireEvent.click(screen.getByRole('button', { name: '팀장' }));
+    expect(within(screen.getByRole('link', { name: '보고' })).getByRole('img', { hidden: true })).toHaveStyle({ color: '#ffaa22' });
+    view.rerender(app(props));
+    searchFor('보고');
+    expect(screen.getByRole('link', { name: /보고/ }).style.boxShadow).toContain('#ffaa22');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/report'));
+});
 
 it('직책을 포함해 5단계 이상인 메뉴도 열고 이동하며 접힌 패널에 실시간 변경을 반영한다', async () => {
     const deepSite: SiteData = { ...site, sidebarSearchEnabled: false, menu: [{ id: 'role', text: '팀장', sub: [

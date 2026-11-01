@@ -8,6 +8,8 @@ export interface MenuItem {
     roles?: string[]; // Added for dynamic role handling
     iconColor?: string; // Custom icon color
     activeColor?: string; // Background/Text color when active
+    backgroundColor?: string; // 좌측 메뉴에서 이 행에만 적용하는 배경색
+    selectedBackgroundColor?: string; // 롤오버·키보드 포커스·현재 페이지에서 공유하는 배경색
     hoverColor?: string; // Color for hover/active state
     hide?: boolean;
     dividerTitle?: string;
@@ -24,6 +26,10 @@ export interface SiteData {
     headerActions?: MenuItem[];
     /** 선택한 사이트·직책의 좌측 메뉴 검색창 표시 여부 (기본: 꺼짐) */
     sidebarSearchEnabled?: boolean;
+    /** 이 사이트·직책의 좌측 메뉴가 상속하는 강조색 */
+    sidebarAccentColor?: string;
+    sidebarBackgroundColor?: string;
+    sidebarSelectedBackgroundColor?: string;
     /** DEV 좌측 메뉴 아래에 직책별 원본 메뉴 연결 (기본: 켜짐) */
     linkedPositionMenusEnabled?: boolean;
     /** DEV 고유 메뉴와 연결된 직책 메뉴 사이의 구분선 설정 */

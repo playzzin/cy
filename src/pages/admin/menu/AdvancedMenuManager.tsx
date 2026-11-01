@@ -35,6 +35,7 @@ import { MENU_PATHS } from '../../../constants/menuPaths';
 import ToolboxPanel from './components/ToolboxPanel';
 import SortableTreeCanvas from './components/SortableTreeCanvas';
 import InspectorPanel from './components/InspectorPanel';
+import { sidebarColorSource } from '../../../utils/sidebarColors';
 import RoleManager from './components/RoleManager';
 import SiteManager from './components/SiteManager';
 import MenuManagerHeader from './components/MenuManagerHeader';
@@ -316,6 +317,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     }, [menuData, selectedSite, selectedSurface, selectedIds]);
 
     const activeItem = selectedItems.length === 1 ? selectedItems[0] : undefined;
+    const colorSource = selectedSurface === 'menu' ? sidebarColorSource(menuData, menuData?.[selectedSite]) : undefined;
 
     const currentMenuDuplicateCount = useMemo(() => {
         if (!menuData) return 0;
@@ -411,13 +413,16 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     const handleBatchUpdate = (updates: Partial<MenuItem>) => {
         if (!menuData) return;
 
+        const editsColors = 'iconColor' in updates || 'activeColor' in updates || 'backgroundColor' in updates || 'selectedBackgroundColor' in updates;
         const updateRecursive = (nodes: (MenuItem | string)[]): (MenuItem | string)[] => {
             return nodes.map(node => {
                 if (typeof node === 'string') return node;
 
                 let newNode = { ...node };
                 if (selectedIds.includes(node.id || '') && !isLinkedMenuContainer(node.id)) {
-                    newNode = { ...newNode, ...updates };
+                    if (!(isMenuDivider(node) && editsColors)) {
+                        newNode = { ...newNode, ...updates };
+                    }
                 }
 
                 if (newNode.sub) {
@@ -929,6 +934,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                         <div className="absolute inset-0 bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px] opacity-20 pointer-events-none" />
 
                         <SortableTreeCanvas
+                            colorSource={colorSource}
                             key={`${selectedSite}-${selectedSurface}`}
                             siteId={selectedSite}
                             title={selectedSurface === 'headerActions' ? '상단 아이콘 구조' : '메뉴 구조'}
@@ -1013,6 +1019,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
                     {/* 3. Inspector Panel (Right) */}
                     <InspectorPanel
+                        colorSource={colorSource}
                         isOpen={selectedItems.length > 0}
                         toggle={() => setSelectedIds([])}
                         selectedItems={selectedItems}

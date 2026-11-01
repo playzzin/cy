@@ -551,8 +551,8 @@ a {
 }
 
 .app.cheongyeon-mode.cy-light #sidebar {
-    background-color: #1e293b !important;
-    color: #f8fafc !important;
+    background-color: var(--sidebar-custom-bg, #1e293b) !important;
+    color: var(--sidebar-custom-ink, #f8fafc) !important;
 }
 
 .app.cheongyeon-mode.cy-light #main-content {
@@ -780,19 +780,23 @@ a {
 
 /* Sidebar - Gray */
 .app.nation-mode #sidebar {
-    background-color: #0f172a !important; /* Slate-900 (Darker gray) */
+    background-color: var(--sidebar-custom-bg, #0f172a) !important;
     border-right: 1px solid #1e293b !important;
 }
 
 .app.nation-mode #sidebar .menu-item > a,
 .app.nation-mode #sidebar .menu-item > button {
-    color: #94a3b8 !important;
+    color: var(--sidebar-custom-ink, #94a3b8) !important;
 }
 
 .app.nation-mode #sidebar .menu-item > a:hover,
 .app.nation-mode #sidebar .menu-item > button:hover {
-    background-color: #1e293b !important;
-    color: #ffffff !important;
+    background-color: var(--sidebar-highlight-bg, #1e293b) !important;
+    color: var(--sidebar-highlight-ink, #ffffff) !important;
+}
+
+.app.nation-mode #sidebar .sidebar-interactive-row:focus-visible {
+    color: var(--sidebar-highlight-ink, #ffffff) !important;
 }
 
 .app.nation-mode #sidebar .menu-item.active > a,
@@ -885,7 +889,7 @@ a {
 
 #mobile-close-btn {
     display: none;
-    color: var(--text-light);
+    color: var(--sidebar-custom-ink, var(--text-light));
     font-size: 18px;
 }
 
@@ -896,7 +900,7 @@ a {
     justify-content: center;
     padding: 7px 9px;
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--sidebar-custom-ink, rgba(255, 255, 255, 0.5));
     border-radius: 6px;
     flex-shrink: 0;
     transition: all 0.2s;
@@ -905,7 +909,7 @@ a {
 
 .sidebar-pc-toggle-btn:hover {
     background: rgba(255, 255, 255, 0.1);
-    color: #fff;
+    color: var(--sidebar-custom-ink, #fff);
 }
 
 .menu-list-wrapper {
@@ -934,6 +938,27 @@ a {
     color: var(--text-light);
 }
 
+/* Override the row's inline resting colors only while pointing or keyboard-focusing. */
+.sidebar-rollover-preview,
+.sidebar-interactive-row:is(:hover, :focus-visible),
+.submenu-leaf-item:has(> .submenu-open-new-btn:is(:hover, :focus-visible)) > .sidebar-interactive-row {
+    background-color: var(--sidebar-highlight-bg) !important;
+    color: var(--sidebar-highlight-ink, var(--text-light)) !important;
+}
+
+.sidebar-interactive-row:is(:hover, :focus-visible) :is(.menu-icon, .submenu-leaf-icon, .sidebar-editor-row-icon),
+.submenu-leaf-item:has(> .submenu-open-new-btn:is(:hover, :focus-visible)) > a .submenu-leaf-icon {
+    color: var(--sidebar-highlight-accent) !important;
+}
+
+.sidebar-interactive-row:is(:hover, :focus-visible) :is(.menu-open-new-btn, .sidebar-editor-path, small) {
+    color: inherit !important;
+}
+
+.submenu-leaf-item:has(> :is(:hover, :focus-visible)) > .submenu-open-new-btn {
+    color: var(--sidebar-highlight-ink) !important;
+}
+
 .menu-item.active>a,
 .menu-item.active>button {
     color: #1abc9c;
@@ -959,7 +984,7 @@ a {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: rgba(189, 195, 199, 0.85);
+    color: var(--sidebar-custom-ink, rgba(189, 195, 199, 0.85));
     transition: all 0.2s ease;
     opacity: 0;
     z-index: 2;
@@ -970,7 +995,7 @@ a {
 }
 
 .menu-open-new-btn:hover {
-    color: #ffffff;
+    color: var(--sidebar-custom-ink, #ffffff);
     background: rgba(255, 255, 255, 0.12);
 }
 
@@ -1000,7 +1025,7 @@ a {
 
 /* Submenu (Accordion Style) */
 .submenu-list {
-    background: #233140;
+    background: var(--sidebar-custom-bg, #233140);
     max-height: 0;
     overflow: hidden;
     transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1118,7 +1143,7 @@ a {
 }
 
 .nested-submenu-list {
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--sidebar-custom-bg, rgba(0, 0, 0, 0.1));
     margin-left: 0;
     margin-right: 0;
     overflow: hidden;
@@ -1180,7 +1205,7 @@ a {
 }
 
 .submenu-close-btn {
-    color: var(--text-light);
+    color: var(--sidebar-custom-ink, var(--text-light));
     padding: 5px;
     font-size: 1.1rem;
 }

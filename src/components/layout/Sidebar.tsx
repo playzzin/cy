@@ -61,8 +61,10 @@ import { isMenuDivider } from '../../utils/menuDivider';
 import { getLinkedMenuRef } from '../../utils/linkedPositionMenus';
 import type { SidebarSide } from '../../utils/sidebarSide';
 import SidebarMenuBranch from './SidebarMenuBranch';
+import { sidebarRowStyle, sidebarColors, sidebarColorSource } from '../../utils/sidebarColors';
 
 interface SidebarProps {
+    siteData?: SiteDataType | null;
     side?: SidebarSide;
     currentSite: string;
     currentSiteData: any;
@@ -217,6 +219,7 @@ const inferMenuIconName = (text: string, path?: string, explicitIcon?: string): 
 };
 
 const Sidebar: React.FC<SidebarProps> = ({
+    siteData,
     side = 'left',
     currentSite,
     currentSiteData,
@@ -260,6 +263,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         icon: 'fa-shield-halved',
         menu: []
     };
+    const colorSource = sidebarColorSource(siteData, safeCurrentSiteData);
 
     useEffect(() => {
         let cancelled = false;
@@ -445,6 +449,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     const liveHoveredMenuItem = hoveredMenuItem
         ? finalMenu.find(item => item.id ? item.id === hoveredMenuItem.id : item === hoveredMenuItem) || null
         : null;
+    const panelSite = colorSource(liveHoveredMenuItem?.id);
+    const panelColors = sidebarColors(liveHoveredMenuItem || {}, panelSite);
     const [hoveredItemTop, setHoveredItemTop] = useState<number>(0);
     const [isPanelHovered, setIsPanelHovered] = useState(false);
     const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -485,7 +491,9 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     // Cheongyeon Style Check
     const isCheongyeon = currentSite === 'test';
-    const sidebarStyle = isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0' } : {};
+    const surfaceColors = sidebarColors({}, safeCurrentSiteData);
+    const sidebarStyle = surfaceColors.background ? sidebarRowStyle(surfaceColors)
+        : isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0' } : undefined;
 
     const [logoType, setLogoType] = useState<'image' | 'video'>('image');
 
@@ -526,7 +534,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <FontAwesomeIcon
                                 icon={resolveIcon(safeCurrentSiteData.icon, faShieldHalved)}
                                 id="sidebar-logo-icon"
-                                style={{ color: '#1abc9c', fontSize: '24px', marginRight: '0' }}
+                                style={{ color: surfaceColors.active, fontSize: '24px', marginRight: '0' }}
                             />
                         )}
                         {shouldShowLogoText && (
@@ -546,11 +554,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <FontAwesomeIcon icon={side === 'right' ? faChevronRight : faChevronLeft} />
                         </button>
                     )}
-                    <button id="mobile-close-btn" onClick={closeAll} aria-label="메뉴 닫기" title="메뉴 닫기" style={isCheongyeon ? { color: 'white' } : {}}>
+                    <button id="mobile-close-btn" onClick={closeAll} aria-label="메뉴 닫기" title="메뉴 닫기" style={isCheongyeon && !surfaceColors.background ? { color: 'white' } : undefined}>
                         <FontAwesomeIcon icon={faXmark} />
                     </button>
                 </div>
                 <SidebarMenuSearch
+                    colorSource={colorSource}
                     key={`${currentSite}-${safeCurrentSiteData.sidebarSearchEnabled === true}`}
                     enabled={safeCurrentSiteData.sidebarSearchEnabled === true}
                     collapsed={isSidebarCollapsed && !isMobile}
@@ -571,27 +580,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                             const isExpanded = activeMenuItems[itemId];
                             const isChildActive = isParentActive(item);
 
-                            // Determine Active Color (Default: #1abc9c)
-                            const activeColor = item.activeColor || '#1abc9c';
-                            // Determine Icon Color (Default: inherit or specific logic)
-                            // If active/expanded, we might want to force activeColor or keep iconColor?
-                            // Usually active state overrides icon color to activeColor.
-                            // Let's use iconColor if set, UNLESS active/expanded where we might want high contrast or activeColor.
-                            // Current design: Active item text/icon becomes activeColor (green #1abc9c).
-
-                            const isItemActive = isExpanded || isChildActive;
-                            const effectiveIconColor = isItemActive ? activeColor : (item.iconColor || undefined);
-                            const effectiveTextStyle = isItemActive ? { color: activeColor, fontWeight: 'bold' } : {};
+                            const sourceSite = colorSource(item.id);
+                            const colors = sidebarColors(item, sourceSite);
+                            const isCurrent = !hasSub && isActiveCheck(item.path || menuPaths[item.text]);
 
                             return (
                                 <li
                                     key={`root-${uniqueKey}-${index}`}
-                                    className={`menu-item ${isExpanded ? 'active' : ''}`}
+                                    className="menu-item"
                                     onMouseEnter={(e) => handleItemMouseEnter(item, e)}
                                 >
                                     {hasSub ? (
                                         <button
-                                            className="menu-btn"
+                                            className="menu-btn sidebar-interactive-row"
                                             aria-label={getMenuDisplayText(item.text)}
                                             aria-expanded={isSidebarCollapsed && !isMobile ? liveHoveredMenuItem === item : Boolean(isExpanded)}
                                             onClick={(e) => {
@@ -608,12 +609,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 }
                                             }}
                                             data-tooltip={getMenuDisplayText(item.text)}
-                                            style={effectiveTextStyle}
+                                            style={{ ...sidebarRowStyle(colors), fontWeight: isChildActive ? 600 : undefined }}
                                         >
                                             <FontAwesomeIcon
                                                 icon={resolveIcon(item.icon)}
                                                 className="menu-icon"
-                                                style={{ color: effectiveIconColor }}
+                                                style={{ color: isChildActive ? colors.active : colors.icon }}
                                             />
                                             <span className="menu-text">{getMenuDisplayText(item.text)}</span>
                                             <FontAwesomeIcon
@@ -624,7 +625,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     ) : (
                                         <a
                                             href={item.path || menuPaths[item.text] || '/'}
-                                            className="menu-link"
+                                            className="menu-link sidebar-interactive-row"
+                                            aria-current={isCurrent ? 'page' : undefined}
                                             aria-label={getMenuDisplayText(item.text)}
                                             onClick={(e) => {
                                                 e.preventDefault();
@@ -637,14 +639,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             }}
                                             onMouseEnter={() => isSidebarCollapsed && setHoveredMenuItem(null)}
                                             data-tooltip={getMenuDisplayText(item.text)}
-                                            style={isActiveCheck(item.path || menuPaths[item.text]) ? { color: activeColor, fontWeight: 'bold' } : {}}
+                                            style={sidebarRowStyle(colors, isCurrent)}
                                         >
                                             <FontAwesomeIcon
                                                 icon={resolveIcon(item.icon)}
                                                 className="menu-icon"
-                                                style={{
-                                                    color: isActiveCheck(item.path || menuPaths[item.text]) ? activeColor : (item.iconColor || undefined)
-                                                }}
+                                                style={{ color: isCurrent ? colors.active : colors.icon }}
                                             />
                                             <span className="menu-text">{getMenuDisplayText(item.text)}</span>
                                             {!isSidebarCollapsed && (
@@ -667,6 +667,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     {hasSub && isExpanded && (!isSidebarCollapsed || isMobile) && (
                                         <ul className="submenu-list" style={{ maxHeight: isExpanded ? 'none' : 0 }}>
                                             <SidebarMenuBranch items={item.sub || []} parentId={itemId}
+                                                sourceSite={sourceSite}
                                                 expanded={activeNestedMenuItems} onToggle={toggleNestedSubmenu}
                                                 menuPaths={menuPaths} onNavigate={openMenuPath} isActive={isActiveCheck}
                                                 displayText={getMenuDisplayText} iconName={inferMenuIconName} />
@@ -688,20 +689,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                     onMouseEnter={handlePanelMouseEnter}
                     onMouseLeave={handlePanelMouseLeave}
                     style={{
+                        ...sidebarRowStyle(sidebarColors({}, panelSite)),
                         position: 'fixed',
                         zIndex: 9999,
                         top: Math.min(hoveredItemTop, window.innerHeight - 300) + 'px',
                         left: side === 'left' ? 'var(--sidebar-collapsed-width, 60px)' : 'auto',
                         right: side === 'right' ? 'var(--sidebar-collapsed-width, 60px)' : 'auto',
                         transformOrigin: side === 'right' ? 'right top' : 'left top',
-                        borderColor: liveHoveredMenuItem.activeColor // Optional border color?
+                        borderColor: panelColors.active
                     }}
                 >
-                    <div className="submenu-panel-header" style={liveHoveredMenuItem.activeColor ? { borderBottomColor: liveHoveredMenuItem.activeColor } : {}}>
-                        <span className="submenu-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: liveHoveredMenuItem.activeColor || '#1abc9c' }}>
+                    <div className="submenu-panel-header" style={{ ...sidebarRowStyle(panelColors), borderBottomColor: panelColors.active }}>
+                        <span className="submenu-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <FontAwesomeIcon
                                 icon={resolveIcon(liveHoveredMenuItem.icon, faChartPie)}
-                                style={{ color: liveHoveredMenuItem.activeColor || liveHoveredMenuItem.iconColor || '#1abc9c' }}
+                                style={{ color: panelColors.icon }}
                             />
                             {getMenuDisplayText(liveHoveredMenuItem.text)}
                         </span>
@@ -712,6 +714,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="submenu-panel-content">
                         <ul>
                             <SidebarMenuBranch key={liveHoveredMenuItem.id || liveHoveredMenuItem.text} items={liveHoveredMenuItem.sub || []} parentId={liveHoveredMenuItem.id || 'panel'}
+                                sourceSite={panelSite}
                                 expanded={activeNestedMenuItems} onToggle={toggleNestedSubmenu} panel
                                 menuPaths={menuPaths} onNavigate={path => { openMenuPath(path); setHoveredMenuItem(null); }}
                                 isActive={isActiveCheck} displayText={getMenuDisplayText} iconName={inferMenuIconName} />

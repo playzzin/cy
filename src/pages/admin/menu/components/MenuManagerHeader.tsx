@@ -25,6 +25,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { SiteDataType } from '../../../../types/menu';
 import { isDevPositionSite } from '../../../../utils/linkedPositionMenus';
+import { DEFAULT_SIDEBAR_ACCENT, DEFAULT_SIDEBAR_BACKGROUND } from '../../../../utils/sidebarColors';
 
 interface MenuManagerHeaderProps {
     menuData: SiteDataType;
@@ -254,6 +255,34 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
                     <FontAwesomeIcon icon={faCog} />
                 </button>
             </div>
+            {menuData[selectedSite] && (
+                <div className="flex flex-wrap items-center gap-3 border-t border-slate-700 bg-slate-800 px-4 py-2">
+                    <strong className="text-sm text-slate-100">{menuData[selectedSite].name}</strong>
+                    {([
+                        { key: 'sidebarBackgroundColor', label: '좌측 메뉴 배경색', fallback: DEFAULT_SIDEBAR_BACKGROUND, reset: '배경색 기본값 복원' },
+                        { key: 'sidebarSelectedBackgroundColor', label: '좌측 메뉴 선택 배경색', fallback: menuData[selectedSite].sidebarBackgroundColor || DEFAULT_SIDEBAR_BACKGROUND, reset: '선택 배경색 기본값 복원' },
+                        { key: 'sidebarAccentColor', label: '좌측 메뉴 기본색', fallback: DEFAULT_SIDEBAR_ACCENT, reset: '시스템 기본값 복원' }
+                    ] as const).map(({ key, label, fallback, reset }) => {
+                        const site = menuData[selectedSite];
+                        return <div key={key} className="flex flex-wrap items-center gap-2">
+                            <label className="flex items-center gap-2 text-sm text-slate-100">
+                                {label}
+                                <input type="color" aria-label={label} className="h-8 w-10 cursor-pointer rounded bg-transparent"
+                                    value={site[key] || fallback} onChange={event => onUpdateMenuData({
+                                        ...menuData, [selectedSite]: { ...site, [key]: event.target.value }
+                                    })} />
+                            </label>
+                            <span className="text-xs text-slate-300">{site[key]?.toUpperCase() || '시스템 기본값'}</span>
+                            {site[key] && <button type="button" className="text-xs text-blue-300 underline" onClick={() => {
+                                const next = { ...site };
+                                delete next[key];
+                                onUpdateMenuData({ ...menuData, [selectedSite]: next });
+                            }}>{reset}</button>}
+                        </div>;
+                    })}
+                    <span className="text-xs text-slate-400">개별 색상을 지정한 메뉴는 해당 색상을 유지합니다.</span>
+                </div>
+            )}
             {isDevPositionSite(menuData, selectedSite) && (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-700 bg-slate-800 px-4 py-3">
                     <div>
