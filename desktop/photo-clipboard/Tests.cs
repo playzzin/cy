@@ -75,6 +75,10 @@ namespace CyPhotoClipboard {
                 File.Copy(Path.Combine(args[2], "test-2.jpg"), nextPaths[0]);
                 var nextId = new string('b', 32); bool interacting = false;
                 using (var dispatcher = new Control()) {
+                    using (var first = new ShellPhotoWindows(dispatcher, root)) {
+                        Check(Pump(Task.Run(() => first.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "first window opens even when the tray process was started hidden");
+                        Check(Application.OpenForms.OfType<ShellPhotoWindow>().Single().IsPresented, "first window is natively visible and not minimized before success");
+                    }
                     using (var windows = new ShellPhotoWindows(dispatcher, root, true, 10000, () => interacting)) {
                         Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "native Shell view has exact selected file-drop batch");
                         Check(!Application.OpenForms.OfType<ShellPhotoWindow>().Single().TopMost, "hidden diagnostics do not create a topmost window");
@@ -120,7 +124,8 @@ namespace CyPhotoClipboard {
                         Check((GetWindowLong(photo.Handle, -20) & 8) == 0, "user can turn off always-on-top");
                         photo.WindowState = FormWindowState.Minimized; Application.DoEvents();
                         Check(Pump(Task.Run(() => windows.Open(id, paths, CancellationToken.None))) == PhotoWindowResult.Opened, "same batch reopens a minimized window");
-                        Check(photo.WindowState == FormWindowState.Normal && pin.Checked && (GetWindowLong(photo.Handle, -20) & 8) != 0, "reopen restores and pins the existing window");
+                        Check(photo.WindowState == FormWindowState.Normal, "reopen restores the existing window from minimized");
+                        Check(pin.Checked && (GetWindowLong(photo.Handle, -20) & 8) != 0, "reopen pins the restored window");
                         covering.Activate(); Application.DoEvents();
                         Check(windows.OpenWindowCount == 1 && Above(photo.Handle, covering.Handle), "reopened photo window stays above the normal window without duplicates");
                         photo.WindowState = FormWindowState.Minimized; Application.DoEvents();
@@ -199,7 +204,7 @@ namespace CyPhotoClipboard {
                 Check(Send("/v1/prepare", pack, null, Bridge.Origin, "", "POST").status == 403, "missing session denied");
                 var session = Call("/v1/session"); var token = (string)session.data["token"];
                 Check(session.status == 200 && token.Length == 64, "ephemeral session");
-                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == "1.4.2" && (string)session.data["transferMode"] == "chunks-v1" &&
+                Check((int)session.data["protocol"] == 2 && (string)session.data["version"] == HelperVersion.Number && (string)session.data["transferMode"] == "chunks-v1" &&
                     (string)session.data["clipboardMode"] == "shell-files-v1" && (string)session.data["photoWindowMode"] == "shell-view-v1", "advertise compatible copying and native photo window capability");
                 Check(Call("/v1/prepare", pack, "wrong").status == 403, "wrong token denied");
                 Check(Send("/v1/prepare", pack, token, Bridge.Origin, "Transfer-Encoding: chunked\r\n", "POST").status == 400, "ambiguous framing denied");

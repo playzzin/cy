@@ -56,10 +56,25 @@ export const saveImageFolder = async (files: File[], signal: AbortSignal, label:
     return { folderName, saved, failed };
 };
 
-export const zipImageFiles = async (files: File[], label: ImageBatchLabel = '신분증'): Promise<File> => {
+export const zipImageFiles = async (files: File[], label: ImageBatchLabel = '신분증', signal?: AbortSignal): Promise<File> => {
     if (!files.length) throw new Error('no-images');
-    const zip = new JSZip();
-    files.forEach(file => zip.file(file.name, file));
-    const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+    if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    let blob: Blob;
+    if (typeof Blob.prototype.stream === 'function' && typeof TransformStream === 'function' && typeof BigInt === 'function') {
+        const { BlobReader, BlobWriter, ZipWriter } = await import('@zip.js/zip.js');
+        const archive = new ZipWriter(new BlobWriter('application/zip'), { level: 0, useWebWorkers: false });
+        for (const file of files) {
+            if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+            await archive.add(file.name, new BlobReader(file), { signal });
+        }
+        blob = await archive.close();
+    } else {
+        // The legacy writer has only 16-bit entry counts and 32-bit offsets.
+        const maxArchiveBytes = files.reduce((sum, file) => sum + file.size + 128 + file.name.length * 24, 22);
+        if (files.length >= 65535 || maxArchiveBytes >= 0xffffffff) throw new Error('zip64-unavailable');
+        const zip = new JSZip();
+        files.forEach(file => zip.file(file.name, file));
+        blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+    }
     return new File([blob], `${batchName(label)}.zip`, { type: 'application/zip' });
 };

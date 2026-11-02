@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { saveAs } from 'file-saver';
 import WorkerIdImageShare from './WorkerIdImageShare';
 import { copyImageFile, imageFileFromUrl } from '../../utils/imageFileDelivery';
@@ -27,6 +27,7 @@ const canShare = jest.fn();
 beforeEach(() => {
     jest.clearAllMocks();
     mockIsPreviewFrame = false;
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Linux; Android) Chrome/133.0 Mobile' });
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux' });
     (copyImageFile as jest.Mock).mockResolvedValue(undefined);
     (openWindowsPhotoWindow as jest.Mock).mockResolvedValue({ batchId: 'b'.repeat(32), photoCount: 2, opened: true });
@@ -51,7 +52,9 @@ test.each(['Win32', 'iPhone'])('팀장 미리보기 %s는 원본 확인만 제�
     const loadImage = jest.fn().mockResolvedValue(new File(['fixture'], 'document.png', { type: 'image/png' }));
     render(<WorkerIdImageShare workers={workers} loadImage={loadImage} />);
     await prepare();
-    expect(screen.getAllByRole('img')).toHaveLength(2);
+    expect(screen.getAllByRole('img')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: '다음 작업자' }));
+    expect(screen.getByRole('img', { name: '테스트 나 신분증 공유 미리보기' })).toBeVisible();
     expect(screen.getByRole('status')).toHaveTextContent('조회 전용 화면에서는 사진 확인만 가능합니다.');
     expect(screen.queryByRole('button', { name: /사진.*(?:공유|복사|저장|끌어놓기)/ })).not.toBeInTheDocument();
     expect(screen.queryByText('PC 카카오톡으로 보내기')).not.toBeInTheDocument();
@@ -97,7 +100,8 @@ test('연결 실패는 성공으로 표시하거나 자동 공유하지 않는�
     await prepare();
     fireEvent.click(screen.getByText('전체 복사로 붙여넣기 (보조 기능)'));
     fireEvent.click(screen.getByRole('button', { name: '사진 2장 전체 복사' }));
-    await screen.findByText(/PC 보조 프로그램에 연결하지 못했습니다/);
+    await screen.findByRole('alert');
+    expect(screen.getByRole('link', { name: '운영 작업자요약 열기' })).toHaveAttribute('href', 'https://cyee-9c1e4.web.app/manpower/summary');
     expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
     expect(share).not.toHaveBeenCalled();
 });
@@ -106,6 +110,35 @@ async function prepare() {
     fireEvent.click(screen.getByRole('button', { name: '신분증 공유' }));
     await screen.findByText(/사진 \d+장을 준비했습니다/);
 }
+
+test('준비 중인 작업자 순번과 이름을 표시하고 미등록·조회 실패도 선택 순서대로 확인한다', async () => {
+    const selected = [{ id: 'a', name: '가상 첫째' }, { id: 'b', name: '동명이인' }, { id: 'c', name: '동명이인' }];
+    let finish!: (photo: File) => void;
+    const loadImage = jest.fn().mockResolvedValueOnce(null)
+        .mockImplementationOnce(() => new Promise<File>(resolve => { finish = resolve; }))
+        .mockRejectedValueOnce(Object.assign(new Error(), { status: 403 }));
+    render(<WorkerIdImageShare workers={selected} loadImage={loadImage} />);
+    fireEvent.click(screen.getByRole('button', { name: '신분증 공유' }));
+    const preparing = within(screen.getByRole('region', { name: '신분증 준비 진행' }));
+    expect(await preparing.findByText('전체 3명 중 2번째 작업자를 준비하고 있습니다.')).toBeVisible();
+    expect(preparing.getByRole('heading', { name: '동명이인' })).toBeVisible();
+    expect(preparing.getByRole('progressbar')).toHaveAttribute('value', '1');
+    await act(async () => { finish(new File(['fixture'], 'doc.png', { type: 'image/png' })); });
+    const review = within(screen.getByRole('region', { name: '신분증 확인' }));
+    expect(review.getByText('신분증 미등록')).toBeVisible();
+    expect(review.getByLabelText('선택한 3명 중 1번째')).toBeVisible();
+    expect(review.getByRole('button', { name: '이전 작업자' })).toBeDisabled();
+    fireEvent.click(review.getByRole('button', { name: '다음 작업자' }));
+    const photo = review.getByRole('img', { name: '동명이인 신분증 공유 미리보기' });
+    fireEvent.load(photo);
+    fireEvent.click(review.getByRole('button', { name: '확대' }));
+    expect(review.getByRole('button', { name: '축소' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(review.getByRole('combobox'), { target: { value: '2' } });
+    expect(review.getByLabelText('선택한 3명 중 3번째')).toBeVisible();
+    expect(review.getByText(/권한이 없습니다/)).toBeVisible();
+    expect(review.getByRole('button', { name: '다음 작업자' })).toBeDisabled();
+    expect(share).not.toHaveBeenCalled();
+});
 
 test('여러 장의 전달 진행 상황과 자동 재시도를 표시하고 닫은 뒤 갱신하지 않는다', async () => {
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
@@ -124,7 +157,7 @@ test('선택한 신분증을 준비하고 다음 클릭에서 원본 사진 여�
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
     expect(share).not.toHaveBeenCalled();
-    expect(screen.getAllByRole('img')).toHaveLength(2);
+    expect(screen.getAllByRole('img')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: '사진 2장 함께 공유' }));
     expect(share).toHaveBeenCalledTimes(1);
     const data = share.mock.calls[0][0];
@@ -136,17 +169,135 @@ test('선택한 신분증을 준비하고 다음 클릭에서 원본 사진 여�
     expect(saveAs).not.toHaveBeenCalled();
 });
 
-test('여러 장 공유가 지원되지 않으면 PC 묶음 저장과 개별 사진 공유를 제공한다', async () => {
+test('11장은 원본 순서대로 10장과 1장을 별도 클릭으로 공유하고 취소한 묶음만 재시도할 수 있다', async () => {
+    const selected = Array.from({ length: 11 }, (_, i) => ({ id: String(i), name: `가상 ${i + 1}`, fileNameSaved: `${i}.jpg` }));
+    render(<WorkerIdImageShare workers={selected} />);
+    await prepare();
+    expect(share).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '1번째 묶음 공유 · 사진 10장' }));
+    const last = await screen.findByRole('button', { name: '2번째 묶음 공유 · 사진 1장' });
+    expect(share).toHaveBeenCalledTimes(1);
+    share.mockRejectedValueOnce(new DOMException('cancel', 'AbortError'));
+    fireEvent.click(last);
+    await screen.findByText(/공유창이 닫혔습니다/);
+    expect(recordIdentityDocumentLog).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '2번째 묶음 다시 공유 · 사진 1장' }));
+    await waitFor(() => expect(recordIdentityDocumentLog).toHaveBeenCalledTimes(2));
+    const batches = share.mock.calls.map(([data]) => data.files as File[]);
+    expect(batches.map(files => files.length)).toEqual([10, 1, 1]);
+    expect(batches[0].concat(batches[2]).map(file => file.name)).toEqual(selected.map((worker, index) =>
+        `${String(index + 1).padStart(2, '0')}_${worker.name}_신분증.jpg`));
+    expect(recordIdentityDocumentLog).toHaveBeenLastCalledWith(expect.objectContaining({ personNames: ['가상 11'], fileCount: 1 }));
+    expect(saveAs).not.toHaveBeenCalled();
+});
+
+test.each(['Linux armv8l', 'Win32'])('%s Chrome에서 20장 중 한 묶음이 실패해도 나머지 10장을 공유하고 전체 원본을 저장할 수 있다', async platform => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: platform });
+    const selected = Array.from({ length: 20 }, (_, i) => ({ id: String(i), name: `가상 ${i + 1}`, fileNameSaved: `${i}.jpg` }));
+    render(<WorkerIdImageShare workers={selected} />);
+    await prepare();
+    fireEvent.click(screen.getByText('묶음별 사진 및 다시 공유'));
+    const first = within(screen.getByRole('group', { name: '사진 묶음 1' }));
+    const second = within(screen.getByRole('group', { name: '사진 묶음 2' }));
+    share.mockRejectedValueOnce(new DOMException('private path', 'DataError'));
+    fireEvent.click(first.getByRole('button', { name: /사진 10장/ }));
+    expect(await first.findByRole('alert')).toHaveTextContent('1번째 묶음 · 브라우저가 받을 앱으로 사진을 전달하는 중 오류');
+    fireEvent.click(second.getByRole('button', { name: /사진 10장/ }));
+    await second.findByText(/공유창 열림/);
+    expect(first.getByRole('alert')).toBeVisible();
+    fireEvent.click(first.getByRole('button', { name: /사진 10장/ }));
+    await first.findByText(/공유창 열림/);
+    expect(first.queryByRole('alert')).not.toBeInTheDocument();
+    const names = selected.map((w,i) => `${String(i + 1).padStart(2, '0')}_${w.name}_신분증.jpg`);
+    expect(share.mock.calls[1][0].files.map((f: File) => f.name)).toEqual(names.slice(10));
+    expect(share.mock.calls[2][0].files.map((f: File) => f.name)).toEqual(names.slice(0,10));
+    fireEvent.click(screen.getByRole('button', { name: '사진 20장 ZIP 저장' }));
+    await screen.findByText(/ZIP 다운로드를 요청했습니다/);
+    expect((zipImageFiles as jest.Mock).mock.calls[0][0].map((f: File) => f.name)).toEqual(names);
+});
+
+test('파일 공유가 가능한 기기에는 20장이 넘어도 한 번의 클릭으로 원본을 넘긴다', async () => {
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Version/18.0 Mobile Safari/605.1' });
+    const selected = Array.from({ length: 23 }, (_, i) => ({ id: String(i), name: `가상 ${i + 1}`, fileNameSaved: `${i}.png` }));
+    render(<WorkerIdImageShare workers={selected} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 23장 함께 공유' }));
+    await screen.findByText(/공유창 열림/);
+    expect(share).toHaveBeenCalledTimes(1);
+    expect(share.mock.calls[0][0].files).toHaveLength(23);
+});
+
+test('기기가 허용한다고 응답한 묶음을 거절해도 재전송 없이 더 작게 나눌 수 있다', async () => {
+    share.mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
+    render(<WorkerIdImageShare workers={workers} />);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '사진 2장 함께 공유' }));
+    await screen.findByRole('alert');
+    fireEvent.click(await screen.findByRole('button', { name: '이 묶음을 더 작게 나누기' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(share).toHaveBeenCalledTimes(1);
+    expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '1/2 묶음 공유 (사진 1장)' }));
+    await screen.findByText(/공유창 열림 ·/);
+    expect(share.mock.calls[1][0].files.map((file: File) => file.name)).toEqual(['01_테스트 가_신분증.jpg']);
+});
+
+test.each(['닫힘', '공유창 열림'])('받는 앱의 첨부 결과를 알 수 없는 경우(%s) 선택한 묶음만 나누고 다른 묶음을 다시 보내지 않는다', async outcome => {
+    const selected = Array.from({ length: 11 }, (_, i) => ({ id: String(i), name: `가상 ${i + 1}`, fileNameSaved: `${i}.jpg` }));
+    render(<WorkerIdImageShare workers={selected} />);
+    await prepare();
+    const batch = (n: number) => within(screen.getByRole('group', { name: `사진 묶음 ${n}` }));
+    fireEvent.click(screen.getByText('묶음별 사진 및 다시 공유'));
+    fireEvent.click(batch(2).getByRole('button', { name: /묶음 공유/ }));
+    await batch(2).findByText(/공유창 열림/);
+
+    if (outcome === '닫힘') share.mockRejectedValueOnce(new DOMException('closed', 'AbortError'));
+    fireEvent.click(batch(1).getByRole('button', { name: /묶음 공유/ }));
+    if (outcome === '닫힘') await screen.findByText(/공유창이 닫혔습니다/);
+    else await batch(1).findByText(/공유창 열림/);
+    fireEvent.click(batch(1).getByRole('button', { name: '이 묶음을 더 작게 나누기' }));
+    expect(share).toHaveBeenCalledTimes(2);
+    expect(batch(3).getByText('가상 11')).toBeVisible();
+    expect(batch(3).getByText(/공유창 열림/)).toBeVisible();
+    fireEvent.click(batch(2).getByRole('button', { name: /묶음 공유/ }));
+    await batch(2).findByText(/공유창 열림/);
+    expect(share.mock.calls[2][0].files.map((file: File) => file.name)).toEqual(
+        selected.slice(5, 10).map((worker, i) => `${String(i + 6).padStart(2, '0')}_${worker.name}_신분증.jpg`));
+});
+
+test('총용량으로 나누고 한 장이 제한을 넘더라도 뒤의 사진은 공유할 수 있다', async () => {
+    const sizes = [30, 25, 51, 1];
+    const selected = sizes.map((_, i) => ({ id: String(i), name: `가상 ${i + 1}`, fileNameSaved: String(i) }));
+    (imageFileFromUrl as jest.Mock).mockImplementation(async (url: string, name: string) => {
+        const file = new File(['test'], `${name}.jpg`, { type: 'image/jpeg' });
+        Object.defineProperty(file, 'size', { value: sizes[Number(url)] * 1024 * 1024 });
+        return file;
+    });
+    render(<WorkerIdImageShare workers={selected} />);
+    await prepare();
+    fireEvent.click(screen.getByText('묶음별 사진 및 다시 공유'));
+    expect(screen.getByRole('button', { name: '1/4 묶음 공유 (사진 1장)' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '2/4 묶음 공유 (사진 1장)' })).toBeEnabled();
+    expect(screen.getByText(/3번째 묶음의 사진은 공유창에서 열 수 없습니다/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '4/4 묶음 공유 (사진 1장)' }));
+    await screen.findByText(/공유창 열림 ·/);
+    expect(share.mock.calls[0][0].files.map((file: File) => file.name)).toEqual(['04_가상 4_신분증.jpg']);
+});
+
+test('여러 장 공유가 지원되지 않으면 한 장씩 공유하고 묶음 저장도 사용할 수 있다', async () => {
     canShare.mockImplementation(({ files }) => files.length === 1);
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
     expect(screen.queryByRole('button', { name: '사진 2장 함께 공유' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '사진 2장 전체 복사' })).not.toBeInTheDocument();
-    expect(screen.getByText(/함께 공유할 수 없습니다/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('묶음별 사진 및 다시 공유'));
+    expect(screen.getByText(/2개 묶음으로 나눴습니다/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('사진 저장으로 보내기'));
     expect(screen.getByRole('button', { name: '사진 2장 ZIP 저장' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '사진 2장 폴더에 저장' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '테스트 가 사진 저장' }));
     expect(saveAs).toHaveBeenCalledWith(expect.any(File), '01_테스트 가_신분증.jpg');
+    fireEvent.click(screen.getByRole('button', { name: '다음 작업자' }));
     fireEvent.click(screen.getByRole('button', { name: '테스트 나 사진 공유' }));
     expect(share.mock.calls[0][0].files).toHaveLength(1);
     await screen.findByText(/공유창을 열었습니다/);
@@ -157,7 +308,7 @@ test('파일 공유를 지원해도 PC 카카오톡 대체 메뉴에서 원본 �
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
     // PC canShare() can return true even when KakaoTalk is absent from the OS share targets.
-    fireEvent.click(screen.getByText('PC 카카오톡으로 보내기'));
+    fireEvent.click(screen.getByText('사진 저장으로 보내기'));
     fireEvent.click(screen.getByRole('button', { name: '사진 2장 폴더에 저장' }));
     expect(saveImageFolder).toHaveBeenCalledTimes(1);
     const files = (saveImageFolder as jest.Mock).mock.calls[0][0] as File[];
@@ -190,7 +341,7 @@ test.each(['AbortError', 'NotAllowedError'])('폴더 저장 %s는 자동 ZIP 다
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
     fireEvent.click(screen.getByRole('button', { name: '사진 2장 폴더에 저장' }));
-    await screen.findByText(name === 'AbortError' ? /저장을 취소했습니다/ : /폴더에 저장하지 못했습니다/);
+    await screen.findByText(name === 'AbortError' ? /저장을 취소했습니다/ : /저장 권한이 거절됐습니다/);
     expect(zipImageFiles).not.toHaveBeenCalled();
     expect(saveAs).not.toHaveBeenCalled();
     expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
@@ -244,7 +395,7 @@ test.each(['AbortError', 'NotAllowedError'])('공유 %s는 자동 저장하거�
     render(<WorkerIdImageShare workers={workers} />);
     await prepare();
     fireEvent.click(screen.getByRole('button', { name: '사진 2장 함께 공유' }));
-    await screen.findByText(name === 'AbortError' ? /공유를 취소했습니다/ : /공유창을 열지 못했습니다/);
+    await screen.findByText(name === 'AbortError' ? /공유창이 닫혔습니다/ : /브라우저가 공유를 거절했습니다/);
     expect(saveAs).not.toHaveBeenCalled();
     expect(recordIdentityDocumentLog).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '사진 2장 함께 공유' })).toBeEnabled();
@@ -257,11 +408,26 @@ test('미등록과 불러오기 실패를 표시하고 준비된 사진 수만 �
     });
     render(<WorkerIdImageShare workers={[...workers, { id: 'none', name: '테스트 없음' }]} />);
     await prepare();
+    fireEvent.click(screen.getByText('미등록 1명 · 조회 실패 1명'));
     expect(screen.getByText(/신분증 미등록 1명: 테스트 없음/)).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('불러오기 실패 1명: 테스트 나');
+    expect(screen.getByRole('alert')).toHaveTextContent('불러오기 실패 1명');
+    expect(screen.getByRole('alert')).toHaveTextContent('테스트 나 · 상세 원인이 제공되지 않았습니다.');
     fireEvent.click(screen.getByRole('button', { name: '사진 1장 함께 공유' }));
     expect(share.mock.calls[0][0].files).toHaveLength(1);
     await screen.findByText(/공유창을 열었습니다/);
+});
+
+test('원본이 없거나 접근이 거절되면 작업자별로 확인된 원인을 표시한다', async () => {
+    (imageFileFromUrl as jest.Mock)
+        .mockRejectedValueOnce(Object.assign(new Error('private reference'), { status: 404 }))
+        .mockRejectedValueOnce(Object.assign(new Error('private download URL'), { code: 'storage/unauthorized' }));
+    render(<WorkerIdImageShare workers={workers} />);
+    fireEvent.click(screen.getByRole('button', { name: '신분증 공유' }));
+    const issues = await screen.findByRole('alert');
+    expect(issues).toHaveTextContent('테스트 가 · 등록된 경로에 원본 사진이 없습니다');
+    expect(issues).toHaveTextContent('테스트 나 · 원본 사진을 조회할 권한이 없습니다');
+    expect(issues).not.toHaveTextContent('private');
+    expect(screen.getByRole('status')).toHaveTextContent('준비된 사진이 없습니다');
 });
 
 test('선택이 바뀌면 준비된 사진을 폐기하고 이전 선택을 공유하지 않는다', async () => {
@@ -325,6 +491,7 @@ test('사진 복사는 선택한 한 장을 직접 클립보드로 전달하고 
     await screen.findByText(/테스트 가 사진 1장을 복사했습니다/);
     expect(copyImageFile).toHaveBeenLastCalledWith(expect.objectContaining({ name: '01_테스트 가_신분증.jpg', type: 'image/jpeg' }));
     expect(screen.getByRole('status')).toHaveTextContent('다른 사진을 복사하면 이전 사진은 교체됩니다.');
+    fireEvent.click(screen.getByRole('button', { name: '다음 작업자' }));
     fireEvent.click(screen.getByRole('button', { name: '테스트 나 사진 복사' }));
     await screen.findByText(/테스트 나 사진 1장을 복사했습니다/);
     expect(copyImageFile).toHaveBeenLastCalledWith(expect.objectContaining({ name: '02_테스트 나_신분증.png', type: 'image/png' }));
@@ -338,6 +505,7 @@ test('사진 복사 실패 시 이전 성공 문구를 지우고 저장 대안�
     fireEvent.click(screen.getByRole('button', { name: '테스트 가 사진 복사' }));
     await screen.findByText(/테스트 가 사진 1장을 복사했습니다/);
     (copyImageFile as jest.Mock).mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
+    fireEvent.click(screen.getByRole('button', { name: '다음 작업자' }));
     fireEvent.click(screen.getByRole('button', { name: '테스트 나 사진 복사' }));
     await screen.findByText(/사진을 복사하지 못했습니다/);
     expect(screen.getByRole('status')).not.toHaveTextContent('복사했습니다');
@@ -360,7 +528,7 @@ test('Windows 사진창에는 선택된 각각의 원본을 전달하고 창 열
     expect(saveAs).not.toHaveBeenCalled();
     expect(share).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('처음 사용하시나요? PC 보조 프로그램 설치'));
-    expect(screen.getByRole('link', { name: 'Windows 보조 프로그램 1.4 다운로드 (.exe)' })).toHaveAttribute('href', '/downloads/CYPhotoClipboardSetup.exe?v=1.4.0');
+    expect(screen.getByRole('link', { name: 'Windows 보조 프로그램 1.4.3 다운로드 (.exe)' })).toHaveAttribute('href', '/downloads/CYPhotoClipboardSetup.exe?v=1.4.3');
 });
 
 test('사진창을 준비하는 중 중복 클릭은 창을 추가로 열지 않는다', async () => {

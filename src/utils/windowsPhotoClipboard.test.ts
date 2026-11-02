@@ -3,6 +3,22 @@ import { TextEncoder } from 'util';
 import { webcrypto } from 'crypto';
 
 const fetchMock = jest.fn();
+
+test('세션 실패 시 브라우저 권한 차단과 운영 주소 밖에서의 접근을 구분한다', async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'permissions');
+    Object.defineProperty(navigator, 'permissions', { configurable: true, value: { query: jest.fn().mockResolvedValue({ state: 'denied' }) } });
+    try {
+        fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+        await expect(openWindowsPhotoWindow([new File(['x'], '가상.png', { type: 'image/png' })], new AbortController().signal))
+            .rejects.toMatchObject({ code: 'network-permission', stage: 'connect' });
+        expect(windowsPhotoClipboardErrorMessage(new WindowsPhotoClipboardError('network-permission'))).toContain('사이트 설정');
+        expect(windowsPhotoClipboardErrorMessage(new WindowsPhotoClipboardError('connection'), 'http://localhost:3000')).toContain('운영 작업자요약');
+        expect(windowsPhotoClipboardErrorMessage(new WindowsPhotoClipboardError('connection'), 'https://other.example')).toContain('운영 작업자요약');
+    } finally {
+        if (original) Object.defineProperty(navigator, 'permissions', original);
+        else Reflect.deleteProperty(navigator, 'permissions');
+    }
+});
 const token = 'a'.repeat(64);
 const session = { app: 'cy-photo-clipboard', protocol: 2, clipboardMode: 'shell-files-v1', token };
 const windowSession = { ...session, version: '1.3.0', photoWindowMode: 'shell-view-v1' };
@@ -63,9 +79,9 @@ test('저장 중 취소되면 파일 복사를 시작하지 않는다', async ()
     expect(fetchMock).toHaveBeenCalledTimes(2);
 });
 test('사진 개수·타입 제한은 로컬 전송 전에 검사한다', async () => {
-    for (const input of [[], Array(101).fill(files[0]), [new File(['exe'], 'x.exe', { type: 'application/octet-stream' })]]) {
-        await expect(copyWindowsPhotos(input, new AbortController().signal)).rejects.toEqual(new WindowsPhotoClipboardError('size'));
-    }
+    await expect(copyWindowsPhotos([], new AbortController().signal)).rejects.toEqual(new WindowsPhotoClipboardError('empty-photo'));
+    await expect(copyWindowsPhotos(Array(101).fill(files[0]), new AbortController().signal)).rejects.toEqual(new WindowsPhotoClipboardError('file-count'));
+    await expect(copyWindowsPhotos([new File(['exe'], 'x.exe')], new AbortController().signal)).rejects.toEqual(new WindowsPhotoClipboardError('image-format'));
     expect(fetchMock).not.toHaveBeenCalled();
 });
 

@@ -26,6 +26,7 @@
     "@types/node": "^16.18.126",
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
+    "@zip.js/zip.js": "2.24.0",
     "ag-grid-community": "^34.3.1",
     "ag-grid-react": "^34.3.1",
     "ajv": "^8.17.1",

@@ -15,13 +15,18 @@ const active = (row: any) => row && row.isActive !== false && !['퇴사', 'inact
 // This namespace is already excluded from all browser Storage fallback rules.
 export const bankPhotoPath = (workerId: string, photoId: string, directPay = false) => `team-worker-documents/account-photos/${workerId}/${directPay ? 'direct-pay/' : ''}${photoId}`;
 
+export function documentPhotoContentType(bytes: Buffer): string {
+    if (bytes.length < 12) return '';
+    if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return 'image/jpeg';
+    if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+    return bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'image/webp' : '';
+}
+
 export function validateBankPhoto(encoded: unknown): { bytes: Buffer; contentType: string } {
     if (typeof encoded !== 'string' || encoded.length > Math.ceil(MAX_BYTES / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) fail('invalid-argument', '계좌사진은 JPG·PNG·WEBP 원본을 5MB 이하로 올려 주세요.');
     const bytes = Buffer.from(encoded as string, 'base64');
     if (bytes.length < 12 || bytes.length > MAX_BYTES || bytes.toString('base64') !== encoded) fail('invalid-argument', '계좌사진 파일을 확인해 주세요.');
-    const contentType = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 ? 'image/jpeg'
-        : bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'image/png'
-            : bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'image/webp' : '';
+    const contentType = documentPhotoContentType(bytes);
     if (!contentType) fail('invalid-argument', 'JPG·PNG·WEBP 계좌사진만 등록할 수 있습니다.');
     return { bytes, contentType };
 }

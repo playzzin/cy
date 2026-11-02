@@ -48,7 +48,22 @@ const request = async (path: string, signal: AbortSignal, body?: Blob | string, 
 };
 
 const connect = async (signal: AbortSignal, photoWindow: boolean): Promise<Session> => {
-    const result = await request('/session', signal) as Session;
+    let result: Session;
+    try {
+        result = await request('/session', signal) as Session;
+    } catch (error) {
+        if (error instanceof WindowsPhotoClipboardError && ['connection', 'timeout'].includes(error.code)) {
+            // Permission names vary across Chromium releases. Check the one for loopback first.
+            for (const name of ['loopback-network', 'local-network-access']) {
+                let state: PermissionState | undefined;
+                try { state = (await navigator.permissions?.query({ name: name as PermissionName }))?.state; }
+                catch { continue; }
+                if (state === 'denied') throw new WindowsPhotoClipboardError('network-permission');
+                if (state) break;
+            }
+        }
+        throw error;
+    }
     if (result?.app !== APP || result.protocol !== 2 || result.clipboardMode !== 'shell-files-v1' || !/^[a-f0-9]{64}$/.test(result.token)) {
         throw new WindowsPhotoClipboardError(photoWindow ? 'photo-window-version' : 'version');
     }
@@ -120,8 +135,11 @@ const prepareChunks = async (files: File[], session: Session, signal: AbortSigna
 };
 
 const prepareWindowsPhotos = async (files: File[], signal: AbortSignal, photoWindow: boolean, progress?: Progress): Promise<{ session: Session; saved: WindowsPhotoBatch }> => {
-    if (!files.length || files.length > 100 || files.some(file => !file.size || file.size > MAX_FILE || !TYPES.has(file.type)) ||
-        files.reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL) throw new WindowsPhotoClipboardError('size');
+    if (!files.length || files.some(file => !file.size)) throw new WindowsPhotoClipboardError('empty-photo');
+    if (files.some(file => !TYPES.has(file.type))) throw new WindowsPhotoClipboardError('image-format');
+    if (files.length > 100) throw new WindowsPhotoClipboardError('file-count');
+    if (files.some(file => file.size > MAX_FILE)) throw new WindowsPhotoClipboardError('file-bytes');
+    if (files.reduce((sum, file) => sum + file.size, 0) > MAX_TOTAL) throw new WindowsPhotoClipboardError('total-bytes');
     // Check the capability before sending any original photo bytes to an older helper.
     const session = await connect(signal, photoWindow);
     const saved = session.transferMode === 'chunks-v1'
@@ -151,9 +169,16 @@ export const openWindowsPhotoWindow = async (files: File[], signal: AbortSignal,
     return result;
 };
 
-export const windowsPhotoClipboardErrorMessage = (error: unknown): string => {
+export const windowsPhotoClipboardErrorMessage = (error: unknown, origin = window.location.origin): string => {
     const code = error instanceof WindowsPhotoClipboardError ? error.code : '';
-    if (code === 'size') return '한 번에 사진 100장, 한 장당 20MB, 전체 200MB까지 준비할 수 있습니다. 선택한 사진 수를 줄여 주세요.';
+    if (code === 'network-permission') return '브라우저가 이 사이트의 로컬 네트워크 접근을 차단했습니다. 주소창의 사이트 설정에서 로컬 네트워크 접근을 허용하고 새로고침한 뒤 다시 눌러 주세요.';
+    if (error instanceof WindowsPhotoClipboardError && error.stage === 'connect' && ['connection', 'timeout'].includes(code)) {
+        if (origin !== 'https://cyee-9c1e4.web.app') return '이 주소는 Windows 보조 프로그램이 허용하는 작업자요약 주소가 아닙니다. 운영 작업자요약에서 다시 열어 주세요.';
+    }
+    if (code === 'empty-photo') return '사진이 없거나 비어 있는 원본이 있습니다. 등록한 원본 파일을 확인해 주세요.';
+    if (code === 'file-count') return 'Windows 보조 프로그램이 한 번에 받는 100장을 초과했습니다. 원본 전체를 ZIP 또는 폴더로 저장해 첨부할 수 있습니다.';
+    if (code === 'file-bytes') return '사진 한 장이 Windows 보조 프로그램의 20MiB 한도를 초과했습니다. 원본 전체를 ZIP 또는 폴더로 저장해 첨부할 수 있습니다.';
+    if (code === 'total-bytes') return '선택한 사진 합계가 Windows 보조 프로그램의 200MiB 한도를 초과했습니다. 원본 전체를 ZIP 또는 폴더로 저장해 첨부할 수 있습니다.';
     if (code === 'busy') return '다른 사진을 처리하고 있습니다. 잠시 뒤 다시 눌러 주세요.';
     if (code === 'version') return '전체 복사 기능을 사용하려면 PC 보조 프로그램 1.2 이상이 필요합니다. 아래 설치 메뉴에서 새 설치 파일을 실행한 뒤 다시 눌러 주세요.';
     if (code === 'photo-window-version') return '사진을 한 번에 끌어놓으려면 PC 보조 프로그램 1.3 이상이 필요합니다. 아래 설치 메뉴에서 새 설치 파일을 실행한 뒤 다시 눌러 주세요.';

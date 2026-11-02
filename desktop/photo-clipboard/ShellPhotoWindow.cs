@@ -71,7 +71,7 @@ namespace CyPhotoClipboard {
                 // view, or change focus, while the user is holding/capturing input.
                 if (interactionInProgress()) { request.done.TrySetResult(PhotoWindowResult.Busy); return; }
                 bool same = active.id == request.id && active.paths.SequenceEqual(request.paths, StringComparer.OrdinalIgnoreCase);
-                if (same && window.Ready) { window.Present(); request.done.TrySetResult(PhotoWindowResult.Opened); return; }
+                if (same && window.Ready) { window.Present(); request.done.TrySetResult(window.IsPresented ? PhotoWindowResult.Opened : PhotoWindowResult.Failed); return; }
                 if (!window.Ready) { window.Present(); request.done.TrySetResult(PhotoWindowResult.Busy); return; }
             }
             try {
@@ -93,7 +93,7 @@ namespace CyPhotoClipboard {
                     request.done.TrySetResult(PhotoWindowResult.Failed);
                 };
                 created.Prepared += delegate(bool ready) {
-                    if (!ready || request.cancelled) { created.Close(); request.done.TrySetResult(PhotoWindowResult.Failed); }
+                    if (!ready || !created.IsPresented || request.cancelled) { created.Close(); request.done.TrySetResult(PhotoWindowResult.Failed); }
                     else request.done.TrySetResult(PhotoWindowResult.Opened);
                 };
                 created.Present();
@@ -151,14 +151,23 @@ namespace CyPhotoClipboard {
         // Browser HTTP requests do not grant foreground activation permission.
         // A topmost tool window stays visible without synthetic input or focus loops.
         internal void Present() {
-            if (!hidden) {
+            if (!hidden && WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Show();
+            if (!hidden && !IsDisposed && IsHandleCreated) {
+                // Windows may apply the tray process's hidden startup state to its first Show().
+                if (!IsPresented) ShowWindow(Handle, 9 /* SW_RESTORE */);
                 keepAbove.Checked = true;
                 TopMost = true;
-                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                BringToFront(); Activate();
+                // Restoring a minimized form can drop its native topmost flag while WinForms still caches TopMost=true.
+                SetWindowPos(Handle, new IntPtr(-1) /* HWND_TOPMOST */, 0, 0, 0, 0, 0x13 /* NOSIZE | NOMOVE | NOACTIVATE */);
             }
-            Show();
-            if (!hidden) { BringToFront(); Activate(); }
         }
+        internal bool IsPresented { get { return hidden || (IsHandleCreated && IsWindowVisible(Handle) && !IsIconic(Handle)); } }
+        [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr handle, int command);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr handle);
+        [DllImport("user32.dll")] static extern bool IsIconic(IntPtr handle);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr handle, IntPtr after, int x, int y, int cx, int cy, uint flags);
         void Finish(bool ready) {
             if (completed) return; completed = true; Ready = ready; poll.Stop();
             status.Text = ready ? "사진 " + paths.Length + "장이 모두 선택되었습니다." : "사진창을 준비하지 못했습니다. 사이트에서 다시 시도해 주세요.";

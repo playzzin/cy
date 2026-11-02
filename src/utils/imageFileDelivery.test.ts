@@ -1,5 +1,28 @@
 import { canShareImageFile, canShareImageFiles, imageFileFromUrl, shareImageFile, shareImageFiles } from './imageFileDelivery';
 
+test('브라우저가 허용한다고 응답해도 사진 10장 또는 총 50MiB를 넘는 요청은 묶음에서 제외한다', () => {
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Chrome/133.0' });
+    Object.defineProperty(navigator, 'share', { configurable: true, value: jest.fn() });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    const photo = new File(['test'], 'sample.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(photo, 'size', { value: 5 * 1024 * 1024 });
+    const extra = new File(['a'], 'extra.jpg', { type: 'image/jpeg' });
+    expect(canShareImageFiles(Array(10).fill(photo))).toBe(true);
+    expect(canShareImageFiles(Array(11).fill(extra))).toBe(false);
+    const large = new File(['large'], 'large.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(large, 'size', { value: 50 * 1024 * 1024 });
+    expect(canShareImageFiles([large, extra])).toBe(false);
+});
+
+test('Chromium이 아닌 기기가 받아주는 120장과 50MiB 초과 묶음에는 앱 한도를 적용하지 않는다', () => {
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Version/18.0 Mobile Safari/605.1' });
+    Object.defineProperty(navigator, 'share', { configurable: true, value: jest.fn() });
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+    const file = new File(['test'], 'large.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(file, 'size', { value: 51 * 1024 * 1024 });
+    expect(canShareImageFiles(Array(120).fill(file))).toBe(true);
+});
+
 test('여러 이미지의 전체 묶음 지원 여부를 검사하고 사진 파일만 전달한다', async () => {
     const files = [new File(['a'], 'one.png', { type: 'image/png' }), new File(['b'], 'two.jpg', { type: 'image/jpeg' })];
     const share = jest.fn().mockResolvedValue(undefined);

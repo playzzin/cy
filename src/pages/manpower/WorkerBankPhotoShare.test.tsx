@@ -62,13 +62,14 @@ test('미등록과 조회 실패를 구별하고 성공한 직불용 통장사�
     (readWorkerBankPhoto as jest.Mock).mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('permission-denied'));
     render(<WorkerIdImageShare workers={[...workers, { id: 'three', name: '가상 다' }]} kind="bank" />); await prepare();
     expect(screen.getByText(/직불용 통장사본 미등록 1명: 가상 가/)).toBeInTheDocument();
-    expect(screen.getByText(/불러오기 실패 1명: 가상 나/)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('불러오기 실패 1명');
+    expect(screen.getByRole('alert')).toHaveTextContent('가상 나');
     expect(screen.getAllByRole('img')).toHaveLength(1);
     expect(imageFileFromUrl).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText('PC 카카오톡으로 보내기'));
+    fireEvent.click(screen.getByText('사진 저장으로 보내기'));
     (zipImageFiles as jest.Mock).mockResolvedValue(new File(['zip'], '계좌_사진.zip'));
     fireEvent.click(screen.getByRole('button', { name: '사진 1장 ZIP 저장' }));
-    await waitFor(() => expect(zipImageFiles).toHaveBeenCalledWith([expect.objectContaining({ name: '03_가상 다_직불용 통장사본.png' })], '직불용 통장사본'));
+    await waitFor(() => expect(zipImageFiles).toHaveBeenCalledWith([expect.objectContaining({ name: '03_가상 다_직불용 통장사본.png' })], '직불용 통장사본', expect.any(AbortSignal)));
 });
 test('직불용 통장사본이 없으면 신분증 대신 원본 등록을 안내한다', async () => {
     (readWorkerBankPhoto as jest.Mock).mockResolvedValue(null);

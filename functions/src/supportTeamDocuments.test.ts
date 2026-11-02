@@ -60,6 +60,29 @@ test('팀장은 지원 이력 없이 명단의 타팀 서류를 읽으며 일반
                 assert.deepEqual(await preview({ action: 'read', workerId: 'guest', kind }), result);
             }
             assert.deepEqual(await call({ action: 'read', workerId: 'guest-leader', kind: 'bank' }), { photo: null });
+            const large = Buffer.concat([png, Buffer.alloc(6 * 1024 * 1024, 73)]);
+            const largePath = 'id_cards/large-test.png';
+            await bucket.file(largePath).save(large, { resumable: false });
+            await db.doc('workers/guest').update({ fileNameSaved: largePath });
+            const readPart = (offset: number, revision?: string) => call({ action: 'read', workerId: 'guest', kind: 'identity', offset, revision }) as Promise<any>;
+            const first = (await readPart(0)).photo;
+            assert.equal(first.size, large.length);
+            assert.equal(first.offset, 0);
+            assert.equal(first.contentType, 'image/png');
+            let offset = Buffer.from(first.base64, 'base64').length;
+            const parts = [Buffer.from(first.base64, 'base64')];
+            while (offset < first.size) {
+                const part = (await readPart(offset, first.revision)).photo;
+                assert.equal(part.offset, offset);
+                parts.push(Buffer.from(part.base64, 'base64'));
+                offset += parts[parts.length - 1].length;
+            }
+            assert.deepEqual(Buffer.concat(parts), large);
+            await assert.rejects(readPart(1, first.revision), denied('invalid-argument'));
+            await assert.rejects(call({ action: 'read', workerId: 'outside', kind: 'identity', offset: 0 }), denied('permission-denied'));
+            await bucket.file(largePath).save(png, { resumable: false });
+            await assert.rejects(readPart(parts[0].length, first.revision), denied('aborted'));
+            await db.doc('workers/guest').update({ fileNameSaved: 'id_cards/support-test.png' });
             assert.equal((await call({ action: 'read', workerId: 'absent', kind: 'bank' }) as any).photo.base64, png.toString('base64'));
             for (const workerId of ['outside', 'retired']) await assert.rejects(call({ action: 'read', workerId, kind: 'bank' }), denied('permission-denied'));
             await assert.rejects(preview({ action: 'read', workerId: 'outside', kind: 'identity' }), denied('permission-denied'));

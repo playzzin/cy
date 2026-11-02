@@ -1,15 +1,52 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { createHash } from 'crypto';
 import { protectedRegion, requireCallableAuth } from './auth';
 import { resolvedRoleNames } from './teamExpenseRequests';
 import { isTeamLeader, TeamRow, text } from './teamReadPolicy';
 import { queryByIds, queryRows } from './teamScopedQuery';
 import { activeDocumentWorker, documentRowIds, supportDocumentOfficeRole, supportDocumentPeople } from './supportTeamDocumentPolicy';
 import { summaryDirectoryTeams } from './workerSummaryDirectory';
-import { bankPhotoPath, validateBankPhoto } from './workerBankPhotos';
+import { bankPhotoPath, documentPhotoContentType, validateBankPhoto } from './workerBankPhotos';
 
 const deny = (): never => { throw new functions.https.HttpsError('permission-denied', '팀장 계정과 작업자 목록의 서류 조회 권한을 확인해 주세요.'); };
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(id);
+const IDENTITY_PART_BYTES = 3 * 1024 * 1024; // Each base64 response fits a v1 callable. The original has no size cap.
+
+async function readDocumentPhoto(path: string, input: { kind: string; offset?: number; revision?: string }) {
+    const bucket = admin.storage().bucket();
+    const file = bucket.file(path);
+    try {
+        const [metadata] = await file.getMetadata();
+        if (input.kind !== 'identity' || input.offset === undefined) {
+            // Older clients expect a complete photo in one response.
+            if (Number(metadata.size) > 5 * 1024 * 1024) throw new functions.https.HttpsError('failed-precondition', '이 공유 방식은 5MiB까지 지원합니다. 화면을 새로고침해 주세요.');
+            const [bytes] = await file.download();
+            const { contentType } = validateBankPhoto(bytes.toString('base64'));
+            return { base64: bytes.toString('base64'), contentType };
+        }
+        const size = Number(metadata.size), offset = input.offset;
+        if (!Number.isSafeInteger(size) || size < 12 || !metadata.generation)
+            throw new functions.https.HttpsError('failed-precondition', '등록된 원본 파일을 확인해 주세요.');
+        const revision = createHash('sha256').update(JSON.stringify([path, String(metadata.generation)])).digest('hex');
+        if (offset > 0 && input.revision !== revision)
+            throw new functions.https.HttpsError('aborted', '서류가 변경되었습니다. 다시 준비해 주세요.');
+        if (!Number.isSafeInteger(offset) || offset < 0 || offset >= size || offset % IDENTITY_PART_BYTES !== 0)
+            throw new functions.https.HttpsError('invalid-argument', '사진 읽기 위치를 확인해 주세요.');
+        const end = Math.min(offset + IDENTITY_PART_BYTES, size) - 1;
+        const original = bucket.file(path, { generation: metadata.generation });
+        const [bytes] = await original.download({ start: offset, end, validation: false });
+        const header = offset === 0 ? bytes : (await original.download({ start: 0, end: 11, validation: false }))[0];
+        const contentType = documentPhotoContentType(header);
+        if (!contentType) throw new functions.https.HttpsError('failed-precondition', '지원되지 않는 원본 사진 형식입니다.');
+        if (bytes.length !== end - offset + 1 || String((await file.getMetadata())[0].generation) !== String(metadata.generation))
+            throw new functions.https.HttpsError('aborted', '서류가 변경되었습니다. 다시 준비해 주세요.');
+        return { base64: bytes.toString('base64'), contentType, offset, size, revision };
+    } catch (error) {
+        if ((error as { code?: number })?.code === 404) throw new functions.https.HttpsError('not-found', '등록한 원본 사진을 찾을 수 없습니다.');
+        throw error;
+    }
+}
 
 export async function readSupportDocumentScope(db: admin.firestore.Firestore, uid: string) {
     const [user, menu] = await db.getAll(db.doc(`users/${uid}`), db.doc('settings/menus_v12'));
@@ -66,17 +103,13 @@ export async function handleSupportTeamDocuments(input: any, context: functions.
     if ((input.kind === 'identity' && !path.startsWith('id_cards/')) || path.startsWith('/') || path.includes('..') || /^(https?:|gs:)/.test(path)) {
         throw new functions.https.HttpsError('failed-precondition', '서류 원본 경로를 확인해 주세요.');
     }
-    const file = admin.storage().bucket().file(path);
-    const [metadata] = await file.getMetadata();
-    if (Number(metadata.size) > 5 * 1024 * 1024) throw new functions.https.HttpsError('failed-precondition', '서류 사진은 5MB 이하만 공유할 수 있습니다.');
-    const [bytes] = await file.download();
-    const photo = validateBankPhoto(bytes.toString('base64'));
+    const photo = await readDocumentPhoto(path, input);
     const current = await readSupportDocumentScope(db, uid);
     if (!current.people.some(row => row.id === worker.id)) deny();
     if (text(current.workers.find(row => row.id === worker.id)?.[field]) !== version) {
         throw new functions.https.HttpsError('aborted', '서류가 변경되었습니다. 다시 준비해 주세요.');
     }
-    return { photo: { base64: photo.bytes.toString('base64'), contentType: photo.contentType } };
+    return { photo };
 }
 
 export const supportTeamDocuments = protectedRegion.https.onCall(handleSupportTeamDocuments);
