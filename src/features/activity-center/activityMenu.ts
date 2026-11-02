@@ -1,27 +1,37 @@
-import type { MenuItem } from '../../types/menu';
+import type { MenuItem, SiteData } from '../../types/menu';
 import { activitySourceForPath } from './activitySources';
 
-/** Presentation only, after role/hidden filtering. Never rewrites saved menus. */
-export function consolidateActivityMenus(items: MenuItem[], paths: Record<string, string>): MenuItem[] {
-  let firstSource: string | undefined;
-  let alreadyPresent = false;
-  const visit = (entries: (MenuItem | string)[]): (MenuItem | string)[] => entries.flatMap(entry => {
-    const item = typeof entry === 'string' ? { text: entry } : entry;
-    if (item.hide) return [entry];
-    const path = item.path || paths[item.text] || '';
-    const source = path.startsWith('/') ? activitySourceForPath(path) : undefined;
-    if (source || ['/activity', '/office/audit-log'].includes(path.split('?')[0])) {
-      firstSource ||= source?.id || 'daily';
-      // A configured single menu keeps its custom label, placement and roles.
-      if (path.split('?')[0] === '/activity' && !alreadyPresent) { alreadyPresent = true; return [entry]; }
-      return item.sub?.length ? visit(item.sub) : [];
+/** Convert the former sidebar shortcut to a regular, editable menu once. */
+export function registerActivityMenu(site: SiteData): void {
+  const activityId = 'activity-center';
+  const label = '활동 내역';
+  if (site.deletedItems?.some(value => [label, activityId, '/activity'].includes(value))) return;
+  let alreadyRegistered = false;
+  const sources = new Set<string>();
+  let unrestricted = false;
+  const roles = new Set<string>();
+  const visit = (entries: (MenuItem | string)[], visible: boolean) => {
+    for (const item of entries) {
+      if (typeof item === 'string') continue;
+      const path = item.path || '';
+      const shown = visible && !item.hide;
+      if (item.id === activityId || path.split(/[?#]/)[0] === '/activity') alreadyRegistered = true;
+      else if (shown && path.startsWith('/') && !path.startsWith('//')) {
+        const source = activitySourceForPath(path)?.id || (path === '/office/audit-log' ? 'daily' : undefined);
+        if (source) {
+          sources.add(source);
+          if (item.roles?.length) item.roles.forEach(role => roles.add(role));
+          else unrestricted = true;
+        }
+      }
+      if (item.sub) visit(item.sub, shown);
     }
-    if (!item.sub?.length) return [entry];
-    const sub = visit(item.sub);
-    if (!sub.length && !path && !item.action) return [];
-    return [{ ...item, sub }];
+  };
+  visit(site.menu, true);
+  visit(site.trash ?? [], false);
+  if (sources.size && !alreadyRegistered) site.menu.push({
+    id: activityId, text: label, icon: 'fa-clock-rotate-left',
+    path: sources.size === 1 ? `/activity?source=${[...sources][0]}` : '/activity',
+    ...(!unrestricted && roles.size ? { roles: [...roles] } : {})
   });
-  const result = visit(items).map(entry => typeof entry === 'string' ? { text: entry } : entry);
-  if (firstSource && !alreadyPresent) result.push({ id: 'activity-center', text: '활동 내역', icon: 'fa-clock-rotate-left', path: `/activity?source=${firstSource}` });
-  return result;
 }

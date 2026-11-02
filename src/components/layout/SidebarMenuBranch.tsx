@@ -35,7 +35,7 @@ const SidebarMenuBranch: React.FC<Props> = props => {
             if (isMenuDivider(item)) return <li key={id}><MenuDivider item={item} /></li>;
             if (item.hide) return null;
             const path = item.path || menuPaths[item.text];
-            const hasChildren = Boolean(item.sub?.length);
+            const hasChildren = Array.isArray(item.sub) && (!path || item.sub.length > 0);
             const open = panel ? !closedPanelItems[id] : Boolean(expanded[id]);
             const active = hasActive(item);
             const colors = sidebarColors(item, props.sourceSite);

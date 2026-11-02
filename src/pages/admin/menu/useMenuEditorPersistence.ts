@@ -13,6 +13,7 @@ export const useMenuEditorPersistence = () => {
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
     const [saveError, setSaveError] = useState('');
     const [isReloading, setIsReloading] = useState(false);
+    const [registrationPending, setRegistrationPending] = useState(false);
     const draft = useRef<SiteDataType | null>(null);
     const historyRef = useRef<MenuEditHistory>(emptyHistory());
     const latestRemote = useRef<SiteDataType | null>(null);
@@ -29,7 +30,9 @@ export const useMenuEditorPersistence = () => {
     }, []);
 
     const receive = useCallback((value: SiteDataType) => {
-        if (!mounted.current || menuConfigsEqual(draft.current, value)) return;
+        if (!mounted.current) return;
+        setRegistrationPending(menuServiceV11.isMenuRegistrationPending?.() ?? false);
+        if (menuConfigsEqual(draft.current, value)) return;
         publishHistory(draft.current ? rebaseMenuHistory(historyRef.current, draft.current, value) : emptyHistory());
         draft.current = clone(value);
         setMenuData(draft.current);
@@ -131,6 +134,7 @@ export const useMenuEditorPersistence = () => {
             draft.current = clone(data);
             latestRemote.current = data;
             setMenuData(draft.current);
+            setRegistrationPending(menuServiceV11.isMenuRegistrationPending?.() ?? false);
             publishHistory(emptyHistory());
             setSaveStatus('idle');
             setSaveError('');
@@ -151,6 +155,9 @@ export const useMenuEditorPersistence = () => {
         return () => window.removeEventListener('beforeunload', preventUnload);
     }, [saveStatus]);
 
-    return { menuData, history, saveStatus, saveError, isReloading, updateMenuData,
+    const registerMenus = () => {
+        if (draft.current && !pending.current && !failed.current) persist(draft.current, draft.current);
+    };
+    return { menuData, history, saveStatus, saveError, isReloading, updateMenuData, registrationPending, registerMenus,
         handleUndo: () => travel('past'), handleRedo: () => travel('future'), reloadLatestMenus };
 };

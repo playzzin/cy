@@ -41,8 +41,11 @@ export default function TeamWorkflowGate({ profile, children }: { profile: UserD
     const workerRows = Object.values(workers).filter(Boolean);
     const restricted = isRestrictedTeamLeader(profile, positions, workerRows);
     const accessProfile = profile as (UserData & { systemRole?: string; roles?: string[] }) | null;
-    const revision = JSON.stringify([profile?.role, profile?.position, profile?.status, profile?.accountType,
-        accessProfile?.systemRole, accessProfile?.roles, linked, profile?.additionalPositions, workers, positions]);
+    const assignedRoles = [profile?.role, profile?.position, profile?.accountType, accessProfile?.systemRole,
+        ...(accessProfile?.roles || []), ...(profile?.additionalPositions || [])];
+    // A menu save also updates this snapshot. Only role mappings used by this account affect its access.
+    const mappedRoles = assignedRoles.map(role => positions.find(p => role === p.id || role === `pos_${p.id}`)?.name);
+    const revision = JSON.stringify([profile?.status, assignedRoles, mappedRoles, linked, workers, restricted]);
     useEffect(() => { invalidateTeamScopedCache(); }, [revision]);
     if (failed) return <p role="alert">현재 업무 권한을 확인하지 못했습니다. 연결을 확인한 뒤 새로고침해 주세요.</p>;
     if (!ready) return <p role="status">현재 업무 권한을 확인하는 중입니다.</p>;

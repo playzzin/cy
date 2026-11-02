@@ -101,7 +101,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                             </div>
                             <div>
                                 <h2 className="font-bold text-gray-100 text-base line-clamp-1">{isMenuDivider(localState) ? '구분선 설정' : localState.text}</h2>
-                                <p className="text-xs text-gray-500 line-clamp-1">{isMenuDivider(localState) ? '메뉴 사이의 시각적 구분' : getLinkedMenuRef(localState.id) ? '연결된 직책 메뉴 · 원본에 반영' : localState.id}</p>
+                                {!isMenuDivider(localState) && <p className="text-xs text-gray-500 line-clamp-1">{getLinkedMenuRef(localState.id) ? '연결된 직책 메뉴 · 원본에 반영' : localState.id}</p>}
                             </div>
                         </div>
                     ) : (
@@ -208,7 +208,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                             </div>}
                         </div>
                     ) : localState && isMenuDivider(localState) ? (
-                        <DividerSettings item={localState} onChange={updated => { setLocalState(updated); onUpdate(updated); }} />
+                        <DividerSettings key={localState.id} item={localState} onChange={updated => { setLocalState(updated); onUpdate(updated); }} />
                     ) : localState ? (
                         <>
                             {/* Section: General */}

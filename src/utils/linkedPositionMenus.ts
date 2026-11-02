@@ -1,5 +1,6 @@
-import type { MenuItem, SiteDataType } from '../types/menu';
+import type { MenuItem, SiteData, SiteDataType } from '../types/menu';
 import { createMenuDivider } from './menuDivider';
+import { hasRegisteredMenus } from './menuRegistration';
 
 const PREFIX = '__linked_position__/';
 export const LINKED_POSITION_DIVIDER_ID = `${PREFIX}divider`;
@@ -13,8 +14,8 @@ export const isDevPositionSite = (data: SiteDataType | null, siteKey: string): b
     return [siteKey, data[siteKey].name, position?.name || ''].some(isDevName);
 };
 
-export const getLinkedPositions = (data: SiteDataType | null, siteKey: string) => {
-    if (!isDevPositionSite(data, siteKey) || data?.[siteKey].linkedPositionMenusEnabled === false) return [];
+export const getAvailableLinkedPositions = (data: SiteDataType | null, siteKey: string) => {
+    if (!isDevPositionSite(data, siteKey)) return [];
     const seen = new Set<string>([siteKey]);
     return [...(data?.admin?.positionConfig || [])]
         .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
@@ -24,6 +25,20 @@ export const getLinkedPositions = (data: SiteDataType | null, siteKey: string) =
             seen.add(key);
             return true;
         });
+};
+
+export const getRegisteredPositionGroups = (data: SiteDataType, siteKey: string): NonNullable<SiteData['linkedPositionGroups']> =>
+    data[siteKey].linkedPositionGroups ?? (hasRegisteredMenus(data) ? [] :
+        getAvailableLinkedPositions(data, siteKey).map(position => ({ sourceSite: positionSiteKey(position.id) })));
+
+export const getLinkedPositions = (data: SiteDataType | null, siteKey: string) => {
+    if (!data?.[siteKey] || !isDevPositionSite(data, siteKey) || data[siteKey].linkedPositionMenusEnabled === false) return [];
+    const available = new Map(getAvailableLinkedPositions(data, siteKey).map(position => [positionSiteKey(position.id), position]));
+    return getRegisteredPositionGroups(data, siteKey).flatMap(group => {
+        const position = available.get(group.sourceSite);
+        available.delete(group.sourceSite);
+        return position ? [{ ...position, name: group.text || position.name }] : [];
+    });
 };
 
 export const linkedMenuId = (siteKey: string, id?: string) =>

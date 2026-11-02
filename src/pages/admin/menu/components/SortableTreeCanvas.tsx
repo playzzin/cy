@@ -9,6 +9,7 @@ import { resolveIcon } from '../../../../constants/iconMap';
 import { getDividerAppearance, isMenuDivider } from '../../../../utils/menuDivider';
 import { getLinkedMenuRef, isLinkedMenuContainer } from '../../../../utils/linkedPositionMenus';
 import { sidebarRowStyle, sidebarColors, SidebarColorSource } from '../../../../utils/sidebarColors';
+import { useSidebarFonts } from '../../../../hooks/useSidebarFonts';
 
 // --- Recursive Sortable Item ---
 interface SortableItemProps {
@@ -275,6 +276,7 @@ interface SortableTreeCanvasProps {
 const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, colorSource, title, emptyMessage, emptyHint, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, onToggleVisibility, isMultiSelectMode, headerActions }) => {
     // Flatten items to get list of IDs for SortableContext (only top level here, children handled recursively)
     const topLevelIds = items.map(i => i.id || i.text);
+    useSidebarFonts(items, colorSource);
 
     const { setNodeRef, isOver } = useDroppable({
         id: 'root-drop-zone',

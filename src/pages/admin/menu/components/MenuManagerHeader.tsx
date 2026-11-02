@@ -25,7 +25,8 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { SiteDataType } from '../../../../types/menu';
 import { isDevPositionSite } from '../../../../utils/linkedPositionMenus';
-import { DEFAULT_SIDEBAR_ACCENT, DEFAULT_SIDEBAR_BACKGROUND } from '../../../../utils/sidebarColors';
+import SidebarAppearanceToolbar from './SidebarAppearanceToolbar';
+import LinkedPositionSettings from './LinkedPositionSettings';
 
 interface MenuManagerHeaderProps {
     menuData: SiteDataType;
@@ -255,39 +256,12 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
                     <FontAwesomeIcon icon={faCog} />
                 </button>
             </div>
-            {menuData[selectedSite] && (
-                <div className="flex flex-wrap items-center gap-3 border-t border-slate-700 bg-slate-800 px-4 py-2">
-                    <strong className="text-sm text-slate-100">{menuData[selectedSite].name}</strong>
-                    {([
-                        { key: 'sidebarBackgroundColor', label: '좌측 메뉴 배경색', fallback: DEFAULT_SIDEBAR_BACKGROUND, reset: '배경색 기본값 복원' },
-                        { key: 'sidebarSelectedBackgroundColor', label: '좌측 메뉴 선택 배경색', fallback: menuData[selectedSite].sidebarBackgroundColor || DEFAULT_SIDEBAR_BACKGROUND, reset: '선택 배경색 기본값 복원' },
-                        { key: 'sidebarAccentColor', label: '좌측 메뉴 기본색', fallback: DEFAULT_SIDEBAR_ACCENT, reset: '시스템 기본값 복원' }
-                    ] as const).map(({ key, label, fallback, reset }) => {
-                        const site = menuData[selectedSite];
-                        return <div key={key} className="flex flex-wrap items-center gap-2">
-                            <label className="flex items-center gap-2 text-sm text-slate-100">
-                                {label}
-                                <input type="color" aria-label={label} className="h-8 w-10 cursor-pointer rounded bg-transparent"
-                                    value={site[key] || fallback} onChange={event => onUpdateMenuData({
-                                        ...menuData, [selectedSite]: { ...site, [key]: event.target.value }
-                                    })} />
-                            </label>
-                            <span className="text-xs text-slate-300">{site[key]?.toUpperCase() || '시스템 기본값'}</span>
-                            {site[key] && <button type="button" className="text-xs text-blue-300 underline" onClick={() => {
-                                const next = { ...site };
-                                delete next[key];
-                                onUpdateMenuData({ ...menuData, [selectedSite]: next });
-                            }}>{reset}</button>}
-                        </div>;
-                    })}
-                    <span className="text-xs text-slate-400">개별 색상을 지정한 메뉴는 해당 색상을 유지합니다.</span>
-                </div>
-            )}
+            {menuData[selectedSite] && <SidebarAppearanceToolbar key={selectedSite} site={menuData[selectedSite]}
+                onChange={site => onUpdateMenuData({ ...menuData, [selectedSite]: site })} />}
             {isDevPositionSite(menuData, selectedSite) && (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-700 bg-slate-800 px-4 py-3">
                     <div>
                         <div className="text-sm font-bold text-slate-100">직책별 메뉴 연결</div>
-                        <p className="mt-1 text-xs text-slate-400">DEV 메뉴 아래에 다른 직책을 표시합니다. 어느 쪽에서 수정해도 같은 메뉴에 반영됩니다.</p>
                     </div>
                     <button type="button" role="switch" aria-label="직책별 메뉴 연결 사용"
                         aria-checked={menuData[selectedSite].linkedPositionMenusEnabled !== false}
@@ -297,6 +271,7 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
                         className="rounded-lg border border-blue-400 bg-blue-600 px-4 py-2 text-sm font-bold text-white">
                         {menuData[selectedSite].linkedPositionMenusEnabled !== false ? '연결 중' : '연결 안 함'}
                     </button>
+                    <LinkedPositionSettings data={menuData} siteKey={selectedSite} onUpdate={onUpdateMenuData} />
                 </div>
             )}
             {menuData[selectedSite] && (
@@ -306,15 +281,11 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
                             <FontAwesomeIcon icon={faMagnifyingGlass} className="text-blue-400" />
                             좌측 메뉴 검색
                         </div>
-                        <p id="sidebar-search-setting-description" className="mt-1 text-xs text-slate-400">
-                            {menuData[selectedSite].name} 메뉴 상단에 검색창을 표시합니다. 하위 메뉴까지 검색할 수 있으며 변경 즉시 저장됩니다.
-                        </p>
                     </div>
                     <button
                         type="button"
                         role="switch"
                         aria-label="좌측 메뉴 검색 사용"
-                        aria-describedby="sidebar-search-setting-description"
                         aria-checked={menuData[selectedSite].sidebarSearchEnabled === true}
                         onClick={() => onUpdateMenuData({
                             ...menuData,

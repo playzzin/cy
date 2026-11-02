@@ -25,7 +25,6 @@ import {
     faList,
     faGrip,
     faBroom,
-    faMinus
 } from '@fortawesome/free-solid-svg-icons';
 import { arrayMove } from '@dnd-kit/sortable';
 
@@ -39,6 +38,7 @@ import { sidebarColorSource } from '../../../utils/sidebarColors';
 import RoleManager from './components/RoleManager';
 import SiteManager from './components/SiteManager';
 import MenuManagerHeader from './components/MenuManagerHeader';
+import QuickAddDivider from './components/QuickAddDivider';
 import PositionMenuCopyModal from './components/PositionMenuCopyModal';
 import { addMenuItemsSafely } from './menuBulkApply';
 import { isDevAdminSessionEnabled } from '../../../utils/devAdminSession';
@@ -289,7 +289,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
 
     // --- State ---
     const { menuData, history, saveStatus, saveError, isReloading, updateMenuData,
-        handleUndo, handleRedo, reloadLatestMenus } = useMenuEditorPersistence();
+        handleUndo, handleRedo, reloadLatestMenus, registrationPending, registerMenus } = useMenuEditorPersistence();
     const [selectedSite, setSelectedSite] = useState<string>(initialSite);
     const [selectedSurface, setSelectedSurface] = useState<MenuSurface>('menu');
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
@@ -413,14 +413,14 @@ const AdvancedMenuManagerEditor: React.FC = () => {
     const handleBatchUpdate = (updates: Partial<MenuItem>) => {
         if (!menuData) return;
 
-        const editsColors = 'iconColor' in updates || 'activeColor' in updates || 'backgroundColor' in updates || 'selectedBackgroundColor' in updates;
+        const editsStyle = 'fontPreset' in updates || 'iconColor' in updates || 'activeColor' in updates || 'backgroundColor' in updates || 'selectedBackgroundColor' in updates;
         const updateRecursive = (nodes: (MenuItem | string)[]): (MenuItem | string)[] => {
             return nodes.map(node => {
                 if (typeof node === 'string') return node;
 
                 let newNode = { ...node };
                 if (selectedIds.includes(node.id || '') && !isLinkedMenuContainer(node.id)) {
-                    if (!(isMenuDivider(node) && editsColors)) {
+                    if (!(isMenuDivider(node) && editsStyle)) {
                         newNode = { ...newNode, ...updates };
                     }
                 }
@@ -575,7 +575,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         updateMenuData(newData);
     }, [currentMenuDuplicateCount, menuData, editingSourceSite, updateMenuData]);
 
-    const handleAddDivider = useCallback(() => {
+    const handleAddDivider = useCallback((title = '') => {
         if (!menuData?.[selectedSite] || selectedSurface !== 'menu') return;
         const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
         const items = getSurfaceItems(newData, selectedSite, 'menu');
@@ -586,6 +586,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
         while (existingIds.has(id)) id = `${baseId}-${suffix++}`;
         const displayId = editingSourceSite === selectedSite ? id : linkedMenuId(editingSourceSite, id);
         const divider = createMenuDivider(displayId);
+        if (title) divider.dividerTitle = title;
         const target = selectedIds.length === 1 ? findRef(items, selectedIds[0]) : null;
         if (target && selectedIds[0] === LINKED_POSITION_DIVIDER_ID) {
             target.list.splice(target.index, 0, divider);
@@ -863,6 +864,11 @@ const AdvancedMenuManagerEditor: React.FC = () => {
             )}
 
             {/* New Tabs Header */}
+            {registrationPending && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-800 p-4 text-sm text-slate-200">
+                <p>기존 좌측 메뉴를 등록하면 모든 직책에서 이름·경로·순서와 삭제 상태를 관리할 수 있습니다. 메뉴를 처음 수정할 때도 함께 등록됩니다.</p>
+                <button type="button" disabled={saveStatus === 'saving' || saveStatus === 'error'} onClick={registerMenus}
+                    className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white disabled:opacity-50">기본 메뉴 등록</button>
+            </div>}
             {menuData && (
                 <MenuManagerHeader
                     menuData={menuData}
@@ -926,7 +932,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                         targetMenuName={menuData[editingSourceSite]?.name || editingSourceSite}
                         isSystemPageAdded={isSystemPageAdded}
                         onAddSystemPage={handleAddSystemPage}
-                        onAddDivider={selectedSurface === 'menu' ? handleAddDivider : undefined}
+                        onAddDivider={selectedSurface === 'menu' ? () => handleAddDivider() : undefined}
                     />
 
                     {/* 2. Canvas (Center) */}
@@ -982,15 +988,7 @@ const AdvancedMenuManagerEditor: React.FC = () => {
                                     </div>
                                     {selectedSurface === 'menu' && (
                                         <>
-                                            <button
-                                                type="button"
-                                                onClick={handleAddDivider}
-                                                className="flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 transition-colors hover:border-blue-400 hover:text-white focus-visible:ring-2 focus-visible:ring-blue-400"
-                                                title={selectedIds.length === 1 ? '선택한 항목 바로 아래에 구분선 추가' : '메뉴 맨 아래에 구분선 추가'}
-                                            >
-                                                <FontAwesomeIcon icon={faMinus} />
-                                                구분선 추가
-                                            </button>
+                                            <QuickAddDivider key={`${selectedSite}/${editingSourceSite}`} onAdd={handleAddDivider} />
                                             <button
                                                 type="button"
                                                 onClick={handleRemoveDuplicateMenuLinks}

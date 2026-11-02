@@ -13,7 +13,7 @@ jest.mock('firebase/firestore', () => ({
 it('검색 사용/미사용 값을 저장 검증 과정에서 유지하고 재조회한다', async () => {
     const config: SiteDataType = {
         admin: { name: '전체', icon: 'fa-list', menu: [], sidebarSearchEnabled: true },
-        pos_leader: { name: '팀장', icon: 'fa-user', menu: [{ text: '보고', path: '/report', activeColor: '#ffaa22', backgroundColor: '#ffeecc', selectedBackgroundColor: '#113355' }], sidebarSearchEnabled: false, sidebarAccentColor: '#2288cc', sidebarBackgroundColor: '#224466', sidebarSelectedBackgroundColor: '#ffffdd' },
+        pos_leader: { name: '팀장', icon: 'fa-user', menu: [{ text: '보고', path: '/report', activeColor: '#ffaa22', backgroundColor: '#ffeecc', selectedBackgroundColor: '#113355', fontPreset: 'maru-buri' }], sidebarSearchEnabled: false, sidebarAccentColor: '#2288cc', sidebarBackgroundColor: '#224466', sidebarSelectedBackgroundColor: '#ffffdd', sidebarFontPreset: 'wanted-sans' },
         custom: { name: '기존 사이트', icon: 'fa-list', menu: [] }
     };
     (setDoc as jest.Mock).mockResolvedValue(undefined);
@@ -31,6 +31,8 @@ it('검색 사용/미사용 값을 저장 검증 과정에서 유지하고 재�
     expect(reloaded?.pos_leader.sidebarAccentColor).toBe('#2288cc');
     expect(reloaded?.pos_leader.sidebarBackgroundColor).toBe('#224466');
     expect(reloaded?.pos_leader.sidebarSelectedBackgroundColor).toBe('#ffffdd');
-    expect(reloaded?.pos_leader.menu.find(item => item.text === '보고')).toMatchObject({ activeColor: '#ffaa22', backgroundColor: '#ffeecc', selectedBackgroundColor: '#113355' });
+    expect(reloaded?.pos_leader.sidebarFontPreset).toBe('wanted-sans');
+    expect(reloaded?.pos_leader.menu.find(item => item.text === '보고')).toMatchObject({ activeColor: '#ffaa22', backgroundColor: '#ffeecc', selectedBackgroundColor: '#113355', fontPreset: 'maru-buri' });
     expect(reloaded?.custom.sidebarAccentColor).toBeUndefined();
+    expect(reloaded?.custom.sidebarFontPreset).toBeUndefined();
 });

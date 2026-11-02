@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { consolidateActivityMenus } from '../../features/activity-center/activityMenu';
 import { activitySourceForPath } from '../../features/activity-center/activitySources';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -62,6 +61,8 @@ import { getLinkedMenuRef } from '../../utils/linkedPositionMenus';
 import type { SidebarSide } from '../../utils/sidebarSide';
 import SidebarMenuBranch from './SidebarMenuBranch';
 import { sidebarRowStyle, sidebarColors, sidebarColorSource } from '../../utils/sidebarColors';
+import { useSidebarFonts } from '../../hooks/useSidebarFonts';
+import { sidebarFontFamily } from '../../constants/sidebarFonts';
 
 interface SidebarProps {
     siteData?: SiteDataType | null;
@@ -170,9 +171,11 @@ const getPermissionId = (itemText: string, itemPath?: string): string | undefine
 
 const DEFAULT_SUBMENU_ICON = 'fa-circle';
 
-const getMenuDisplayText = (text: string): string => {
+const legacyMenuText = (text: string): string => {
     return text === '일보목록v2' ? '일보목록' : text;
 };
+const storedMenuText = (text: string) => text;
+const storedPaths: Record<string, string> = {};
 
 const inferMenuIconName = (text: string, path?: string, explicitIcon?: string): string => {
     const icon = typeof explicitIcon === 'string' ? explicitIcon.trim() : '';
@@ -231,7 +234,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     handleMenuItemClick,
     handleSubMenuClick,
     handleLogoClick,
-    menuPaths,
+    menuPaths: legacyPaths,
     isSidebarCollapsed,
     isMobile,
     openMobileSidebar,
@@ -264,6 +267,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         menu: []
     };
     const colorSource = sidebarColorSource(siteData, safeCurrentSiteData);
+    const menuPaths = safeCurrentSiteData.menuRegistrationVersion ? storedPaths : legacyPaths;
+    const getMenuDisplayText = safeCurrentSiteData.menuRegistrationVersion ? storedMenuText : legacyMenuText;
 
     useEffect(() => {
         let cancelled = false;
@@ -435,14 +440,15 @@ const Sidebar: React.FC<SidebarProps> = ({
         if (getLinkedMenuRef(entry.id)?.itemId === undefined && getLinkedMenuRef(entry.id)) return { ...entry, sub: filteredSub || [] };
         if (hasOriginalChildren && !directPath) return null;
 
-        return hasPermission(entry.text, entry.roles, directPath) ? { ...entry, sub: filteredSub } : null;
+        return hasPermission(entry.text, entry.roles, directPath) ? { ...entry, sub: filteredSub ?? (entry.sub?.length === 0 ? [] : undefined) } : null;
     };
 
-    const filteredMenu = consolidateActivityMenus(safeCurrentSiteData.menu
+    const filteredMenu = safeCurrentSiteData.menu
         .map((item: MenuItem) => filterMenuEntry(item))
-        .filter((item: string | MenuItem | null): item is MenuItem => Boolean(item) && typeof item !== 'string'), menuPaths);
+        .filter((item: string | MenuItem | null): item is MenuItem => Boolean(item) && typeof item !== 'string');
 
     const finalMenu = [...filteredMenu];
+    useSidebarFonts(filteredMenu, colorSource);
 
     // State for hover menu in collapsed mode
     const [hoveredMenuItem, setHoveredMenuItem] = useState<MenuItem | null>(null);
@@ -492,8 +498,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     // Cheongyeon Style Check
     const isCheongyeon = currentSite === 'test';
     const surfaceColors = sidebarColors({}, safeCurrentSiteData);
-    const sidebarStyle = surfaceColors.background ? sidebarRowStyle(surfaceColors)
-        : isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0' } : undefined;
+    const sidebarStyle = {
+        ...(isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0' } : {}),
+        ...sidebarRowStyle(surfaceColors)
+    };
 
     const [logoType, setLogoType] = useState<'image' | 'video'>('image');
 
@@ -574,7 +582,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <ul className="menu-list" style={{ paddingBottom: '20px' }}>
                         {finalMenu.map((item: MenuItem, index: number) => {
                             if (isMenuDivider(item)) return <li key={`divider-${item.id || index}`}><MenuDivider item={item} collapsed={isSidebarCollapsed && !isMobile} /></li>;
-                            const hasSub = Boolean(item.sub?.length) || Boolean(getLinkedMenuRef(item.id) && getLinkedMenuRef(item.id)?.itemId === undefined);
+                            const hasSub = Array.isArray(item.sub) && (!item.path || item.sub.length > 0);
                             const uniqueKey = item.id || `menu-${index}`;
                             const itemId = uniqueKey;
                             const isExpanded = activeMenuItems[itemId];
@@ -624,7 +632,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         </button>
                                     ) : (
                                         <a
-                                            href={item.path || menuPaths[item.text] || '/'}
+                                            href={item.path || menuPaths[item.text] || '#'}
                                             className="menu-link sidebar-interactive-row"
                                             aria-current={isCurrent ? 'page' : undefined}
                                             aria-label={getMenuDisplayText(item.text)}
@@ -647,7 +655,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 style={{ color: isCurrent ? colors.active : colors.icon }}
                                             />
                                             <span className="menu-text">{getMenuDisplayText(item.text)}</span>
-                                            {!isSidebarCollapsed && (
+                                            {!isSidebarCollapsed && (item.path || menuPaths[item.text]) && (
                                                 <button
                                                     className="menu-open-new-btn"
                                                     onClick={(e) => {
@@ -665,7 +673,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         </a>
                                     )}
                                     {hasSub && isExpanded && (!isSidebarCollapsed || isMobile) && (
-                                        <ul className="submenu-list" style={{ maxHeight: isExpanded ? 'none' : 0 }}>
+                                        <ul className="submenu-list" style={{ maxHeight: isExpanded ? 'none' : 0, fontFamily: sidebarFontFamily(sourceSite?.sidebarFontPreset) }}>
                                             <SidebarMenuBranch items={item.sub || []} parentId={itemId}
                                                 sourceSite={sourceSite}
                                                 expanded={activeNestedMenuItems} onToggle={toggleNestedSubmenu}

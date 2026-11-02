@@ -54,7 +54,9 @@ it('선택한 메뉴 아래에 링크 없는 구분선을 추가하고 전용 �
         expect(calls[calls.length - 1][0].admin.menu[1]).toMatchObject({ text: '-', dividerStyle: 'dashed', dividerSpacing: 'relaxed' });
     });
     expect(screen.getByRole('separator', { name: '메뉴 구분선' })).toHaveStyle({ padding: '22px 12px' });
-    fireEvent.change(screen.getByRole('textbox', { name: '구분선 제목' }), { target: { value: '현장 관리' } });
+    const input = screen.getByRole('textbox', { name: '구분선 제목' });
+    fireEvent.change(input, { target: { value: '현장 관리' } });
+    fireEvent.blur(input);
     await waitFor(() => {
         const calls = (menuServiceV11.saveMenuConfig as jest.Mock).mock.calls;
         expect(calls[calls.length - 1][0].admin.menu[1]).toMatchObject({ text: '-', dividerTitle: '현장 관리' });
@@ -62,6 +64,39 @@ it('선택한 메뉴 아래에 링크 없는 구분선을 추가하고 전용 �
     expect(screen.getByRole('separator', { name: '현장 관리 구분선' })).toHaveTextContent('현장 관리');
     fireEvent.click(screen.getByRole('checkbox', { name: '구분선 표시' }));
     await waitFor(() => expect(screen.queryByRole('separator')).not.toBeInTheDocument());
+});
+
+it('제목을 한글로 입력해 Enter 한 번으로 등록하고 편집 중에는 저장하거나 포커스를 바꾸지 않는다', async () => {
+    await openEditor();
+    const quick = screen.getByRole('textbox', { name: '새 구분선 제목' });
+    fireEvent.compositionStart(quick);
+    fireEvent.change(quick, { target: { value: '현장' } });
+    fireEvent.keyDown(quick, { key: 'Enter' });
+    expect(menuServiceV11.saveMenuConfig).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(quick);
+    fireEvent.keyDown(quick, { key: 'Enter' });
+    await waitFor(() => expect(menuServiceV11.saveMenuConfig).toHaveBeenCalledTimes(1));
+    const save = menuServiceV11.saveMenuConfig as jest.Mock;
+    expect(save.mock.calls[0][0].admin.menu[2]).toMatchObject({ text: '-', dividerTitle: '현장' });
+    expect(quick).toHaveValue('');
+    const title = screen.getByRole('textbox', { name: '구분선 제목' });
+    title.focus();
+    fireEvent.compositionStart(title);
+    for (const value of ['현장 ㄱ', '현장 과', '현장 관리']) fireEvent.change(title, { target: { value } });
+    fireEvent.keyDown(title, { key: 'Enter' });
+    expect(title).toHaveFocus();
+    expect(screen.getByRole('separator', { name: '현장 관리 구분선' })).toBeInTheDocument();
+    fireEvent.compositionEnd(title);
+    expect(save).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(title, { key: 'Enter' });
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1][0].admin.menu[2].dividerTitle).toBe('현장 관리');
+    title.focus();
+    fireEvent.change(title, { target: { value: '취소할 제목' } });
+    fireEvent.keyDown(title, { key: 'Escape' });
+    fireEvent.blur(title);
+    expect(title).toHaveValue('현장 관리');
+    expect(save).toHaveBeenCalledTimes(2);
 });
 
 it('하위 메뉴 선택 시 같은 그룹에 추가하고 실행 취소로 원래 구조를 복원한다', async () => {

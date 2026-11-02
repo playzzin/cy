@@ -1,3 +1,5 @@
+import type { SidebarFontId } from '../constants/sidebarFonts';
+
 export interface MenuItem {
     text: string;
     icon?: string;
@@ -10,6 +12,7 @@ export interface MenuItem {
     activeColor?: string; // Background/Text color when active
     backgroundColor?: string; // 좌측 메뉴에서 이 행에만 적용하는 배경색
     selectedBackgroundColor?: string; // 롤오버·키보드 포커스·현재 페이지에서 공유하는 배경색
+    fontPreset?: SidebarFontId;
     hoverColor?: string; // Color for hover/active state
     hide?: boolean;
     dividerTitle?: string;
@@ -30,6 +33,9 @@ export interface SiteData {
     sidebarAccentColor?: string;
     sidebarBackgroundColor?: string;
     sidebarSelectedBackgroundColor?: string;
+    sidebarFontPreset?: SidebarFontId;
+    menuRegistrationVersion?: number;
+    linkedPositionGroups?: { sourceSite: string; text?: string }[];
     /** DEV 좌측 메뉴 아래에 직책별 원본 메뉴 연결 (기본: 켜짐) */
     linkedPositionMenusEnabled?: boolean;
     /** DEV 고유 메뉴와 연결된 직책 메뉴 사이의 구분선 설정 */

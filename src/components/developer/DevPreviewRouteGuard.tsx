@@ -10,9 +10,12 @@ export function previewMenuContainsPath(items: (MenuItem | string)[], path: stri
     return items.some(entry => {
         const item = typeof entry === 'string' ? { text: entry } : entry;
         if (item.hide) return false;
-        const link = item.path || MENU_PATHS[item.text];
+        const link = typeof entry === 'string' ? MENU_PATHS[entry] : item.path;
         if (link?.startsWith('/') && !link.startsWith('//')) {
             const url = new URL(link, 'https://preview.invalid');
+            // A migrated multi-source shortcut delegates source-specific preview access to its registered log links.
+            if (item.id === 'activity-center' && url.pathname === '/activity' && !url.search
+                && target.pathname === '/activity' && target.searchParams.has('source')) return false;
             if (url.pathname.replace(/\/$/, '') === target.pathname.replace(/\/$/, '')
                 && [...url.searchParams.entries()].filter(([key]) => key !== 'newTab').every(([key, value]) => target.searchParams.get(key) === value)) return true;
         }

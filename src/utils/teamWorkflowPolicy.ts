@@ -1,5 +1,6 @@
 import { MENU_PATHS } from '../constants/menuPaths';
 import type { MenuItem } from '../types/menu';
+import { teamAccountApprovalEnabled } from './teamAccountApprovalFeature';
 const key = (value: unknown) => String(value ?? '').toLowerCase().replace(/[\s_-]/g, '');
 export const isTeamLeaderRole = (value: unknown) => ['팀장', 'teamlead', 'teamleader'].includes(key(value));
 const officeRoles = new Set(['admin', 'administrator', 'superadmin', 'owner', 'developer', 'dev', 'systemadmin', '관리자', '사장', '실장', '개발자', 'office', 'officestaff', '사무실직원', '사무직원', '사무', 'manager', 'manager1', 'manager2', 'manager3', 'sitemanager', '현장관리자', '현장소장', '매니저', '메니저', 'payrollmanager', 'finance', 'accounting', '회계', '재무', '경리']);
@@ -28,9 +29,9 @@ export const hideTeamWorkflowLink = (item: { text?: string; path?: string }) => 
 export function filterTeamWorkflowMenu(items: (MenuItem | string)[]): MenuItem[] {
     return items.flatMap(value => {
         const item = typeof value === 'string' ? { text: value } : value;
-        if (hideTeamWorkflowLink(item)) return [];
+        if (hideTeamWorkflowLink(item) || (item.path?.split(/[?#]/)[0] === '/manpower/team-account-approvals' && !teamAccountApprovalEnabled())) return [];
         const sub = item.sub ? filterTeamWorkflowMenu(item.sub) : undefined;
-        if (sub && !sub.length && !item.path) return [];
+        if (item.sub?.length && sub && !sub.length && !item.path) return [];
         return [{ ...item, ...(sub ? { sub } : {}) }];
     });
 }

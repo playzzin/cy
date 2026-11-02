@@ -32,3 +32,20 @@ test('소속 변경 시 열린 자식 화면을 재생성하고 사무실은 입
     render(<MemoryRouter initialEntries={['/reports/daily?tab=input']}><TeamWorkflowGate profile={{ ...profile, accountType: 'office' }}><p>사무실 일보 입력</p></TeamWorkflowGate></MemoryRouter>);
     await screen.findByText('사무실 일보 입력');
 });
+
+test('메뉴 저장 알림은 입력 포커스를 유지하고 담당 직책의 접근 역할이 바뀔 때만 화면을 교체한다', async () => {
+    render(<MemoryRouter><TeamWorkflowGate profile={{ ...profile, position: 'pos_custom', linkedWorkerIds: [] }}>
+        <input aria-label="구분선 제목" />
+    </TeamWorkflowGate></MemoryRouter>);
+    const snapshot = (positions: unknown[], title = '') => act(() => mockListeners.get('settings/menus_v12')!({
+        data: () => ({ admin: { positionConfig: positions, menu: [{ text: '-', dividerTitle: title }] } })
+    }));
+    snapshot([{ id: 'custom', name: '팀장', color: 'blue' }]);
+    const input = await screen.findByRole('textbox');
+    input.focus();
+    snapshot([{ id: 'other', name: '사무실' }, { color: 'green', name: '팀장', id: 'custom' }], '현장');
+    expect(screen.getByRole('textbox')).toBe(input);
+    expect(input).toHaveFocus();
+    snapshot([{ id: 'custom', name: '사무실' }]);
+    expect(screen.getByRole('textbox')).not.toBe(input);
+});

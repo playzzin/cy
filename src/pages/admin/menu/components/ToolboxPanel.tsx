@@ -233,7 +233,6 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({
                                     <span className="flex-1 border-t border-slate-500/60" /><FontAwesomeIcon icon={faMinus} /><span className="flex-1 border-t border-slate-500/60" />
                                 </div>
                                 <DraggableItem id="new-divider" label="구분선" icon={faMinus} color="bg-slate-700" payload={{ template: 'divider' }} />
-                                <p className="my-2 text-[11px] leading-relaxed text-slate-400">메뉴 사이에 드래그해 구역을 나눕니다.</p>
                                 <button type="button" onClick={onAddDivider} className="w-full rounded-md border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-blue-400 hover:bg-blue-500/10 focus-visible:ring-2 focus-visible:ring-blue-400">구분선 바로 추가</button>
                             </div>
                         )}

@@ -15,12 +15,15 @@ import {
 } from '../utils/devAdminFixtures';
 import { isOperationManagementMenuPath, isOperationManagementMenuText } from '../utils/operationMenuAccess';
 import { permissionAuditService } from './permissionAuditService';
-import { mergeMenuConfigChanges } from '../utils/menuConfigChanges';
+import { menuConfigsEqual, mergeMenuConfigChanges } from '../utils/menuConfigChanges';
 import { ensureDelegatedReceiptsMenu } from '../utils/delegatedReceiptsMenu';
 import { ensureTeamPersonnelMenu } from '../utils/teamPersonnelMenu';
 import { ensureBankTransferMenu } from '../utils/bankTransferMenu';
 import { ensureCorporateTaxMenu } from '../utils/corporateTaxMenu';
 import { ensureAdvanceSummaryMenu } from '../utils/advanceSummaryMenu';
+import { hasRegisteredMenus, legacyDeletedMenuFilter, MENU_REGISTRATION_VERSION } from '../utils/menuRegistration';
+import { getRegisteredPositionGroups, isDevPositionSite } from '../utils/linkedPositionMenus';
+import { registerActivityMenu } from '../features/activity-center/activityMenu';
 
 export type { MenuItem, SiteDataType };
 
@@ -412,16 +415,6 @@ const OFFICE_MENU_ITEMS: MenuItem[] = [
     }
 ];
 
-const OFFICE_MENU_PATHS = new Set(OFFICE_MENU_ITEMS.map((item) => item.path).filter(Boolean) as string[]);
-const LEGACY_OFFICE_MENU_TEXTS = new Set([
-    '\uc77c\uc815 / \ubc30\uc815 \uad00\ub9ac',
-    '\ucd9c\uc5ed / \uc77c\ubcf4 \uac80\uc218',
-    '\uc791\uc5c5\uc790 / \uc11c\ub958 \uad00\ub9ac',
-    '\uae09\uc5ec / \uac00\ubd88 \ucc98\ub9ac',
-    '\uacbd\ube44 / \ubb3c\ud488 \uc694\uccad \uad00\ub9ac',
-    '\uacf5\uc9c0 / \uba54\uc2dc\uc9c0',
-    '\uc18c\uac1c\uc18c'
-]);
 
 const RECRUITING_MENU_PATH_PREFIX = '/recruiting';
 const RECRUITING_FOLDER_TEXTS = new Set(['\uc18c\uac1c\uc18c', '\uc18c\uac1c\uc18c \uba54\ub274']);
@@ -440,35 +433,6 @@ const RECRUITING_MENU_TEXTS = new Set([
     '\uc18c\uac1c\uc18c \uc815\uc0b0 \ub85c\uadf8'
 ]);
 
-const officeMenuContainsLegacyArtifacts = (items: (MenuItem | string)[] = []): boolean =>
-    items.some((item) => {
-        if (typeof item === 'string') {
-            return LEGACY_OFFICE_MENU_TEXTS.has(item);
-        }
-
-        if (LEGACY_OFFICE_MENU_TEXTS.has(item.text)) {
-            return true;
-        }
-
-        return Array.isArray(item.sub) ? officeMenuContainsLegacyArtifacts(item.sub) : false;
-    });
-
-const officeMenuHasDuplicateSeedRoutes = (items: (MenuItem | string)[] = [], seen = new Set<string>()): boolean => {
-    for (const item of items) {
-        if (typeof item === 'string') continue;
-
-        if (item.path && OFFICE_MENU_PATHS.has(item.path)) {
-            if (seen.has(item.path)) return true;
-            seen.add(item.path);
-        }
-
-        if (Array.isArray(item.sub) && officeMenuHasDuplicateSeedRoutes(item.sub, seen)) {
-            return true;
-        }
-    }
-
-    return false;
-};
 
 const removeDuplicatePositionMenuArtifacts = (config: SiteDataType): boolean => {
     let changed = false;
@@ -569,11 +533,7 @@ const ensureOfficeMenuPages = (config: SiteDataType): boolean => {
 
     const existingOfficeSite = config.pos_office;
     const existingOfficeMenu = Array.isArray(existingOfficeSite?.menu) ? existingOfficeSite.menu : [];
-    const shouldSeedOfficeMenu =
-        !existingOfficeSite ||
-        existingOfficeMenu.length === 0 ||
-        officeMenuContainsLegacyArtifacts(existingOfficeMenu) ||
-        officeMenuHasDuplicateSeedRoutes(existingOfficeMenu);
+    const shouldSeedOfficeMenu = existingOfficeMenu.length === 0;
 
     const nextOfficeSite = {
         ...(existingOfficeSite || {}),
@@ -592,7 +552,7 @@ const ensureOfficeMenuPages = (config: SiteDataType): boolean => {
     return changed;
 };
 
-const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): MenuItem => {
+const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0, registered = false): MenuItem => {
     const base: MenuItem =
         typeof item === 'string'
             ? { text: item }
@@ -605,7 +565,8 @@ const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): M
     const rawId = typeof base.id === 'string' ? base.id.trim() : '';
     const fromPath = rawPath ? (PATH_TO_MENU_TEXT[rawPath] || '') : '';
     const inferredText = rawText || fromPath || rawId;
-    const normalizedText = inferredText ? (MENU_TEXT_ALIASES[inferredText] ?? inferredText) : '';
+    const useLegacyMapping = !registered || typeof item === 'string';
+    const normalizedText = useLegacyMapping ? (MENU_TEXT_ALIASES[inferredText] ?? inferredText) : inferredText;
 
     const idSeed = `${parentIdPath}/${normalizedText || rawId || 'unknown'}${normalizedText === '-' ? `/${siblingIndex}` : ''}`;
     const normalizedId = rawId.length > 0 ? rawId : createDeterministicId([idSeed]);
@@ -614,11 +575,12 @@ const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): M
         ? base.sub.filter((c: any) => typeof c === 'string' || (c && typeof c === 'object'))
         : [];
     const normalizedSub = rawSub
-        .map((child: any, index: number) => normalizeMenuItem(child, idSeed, index))
+        .map((child: any, index: number) => normalizeMenuItem(child, idSeed, index, registered))
         .filter((child: MenuItem) => typeof child.text === 'string' && child.text.trim().length > 0);
 
     const inferredPath = normalizedText ? (MENU_PATHS[normalizedText] || undefined) : undefined;
     const normalizedPath =
+        !useLegacyMapping ? rawPath || undefined :
         normalizedText && FORCE_MENU_PATH_TEXTS.has(normalizedText)
             ? inferredPath
             : rawPath.length > 0
@@ -627,7 +589,7 @@ const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): M
 
     const next: MenuItem = {
         ...base,
-        text: normalizedText === '위임금 입금 확인' ? '노무 입금 확인' : normalizedText,
+        text: useLegacyMapping && normalizedText === '위임금 입금 확인' ? '노무 입금 확인' : normalizedText,
         id: normalizedId,
         path: normalizedPath,
         sub: normalizedSub
@@ -641,7 +603,7 @@ const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): M
         return next;
     }
 
-    if (!next.sub || next.sub.length === 0) {
+    if (!normalizedSub.length && !Array.isArray(base.sub)) {
         delete (next as any).sub;
     }
 
@@ -655,6 +617,7 @@ const normalizeMenuItem = (item: any, parentIdPath: string, siblingIndex = 0): M
 const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
     const normalized: SiteDataType = {};
     const safeConfig: any = config && typeof config === 'object' ? config : {};
+    const registered = hasRegisteredMenus(safeConfig);
     Object.keys(safeConfig).forEach((siteKey) => {
         const siteAny: any = safeConfig[siteKey];
         const site: any = siteAny && typeof siteAny === 'object' ? siteAny : {};
@@ -672,15 +635,15 @@ const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
             order: typeof site.order === 'number' ? site.order : undefined, // Ensure order is preserved
             headerActions: normalizeHeaderActions(site.headerActions, siteKey),
             menu: rawMenu
-                .map((item: any, index: number) => normalizeMenuItem(item, siteKey, index))
+                .map((item: any, index: number) => normalizeMenuItem(item, siteKey, index, registered))
                 .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0),
             trash: rawTrash
                 ? rawTrash
-                    .map((item: any, index: number) => normalizeMenuItem(item, `${siteKey}/trash`, index))
+                    .map((item: any, index: number) => normalizeMenuItem(item, `${siteKey}/trash`, index, registered))
                     .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0)
                 : undefined,
             deletedItems: Array.isArray(site.deletedItems) ? site.deletedItems.filter((v: any) => typeof v === 'string') : [],
-            positionConfig: sanitizePositionConfig(site.positionConfig)
+            positionConfig: sanitizePositionConfig(site.positionConfig) ?? (registered && Array.isArray(site.positionConfig) ? [] : undefined)
         };
     });
     return normalized;
@@ -1143,7 +1106,7 @@ const RETIRED_WORKBOOK_LEDGER_MENU_TEXTS = new Set([
 
 // Saved menu configurations may still contain the removed page, including
 // renamed links and legacy text-only entries. Do not write on read.
-const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType): void => {
+const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType, legacy: boolean): void => {
     const filterItems = (items: (MenuItem | string)[]): (MenuItem | string)[] =>
         items.flatMap((item): (MenuItem | string)[] => {
             const text = (typeof item === 'string' ? item : item.text).trim();
@@ -1153,7 +1116,7 @@ const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType): void => {
                 ? filterItems(item.sub)
                 : undefined;
             if (pathname === '/payroll/workbook-ledger-upgrade'
-                || (!path && RETIRED_WORKBOOK_LEDGER_MENU_TEXTS.has(text))) {
+                || (legacy && !path && RETIRED_WORKBOOK_LEDGER_MENU_TEXTS.has(text))) {
                 return children || [];
             }
             return [typeof item !== 'string' && children ? { ...item, sub: children } : item];
@@ -1167,31 +1130,27 @@ const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType): void => {
     });
 };
 
-const ensureGeneratedMenuIds = (items: (MenuItem | string)[], parentId: string): void => {
+const ensureUniqueMenuIds = (items: (MenuItem | string)[], parentId: string, seen = new Set<string>()): void => {
     items.forEach((item, index) => {
         if (typeof item === 'string') return;
         item.id ||= createDeterministicId([parentId, item.text, String(index)]);
-        if (item.sub) ensureGeneratedMenuIds(item.sub, item.id);
+        if (seen.has(item.id)) {
+            const seed = [parentId, item.id, String(index)];
+            let suffix = 0;
+            do { item.id = createDeterministicId([...seed, String(suffix++)]); } while (seen.has(item.id));
+        }
+        seen.add(item.id);
+        if (item.sub) ensureUniqueMenuIds(item.sub, item.id, seen);
     });
 };
 
-// This is the new "Init" logic: normalize inputs, prune illegal items, fix structure.
-// But it DOES NOT merge with defaults.
-const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
-    // 1. Normalize IDs and structure
-    const normalized = normalizeSiteDataType(incomingConfig);
-
-    // Removed normalizePayrollStructure to allow dynamic configuration
-    const final = normalized;
-
+const registerLegacyMenus = (final: SiteDataType) => {
+    const keepBySite = new Map(Object.entries(final).map(([key, site]) => [key, legacyDeletedMenuFilter(site)]));
     ensureCanonicalNationSiteConfig(final);
 
     // 3. Ensure Position Config exists (Migration)
     if (final['admin'] && !final['admin'].positionConfig) {
         console.log('[MenuService] Auto-injecting default position config');
-        // Use a safe fallback or import from DEFAULT_MENU_CONFIG
-        // Since we are inside the module, we can use the imported constant if we avoid circular issues or just hardcode/copy.
-        // Copying from DEFAULT_MENU_CONFIG if available, or using hardcoded fallback for safety.
         if (DEFAULT_MENU_CONFIG.admin?.positionConfig) {
             final['admin'].positionConfig = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG.admin.positionConfig));
         }
@@ -1203,16 +1162,32 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     ensureOfficeMenuPages(final);
     removeRetiredHardcodedMenuSeeds(final);
     ensureRequiredLogManagementItems(final);
-    removeWorkbookLedgerUpgradeMenus(final);
     ensureDelegatedReceiptsMenu(final);
     ensureTeamPersonnelMenu(final);
     ensureBankTransferMenu(final);
     ensureCorporateTaxMenu(final);
     ensureAdvanceSummaryMenu(final);
 
-    // Migrations can insert items without IDs. Assign only missing IDs before
-    // projection; re-normalizing here would also rewrite their intentional labels.
-    Object.entries(final).forEach(([siteKey, site]) => ensureGeneratedMenuIds(site.menu, siteKey));
+    Object.entries(final).forEach(([key, site]) => {
+        // Older seeds also contain string children. Materialize their routes and IDs before the editor sees them.
+        site.menu = site.menu.map((item, index) => normalizeMenuItem(item, key, index, true));
+        const keep = keepBySite.get(key);
+        if (keep) site.menu = site.menu.filter(keep);
+        if (isDevPositionSite(final, key)) site.linkedPositionGroups = getRegisteredPositionGroups(final, key);
+        registerActivityMenu(site);
+    });
+};
+
+const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
+    const final = normalizeSiteDataType(incomingConfig);
+    const legacy = !hasRegisteredMenus(final);
+    if (legacy) registerLegacyMenus(final);
+    removeWorkbookLedgerUpgradeMenus(final, legacy);
+    Object.entries(final).forEach(([key, site]) => {
+        site.menuRegistrationVersion = Math.max(site.menuRegistrationVersion || 0, MENU_REGISTRATION_VERSION);
+        if (site.linkedPositionGroups) site.linkedPositionGroups = site.linkedPositionGroups.filter(group => final[group.sourceSite]);
+        ensureUniqueMenuIds(site.menu, key);
+    });
     return final;
 };
 
@@ -1236,16 +1211,8 @@ const setupSnapshotListener = () => {
             getMenuDocRef(),
             (snapshot) => {
                 if (!snapshot.exists()) {
-                    console.warn('[MenuService] Configuration missing. Initializing with defaults...');
-                    const processedInitial = processIncomingConfig(deepClone(DEFAULT_MENU_CONFIG));
-
-                    currentRawConfig = processedInitial;
-                    currentConfig = processedInitial;
-
-                    menuServiceV11.saveMenuConfig(processedInitial).catch(err => {
-                        console.error('[MenuService] Failed to auto-initialize menu config:', err);
-                    });
-
+                    currentRawConfig = deepClone(DEFAULT_MENU_CONFIG);
+                    currentConfig = processIncomingConfig(currentRawConfig);
                     notifyListeners();
                     return;
                 }
@@ -1272,21 +1239,22 @@ const setupSnapshotListener = () => {
 };
 
 export const menuServiceV11 = {
+    isMenuRegistrationPending: (): boolean => Boolean(currentRawConfig && !hasRegisteredMenus(currentRawConfig)),
     subscribe: (callback: (data: SiteDataType) => void, options: MenuSubscribeOptions = {}) => {
         const listener: MenuListener = { callback, onError: options.onError };
         listeners.add(listener);
 
         if (isDevAdminSessionEnabled()) {
-            currentConfig = processIncomingConfig(getDevMenuConfig());
-            currentRawConfig = deepClone(currentConfig);
+            currentRawConfig = getDevMenuConfig();
+            currentConfig = processIncomingConfig(currentRawConfig);
             callback(deepClone(currentConfig));
 
             const handleDevMenuStorageChange = (event: StorageEvent) => {
                 if (event.key !== DEV_MENU_STORAGE_KEY) return;
 
-                const refreshedConfig = processIncomingConfig(reloadDevMenuConfigFromStorage());
+                currentRawConfig = reloadDevMenuConfigFromStorage();
+                const refreshedConfig = processIncomingConfig(currentRawConfig);
                 currentConfig = refreshedConfig;
-                currentRawConfig = deepClone(refreshedConfig);
                 callback(deepClone(refreshedConfig));
             };
 
@@ -1315,7 +1283,8 @@ export const menuServiceV11 = {
 
     getMenuConfig: async (options: MenuFetchOptions = {}): Promise<SiteDataType | null> => {
         if (isDevAdminSessionEnabled()) {
-            return processIncomingConfig(getDevMenuConfig());
+            currentRawConfig = getDevMenuConfig();
+            return processIncomingConfig(currentRawConfig);
         }
 
         try {
@@ -1329,9 +1298,9 @@ export const menuServiceV11 = {
             }
 
             console.warn('[MenuService] Config missing on fetch. Returning defaults.');
-            const initial = processIncomingConfig(deepClone(DEFAULT_MENU_CONFIG));
-            await menuServiceV11.saveMenuConfig(initial);
-            return initial;
+            currentRawConfig = deepClone(DEFAULT_MENU_CONFIG);
+            currentConfig = processIncomingConfig(currentRawConfig);
+            return deepClone(currentConfig);
 
         } catch (error) {
             console.error('Failed to fetch menu configuration:', error);
@@ -1383,8 +1352,9 @@ export const menuServiceV11 = {
                     if (normalizedBase) {
                         savedData = await runTransaction(db, async transaction => {
                             const snapshot = await transaction.get(getMenuDocRef());
-                            if (!snapshot.exists()) throw new Error('메뉴 설정을 찾을 수 없습니다. 최신 메뉴를 불러와주세요.');
-                            const latest = SiteDataTypeSchema.parse(pruneLargeConfig(processIncomingConfig(normalizeSiteDataType(snapshot.data() as SiteDataType)))) as SiteDataType;
+                            const raw = snapshot.exists() ? snapshot.data() as SiteDataType : DEFAULT_MENU_CONFIG;
+                            const latest = SiteDataTypeSchema.parse(pruneLargeConfig(processIncomingConfig(raw))) as SiteDataType;
+                            if (!snapshot.exists() && !menuConfigsEqual(latest, normalizedBase)) throw new Error('메뉴 설정을 찾을 수 없습니다. 최신 메뉴를 불러와주세요.');
                             previousConfig = latest;
                             const merged = mergeMenuConfigChanges(latest, normalizedBase, sanitizedData);
                             const validated = JSON.parse(JSON.stringify(SiteDataTypeSchema.parse(merged))) as SiteDataType;
@@ -1719,7 +1689,8 @@ export const menuServiceV11 = {
     runOneTimeMigrations: async (): Promise<void> => {
         try {
             const config = await menuServiceV11.getMenuConfig();
-            if (!config) return;
+            if (!config || !menuServiceV11.isMenuRegistrationPending()) return;
+            const base = deepClone(config);
 
             const addedNationwidePage = ensureMenuChild(config, '현황관리', '전국페이지');
             const addedNoticeBoard = ensureNoticeBoardMenu(config);
@@ -1728,7 +1699,7 @@ export const menuServiceV11 = {
             const normalizedSupportAssetMenu = normalizeSupportAssetMenu(config);
             const changed = addedNationwidePage || addedNoticeBoard || removedRecruitingMenus || ensuredNationSite || normalizedSupportAssetMenu;
             if (changed) {
-                await menuServiceV11.saveMenuConfig(config);
+                await menuServiceV11.saveMenuConfig(config, base);
             }
         } catch (error: any) {
             console.error('[MenuService] runOneTimeMigrations failed:', error);

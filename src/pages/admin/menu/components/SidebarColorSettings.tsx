@@ -5,6 +5,8 @@ import { resolveIcon } from '../../../../constants/iconMap';
 import type { MenuItem } from '../../../../types/menu';
 import { isMenuDivider } from '../../../../utils/menuDivider';
 import { DEFAULT_SIDEBAR_ACCENT, DEFAULT_SIDEBAR_BACKGROUND, sidebarColors, sidebarRowStyle, SidebarColorSource } from '../../../../utils/sidebarColors';
+import { SIDEBAR_FONTS } from '../../../../constants/sidebarFonts';
+import SidebarFontSelect from './SidebarFontSelect';
 
 interface Props {
     items: MenuItem[];
@@ -50,11 +52,15 @@ export default function SidebarColorSettings({ items, source, onChange }: Props)
     const site = source(item.id);
     const colors = sidebarColors(item, site);
     const sources = new Set(menus.map(entry => source(entry.id)?.name));
-    const scope = sources.size > 1 ? '각 원본 직책' : site?.name || '시스템';
+    const inheritedFont = sidebarColors({}, site).fontPreset;
+    const fontValues = new Set(menus.map(entry => entry.fontPreset || ''));
 
-    return <section className="space-y-3" aria-label="좌측 메뉴 색상 설정">
-        <h3 className="text-sm font-bold text-slate-200">좌측 메뉴 색상</h3>
-        <p className="text-xs text-slate-400">{scope} 기본색을 따르거나 색상을 직접 지정할 수 있습니다. 마우스를 올리거나 키보드로 초점을 옮기면 선택 배경색이 보이고, 현재 페이지는 그 색을 유지합니다.</p>
+    return <section className="space-y-3" aria-label="좌측 메뉴 스타일 설정">
+        <h3 className="text-sm font-bold text-slate-200">좌측 메뉴 글꼴과 색상</h3>
+        <SidebarFontSelect label="메뉴 글꼴" value={fontValues.size > 1 ? 'mixed' : item.fontPreset || ''}
+            inherited={sources.size === 1 ? inheritedFont : undefined}
+            defaultLabel={sources.size === 1 && inheritedFont ? `직책 글꼴 사용 · ${SIDEBAR_FONTS[inheritedFont].label}` : '직책 글꼴 사용'}
+            onChange={font => onChange({ fontPreset: font })} />
         {fields.map(({ key, tone, label, inherit }) => {
             const values = new Set(menus.map(entry => entry[key] || ''));
             const mode = values.size > 1 ? 'mixed' : item[key] ? 'custom' : 'inherit';

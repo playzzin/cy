@@ -1,0 +1,113 @@
+/* A distinct face name keeps the CDN font scoped to menus that opt in. */
+@font-face {
+    font-family: 'CY Sidebar Pretendard';
+    src: url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/packages/pretendard/dist/web/variable/woff2/PretendardVariable.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 45 920;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar SUIT';
+    src: url('https://cdn.jsdelivr.net/gh/sunn-us/SUIT@v2.0.2/fonts/variable/woff2/SUIT-Variable.woff2') format('woff2');
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar Spoqa Han Sans Neo';
+    src: url('https://cdn.jsdelivr.net/gh/spoqa/spoqa-han-sans@v3.3.0/Subset/SpoqaHanSansNeo/SpoqaHanSansNeo-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar Spoqa Han Sans Neo';
+    src: url('https://cdn.jsdelivr.net/gh/spoqa/spoqa-han-sans@v3.3.0/Subset/SpoqaHanSansNeo/SpoqaHanSansNeo-Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumSquare Neo';
+    src: url('https://cdn.jsdelivr.net/gh/moonspam/NanumSquareNeo@1.0/NanumSquareNeoTTF-bRg.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumSquare Neo';
+    src: url('https://cdn.jsdelivr.net/gh/moonspam/NanumSquareNeo@1.0/NanumSquareNeoTTF-cBd.woff2') format('woff2');
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumSquare';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquare/NanumSquareR.woff') format('woff');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumSquare';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquare/NanumSquareB.woff') format('woff');
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumBarunGothic';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/NanumBarunGothic/NanumBarunGothicWeb.woff') format('woff');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumBarunGothic';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/NanumBarunGothic/NanumBarunGothicWebBold.woff') format('woff');
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar MaruBuri';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/MaruBuri/MaruBuri-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar MaruBuri';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/MaruBuri/MaruBuri-Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumSquareRound';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareRound/NanumSquareRoundR.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumSquareRound';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/NanumSquareRound/NanumSquareRoundB.woff2') format('woff2');
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumBarunpen';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/NanumBarunpen/NanumBarunpenR.woff') format('woff');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'CY Sidebar NanumBarunpen';
+    src: url('https://hangeul.pstatic.net/hangeul_static/webfont/NanumBarunpen/NanumBarunpenB.woff') format('woff');
+    font-weight: 700;
+    font-display: swap;
+}

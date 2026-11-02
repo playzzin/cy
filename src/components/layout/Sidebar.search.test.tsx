@@ -48,6 +48,31 @@ const app = (props: Partial<React.ComponentProps<typeof Sidebar>> = {}) => (
 );
 const searchFor = (value: string) => fireEvent.change(screen.getByRole('searchbox', { name: '메뉴 검색' }), { target: { value } });
 
+it('직책 및 연결 원본 글꼴을 상속하고 메뉴 글꼴 예외를 검색과 접힌 패널에서도 표시한다', async () => {
+    const group = linkedMenuId('pos_leader');
+    const currentSiteData: SiteData = { ...site, sidebarFontPreset: 'pretendard', menu: [
+        { id: 'home', text: '홈', path: '/' },
+        { id: group, text: '팀장', sub: [
+            { id: linkedMenuId('pos_leader', 'daily'), text: '일보', path: '/daily', fontPreset: 'nanum-myeongjo' },
+            { id: linkedMenuId('pos_leader', 'list'), text: '작업목록', path: '/jobs' }
+        ] }
+    ] };
+    const props = { currentSiteData, siteData: { pos_leader: { ...site, sidebarFontPreset: 'noto-sans-kr' } } as Record<string, SiteData>, activeMenuItems: { [group]: true } };
+    const view = render(app(props));
+    expect(screen.getByRole('navigation').style.fontFamily).toContain('CY Sidebar Pretendard');
+    expect(screen.getByRole('link', { name: '홈' }).style.fontFamily).toContain('CY Sidebar Pretendard');
+    expect(screen.getByRole('button', { name: '팀장' }).style.fontFamily).toContain('Noto Sans KR Variable');
+    expect(screen.getByRole('link', { name: '작업목록' }).style.fontFamily).toContain('Noto Sans KR Variable');
+    expect(screen.getByRole('link', { name: '일보' }).style.fontFamily).toContain('Nanum Myeongjo');
+    view.rerender(app({ ...props, isSidebarCollapsed: true }));
+    fireEvent.click(screen.getByRole('button', { name: '팀장' }));
+    expect(screen.getByRole('link', { name: '일보' }).style.fontFamily).toContain('Nanum Myeongjo');
+    view.rerender(app(props));
+    searchFor('일보');
+    expect(screen.getByRole('link', { name: /일보/ }).style.fontFamily).toContain('Nanum Myeongjo');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('검색 결과 1개'));
+});
+
 it('경로가 바뀌면 이전 메뉴의 일반 배경을 복원하고 현재 페이지만 메뉴·직책 선택 배경으로 표시한다', async () => {
     const group = linkedMenuId('pos_leader');
     const currentSiteData: SiteData = { ...site, sidebarBackgroundColor: '#183355', sidebarSelectedBackgroundColor: '#ffeeaa', menu: [

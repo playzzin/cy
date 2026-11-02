@@ -1,4 +1,4 @@
-import { getDoc, onSnapshot, runTransaction } from 'firebase/firestore';
+import { getDoc, onSnapshot, runTransaction, setDoc } from 'firebase/firestore';
 import { menuServiceV11 } from './menuServiceV11';
 import { permissionAuditService } from './permissionAuditService';
 import type { SiteDataType } from '../types/menu';
@@ -10,6 +10,80 @@ jest.mock('./permissionAuditService', () => ({ permissionAuditService: { logMenu
 jest.mock('firebase/firestore', () => ({ doc: jest.fn(), getDoc: jest.fn(), setDoc: jest.fn(), updateDoc: jest.fn(), onSnapshot: jest.fn(), runTransaction: jest.fn() }));
 
 beforeEach(() => { jest.clearAllMocks(); menuServiceV11.clearCache(); });
+
+it('기본 메뉴를 한 번만 등록하고 이름·경로·빈 폴더·직책 삭제를 다음 조회에도 유지한다', async () => {
+    let remote: SiteDataType = {
+        pos_ceo: { name: 'CEO', icon: 'fa-list', menu: [] },
+        pos_leader: { name: '팀장', icon: 'fa-list', menu: [],
+            trash: [{ text: '스마트 메모', path: '/memos' }], deletedItems: ['엔진오일 주기'] },
+        pos_office: { name: '사무실', icon: 'fa-list', menu: [
+            { id: 'custom', text: '일정 / 배정 관리', path: '/custom', roles: ['사무'], fontPreset: 'suit' }
+        ] }
+    };
+    const snapshot = () => ({ exists: () => true, data: () => remote });
+    (getDoc as jest.Mock).mockImplementation(async () => snapshot());
+    const write = jest.fn((_ref, data) => { remote = data; });
+    (runTransaction as jest.Mock).mockImplementation(async (_db, work) => work({ get: snapshot, set: write }));
+    const initial = (await menuServiceV11.getMenuConfig())!;
+    expect(menuServiceV11.isMenuRegistrationPending()).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+    expect(initial.pos_ceo.menu.map(item => item.text)).toEqual(expect.arrayContaining(['로그관리', '활동 내역']));
+    expect(initial.pos_leader.menu.map(item => item.text)).toContain('인원관리');
+    expect(initial.pos_leader.menu.map(item => item.text)).not.toContain('스마트 메모');
+    expect(initial.pos_leader.menu.map(item => item.text)).not.toContain('엔진오일 주기');
+    expect(initial.pos_office.menu[0]).toMatchObject({ id: 'custom', path: '/custom', fontPreset: 'suit' });
+    const edited = JSON.parse(JSON.stringify(initial)) as SiteDataType;
+    edited.pos_ceo.menu = [];
+    edited.pos_leader.menu = [
+        { ...initial.pos_leader.menu.find(item => item.text === '인원관리')!, text: '현장관리', sub: [] },
+        { id: 'new', text: '바이백', path: '/custom-route' },
+        { id: 'clear', text: '매입매출 관리' },
+    ];
+    delete edited.pos_rental;
+    remote.pos_office.sidebarAccentColor = '#abcdef';
+    const saved = await menuServiceV11.saveMenuConfig(edited, initial);
+    expect(menuServiceV11.isMenuRegistrationPending()).toBe(false);
+    expect(remote.pos_office.sidebarAccentColor).toBe('#abcdef');
+    expect(saved.pos_leader.menu).toEqual(edited.pos_leader.menu);
+    expect(remote.pos_ceo.menu).toEqual([]);
+    expect(remote.pos_rental).toBeUndefined();
+    menuServiceV11.clearCache();
+    const reloaded = (await menuServiceV11.getMenuConfig())!;
+    expect(reloaded).toEqual(saved);
+    await menuServiceV11.runOneTimeMigrations();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(setDoc).not.toHaveBeenCalled();
+    const empty = { ...reloaded, pos_leader: { ...reloaded.pos_leader, menu: [] } };
+    await menuServiceV11.saveMenuConfig(empty, reloaded);
+    expect((await menuServiceV11.getMenuConfig())!.pos_leader.menu).toEqual([]);
+});
+
+it('이름이 같은 이전 메뉴를 각각 편집할 수 있도록 서로 다른 고정 ID를 등록한다', async () => {
+    const legacy = { storefront: { name: '현장', icon: 'fa-list', menu: [
+        { text: '현황', path: '/a' }, { text: '현황', path: '/b' }
+    ] } };
+    (getDoc as jest.Mock).mockResolvedValue({ exists: () => true, data: () => legacy });
+    const first = (await menuServiceV11.getMenuConfig())!;
+    const ids = first.storefront.menu.map(item => item.id);
+    expect(new Set(ids).size).toBe(2);
+    (getDoc as jest.Mock).mockResolvedValue({ exists: () => true, data: () => first });
+    expect((await menuServiceV11.getMenuConfig())!.storefront.menu.map(item => item.id)).toEqual(ids);
+});
+
+it('설정 문서가 없어도 조회는 쓰지 않으며 최초 등록 버튼의 트랜잭션으로만 생성한다', async () => {
+    let remote: SiteDataType | null = null;
+    const snapshot = () => ({ exists: () => remote !== null, data: () => remote });
+    (getDoc as jest.Mock).mockImplementation(async () => snapshot());
+    const write = jest.fn((_ref, data) => { remote = data; });
+    (runTransaction as jest.Mock).mockImplementation(async (_db, work) => work({ get: snapshot, set: write }));
+    const base = (await menuServiceV11.getMenuConfig())!;
+    expect(setDoc).not.toHaveBeenCalled();
+    expect(menuServiceV11.isMenuRegistrationPending()).toBe(true);
+    const registered = await menuServiceV11.saveMenuConfig(base, base);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(menuServiceV11.isMenuRegistrationPending()).toBe(false);
+    expect(await menuServiceV11.getMenuConfig()).toEqual(registered);
+});
 
 it('자동 추가된 급여 메뉴의 ID를 유지하며 통합 구분선 제목을 저장하고 다시 불러온다', async () => {
     let remote: SiteDataType = {

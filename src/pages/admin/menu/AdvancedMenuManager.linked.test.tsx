@@ -9,7 +9,7 @@ import type { SiteDataType } from '../../../types/menu';
 jest.mock('../../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: null }) }));
 jest.mock('../../../contexts/SiteModeContext', () => ({ useSiteMode: () => ({ positions: [], changePosition: jest.fn() }) }));
 jest.mock('../../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
-jest.mock('../../../services/menuServiceV11', () => ({ menuServiceV11: { subscribe: jest.fn(), getMenuConfig: jest.fn(), saveMenuConfig: jest.fn() } }));
+jest.mock('../../../services/menuServiceV11', () => ({ menuServiceV11: { subscribe: jest.fn(), getMenuConfig: jest.fn(), saveMenuConfig: jest.fn(), isMenuRegistrationPending: jest.fn() } }));
 jest.mock('./components/RoleManager', () => () => null);
 jest.mock('./components/SiteManager', () => () => null);
 jest.mock('./components/PositionMenuCopyModal', () => () => null);
@@ -37,6 +37,62 @@ beforeEach(() => {
 });
 const openEditor = () => render(<MemoryRouter initialEntries={['/admin/menu-manager?site=pos_dev']} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AdvancedMenuManager /></MemoryRouter>);
 const openLinked = () => fireEvent.click(screen.getByRole('button', { name: '팀장 연결 메뉴 펼치기' }));
+
+it('관리자가 최초 등록을 확정하고 DEV 연결의 추가·이름 변경·해제를 저장한다', async () => {
+    let pending = true;
+    (menuServiceV11.isMenuRegistrationPending as jest.Mock).mockImplementation(() => pending);
+    (menuServiceV11.saveMenuConfig as jest.Mock).mockImplementation(async data => {
+        pending = false; stored = data; receive(data); return data;
+    });
+    const original = JSON.parse(JSON.stringify(stored.pos_leader.menu));
+    const view = openEditor();
+    fireEvent.click(screen.getByRole('button', { name: '기본 메뉴 등록' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '기본 메뉴 등록' })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByText('연결 폴더 관리'));
+    const input = screen.getByRole('textbox', { name: '팀장 연결 폴더 이름' });
+    fireEvent.change(input, { target: { value: '현장팀' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(stored.pos_dev.linkedPositionGroups).toEqual([{ sourceSite: 'pos_leader', text: '현장팀' }]));
+    expect(screen.getByRole('button', { name: '현장팀 연결 메뉴 펼치기' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '팀장 연결 해제' }));
+    await waitFor(() => expect(stored.pos_dev.linkedPositionGroups).toEqual([]));
+    view.unmount();
+    openEditor();
+    expect(screen.queryByRole('button', { name: /팀장 연결 메뉴/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('연결 폴더 관리'));
+    fireEvent.change(screen.getByRole('combobox', { name: '직책 연결 추가' }), { target: { value: 'pos_leader' } });
+    await waitFor(() => expect(stored.pos_dev.linkedPositionGroups).toEqual([{ sourceSite: 'pos_leader' }]));
+    expect(stored.pos_leader.menu).toEqual(original);
+    expect(screen.getByRole('button', { name: '팀장 연결 메뉴 펼치기' })).toBeInTheDocument();
+});
+
+it('직책별 글꼴과 연결 메뉴 예외를 따로 저장하고 다중 선택에서 직책 글꼴로 복원한다', async () => {
+    stored.pos_dev.sidebarFontPreset = 'pretendard';
+    stored.pos_leader.sidebarAccentColor = '#123456';
+    const view = openEditor();
+    fireEvent.click(screen.getByRole('button', { name: '팀장' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '좌측 메뉴 기본 글꼴' }), { target: { value: 'noto-sans-kr' } });
+    await waitFor(() => expect(stored.pos_leader.sidebarFontPreset).toBe('noto-sans-kr'));
+    expect(stored.pos_dev.sidebarFontPreset).toBe('pretendard');
+    expect(stored.pos_leader.menu).toEqual(config().pos_leader.menu);
+    view.unmount();
+    openEditor();
+    openLinked();
+    fireEvent.click(screen.getByRole('checkbox', { name: '일보 작성 선택' }));
+    expect(screen.getByRole('option', { name: '직책 글꼴 사용 · 본고딕 (Noto Sans KR)' })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: '메뉴 글꼴' }), { target: { value: 'nanum-myeongjo' } });
+    await waitFor(() => expect(stored.pos_leader.menu[0].sub![0]).toMatchObject({ fontPreset: 'nanum-myeongjo' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '일보 관리 선택' }));
+    expect(screen.getByRole('combobox', { name: '메뉴 글꼴' })).toHaveValue('mixed');
+    fireEvent.change(screen.getByRole('combobox', { name: '메뉴 글꼴' }), { target: { value: 'baemin-jua' } });
+    await waitFor(() => expect(stored.pos_leader.menu[0]).toMatchObject({ fontPreset: 'baemin-jua', sub: [{ fontPreset: 'baemin-jua' }] }));
+    fireEvent.change(screen.getByRole('combobox', { name: '메뉴 글꼴' }), { target: { value: '' } });
+    await waitFor(() => expect(stored.pos_leader.menu).toEqual(config().pos_leader.menu));
+    fireEvent.click(screen.getByRole('button', { name: '팀장' }));
+    fireEvent.change(screen.getByRole('combobox', { name: '좌측 메뉴 기본 글꼴' }), { target: { value: '' } });
+    await waitFor(() => expect(stored.pos_leader.sidebarFontPreset).toBeUndefined());
+    expect(stored.pos_leader.sidebarAccentColor).toBe('#123456');
+});
 
 it('선택 배경을 일반 배경과 독립적으로 저장하고 연결 메뉴와 폴더의 롤오버에 일괄 지정한다', async () => {
     stored.pos_leader.sidebarBackgroundColor = '#123456';
@@ -137,6 +193,7 @@ it('자동 연결 구분선을 선택해 제목과 모양을 저장하고 다시
     fireEvent.click(screen.getByRole('button', { name: '구분선 설정 열기' }));
     expect(screen.getByRole('heading', { name: '구분선 설정' })).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: '구분선 제목' }), { target: { value: '직책별 메뉴' } });
+    fireEvent.blur(screen.getByRole('textbox', { name: '구분선 제목' }));
     fireEvent.click(screen.getByRole('button', { name: '점선' }));
     fireEvent.click(screen.getByRole('button', { name: '좁게' }));
     await waitFor(() => expect(stored.pos_dev.linkedPositionDivider).toEqual({

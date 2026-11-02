@@ -2,6 +2,7 @@ import { Timestamp } from 'firebase/firestore';
 import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
 import { BUSINESS_PARTNER_DEFAULT_POSITION_ROWS } from '../constants/businessPartnerPositions';
 import type { SiteDataType } from '../types/menu';
+import { hasRegisteredMenus } from './menuRegistration';
 import { UserRole } from '../types/roles';
 import type { UserData } from '../services/userService';
 import type { Position } from '../services/positionService';
@@ -16,6 +17,7 @@ let devMenuConfig: SiteDataType | null = null;
 
 const currentDevMenuConfig = (config: SiteDataType): SiteDataType => {
   const next = clone(config);
+  if (hasRegisteredMenus(next)) return next;
   const retiredTitles = new Set(['대표', '사장']);
   if (next.pos_ceo && retiredTitles.has(next.pos_ceo.name)) next.pos_ceo.name = 'CEO';
   for (const site of Object.values(next)) {

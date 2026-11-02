@@ -1,6 +1,6 @@
 import { activityMillis, activityRange, normalizeActivity } from './activityModel';
 import { ACTIVITY_SOURCES, activitySourceForPath, availableActivitySources } from './activitySources';
-import { consolidateActivityMenus } from './activityMenu';
+import { registerActivityMenu } from './activityMenu';
 import type { MenuItem } from '../../types/menu';
 import { previewMenuAllowsPath } from '../../components/developer/DevPreviewRouteGuard';
 
@@ -37,19 +37,34 @@ it('preserves access boundaries and legacy routes without granting login access 
   expect(activitySourceForPath('/activity?source=materials')?.id).toBe('materials');
 });
 
-it('consolidates only visible log links, preserves other menus and never mutates stored menus', () => {
+it('registers one editable activity link, preserves the source tree and limits preview to its sources', () => {
   const menu: MenuItem[] = [
     { text: '일보', sub: ['일보 작성', { text: '일보 기록', path: '/reports/daily-logs' }] },
     { text: '로그관리', sub: [{ text: '접속', path: '/admin/login-logs' }, { text: '파일', path: '/admin/pdf-transfer-logs' }] },
     { text: '로그 설정', path: '/messages/settings' },
   ];
-  const before = JSON.stringify(menu);
-  const result = consolidateActivityMenus(menu, {});
-  expect(result.map(item => item.text)).toEqual(['일보', '로그 설정', '활동 내역']);
-  expect(result[0].sub).toEqual(['일보 작성']);
-  expect(JSON.stringify(menu)).toBe(before);
-  expect(consolidateActivityMenus(result, {})).toEqual(result);
-  expect(consolidateActivityMenus([{ text: '홈', path: '/dashboard' }], {})).toEqual([{ text: '홈', path: '/dashboard' }]);
+  const original = JSON.parse(JSON.stringify(menu));
+  const site = { name: '관리자', icon: '', menu };
+  registerActivityMenu(site);
+  registerActivityMenu(site);
+  expect(menu.slice(0, -1)).toEqual(original);
+  expect(menu[3]).toMatchObject({ id: 'activity-center', text: '활동 내역', path: '/activity' });
+  expect(previewMenuAllowsPath(menu, '/activity?source=database')).toBe(false);
+  expect(previewMenuAllowsPath(menu, '/activity?source=daily')).toBe(true);
+});
+
+it('respects hidden sources, configured roles and an existing or deleted shortcut', () => {
+  const menu: MenuItem[] = [{ text: '비공개', hide: true, sub: [{ text: '로그인', path: '/admin/login-logs' }] },
+    { text: '일보 기록', roles: ['팀장'], path: '/reports/daily-logs' }];
+  const site = { name: '팀장', icon: '', menu };
+  registerActivityMenu({ ...site, deletedItems: ['활동 내역'] });
+  expect(menu).toHaveLength(2);
+  registerActivityMenu(site);
+  expect(menu[2]).toMatchObject({ path: '/activity?source=daily', roles: ['팀장'] });
+  Object.assign(menu[2], { text: '내 기록', hide: true });
+  registerActivityMenu(site);
+  expect(menu).toHaveLength(3);
+  expect(menu[2].text).toBe('내 기록');
 });
 
 it('retains preview access to a consolidated source without unlocking other log sources', () => {
