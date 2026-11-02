@@ -27,6 +27,7 @@ import { manpowerService, type Worker } from '../../services/manpowerService';
 import { teamService, type Team } from '../../services/teamService';
 import { storageService } from '../../services/storageService';
 import { toast } from '../../utils/swal';
+import { renderDayLookupCanvas } from './utils/dayLookupImage';
 import {
   normalizeDailyAdvanceSalaryType,
   resolveDailyAdvanceRowSalaryType,
@@ -2437,7 +2438,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       clipboardReservation = reserveImageClipboardWrite(clipboardWriter);
 
       setCopyingTab(activeTab);
-      const captureBlob = await captureWorkbookTabToPng(captureRoot);
+      const captureBlob = activeTab === 'day-lookup'
+        ? await withWorkbookCopyTimeout(
+            canvasToPngBlob(renderDayLookupCanvas(captureRoot, getCaptureScale)),
+            PNG_ENCODING_TIMEOUT_MS,
+            'PNG 이미지 변환이 지연되었습니다. 다시 시도해 주세요.'
+          )
+        : await captureWorkbookTabToPng(captureRoot);
       copyStage = 'clipboard';
 
       if (clipboardReservation) {
@@ -2923,22 +2930,22 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   );
 
   const renderDayLookupTab = () => (
-    <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
+    <section aria-label="일자별조회" className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
       <div className="grid gap-0 lg:grid-cols-[260px_1fr]">
         <div className="border-r border-[#d5ccb0] bg-[#f7f2df]">
-          <div className="grid grid-cols-[88px_1fr] text-sm">
-            <div className="border-b border-r border-[#d5ccb0] px-3 py-3 font-bold text-white" style={{ backgroundColor: COLORS.blue }}>
+          <dl className="grid grid-cols-[88px_1fr] text-sm">
+            <dt className="border-b border-r border-[#d5ccb0] px-3 py-3 font-bold text-white" style={{ backgroundColor: COLORS.blue }}>
               일자
-            </div>
-            <div className="border-b border-[#d5ccb0] px-3 py-3 font-bold text-[#4A452A]" style={{ backgroundColor: COLORS.paleYellow }}>
+            </dt>
+            <dd className="border-b border-[#d5ccb0] px-3 py-3 font-bold text-[#4A452A]" style={{ backgroundColor: COLORS.paleYellow }}>
               {selectedDate}
-            </div>
-          </div>
+            </dd>
+          </dl>
 
           <div className="space-y-3 p-4 text-sm">
-            <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
-              <div className="text-xs font-bold text-slate-500">선택일 공수</div>
-              <div className="mt-1 text-lg font-black text-[#4A452A]">
+            <dl className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
+              <dt className="text-xs font-bold text-slate-500">선택일 공수</dt>
+              <dd className="mt-1 text-lg font-black text-[#4A452A]">
                 {formatNumber(
                   selectedDateEntries.reduce((sum, entry) => {
                     const draftValue = manDayDrafts[entry.key];
@@ -2946,11 +2953,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     return sum + nextManDay;
                   }, 0)
                 )}
-              </div>
-            </div>
-            <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
-              <div className="text-xs font-bold text-slate-500">선택일 실지급금</div>
-              <div className="mt-1 text-lg font-black text-[#4A452A]">
+              </dd>
+            </dl>
+            <dl className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
+              <dt className="text-xs font-bold text-slate-500">선택일 실지급금</dt>
+              <dd className="mt-1 text-lg font-black text-[#4A452A]">
                 {formatCurrency(
                   selectedDateEntries.reduce(
                     (sum, entry) => {
@@ -2961,11 +2968,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     0
                   )
                 )}
-              </div>
-            </div>
-            <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
-              <div className="text-xs font-bold text-slate-500">선택일 청구금 합계</div>
-              <div className="mt-1 text-lg font-black text-[#4A452A]">
+              </dd>
+            </dl>
+            <dl className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
+              <dt className="text-xs font-bold text-slate-500">선택일 청구금 합계</dt>
+              <dd className="mt-1 text-lg font-black text-[#4A452A]">
                 {formatCurrency(
                   selectedDateEntries.reduce((sum, entry) => {
                     const draftValue = manDayDrafts[entry.key];
@@ -2973,8 +2980,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     return sum + getReportAmountForEntry(entry, nextManDay);
                   }, 0)
                 )}
-              </div>
-            </div>
+              </dd>
+            </dl>
           </div>
         </div>
 
@@ -3046,7 +3053,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 
   const renderDailyWageTab = () => (

@@ -5,7 +5,7 @@ import { accountDirectoryService, type AccountDirectory } from '../../services/a
 import { accommodationService } from '../../services/accommodationService';
 import { dailyReportService, type DailyReport } from '../../services/dailyReportService';
 import { siteService, type Site } from '../../services/siteService';
-import { supportRateService, type SupportRate } from '../../services/supportRateService';
+import { DEFAULT_SUPPORT_UNIT_PRICE } from '../../utils/teamSettlementSupportRateOverrides';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import type { Accommodation, UtilityRecord } from '../../types/accommodation';
 import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
@@ -164,7 +164,6 @@ interface SupportSourceData {
     companies: Company[];
     sites: Site[];
     reports: DailyReport[];
-    rates: SupportRate[];
     claims: TeamExpenseClaim[];
     overrides?: RateOverrides;
     adjustments?: ManualAdjustments;
@@ -183,8 +182,6 @@ interface SupportGroup {
     workEntries: SupportTransferDetail['workEntries'];
 }
 
-// Mirrors SupportTeamPaymentPage's explicit business default, not a guessed rate.
-const DEFAULT_SUPPORT_UNIT_PRICE = 230000;
 const INCOMING = '외부지원온곳';
 const isOwnCompanyName = (value: unknown): boolean => {
     const key = nameKey(value);
@@ -210,7 +207,7 @@ const matchesReference = <T extends NamedReference>(items: T[], leftId: unknown,
 /** Mirrors the incoming page's classification, billing-rate precedence, settlement merge, and additions. */
 export const buildSupportTransferCandidates = (period: string, data: SupportSourceData): TransferLoadResult => {
     if (!validPeriod(period)) return invalidMonth();
-    const { teams, companies, sites, reports, rates, claims, overrides = {}, adjustments = {} } = data;
+    const { teams, companies, sites, reports, claims, overrides = {}, adjustments = {} } = data;
     const findTeam = (id: unknown, name: unknown) => findReference(teams, id, name);
     const findCompany = (id: unknown, name: unknown) => findReference(companies, id, name);
     const ownCompany = (id: unknown, name: unknown): boolean => {
@@ -232,9 +229,6 @@ export const buildSupportTransferCandidates = (period: string, data: SupportSour
         const targetId = text(target?.id ?? targetIdRaw);
         const targetName = target?.name ?? targetNameRaw ?? '팀 미지정';
         if (!siteOwn || !ownTeam(target)) return;
-        const matchingRates = rates.filter(rate => matchesReference(sites, rate.siteId || rate.id, rate.siteName, report.siteId, site?.name || report.siteName));
-        const configuredSiteRate = positiveRate(matchingRates.find(rate => identity(rate.siteId || rate.id))?.defaultRate)
-            ?? positiveRate(matchingRates.find(rate => !identity(rate.siteId || rate.id))?.defaultRate);
         report.workers.forEach(worker => {
             const fallbackReportTeamId = worker.workerTeamName ? '' : text(report.teamId);
             const source = findTeam(worker.teamId || fallbackReportTeamId, worker.workerTeamName);
@@ -251,7 +245,6 @@ export const buildSupportTransferCandidates = (period: string, data: SupportSour
             const aggregateId = `${INCOMING}::${identity(targetId) || nameKey(targetName) || 'unknown-view'}::${identity(settlementId)}`;
             const mergedId = `merged::${mergeKey}`;
             const siteId = report.siteId ?? 'unknown-site';
-            const baseRate = configuredSiteRate ?? positiveRate(source?.supportRate) ?? positiveRate(worker.unitPrice);
             // Support-unit overrides only change the support-cost column; bank exports use the billing column.
             const overrideRate = positiveRate(overrides.siteRates?.[`${aggregateId}::${siteId}`])
                 ?? positiveRate(overrides.siteRates?.[`${mergedId}::${siteId}`])
@@ -260,7 +253,7 @@ export const buildSupportTransferCandidates = (period: string, data: SupportSour
                 ?? positiveRate(overrides.aggregateRates?.[mergedId])
                 ?? positiveRate(overrides.teamRates?.[mergeKey])
                 ?? positiveRate(overrides.bulkRate);
-            const rate = overrideRate ?? baseRate ?? DEFAULT_SUPPORT_UNIT_PRICE;
+            const rate = overrideRate ?? DEFAULT_SUPPORT_UNIT_PRICE;
             const manDay = typeof worker.manDay === 'number' && Number.isFinite(worker.manDay) ? Math.max(0, worker.manDay) : 0;
             const group = groups.get(mergeKey) ?? {
                 teamId: settlementId, teamName: sourceName, team: source, company,
@@ -273,11 +266,11 @@ export const buildSupportTransferCandidates = (period: string, data: SupportSour
             const lineAmount = Math.round(manDay * rate);
             group.amount += lineAmount;
             group.manDay += manDay;
-            group.usesDefaultRate ||= !overrideRate && !baseRate;
+            group.usesDefaultRate ||= !overrideRate;
             group.workEntries.push({
                 date: report.date, siteName: report.siteName ?? '현장 미지정', targetTeamName: targetName,
                 workerName: text(worker.name) || '작업자 미지정', manDay, unitPrice: rate, amount: lineAmount,
-                rateSource: overrideRate ? '월별 청구단가' : configuredSiteRate ? '현장 설정단가' : positiveRate(source?.supportRate) ? '팀 지원단가' : baseRate ? '일보 단가' : '기본단가',
+                rateSource: overrideRate ? '월별 청구단가' : '기본단가',
             });
             groups.set(mergeKey, group);
         });
@@ -347,16 +340,16 @@ export const loadSupportTransferCandidates = async (period: string): Promise<Tra
     const end = `${period}-${new Date(year, month, 0).getDate()}`;
     const results = await Promise.allSettled([
         teamService.getTeams(), companyService.getCompanies(), siteService.getSites(),
-        dailyReportService.getReportsByRange(`${period}-01`, end), supportRateService.getAllSiteRates(), teamExpenseLedgerService.getClaimsByMonth(period),
+        dailyReportService.getReportsByRange(`${period}-01`, end), teamExpenseLedgerService.getClaimsByMonth(period),
     ]);
-    const labels = ['팀', '회사', '현장', '작업일보', '지원단가', '후청구 경비'];
+    const labels = ['팀', '회사', '현장', '작업일보', '후청구 경비'];
     const warnings = results.flatMap((result, index) => result.status === 'rejected' ? [`${labels[index]} 조회에 실패했습니다. 지원비 금액이 불완전해 목록을 가져오지 않았습니다.`] : []);
-    const [teams, companies, sites, reports, rates, claims] = results;
-    if (teams.status !== 'fulfilled' || companies.status !== 'fulfilled' || sites.status !== 'fulfilled' || reports.status !== 'fulfilled' || rates.status !== 'fulfilled' || claims.status !== 'fulfilled') return { candidates: [], warnings };
+    const [teams, companies, sites, reports, claims] = results;
+    if (teams.status !== 'fulfilled' || companies.status !== 'fulfilled' || sites.status !== 'fulfilled' || reports.status !== 'fulfilled' || claims.status !== 'fulfilled') return { candidates: [], warnings };
     try {
         const overrides = readMonthlySetting<RateOverrides>('support-team-payment-rate-overrides-v1', period);
         const adjustments = readMonthlySetting<ManualAdjustments>('support-team-payment-manual-v1', period);
-        return buildSupportTransferCandidates(period, { teams: teams.value, companies: companies.value, sites: sites.value, reports: reports.value, rates: rates.value, claims: claims.value, overrides, adjustments });
+        return buildSupportTransferCandidates(period, { teams: teams.value, companies: companies.value, sites: sites.value, reports: reports.value, claims: claims.value, overrides, adjustments });
     } catch {
         return { candidates: [], warnings: ['저장된 월별 지원단가·추가금액을 읽지 못했습니다. 외부지원온곳 화면에서 해당 월 설정을 확인해주세요.'] };
     }

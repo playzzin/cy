@@ -3,6 +3,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import * as XLSX from 'xlsx-js-style';
 import DailyAdvanceWorkbookPage from './DailyAdvanceWorkbookPage';
+import { renderDayLookupCanvas } from './utils/dayLookupImage';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService } from '../../services/manpowerService';
 import { teamService } from '../../services/teamService';
@@ -50,7 +51,7 @@ const exportedSheet = () => {
   return workbook.Sheets['용역팀'];
 };
 
-describe('용역팀 날짜별 합계', () => {
+describe('대납출력부', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     window.localStorage.clear();
@@ -110,5 +111,48 @@ describe('용역팀 날짜별 합계', () => {
     await openServiceTab();
     expect(screen.getByText(/용역팀 데이터가 없습니다/)).toBeInTheDocument();
     expect(screen.queryByText('일자별 공수합계')).not.toBeInTheDocument();
+  });
+
+  it('일자별조회 이미지는 스크롤 밖의 열, 수정된 공수와 금액, 빈 날짜 안내를 포함한다', async () => {
+    const note = '마지막 열 비고';
+    (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue(
+      fixtureRows.map(row => ({ ...row, workContent: note }))
+    );
+    await openServiceTab();
+    fireEvent.click(screen.getByRole('button', { name: '일자별조회' }));
+    fireEvent.change(screen.getByLabelText('팀 필터'), { target: { value: 'team-daily' } });
+    fireEvent.change(screen.getByLabelText('일자'), { target: { value: `${fixtureMonth}-01` } });
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '1.5' } });
+
+    const root = screen.getByRole('region', { name: '일자별조회' });
+    const drawText = jest.fn();
+    const context = {
+      fillText: drawText, scale: jest.fn(), fillRect: jest.fn(), strokeRect: jest.fn(),
+      measureText: (value: string) => ({ width: value.length * 8 }),
+    };
+    const getContext = jest.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    const cellBounds = jest.spyOn(HTMLTableCellElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ x: -300, width: 120 } as DOMRect);
+    try {
+      expect(renderDayLookupCanvas(root, () => 1).width).toBe(1200);
+      const text = drawText.mock.calls.map(([value]) => value);
+      expect(text).toEqual(expect.arrayContaining([
+        '일자', `${fixtureMonth}-01`, '선택일 공수', '선택일 실지급금', '선택일 청구금 합계',
+        '일급검증', '1.5', '127,500', '150,000', '비고', note,
+      ]));
+      expect(text).not.toContain('검증가');
+      expect(drawText.mock.calls.find(([value]) => value === note)?.[1]).toBeGreaterThan(1080);
+
+      fireEvent.change(screen.getByLabelText('일자'), { target: { value: `${fixtureMonth}-02` } });
+      drawText.mockClear();
+      renderDayLookupCanvas(root, () => 1);
+      expect(drawText.mock.calls.map(([value]) => value)).toEqual(expect.arrayContaining([
+        `${fixtureMonth}-02`, '0', '선택한 일자에 조회 결과가 없습니다.',
+      ]));
+    } finally {
+      cellBounds.mockRestore();
+      getContext.mockRestore();
+    }
   });
 });

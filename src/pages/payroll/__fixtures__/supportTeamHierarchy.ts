@@ -34,5 +34,5 @@ export const hierarchyReports = [
     id: `synthetic-${index}`, date: '2026-10-01', siteId,
     siteName: hierarchySites.find(site => site.id === siteId)!.name,
     teamId, teamName: hierarchyTeams.find(team => team.id === teamId)!.name,
-    workers: [{ workerId: `synthetic-worker-${index}`, name: `가상작업자${index + 1}`, teamId, manDay, unitPrice: 230000 }],
+    workers: [{ workerId: `synthetic-worker-${index}`, name: `가상작업자${index + 1}`, teamId, manDay, unitPrice: index % 2 ? 180000 : 250000 }],
 })) as DailyReport[];

@@ -10,7 +10,6 @@ jest.mock('../../services/companyService', () => ({ companyService: { getCompani
 jest.mock('../../services/siteService', () => ({ siteService: { getSites: async () => mockSites } }));
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportsByRange: async () => mockReports } }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: async () => [] } }));
-jest.mock('../../services/supportRateService', () => ({ supportRateService: { getAllSiteRates: async () => [] } }));
 jest.mock('../../services/teamExpenseLedgerService', () => ({ teamExpenseLedgerService: { getClaimsByMonth: async () => [] } }));
 jest.mock('../../services/statementOutputService', () => ({ statementOutputService: {} }));
 jest.mock('../../components/accounts/PagePrimaryAccountManager', () => ({ PagePrimaryAccountSettings: () => null }));
@@ -29,6 +28,42 @@ const rowFor = (button: HTMLElement) => within(screen.getAllByRole('row').revers
 )!);
 
 beforeEach(() => localStorage.clear());
+
+it('월 단가는 첫 조회부터 각각 23만 원이며 변경한 월과 현장만 새 금액을 사용한다', async () => {
+    const { unmount } = renderScope('external');
+    const teamButton = () => screen.findByRole('button', { name: '가상외부팀 현장 목록' });
+    const siteInput = (rate: string) => screen.getByRole('textbox', { name: `가상 외부현장 ${rate}` });
+    const bulkInput = (rate: string) => screen.getByRole('textbox', { name: `일괄 적용 ${rate}` });
+    fireEvent.click(await teamButton());
+    expect(screen.getAllByText('월 적용됨')).toHaveLength(2);
+    expect(siteInput('지원단가')).toHaveValue('230,000');
+    expect(siteInput('청구단가')).toHaveValue('230,000');
+
+    fireEvent.change(siteInput('지원단가'), { target: { value: '245000' } });
+    fireEvent.change(bulkInput('지원단가'), { target: { value: '240000' } });
+    fireEvent.click(screen.getByRole('button', { name: '일괄적용' }));
+    fireEvent.change(bulkInput('청구단가'), { target: { value: '260000' } });
+    expect(screen.getByText('현재 230,000원 적용 중')).toBeInTheDocument();
+    expect(siteInput('청구단가')).toHaveValue('230,000');
+    fireEvent.click(screen.getByRole('button', { name: '월 적용' }));
+    const siteButton = screen.getByRole('button', { name: '가상외부팀 가상 외부현장 작업자 상세' });
+    expect(rowFor(siteButton).getByText('367,500')).toBeInTheDocument(); // 1.5 × 현장 지원단가
+    expect(rowFor(siteButton).getAllByText('390,000').length).toBeGreaterThan(0); // 1.5 × 월 청구단가
+
+    fireEvent.click(screen.getByRole('button', { name: '다음 달 보기' }));
+    await teamButton();
+    expect(bulkInput('지원단가')).toHaveValue('230,000');
+    expect(bulkInput('청구단가')).toHaveValue('230,000');
+    expect(siteInput('지원단가')).toHaveValue('230,000');
+    expect(siteInput('청구단가')).toHaveValue('230,000');
+    unmount();
+    renderScope('external');
+    fireEvent.click(await teamButton());
+    expect(bulkInput('지원단가')).toHaveValue('240,000');
+    expect(bulkInput('청구단가')).toHaveValue('260,000');
+    expect(siteInput('지원단가')).toHaveValue('245,000');
+    expect(siteInput('청구단가')).toHaveValue('260,000');
+});
 
 it.each([
     { scope: 'internalOut' as const, direction: '내부지원간곳', team: '가상지원팀', teamManDay: '4.5', siteCount: 3, label: '현장담당팀', counterTeam: '가상담당팀' },

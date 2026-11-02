@@ -20,7 +20,7 @@ function Action({ id, active, practice, send, action, children, disabled = false
 
 function Detail({ row }: { row: DemoRow }) {
     const lines = row.source === 'payroll' ? [['근무', '1공수 × 120,000원'], ['지급총액', '120,000원'], ['공제·선지급 등 차감액', won(120000 - (row.originalAmount ?? 100000))], ['선택 기준 금액', won(row.originalAmount ?? 100000)]]
-        : row.source === 'support' ? [['현장', '연습 현장 · 10월 5일'], ['작업비', '1.5공수 × 200,000원'], ['경비', '식비 10,000원'], ['지원비 합계', '310,000원']]
+        : row.source === 'support' ? [['현장', '연습 현장 · 10월 5일'], ['작업비', '1.5공수 × 230,000원'], ['경비', '식비 10,000원'], ['지원비 합계', '355,000원']]
             : [['숙소', '연습 숙소 101호'], ['정산월', '2026-10'], ['월 임대료', '500,000원'], ['월세 지급액', '500,000원']];
     return <div className="bt-sim-detail" data-demo-target={`detail-content-${row.id}`} aria-label={`${row.name} 연습 상세내역`}><strong>{SOURCE_LABELS[row.source]} 상세내역 · 가상 자료</strong><dl>{lines.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>현재 송금액 {won(row.amount)} · 상세와 다른 금액을 지급할 때는 사유를 확인하세요.</p></div>;
 }

@@ -5,7 +5,6 @@ import { accountDirectoryService } from '../../services/accountDirectoryService'
 import { accommodationService } from '../../services/accommodationService';
 import { siteService, type Site } from '../../services/siteService';
 import { dailyReportService, type DailyReport } from '../../services/dailyReportService';
-import { supportRateService } from '../../services/supportRateService';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import type { Accommodation, UtilityRecord } from '../../types/accommodation';
 import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
@@ -21,7 +20,6 @@ jest.mock('../../services/accountDirectoryService', () => ({ accountDirectorySer
 jest.mock('../../services/accommodationService', () => ({ accommodationService: { getAccommodations: jest.fn(), listAllUtilityRecords: jest.fn() } }));
 jest.mock('../../services/siteService', () => ({ siteService: { getSites: jest.fn() } }));
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportsByRange: jest.fn() } }));
-jest.mock('../../services/supportRateService', () => ({ supportRateService: { getAllSiteRates: jest.fn() } }));
 jest.mock('../../services/teamExpenseLedgerService', () => ({ teamExpenseLedgerService: { getClaimsByMonth: jest.fn() } }));
 
 const bank = { bankName: 'KB국민은행', accountNumber: '000-123-456', accountHolder: '테스트 예금주' };
@@ -51,7 +49,7 @@ const report = (patch: Partial<DailyReport> = {}): DailyReport => ({
     id: 'report', date: '2026-10-10', teamId: 'our-team', siteId: 'site', siteName: '테스트 현장', totalManDay: 1.5,
     workers: [{ workerId: 'worker', name: '테스트 작업자', teamId: 'supplier', workerTeamName: '테스트 외부팀', manDay: 1.5, status: 'attendance', unitPrice: 200000 }], ...patch,
 });
-const supportData = () => ({ teams, companies, sites, reports: [report()], rates: [], claims: [] });
+const supportData = () => ({ teams, companies, sites, reports: [report()], claims: [] });
 const claim = (patch: Partial<TeamExpenseClaim> = {}): TeamExpenseClaim => ({
     id: 'claim', yearMonth: '2026-10', date: '2026-10-12', claimType: 'teamCharge', payerTeamId: 'supplier', payerTeamName: '테스트 외부팀',
     chargeToTeamId: 'our-team', siteId: 'site', category: '식비', description: '테스트 경비', amount: 10000, status: 'charged', ...patch,
@@ -64,7 +62,6 @@ beforeEach(() => {
     (companyService.getCompanies as jest.Mock).mockResolvedValue(companies);
     (siteService.getSites as jest.Mock).mockResolvedValue(sites);
     (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValue([report()]);
-    (supportRateService.getAllSiteRates as jest.Mock).mockResolvedValue([]);
     (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValue([]);
 });
 
@@ -214,15 +211,15 @@ it('외부지원온곳은 외부 작업팀에게 지급하며 내부지원·외�
     const internal = report({ id: 'internal', workers: [{ ...report().workers[0], teamId: 'our-team-2', workerTeamName: '테스트 담당팀2' }] });
     const result = buildSupportTransferCandidates('2026-10', { ...supportData(), reports: [report(), outgoing, internal, report({ id: 'other-month', date: '2026-09-10' })] });
     expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0]).toMatchObject({ sourceId: 'supplier', name: '테스트 외부팀', amount: 315000, accountNumber: bank.accountNumber });
+    expect(result.candidates[0]).toMatchObject({ sourceId: 'supplier', name: '테스트 외부팀', amount: 345000, accountNumber: bank.accountNumber });
 });
 
-it('현장 설정단가를 팀·일보 단가보다 우선하고 계산서 현장에도 VAT를 더하지 않는다', () => {
-    const result = buildSupportTransferCandidates('2026-10', { ...supportData(), rates: [{ siteId: 'site', siteName: '테스트 현장', defaultRate: 250000 }] });
-    expect(result.candidates[0].amount).toBe(375000);
+it('월 지정값이 없으면 팀·일보 단가와 관계없이 23만 원으로 청구하고 계산서 현장에도 VAT를 더하지 않는다', () => {
+    const result = buildSupportTransferCandidates('2026-10', supportData());
+    expect(result.candidates[0].amount).toBe(345000);
     expect(result.candidates[0].supportDetail).toMatchObject({
-        originalAmount: 375000, billingAmount: 375000, additionalAmount: 0, expenseAmount: 0, totalManDay: 1.5, siteCount: 1,
-        workEntries: [{ date: '2026-10-10', siteName: '테스트 현장', targetTeamName: '테스트 담당팀', workerName: '테스트 작업자', manDay: 1.5, unitPrice: 250000, amount: 375000, rateSource: '현장 설정단가' }],
+        originalAmount: 345000, billingAmount: 345000, additionalAmount: 0, expenseAmount: 0, totalManDay: 1.5, siteCount: 1,
+        workEntries: [{ date: '2026-10-10', siteName: '테스트 현장', targetTeamName: '테스트 담당팀', workerName: '테스트 작업자', manDay: 1.5, unitPrice: 230000, amount: 345000, rateSource: '기본단가' }],
         expenseEntries: [],
     });
 });
@@ -233,7 +230,7 @@ it('소수 공수를 유지하고 원본처럼 각 작업자별 청구금액만 
         { ...report().workers[0], workerId: 'fraction-two', manDay: 0.25 },
     ] });
     const result = buildSupportTransferCandidates('2026-10', {
-        ...supportData(), reports: [fractionalReport], rates: [{ siteId: 'site', siteName: '테스트 현장', defaultRate: 210001 }],
+        ...supportData(), reports: [fractionalReport], overrides: { bulkRate: 210001 },
     });
     expect(result.candidates[0].amount).toBe(105000);
     expect(result.candidates[0].detail).toContain('0.5공수');
@@ -259,10 +256,10 @@ it('다른 담당팀에 지원한 동일 외부팀을 병합하고 병합 추가
         adjustments: { 'merged::외부지원온곳::supplier': { additionalAmount: 20000 }, '외부지원온곳::our-team::supplier': { additionalAmount: 500000 } },
     });
     expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0].amount).toBe(660000);
+    expect(result.candidates[0].amount).toBe(720000);
     expect(result.candidates[0].groupName).toContain('테스트 담당팀2');
     const detail = result.candidates[0].supportDetail!;
-    expect(detail).toMatchObject({ originalAmount: 660000, billingAmount: 630000, additionalAmount: 20000, expenseAmount: 10000, totalManDay: 3, adjustmentScope: 'merged' });
+    expect(detail).toMatchObject({ originalAmount: 720000, billingAmount: 690000, additionalAmount: 20000, expenseAmount: 10000, totalManDay: 3, adjustmentScope: 'merged' });
     expect(detail.workEntries.map(entry => entry.targetTeamName)).toEqual(['테스트 담당팀', '테스트 담당팀2']);
     expect(detail.expenseEntries).toEqual([{ date: '2026-10-12', siteName: '테스트 현장', category: '식비', description: '테스트 경비', amount: 10000, status: 'charged' }]);
     expect(detail.workEntries.reduce((sum, entry) => sum + entry.amount, 0) + detail.additionalAmount + detail.expenseEntries.reduce((sum, entry) => sum + entry.amount, 0)).toBe(result.candidates[0].amount);
@@ -284,7 +281,7 @@ it('경비의 팀·현장 ID가 다르면 이름이 같아도 지급액에 합�
         claim({ id: 'wrong-team', payerTeamId: 'another-supplier', siteName: '테스트 현장', amount: 900000 }),
         claim({ id: 'wrong-site', siteId: 'another-site', siteName: '테스트 현장', amount: 800000 }),
     ] });
-    expect(result.candidates[0].amount).toBe(325000);
+    expect(result.candidates[0].amount).toBe(355000);
     expect(result.candidates[0].supportDetail?.expenseEntries).toHaveLength(1);
     expect(result.warnings.join(' ')).toContain('식별정보가 달라');
 });
@@ -296,13 +293,13 @@ it('이전 ID로 연결되는 경비는 포함하고 동명 팀의 이름만 있
             claim({ id: 'legacy', payerTeamId: 'old-supplier', siteId: 'old-site', siteName: '테스트 현장' }),
             claim({ id: 'ambiguous', payerTeamId: '', siteName: '테스트 현장', amount: 900000 }),
         ] });
-    expect(result.candidates[0].amount).toBe(325000);
+    expect(result.candidates[0].amount).toBe(355000);
     expect(result.candidates[0].supportDetail?.expenseEntries).toHaveLength(1);
 });
 
 it('이름만 있는 경비는 팀과 현장이 하나로 식별될 때만 연결한다', () => {
     const result = buildSupportTransferCandidates('2026-10', { ...supportData(), claims: [claim({ payerTeamId: '', siteId: '', siteName: '테스트 현장' })] });
-    expect(result.candidates[0].amount).toBe(325000);
+    expect(result.candidates[0].amount).toBe(355000);
 });
 
 it('잘못된 팀 ID에 동명 팀의 계좌를 연결하지 않는다', () => {
@@ -311,20 +308,11 @@ it('잘못된 팀 ID에 동명 팀의 계좌를 연결하지 않는다', () => {
     expect(result.candidates[0].warning).toContain('원본 등록정보 확인');
 });
 
-it('현장 이름이 없을 때 무관한 무명 단가를 가져오지 않는다', () => {
-    const result = buildSupportTransferCandidates('2026-10', { ...supportData(), sites: sites.map(site => ({ ...site, name: '' })),
-        reports: [report({ siteName: '' })], rates: [{ siteId: 'another-site', siteName: '', defaultRate: 900000 }] });
-    expect(result.candidates[0].amount).toBe(315000);
-});
-
-it('이름이 같은 다른 현장의 단가를 가져오지 않고 이전 현장 ID는 연결한다', () => {
-    const sameNameSites = [...sites, { ...sites[0], id: 'same-name-site' }];
-    const wrongRate = buildSupportTransferCandidates('2026-10', { ...supportData(), sites: sameNameSites,
-        rates: [{ siteId: 'same-name-site', siteName: '테스트 현장', defaultRate: 900000 }] });
-    expect(wrongRate.candidates[0].amount).toBe(315000);
-    const migrated = buildSupportTransferCandidates('2026-10', { ...supportData(), sites: sites.map(site => site.id === 'site' ? { ...site, legacyId: 'old-site' } : site),
-        rates: [{ siteId: 'old-site', siteName: '이전 현장명', defaultRate: 250000 }] });
-    expect(migrated.candidates[0].amount).toBe(375000);
+it('다른 현장에 저장한 월 단가가 있어도 지정값 없는 현장은 기본 23만 원을 쓴다', () => {
+    const result = buildSupportTransferCandidates('2026-10', {
+        ...supportData(), overrides: { siteRates: { '외부지원온곳::supplier::different-site': 900000 } },
+    });
+    expect(result.candidates[0].amount).toBe(345000);
 });
 
 it('팀의 은행과 회사의 계좌번호를 섞어 잘못된 은행 계좌를 만들지 않는다', () => {
@@ -345,12 +333,11 @@ it('선택월의 마지막 날짜로 조회하고 저장된 해당월 청구단�
     expect(result.candidates[0].amount).toBe(475000);
 });
 
-it('지원단가/후청구 조회 실패 시 불완전한 이체금액을 제공하지 않는다', async () => {
-    (supportRateService.getAllSiteRates as jest.Mock).mockRejectedValue(new Error('fixture read failed'));
+it('후청구 조회 실패 시 불완전한 이체금액을 제공하지 않는다', async () => {
     (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockRejectedValue(new Error('fixture read failed'));
     const result = await loadSupportTransferCandidates('2026-10');
     expect(result.candidates).toEqual([]);
-    expect(result.warnings).toHaveLength(2);
+    expect(result.warnings).toHaveLength(1);
 });
 
 it('손상된 월별 저장 설정을 기본값으로 대체하지 않는다', async () => {

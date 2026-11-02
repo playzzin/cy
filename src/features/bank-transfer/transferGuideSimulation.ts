@@ -46,7 +46,7 @@ const fixture = (source: TransferSource, suffix: string, name: string, amount: n
 });
 export const demoFixtures = (source: TransferSource, period = '2026-10', amountBasis = 'net'): DemoRow[] => {
     if (source === 'rent') return [fixture('rent', 'house', '연습 숙소 101호', 500000, { groupName: '연습 숙소', period })];
-    if (source === 'support') return [fixture('support', 'team', '가상 지원팀', 310000, { groupName: '외부팀', period })];
+    if (source === 'support') return [fixture('support', 'team', '가상 지원팀', 355000, { groupName: '외부팀', period })];
     const payroll = source === 'payroll';
     return [
         fixture(source, 'a', '가상 작업자 A', payroll ? amountBasis === 'advance' ? 20000 : 100000 : 0, { period: payroll ? period : '' }),
