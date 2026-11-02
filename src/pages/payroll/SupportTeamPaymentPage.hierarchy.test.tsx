@@ -1,6 +1,9 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
+import { statementOutputService } from '../../services/statementOutputService';
 import { MemoryRouter } from 'react-router-dom';
 import SupportTeamPaymentPage from './SupportTeamPaymentPage';
 import { hierarchyCompanies as mockCompanies, hierarchyReports as mockReports, hierarchySites as mockSites, hierarchyTeams as mockTeams } from './__fixtures__/supportTeamHierarchy';
@@ -11,7 +14,7 @@ jest.mock('../../services/siteService', () => ({ siteService: { getSites: async 
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportsByRange: async () => mockReports } }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: async () => [] } }));
 jest.mock('../../services/teamExpenseLedgerService', () => ({ teamExpenseLedgerService: { getClaimsByMonth: async () => [] } }));
-jest.mock('../../services/statementOutputService', () => ({ statementOutputService: {} }));
+jest.mock('../../services/statementOutputService', () => ({ statementOutputService: { upsertOutput: jest.fn() } }));
 jest.mock('../../components/accounts/PagePrimaryAccountManager', () => ({ PagePrimaryAccountSettings: () => null }));
 jest.mock('../../components/accounts/PagePrimaryAccountCard', () => () => null);
 jest.mock('../../hooks/usePagePrimaryAccount', () => ({ usePagePrimaryAccount: () => ({ account: null }), ensurePagePrimaryAccountReady: () => true }));
@@ -28,6 +31,88 @@ const rowFor = (button: HTMLElement) => within(screen.getAllByRole('row').revers
 )!);
 
 beforeEach(() => localStorage.clear());
+
+it('팀·현장 명세서는 선택한 행 바로 아래에서 열리고 전체 미리보기는 정산표의 첫 행에서 열린다', async () => {
+    renderScope('external');
+    const team = await screen.findByRole('button', { name: '가상외부팀 노임명세서' });
+    const tbody = screen.getAllByRole('rowgroup').find(body =>
+        within(body).queryByRole('button', { name: '가상외부팀 노임명세서' }) === team
+    ) as HTMLTableSectionElement;
+    const rowBelow = (button: HTMLElement) => {
+        const index = Array.from(tbody.rows).findIndex(row => row.contains(button));
+        return tbody.rows[index + 1];
+    };
+    const groupCell = tbody.rows[0].cells[0];
+    const preview = screen.getByRole('button', { name: '노무내역서 미리보기' });
+    const editor = () => screen.getByRole('region', { name: '노임명세서 편집' });
+
+    fireEvent.click(team);
+    expect(rowBelow(team).cells[0]).toContainElement(editor());
+    expect(rowBelow(team).cells[0].colSpan).toBe(12);
+    expect(groupCell.rowSpan).toBe(tbody.rows.length);
+    expect(team).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: '가상외부팀 현장 목록' }));
+    const site = screen.getByRole('button', { name: '가상 외부현장 노임명세서' });
+    fireEvent.click(site);
+    expect(rowBelow(site).cells[0]).toContainElement(editor());
+    expect(groupCell.rowSpan).toBe(tbody.rows.length);
+    expect(team).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(preview);
+    expect(tbody.rows[0]).toContainElement(editor());
+    expect(tbody.rows[0].cells[0].colSpan).toBe(13);
+    expect(groupCell.rowSpan).toBe(tbody.rows.length - 1);
+    expect(site).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(site);
+    expect(preview).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(site);
+    expect(screen.queryByRole('region', { name: '노임명세서 편집' })).not.toBeInTheDocument();
+    expect(groupCell.rowSpan).toBe(tbody.rows.length);
+    expect(site).toBeVisible();
+});
+
+it('팀 명세서는 선택한 현장의 월 청구단가로 시작하고 현장을 오가도 편집값을 전체 엑셀과 문서대장에 반영한다', async () => {
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    localStorage.setItem(`support-team-payment-rate-overrides-v1:${month}`, JSON.stringify({
+        bulkRate: 250000, siteRates: { '외부지원간곳::external::outside': 260000 },
+    }));
+    renderScope('external');
+    fireEvent.click(await screen.findByRole('button', { name: '가상외부팀 노임명세서' }));
+    expect(screen.getByRole('heading', { name: '명세서 생성기' })).toBeVisible();
+    const chooseSite = (name: string) => {
+        fireEvent.click(screen.getByRole('button', { name: /^가상외부팀 ·/ }));
+        expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(2);
+        fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name }));
+    };
+    chooseSite('가상외부팀 · 가상 외부현장');
+    expect(screen.getByLabelText('가상작업자5 단가')).toHaveValue('260,000');
+    fireEvent.change(screen.getByLabelText('가상작업자5 1일 공수'), { target: { value: '2' } });
+    chooseSite('가상외부팀 · 가상 외부2현장');
+    expect(screen.getByLabelText('가상작업자9 단가')).toHaveValue('250,000');
+    chooseSite('가상외부팀 · 가상 외부현장');
+    expect(screen.getByLabelText('가상작업자5 1일 공수')).toHaveValue('2');
+    fireEvent.click(screen.getByRole('button', { name: '전체 현장 엑셀 저장' }));
+    await waitFor(() => expect(saveAs).toHaveBeenCalled());
+    const blob = (saveAs as unknown as jest.Mock).mock.calls[0][0];
+    const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader(); reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = reject; reader.readAsArrayBuffer(blob);
+    });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(bytes);
+    expect(workbook.worksheets).toHaveLength(2);
+    const first = workbook.worksheets.find(sheet => sheet.name.endsWith('가상 외부현장'))!;
+    expect(first.getCell('E6').value).toBe(2);
+    expect(JSON.stringify(first.getSheetValues())).toContain('"result":520000');
+    expect(JSON.stringify(workbook.worksheets.map(sheet => sheet.getSheetValues()))).not.toContain('가상작업자10');
+    fireEvent.click(screen.getByRole('button', { name: '옵션 저장' }));
+    await waitFor(() => expect(statementOutputService.upsertOutput).toHaveBeenCalledWith(expect.objectContaining({
+        yearMonth: month, amountSummary: { manDay: 4.5, supplyAmount: 1150000, totalAmount: 1150000 },
+    })));
+}, 20000);
 
 it('월 단가는 첫 조회부터 각각 23만 원이며 변경한 월과 현장만 새 금액을 사용한다', async () => {
     const { unmount } = renderScope('external');
@@ -144,6 +229,7 @@ it('작업팀으로 나눈 현장에서도 기존 현장 전체 정산을 열어
     expect(rowFor(wholeSite).getAllByRole('cell')[4]).toHaveTextContent('360,000');
     fireEvent.click(screen.getByRole('button', { name: '가상 1현장 노임명세서' }));
     expect(screen.getByRole('checkbox', { name: 'DB 직불여부 적용' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '노임명세서 닫기' }));
     fireEvent.click(screen.getByRole('button', { name: '현장 정산 닫기' }));
     expect(screen.queryByRole('textbox', { name: '가상 1현장 지원단가' })).not.toBeInTheDocument();
 });

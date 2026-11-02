@@ -67,6 +67,7 @@ const openStatement = async (view: typeof views[number]) => {
         fireEvent.click(screen.getByLabelText('계좌/지급구분'));
     } else if (view === 'team') {
         fireEvent.click(await screen.findByRole('button', { name: '가상외부팀 노임명세서' }));
+        fireEvent.click(screen.getByLabelText('계좌/지급구분'));
     }
     expect(screen.getByRole('checkbox', { name: 'DB 직불여부 적용' })).not.toBeChecked();
 };
@@ -90,14 +91,14 @@ it.each(views.flatMap(view => [false, true].map(applyDb => ({ view, applyDb })))
     const expectedBank = applyDb ? '최신직불은행' : '기본검증은행';
     const expectedHolder = applyDb ? '최신직불예금주' : '기본검증예금주';
     const expectedPurpose = applyDb ? '직불계좌' : '기본계좌';
-    const accountNumber = view === 'generator' ? screen.getByDisplayValue(expectedNumber) : screen.getByText(new RegExp(expectedNumber));
-    const bank = view === 'generator' ? screen.getByDisplayValue(expectedBank) : screen.getByText(new RegExp(expectedBank));
-    const holder = view === 'generator' ? screen.getByDisplayValue(expectedHolder) : screen.getByText(new RegExp(expectedHolder));
+    const accountNumber = view !== 'client' ? screen.getByDisplayValue(expectedNumber) : screen.getByText(new RegExp(expectedNumber));
+    const bank = view !== 'client' ? screen.getByDisplayValue(expectedBank) : screen.getByText(new RegExp(expectedBank));
+    const holder = view !== 'client' ? screen.getByDisplayValue(expectedHolder) : screen.getByText(new RegExp(expectedHolder));
     expect(accountNumber).toBeVisible();
     expect(bank).toBeVisible();
     expect(holder).toBeVisible();
     expect(screen.getByText(new RegExp(expectedPurpose))).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: view === 'generator' ? '엑셀 저장' : '노무비 지급 명세서 엑셀 다운로드' }));
+    fireEvent.click(screen.getByRole('button', { name: view !== 'client' ? '엑셀 저장' : '노무비 지급 명세서 엑셀 다운로드' }));
     await waitFor(() => expect(saveAs).toHaveBeenCalledTimes(1));
     const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
         const reader = new FileReader(); reader.onload = () => resolve(reader.result as ArrayBuffer);
@@ -127,11 +128,11 @@ it.each(views)('%s: DB 위임 적용 후 해제하면 작업자 기본계좌를 
     (manpowerService.getWorkers as jest.Mock).mockResolvedValueOnce([{ ...freshWorker, laborStatementPayType: 'delegate' }]);
     fireEvent.click(screen.getByRole('checkbox', { name: 'DB 직불여부 적용' }));
     await waitFor(() => expect(screen.getByRole('checkbox', { name: 'DB 직불여부 적용' })).toBeChecked());
-    const delegated = view === 'generator' ? screen.getByDisplayValue('TEST-DELEGATE') : screen.getByText(/TEST-DELEGATE/);
+    const delegated = view !== 'client' ? screen.getByDisplayValue('TEST-DELEGATE') : screen.getByText(/TEST-DELEGATE/);
     expect(delegated).toBeVisible();
     expect(screen.getByText(/대표계좌\(위임\)/)).toBeVisible();
     fireEvent.click(screen.getByRole('checkbox', { name: 'DB 직불여부 적용' }));
-    const basic = view === 'generator' ? screen.getByDisplayValue('TEST-BASIC') : screen.getByText(/TEST-BASIC/);
+    const basic = view !== 'client' ? screen.getByDisplayValue('TEST-BASIC') : screen.getByText(/TEST-BASIC/);
     expect(basic).toBeVisible();
     expect(screen.getByText(/기본계좌/)).toBeVisible();
     expect(screen.queryByText(/대표계좌\(위임\)/)).not.toBeInTheDocument();
@@ -139,9 +140,9 @@ it.each(views)('%s: DB 위임 적용 후 해제하면 작업자 기본계좌를 
 
 it('지원팀 명세서의 기본 상태는 작업자 기본계좌를 사용한다', async () => {
     await openStatement('team');
-    fireEvent.click(screen.getByRole('checkbox', { name: '계좌/지급구분 표시' }));
-    expect(screen.getByText(/TEST-BASIC/)).toBeVisible();
-    expect(screen.queryByText(/이전직불은행/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '계좌/지급구분' }));
+    expect(screen.getByDisplayValue('TEST-BASIC')).toBeVisible();
+    expect(screen.queryByDisplayValue('이전직불은행')).not.toBeInTheDocument();
 });
 
 it('생성기의 기본·직불 선택은 각각의 작업자 계좌를 가져온다', async () => {

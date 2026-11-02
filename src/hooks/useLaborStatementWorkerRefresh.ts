@@ -3,7 +3,7 @@ import { manpowerService, Worker } from '../services/manpowerService';
 
 type WorkerIdentity = { workerId?: string | null; workerName?: string };
 
-const createWorkerLookup = (workers: Worker[]) => {
+export const createWorkerLookup = (workers: Worker[]) => {
     const byId = new Map(workers.filter(worker => worker.id).map(worker => [worker.id, worker]));
     const byName = new Map<string, Worker | null>();
     workers.forEach(worker => {

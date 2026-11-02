@@ -74,43 +74,72 @@
   font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
 }
 
-.support-team-font .font-mono {
+.support-team-font .font-mono:not(:where(.labor-statement-page *)) {
   font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
 
 /* 지원팀 정산 화면의 보조 정보도 공수·금액 값과 균형이 맞도록 키운다. */
-.support-team-font .text-\[9px\] {
+.support-team-font .text-\[9px\]:not(:where(.labor-statement-page *)) {
   font-size: 12px;
 }
 
-.support-team-font .text-\[10px\] {
+.support-team-font .text-\[10px\]:not(:where(.labor-statement-page *)) {
   font-size: 13px;
 }
 
-.support-team-font .text-\[11px\] {
+.support-team-font .text-\[11px\]:not(:where(.labor-statement-page *)) {
   font-size: 14px;
 }
 
-.support-team-font .text-\[12px\] {
+.support-team-font .text-\[12px\]:not(:where(.labor-statement-page *)) {
   font-size: 15px;
 }
 
-.support-team-font .text-\[13px\] {
+.support-team-font .text-\[13px\]:not(:where(.labor-statement-page *)) {
   font-size: 16px;
 }
 
-.support-team-font .text-\[15px\] {
+.support-team-font .text-\[15px\]:not(:where(.labor-statement-page *)) {
   font-size: 17px;
 }
 
-.support-team-font .text-xs {
+.support-team-font .text-xs:not(:where(.labor-statement-page *)) {
   font-size: 15px;
 }
 
-.support-team-font .text-sm {
+.support-team-font .text-sm:not(:where(.labor-statement-page *)) {
   font-size: 16px;
+}
+
+@media screen {
+  .support-statement-scroll {
+    container-type: inline-size;
+  }
+
+  .support-statement-inline {
+    position: sticky;
+    left: 0;
+    width: min(100%, 100cqw);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  /* 팀·현장 행 앞에는 그룹 이름이 표시되는 병합 셀이 있다. */
+  td[colspan="12"] > .support-statement-inline {
+    width: min(100%, calc(100cqw - max(4rem, 4cqw)));
+  }
+
+  .support-statement-inline .labor-statement-page {
+    height: auto;
+    min-height: 0;
+  }
+
+  .support-statement-inline .labor-statement-shell {
+    flex: none;
+    height: clamp(360px, 60dvh, 700px);
+  }
 }
 
 /* 월별 급여 공제·공수 내역표의 조작 요소와 본문을 같은 가독성 기준으로 맞춘다. */

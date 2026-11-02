@@ -8,10 +8,9 @@ import {
   Users, Briefcase, PlusCircle, Check,
   AlertTriangle
 } from 'lucide-react';
-import ExcelJS from 'exceljs';
-import { saveAs } from 'file-saver';
-import html2canvas from 'html2canvas';
-import Swal from 'sweetalert2';
+import { createEmptyRow, downloadLaborStatementWorkbook, formatRetiredWorkerName, getMonthLastDay, sumDaysForMonth,
+  type LaborStatementDocument, type LaborStatementRow as RowState, type PayType } from './utils/laborStatementWorkbook';
+import type { PrimaryAccountPage } from '../../services/primaryAccountService';
 
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
@@ -19,44 +18,19 @@ import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
 import { usePagePrimaryAccount, ensurePagePrimaryAccountReady } from '../../hooks/usePagePrimaryAccount';
 import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
-import { useLaborStatementWorkerRefresh } from '../../hooks/useLaborStatementWorkerRefresh';
-import { formatManDayWithDecimal, roundManDay, sumManDays } from '../../utils/manDayMath';
+import { createWorkerLookup, useLaborStatementWorkerRefresh } from '../../hooks/useLaborStatementWorkerRefresh';
+import { formatManDayWithDecimal, roundManDay } from '../../utils/manDayMath';
 import {
   getLaborStatementAccountLabel,
-  formatLaborStatementPaymentAccountLabel,
+  getLaborStatementWorkerPayType,
   getWorkerMasterLaborStatementPayType,
   loadLaborStatementDefaults,
-  saveLaborStatementDefaults
+  saveLaborStatementDefaults,
+  type SharedLaborStatementDefaults,
 } from '../../utils/payrollLaborStatementDefaults';
-import {
-  applyLaborStatementDayPeriodFills,
-  applyLaborStatementDelegateHighlight,
-  getLaborStatementSplitPoint,
-} from '../../utils/laborCostStatementExcelStyles';
+import { getLaborStatementSplitPoint } from '../../utils/laborCostStatementExcelStyles';
 
 // --- Types ---
-type PayType = 'direct' | 'delegate';
-
-type RowState = {
-  id: number;
-  workerId: string | null;
-  workerName: string;
-  isRetired: boolean;
-  workerSsn: string;
-  workerPhone: string;
-  workerAddress: string;
-  unitPrice: string;
-  days: string[]; // 1..31
-  payType: PayType;
-  accountPurpose: 'default' | 'directPay';
-  bankName: string;
-  bankOwner: string;
-  bankAccount: string;
-  directBankName: string;
-  directBankOwner: string;
-  directBankAccount: string;
-  teamName: string;
-};
 
 type AttendanceMapEntry = {
   days: Record<number, number>; // day -> manDay
@@ -98,36 +72,6 @@ const shiftYearMonth = (yearMonth: string, monthOffset: number): string => {
 };
 
 
-const getMonthLastDay = (month: string): number => {
-  const [yearText, monthText] = String(month || '').split('-');
-  const year = Number(yearText);
-  const monthNumber = Number(monthText);
-  if (!year || !monthNumber) {
-    return 31;
-  }
-  return new Date(year, monthNumber, 0).getDate();
-};
-
-const createEmptyRow = (id: number): RowState => ({
-  id,
-  workerId: null,
-  workerName: '',
-  isRetired: false,
-  workerSsn: '',
-  workerPhone: '',
-  workerAddress: '',
-  unitPrice: '',
-  days: Array.from({ length: 31 }, () => ''),
-  payType: 'direct',
-  accountPurpose: 'default',
-  bankName: '',
-  bankOwner: '',
-  bankAccount: '',
-  directBankName: '',
-  directBankOwner: '',
-  directBankAccount: '',
-  teamName: ''
-});
 
 const monthToPeriod = (month: string): { start: string; end: string } => {
   if (!month) {
@@ -145,9 +89,6 @@ const monthToPeriod = (month: string): { start: string; end: string } => {
   return { start, end };
 };
 
-const sumDaysForMonth = (days: string[], lastDay: number): number => {
-  return sumManDays(days.slice(0, Math.max(lastDay, 0)));
-};
 
 const formatManDay = (value: number): string => {
   return formatManDayWithDecimal(value);
@@ -178,42 +119,6 @@ const isRetiredWorker = (worker?: Pick<Worker, 'status' | 'isActive'> | null): b
   );
 };
 
-const formatRetiredWorkerName = (name: string, isRetired: boolean): string => {
-  const trimmed = name.trim();
-  if (!trimmed) return '';
-  return isRetired ? `${trimmed} (퇴사)` : trimmed;
-};
-
-const formatWorkerNameCell = (row: RowState, includeTeam: boolean, includeRetired = true): string => {
-  const parts = [includeRetired ? formatRetiredWorkerName(row.workerName, row.isRetired) : row.workerName.trim()];
-  if (includeTeam && row.teamName.trim()) {
-    parts.push(row.teamName.trim());
-  }
-  return parts.filter(Boolean).join('\n');
-};
-
-const formatWorkerIdentityCell = (row: RowState): string => {
-  return [row.workerSsn.trim(), row.workerPhone.trim()].filter(Boolean).join('\n');
-};
-
-const formatInlineBankInfo = (row: RowState): string => {
-  const bankParts = [row.bankName.trim(), row.bankOwner.trim(), row.bankAccount.trim()].filter(Boolean);
-  const payTypeLabel = formatLaborStatementPaymentAccountLabel(row.payType, row.accountPurpose);
-  if (bankParts.length === 0) return payTypeLabel;
-  return `${bankParts.join(' / ')} (${payTypeLabel})`;
-};
-
-const formatAddressCell = (row: RowState, includeBankUnderAddress: boolean): string => {
-  const parts = [row.workerAddress.trim()];
-  if (includeBankUnderAddress) {
-    const bankLine = formatInlineBankInfo(row);
-    if (bankLine) parts.push(bankLine);
-  }
-  return parts.filter(Boolean).join('\n');
-};
-
-
-// --- UI Constants & Classes ---
 const W_INDEX = 'w-[45px]';
 
 const statementCellClass = 'border border-black align-middle text-center tabular-nums';
@@ -255,47 +160,87 @@ const parseComma = (val: string): string => {
 };
 
 // --- Component ---
-const LaborCostStatementGeneratorPage: React.FC = () => {
+export interface LaborStatementSheet {
+  id: string;
+  label: string;
+  siteName: string;
+  rows: RowState[];
+  fallbackAccount?: { bankName?: string; accountHolder?: string; accountNumber?: string };
+}
+
+export interface LaborEditorOutput {
+  documents: LaborStatementDocument[];
+  activeIndex: number;
+  sheetRef: React.RefObject<HTMLDivElement>;
+  accountReady: () => boolean;
+  accountsLoaded: boolean;
+  dbPayType: boolean;
+  appliedRate: number;
+  applyViewOptions: (options: SharedLaborStatementDefaults) => Promise<void>;
+}
+
+export interface LaborStatementSource {
+  month: string;
+  sheets: LaborStatementSheet[];
+  workers: Worker[];
+  primaryAccountScope: PrimaryAccountPage;
+  onClose: () => void;
+  onMonthChange: (month: string) => void;
+  renderTools: (output: LaborEditorOutput) => React.ReactNode;
+  savedOptions?: SharedLaborStatementDefaults;
+}
+
+const LaborCostStatementGeneratorPage: React.FC<{ source?: LaborStatementSource }> = ({ source }) => {
   const [searchParams] = useSearchParams();
 
   // --- UI Settings ---
-  const [showBankColumn, setShowBankColumn] = useState(true);
-  const [showDelegationUi, setShowDelegationUi] = useState(true);
-  const [isSplitView, setIsSplitView] = useState(true);
-  const [showBankUnderAddress, setShowBankUnderAddress] = useState(false);
-  const [showTeamUnderName, setShowTeamUnderName] = useState(false);
-  const [useWorkerMasterPayType, setUseWorkerMasterPayType] = useState(() => loadLaborStatementDefaults().useWorkerMasterPayType);
+  const [showBankColumn, setShowBankColumn] = useState(source?.savedOptions?.showBankColumn ?? true);
+  const [showBillingColumns, setShowBillingColumns] = useState(source?.savedOptions?.showBillingColumns ?? true);
+  const [isSplitView, setIsSplitView] = useState(source?.savedOptions?.isSplitView ?? true);
+  const [showBankUnderAddress, setShowBankUnderAddress] = useState(source?.savedOptions?.showBankUnderAddress ?? false);
+  const [showTeamUnderName, setShowTeamUnderName] = useState(source?.savedOptions?.showTeamUnderName ?? false);
+  const [useWorkerMasterPayType, setUseWorkerMasterPayType] = useState(() => source?.savedOptions?.useWorkerMasterPayType ?? loadLaborStatementDefaults().useWorkerMasterPayType);
   const { workers: refreshedWorkers, findWorker: findRefreshedWorker, refresh: refreshWorkerDb, loading: loadingWorkerDb, error: workerDbError } = useLaborStatementWorkerRefresh();
 
   // --- Main Configuration ---
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [localMonth, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const month = source?.month ?? localMonth;
+  const changeMonth = source?.onMonthChange ?? setMonth;
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [selectedSiteId, setSelectedSiteId] = useState<'ALL' | string>('ALL');
+  const [siteChoice, setSelectedSiteId] = useState('ALL');
+  const activeSheet = source?.sheets.find(sheet => sheet.id === siteChoice) ?? source?.sheets[0];
+  const selectedSiteId = activeSheet?.id ?? siteChoice;
   const [siteSearchQuery, setSiteSearchQuery] = useState('');
   const [isSitePickerOpen, setIsSitePickerOpen] = useState(false);
 
   // --- Statement Details ---
   const [siteNameInput, setSiteNameInput] = useState('');
   const [statementTitle, setStatementTitle] = useState('노무내역서');
-  const [globalRate, setGlobalRate] = useState(230000);
+  const [globalRate, setGlobalRate] = useState(() => Number(activeSheet?.rows[0]?.unitPrice) || 230000);
 
   // --- Master Bank Info ---
-  const [legacyMasterBank, setMasterBank] = useState(() => loadLaborStatementDefaults().delegateBankName);
-  const [legacyMasterOwner, setMasterOwner] = useState(() => loadLaborStatementDefaults().delegateAccountHolder);
-  const [legacyMasterAccount, setMasterAccount] = useState(() => loadLaborStatementDefaults().delegateAccountNumber);
-  const pagePrimaryAccount = usePagePrimaryAccount('labor-cost-statement-generator');
-  const masterBank = pagePrimaryAccount.account?.bankName ?? legacyMasterBank;
-  const masterOwner = pagePrimaryAccount.account?.accountHolder ?? legacyMasterOwner;
-  const masterAccount = pagePrimaryAccount.account?.accountNumber ?? legacyMasterAccount;
-  useEffect(() => {
-    setRows(current => current.map(row => row.payType === 'delegate'
-      ? { ...row, bankName: masterBank, bankOwner: masterOwner, bankAccount: masterAccount } : row));
-  }, [masterBank, masterOwner, masterAccount]);
+  const [legacyMasterBank, setMasterBank] = useState(() => (source?.savedOptions ?? loadLaborStatementDefaults()).delegateBankName);
+  const [legacyMasterOwner, setMasterOwner] = useState(() => (source?.savedOptions ?? loadLaborStatementDefaults()).delegateAccountHolder);
+  const [legacyMasterAccount, setMasterAccount] = useState(() => (source?.savedOptions ?? loadLaborStatementDefaults()).delegateAccountNumber);
+  const pagePrimaryAccount = usePagePrimaryAccount(source?.primaryAccountScope ?? 'labor-cost-statement-generator');
+  const { bankName: pageBank, accountHolder: pageOwner, accountNumber: pageNumber } = pagePrimaryAccount.account ?? {};
+  const hasPageAccount = Boolean(pagePrimaryAccount.account);
+  const accountForSheet = useCallback((sheet?: LaborStatementSheet) => {
+    const saved = source?.savedOptions;
+    const presetAccount = saved && (saved.delegateBankName || saved.delegateAccountHolder || saved.delegateAccountNumber)
+      ? { bankName: saved.delegateBankName, accountHolder: saved.delegateAccountHolder, accountNumber: saved.delegateAccountNumber } : undefined;
+    const account = hasPageAccount ? { bankName: pageBank, accountHolder: pageOwner, accountNumber: pageNumber } : (sheet ? presetAccount ?? sheet.fallbackAccount : {
+      bankName: legacyMasterBank, accountHolder: legacyMasterOwner, accountNumber: legacyMasterAccount,
+    });
+    return { masterBank: account?.bankName ?? '', masterOwner: account?.accountHolder ?? '', masterAccount: account?.accountNumber ?? '' };
+  }, [hasPageAccount, pageBank, pageOwner, pageNumber, source?.savedOptions, legacyMasterBank, legacyMasterOwner, legacyMasterAccount]);
+  const { masterBank, masterOwner, masterAccount } = accountForSheet(activeSheet);
 
   // --- Data ---
   const [sites, setSites] = useState<Site[]>([]);
-  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [localWorkers, setWorkers] = useState<Worker[]>([]);
+  const workers = source?.workers ?? localWorkers;
   const [reports, setReports] = useState<DailyReport[]>([]);
 
   // --- Loading States ---
@@ -306,9 +251,91 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [loadingAttendance, setLoadingAttendance] = useState(false);
 
   const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
-  const [rows, setRows] = useState<RowState[]>(() => Array.from({ length: 15 }, (_, i) => createEmptyRow(i + 1)));
+  const [drafts, setDrafts] = useState<Record<string, RowState[]>>({});
+  const [appliedRates, setAppliedRates] = useState<Record<string, number>>({});
+  const draftKey = activeSheet ? `${month}|${activeSheet.id}` : 'generator';
+  const blankRows = useMemo(() => Array.from({ length: 15 }, (_, i) => createEmptyRow(i + 1)), []);
+  const buildBankFieldsForPayType = useCallback((
+    payType: PayType,
+    directBank: Pick<RowState, 'bankName' | 'bankOwner' | 'bankAccount'>,
+    defaultBank = directBank,
+    accountPurpose: RowState['accountPurpose'] = 'directPay'
+  ): Pick<RowState, 'payType' | 'accountPurpose' | 'bankName' | 'bankOwner' | 'bankAccount' | 'directBankName' | 'directBankOwner' | 'directBankAccount'> => {
+    const workerBank = accountPurpose === 'default' ? defaultBank : directBank;
+    if (payType === 'delegate') {
+      return {
+        payType: 'delegate',
+        accountPurpose,
+        bankName: masterBank,
+        bankOwner: masterOwner,
+        bankAccount: masterAccount,
+        directBankName: directBank.bankName,
+        directBankOwner: directBank.bankOwner,
+        directBankAccount: directBank.bankAccount
+      };
+    }
+
+    return {
+      payType: 'direct',
+      accountPurpose,
+      bankName: workerBank.bankName,
+      bankOwner: workerBank.bankOwner,
+      bankAccount: workerBank.bankAccount,
+      directBankName: directBank.bankName,
+      directBankOwner: directBank.bankOwner,
+      directBankAccount: directBank.bankAccount
+    };
+  }, [masterAccount, masterBank, masterOwner]);
+
+  const findSourceWorker = useMemo(() => createWorkerLookup(refreshedWorkers ?? workers), [refreshedWorkers, workers]);
+  const seededSheets = useMemo(() => new Map(source?.sheets.map((sheet): [string, RowState[]] => {
+    const seeded = sheet.rows.map(row => {
+      const worker = findSourceWorker(row);
+      const direct = {
+        bankName: worker?.directPayBankName ?? row.directBankName,
+        bankOwner: worker?.directPayAccountHolder ?? row.directBankOwner,
+        bankAccount: worker?.directPayAccountNumber ?? row.directBankAccount,
+      };
+      const basic = { bankName: worker?.bankName ?? row.bankName, bankOwner: worker?.accountHolder ?? row.bankOwner,
+        bankAccount: worker?.accountNumber ?? row.bankAccount };
+      const payType = useWorkerMasterPayType ? getWorkerMasterLaborStatementPayType(worker) ??
+        getLaborStatementWorkerPayType(source?.savedOptions?.workerPayTypes ?? {}, row) : undefined;
+      const fields = buildBankFieldsForPayType(payType ?? 'direct', direct, basic, useWorkerMasterPayType ? 'directPay' : 'default');
+      if (payType === 'delegate') {
+        const account = accountForSheet(sheet);
+        Object.assign(fields, { bankName: account.masterBank, bankOwner: account.masterOwner, bankAccount: account.masterAccount });
+      }
+      return { ...row, ...fields, isRetired: worker ? isRetiredWorker(worker) : row.isRetired };
+    });
+    return [sheet.id, [...seeded, ...Array.from({ length: Math.max(0, 10 - seeded.length) }, (_, i) => createEmptyRow(seeded.length + i + 1))]];
+  })), [source?.sheets, source?.savedOptions, findSourceWorker, useWorkerMasterPayType, buildBankFieldsForPayType, accountForSheet]);
+  const baseRows = activeSheet ? seededSheets.get(activeSheet.id)! : blankRows;
+  const rows = drafts[draftKey] ?? baseRows;
+  const sourceMonth = source?.month;
+  const setRows = (update: React.SetStateAction<RowState[]>) => setDrafts(current => ({
+    ...current, [draftKey]: typeof update === 'function' ? update(current[draftKey] ?? baseRows) : update,
+  }));
+  useEffect(() => {
+    setDrafts(current => Object.fromEntries(Object.entries(current).map(([key, items]) => {
+      const sheet = source?.sheets.find(item => key === `${sourceMonth}|${item.id}`);
+      const account = accountForSheet(sheet);
+      return [key, items.map(row => row.payType === 'delegate' ? {
+        ...row, bankName: account.masterBank, bankOwner: account.masterOwner, bankAccount: account.masterAccount,
+      } : row)];
+    })));
+  }, [accountForSheet, sourceMonth, source?.sheets]);
   const [payTypeAutoWarnings, setPayTypeAutoWarnings] = useState<string[]>([]);
   const bulkPayTypeSnapshot = useRef<{ rows: Map<number, RowState>; warnings: string[] } | null>(null);
+  const sheetPayTypeWarnings = () => activeSheet && useWorkerMasterPayType
+    ? activeSheet.rows.filter(row => !getWorkerMasterLaborStatementPayType(findSourceWorker(row))).map(row => row.workerName)
+    : [];
+  useEffect(() => {
+    if (!activeSheet) return;
+    bulkPayTypeSnapshot.current = null;
+    setSelectedWorkerId('');
+    setPayTypeAutoWarnings(sheetPayTypeWarnings());
+    setGlobalRate(Number(activeSheet.rows[0]?.unitPrice) || 230000);
+  }, [activeSheet]);
 
   // --- Constructor Company Info ---
   const [constructorCompany, setConstructorCompany] = useState<Company | null>(null);
@@ -323,6 +350,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   // --- Queries ---
   useEffect(() => {
+    if (source) return;
     const qMonth = toYearMonth(searchParams.get('month') ?? '');
     if (qMonth) setMonth(qMonth);
     const qSiteId = String(searchParams.get('siteId') ?? '').trim();
@@ -337,6 +365,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   // --- Initial Load ---
   useEffect(() => {
+    if (source) return;
     siteService.getSites().then(data => setSites(data.map(s => ({ ...s, id: s.id ?? '' }))));
     manpowerService.getWorkers().then(data => setWorkers(data.map(w => ({ ...w, id: w.id ?? '' }))));
   }, []);
@@ -344,6 +373,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   // Keep the legacy company fallback; a saved page account always takes precedence.
   useEffect(() => {
     let cancelled = false;
+    if (source) return;
 
     const loadDefaultDelegationAccount = async () => {
       try {
@@ -362,13 +392,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [Boolean(source)]);
 
   // --- Memos & Derived State ---
   const periodKey = useMemo(() => `${startDate}|${endDate}`, [startDate, endDate]);
 
   useEffect(() => {
     const loadReports = async () => {
+      if (source) return;
       if (!startDate || !endDate) {
         setReports([]);
         setReportsLoadedKey(periodKey);
@@ -407,6 +438,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   }, [sites]);
 
   const reportSites = useMemo<ReportSiteOption[]>(() => {
+    if (source) return source.sheets.map(sheet => ({ id: sheet.id, name: sheet.label }));
     const map = new Map<string, ReportSiteOption>();
     reports.forEach((r) => {
       const rawId = String((r as any)?.siteId ?? '').trim();
@@ -437,7 +469,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     });
 
     return result.sort((a, b) => a.name.localeCompare(b.name));
-  }, [reports, siteNameById, sites]);
+  }, [reports, siteNameById, sites, source]);
 
   const filteredReportSites = useMemo(() => {
     const query = siteSearchQuery.trim().toLocaleLowerCase();
@@ -453,9 +485,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   }, [selectedSiteId, reportSites]);
 
   useEffect(() => {
-    if (selectedSiteId === 'ALL') setSiteNameInput('전체 통합');
+    if (activeSheet) setSiteNameInput(activeSheet.siteName);
+    else if (selectedSiteId === 'ALL') setSiteNameInput('전체 통합');
     else setSiteNameInput(selectedSite?.name ?? '');
-  }, [selectedSiteId, selectedSite]);
+  }, [selectedSiteId, selectedSite, activeSheet]);
 
   useEffect(() => {
     const fetchCompany = async () => {
@@ -495,6 +528,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   };
 
   const reportWorkers = useMemo<ReportWorkerOption[]>(() => {
+    if (activeSheet) return activeSheet.rows.map(row => ({
+      key: String(row.id), workerId: row.workerId, name: row.workerName, siteId: activeSheet.id, siteName: activeSheet.siteName,
+    }));
     const siteFiltered = selectedSiteId === 'ALL'
       ? reports
       : reports.filter((r) => matchesSelectedSiteId(String((r as any)?.siteId ?? '')));
@@ -526,7 +562,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     });
 
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [reports, selectedSiteId, sites]);
+  }, [reports, selectedSiteId, sites, activeSheet]);
 
   const workerById = useMemo(() => {
     const map = new Map<string, Worker>();
@@ -580,37 +616,6 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     return 'direct';
   }, [addPayTypeAutoWarning, useWorkerMasterPayType]);
 
-  const buildBankFieldsForPayType = useCallback((
-    payType: PayType,
-    directBank: Pick<RowState, 'bankName' | 'bankOwner' | 'bankAccount'>,
-    defaultBank = directBank,
-    accountPurpose: RowState['accountPurpose'] = 'directPay'
-  ): Pick<RowState, 'payType' | 'accountPurpose' | 'bankName' | 'bankOwner' | 'bankAccount' | 'directBankName' | 'directBankOwner' | 'directBankAccount'> => {
-    const workerBank = accountPurpose === 'default' ? defaultBank : directBank;
-    if (payType === 'delegate') {
-      return {
-        payType: 'delegate',
-        accountPurpose,
-        bankName: masterBank,
-        bankOwner: masterOwner,
-        bankAccount: masterAccount,
-        directBankName: directBank.bankName,
-        directBankOwner: directBank.bankOwner,
-        directBankAccount: directBank.bankAccount
-      };
-    }
-
-    return {
-      payType: 'direct',
-      accountPurpose,
-      bankName: workerBank.bankName,
-      bankOwner: workerBank.bankOwner,
-      bankAccount: workerBank.bankAccount,
-      directBankName: directBank.bankName,
-      directBankOwner: directBank.bankOwner,
-      directBankAccount: directBank.bankAccount
-    };
-  }, [masterAccount, masterBank, masterOwner]);
 
   const buildAttendanceKey = (): string => `${selectedSiteId}|${startDate}|${endDate}`;
 
@@ -706,6 +711,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   };
 
   const updateRow = (rowId: number, patch: Partial<RowState>) => {
+    if (source && patch.unitPrice !== undefined) setAppliedRates(current => ({ ...current, [draftKey]: 0 }));
     setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, ...patch } : r)));
   };
 
@@ -840,7 +846,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         };
       }
 
-      const payType = getWorkerMasterLaborStatementPayType(masterWorker);
+      const payType = getWorkerMasterLaborStatementPayType(masterWorker) ||
+        (source && getLaborStatementWorkerPayType(source.savedOptions?.workerPayTypes ?? {}, row));
       if (!payType) {
         warningSet.add(row.workerName || row.workerId || '이름 없음');
       }
@@ -860,16 +867,36 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     bulkPayTypeSnapshot.current = null;
     setUseWorkerMasterPayType(checked);
     const { warnings } = buildRowsForWorkerMasterPayTypeSetting(rows, checked, findWorker);
-    setRows(current => buildRowsForWorkerMasterPayTypeSetting(current, checked, findWorker).nextRows);
+    if (source) {
+      setDrafts(current => Object.fromEntries(Object.entries({ ...current, [draftKey]: current[draftKey] ?? baseRows }).map(([key, items]) => {
+        const account = accountForSheet(source.sheets.find(sheet => key === `${month}|${sheet.id}`));
+        const updated = buildRowsForWorkerMasterPayTypeSetting(items, checked, findWorker).nextRows;
+        return [key, updated.map(row => row.payType === 'delegate' ? {
+          ...row, bankName: account.masterBank, bankOwner: account.masterOwner, bankAccount: account.masterAccount,
+        } : row)];
+      })));
+    } else {
+      setRows(current => buildRowsForWorkerMasterPayTypeSetting(current, checked, findWorker).nextRows);
+    }
     setPayTypeAutoWarnings(checked ? warnings : []);
     if (checked && !showBankUnderAddress) setShowBankColumn(true);
-    saveLaborStatementDefaults({ useWorkerMasterPayType: checked });
+    if (!source) saveLaborStatementDefaults({ useWorkerMasterPayType: checked });
   };
 
   const loadWorkerToNextEmptyRow = async () => {
     const selected = reportWorkers.find(w => w.key === selectedWorkerId);
     if (!selected) return;
 
+    if (activeSheet) {
+      const worker = baseRows.find(row => String(row.id) === selected.key);
+      if (!worker) return;
+      const empty = rows.find(row => !row.workerName.trim());
+      const id = empty?.id ?? Math.max(0, ...rows.map(row => row.id)) + 1;
+      bulkPayTypeSnapshot.current?.rows.delete(id);
+      const next = { ...worker, id, days: [...worker.days] };
+      setRows(current => empty ? current.map(row => row.id === id ? next : row) : [...current, next]);
+      return;
+    }
     let target = rows.find(r => r.workerName.trim().length === 0);
     if (!target) {
       const nextId = rows.length > 0 ? Math.max(...rows.map(r => r.id)) + 1 : 1;
@@ -891,6 +918,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   };
 
   const loadAllByFilter = async () => {
+    if (activeSheet) {
+      bulkPayTypeSnapshot.current = null;
+      setAppliedRates(current => ({ ...current, [draftKey]: 0 }));
+      setRows(baseRows);
+      setPayTypeAutoWarnings(sheetPayTypeWarnings());
+      return;
+    }
     const count = Math.max(reportWorkers.length, 10);
     const map = await loadAttendance();
 
@@ -947,6 +981,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   };
 
   const handleApplyGlobalRate = () => {
+    if (source) setAppliedRates(current => ({ ...current, [draftKey]: globalRate }));
     setRows(prev => prev.map(r => {
       const workerId = String(r.workerId ?? '').trim();
       const workerName = r.workerName.trim();
@@ -957,550 +992,31 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       );
 
       if (!hasWorker) return { ...r, unitPrice: '' };
-      return hasRegisteredWorker ? { ...r, unitPrice: String(globalRate) } : r;
+      return source || hasRegisteredWorker ? { ...r, unitPrice: String(globalRate) } : r;
     }));
   };
 
   const handleClearAll = () => {
     if (window.confirm('작성된 모든 내용을 초기화하시겠습니까?')) {
       bulkPayTypeSnapshot.current = null;
+      if (source) setAppliedRates(current => ({ ...current, [draftKey]: 0 }));
       setRows(Array.from({ length: 15 }, (_, i) => createEmptyRow(i + 1)));
       setPayTypeAutoWarnings([]);
     }
   };
 
-  const getDayOfWeek = (month: string, day: number): string => {
-  const [y, m] = month.split('-').map(Number);
-  if (!y || !m) return '';
-  const date = new Date(y, m - 1, day);
-  const days = ['일', '월', '화', '수', '목', '금', '토'];
-  return days[date.getDay()];
-};
 
-  const handleExcelDownload = useCallback(async () => {
+  const activeDocument: LaborStatementDocument = {
+    rows, month, statementTitle, siteNameInput: activeSheet?.siteName ?? siteNameInput, showBankColumn, showBillingColumns, showBankUnderAddress,
+    showTeamUnderName, isSplitView, masterBank, masterOwner, masterAccount,
+  };
+  const documents = source ? source.sheets.map(sheet => ({
+    ...activeDocument, ...accountForSheet(sheet), siteNameInput: sheet.siteName, rows: drafts[`${month}|${sheet.id}`] ?? seededSheets.get(sheet.id)!,
+  })) : [activeDocument];
+  const handleExcelDownload = async () => {
     if (rows.some(row => row.payType === 'delegate') && !ensurePagePrimaryAccountReady(pagePrimaryAccount)) return;
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Codex';
-    workbook.lastModifiedBy = 'Codex';
-    workbook.created = new Date();
-    workbook.modified = new Date();
-    const fixedInfoColumnCount = 4;
-
-    const ws = workbook.addWorksheet('노무내역서', {
-      views: [{ 
-        state: 'frozen', 
-        ySplit: isSplitView ? 5 : 4, 
-        xSplit: fixedInfoColumnCount,
-        showGridLines: false 
-      }]
-    });
-    ws.properties.defaultRowHeight = 24;
-
-    const [y, m] = (month || '').split('-');
-    const lastDay = getMonthLastDay(month);
-    const showBankDetailsColumn = showBankColumn;
-    const dayStartColumn = fixedInfoColumnCount + 1;
-    // 공수는 반드시 숫자로 내보내야 엑셀에서 드래그 합계가 셀 개수로
-    // 표시되지 않고 실제 공수 합계로 계산된다.
-    const manDayCellFormat = '#,##0.0##';
-    const dailyTotalCellFormat = '#,##0.0##;-#,##0.0##;';
-    const moneyNumberFormat = '#,##0';
-    const blackArgb = 'FF000000';
-    const sundayArgb = 'FFE60012';
-    const headerFillArgb = 'FFE8E6F0';
-    const totalFillArgb = 'FFDCEFF4';
-    const trailingHeaders = showBankDetailsColumn
-      ? ['은행', '예금주', '계좌번호', '지급구분']
-      : ['지급구분'];
-
-    const daySplitPoint = isSplitView ? getLaborStatementSplitPoint(lastDay) : lastDay;
-    const dayColCount = isSplitView ? Math.max(daySplitPoint, lastDay - daySplitPoint) : lastDay;
-    const totalColumns = fixedInfoColumnCount + dayColCount + 3 + trailingHeaders.length;
-    const summaryStartCol = fixedInfoColumnCount + dayColCount + 1;
-    const toExcelColumnName = (columnNumber: number) => {
-      let current = columnNumber;
-      let name = '';
-      while (current > 0) {
-        const remainder = (current - 1) % 26;
-        name = String.fromCharCode(65 + remainder) + name;
-        current = Math.floor((current - 1) / 26);
-      }
-      return name;
-    };
-    const makeSumFormula = (references: string[]) => (
-      references.length > 0 ? `SUM(${references.join(',')})` : '0'
-    );
-
-    // 엑셀을 열거나 공수/단가를 수정했을 때 모든 수식이 다시 계산되도록 한다.
-    workbook.calcProperties.fullCalcOnLoad = true;
-
-    ws.pageSetup = {
-      orientation: 'landscape',
-      paperSize: 9,
-      fitToPage: true,
-      fitToWidth: 1,
-      fitToHeight: 0,
-      horizontalCentered: true,
-      margins: {
-        left: 0.25, right: 0.25, top: 0.35, bottom: 0.35, header: 0.2, footer: 0.2
-      }
-    };
-    ws.headerFooter.oddHeader = `&C&"Malgun Gothic,Bold"${statementTitle || '노무내역서'}`;
-    ws.headerFooter.oddFooter = `&L출력일 ${new Date().toLocaleDateString('ko-KR')}&R&P / &N`;
-
-    // --- Title Row (Row 1) ---
-    const titleRow = ws.addRow([statementTitle || '노무내역서']);
-    ws.mergeCells(titleRow.number, 1, titleRow.number, totalColumns);
-    titleRow.getCell(1).font = { bold: true, size: 18, color: { argb: blackArgb } };
-    titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-    titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-    titleRow.height = 40;
-
-    // --- Info Row (Row 2) ---
-    const periodStr = y && m ? `${y}-${m}-01 ~ ${y}-${m}-${String(lastDay).padStart(2, '0')}` : '-';
-    ws.mergeCells(2, 1, 2, 4);
-    ws.mergeCells(2, 5, 2, Math.min(12, totalColumns));
-    ws.mergeCells(2, Math.min(13, totalColumns), 2, totalColumns);
-
-    ws.getCell(2, 1).value = `기간: ${periodStr}`;
-    ws.getCell(2, 5).value = `현장명: ${siteNameInput || '전체 통합'}`;
-    const delegationAccount = [masterBank.trim(), masterAccount.trim()].filter(Boolean).join(' ');
-    ws.getCell(2, Math.min(13, totalColumns)).value = `위임계좌번호: ${delegationAccount} / 예금주: ${masterOwner.trim()}`;
-
-    for (let col = 1; col <= totalColumns; col++) {
-      const cell = ws.getCell(2, col);
-      cell.font = { bold: true, size: 10, color: { argb: blackArgb } };
-      cell.alignment = { vertical: 'middle', horizontal: col === 1 ? 'left' : 'center' };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-    }
-    ws.getRow(2).height = 25;
-
-    // Empty row for spacing (Row 3)
-    ws.addRow([]);
-    ws.getRow(3).height = 10;
-
-    // --- Header Style Helper ---
-    const applyHeaderStyle = (cell: ExcelJS.Cell, isSunday = false) => {
-      cell.font = { bold: true, size: 9, color: { argb: isSunday ? sundayArgb : blackArgb } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: headerFillArgb } };
-      cell.border = {
-        top: { style: 'thin', color: { argb: blackArgb } },
-        bottom: { style: 'thin', color: { argb: blackArgb } },
-        left: { style: 'thin', color: { argb: blackArgb } },
-        right: { style: 'thin', color: { argb: blackArgb } }
-      };
-    };
-
-    const isWeekend = (day: number): 'sat' | 'sun' | null => {
-      const date = new Date(Number(y), Number(m) - 1, day);
-      const dayOfWeek = date.getDay();
-      if (dayOfWeek === 6) return 'sat';
-      if (dayOfWeek === 0) return 'sun';
-      return null;
-    };
-
-    // --- Header Rows (Row 4 & 5) ---
-    if (isSplitView) {
-      const h1: any[] = ['No', '성명', '주민등록번호', '주소'];
-      for (let d = 1; d <= daySplitPoint; d++) {
-        const dow = getDayOfWeek(month, d);
-        h1.push(`${String(d).padStart(2, '0')}\n(${dow})`);
-      }
-      while (h1.length < fixedInfoColumnCount + dayColCount) h1.push('');
-      h1.push('공수', '단가', '총액', ...trailingHeaders);
-
-      const h2: any[] = ['', '', '전화번호', ''];
-      for (let d = daySplitPoint + 1; d <= lastDay; d++) {
-        const dow = getDayOfWeek(month, d);
-        h2.push(`${String(d).padStart(2, '0')}\n(${dow})`);
-      }
-      while (h2.length < fixedInfoColumnCount + dayColCount) h2.push('');
-      h2.push('', '', '', ...trailingHeaders.map(() => ''));
-
-      const hr1 = ws.addRow(h1);
-      const hr2 = ws.addRow(h2);
-
-      for (let col = 1; col <= fixedInfoColumnCount; col++) {
-        if (col === 3) continue;
-        ws.mergeCells(hr1.number, col, hr2.number, col);
-      }
-      for (let col = summaryStartCol; col <= totalColumns; col++) {
-        ws.mergeCells(hr1.number, col, hr2.number, col);
-      }
-
-      hr1.eachCell((cell, colNum) => {
-        let isSundayCell = false;
-        if (colNum >= dayStartColumn && colNum < dayStartColumn + daySplitPoint) {
-          const day = colNum - fixedInfoColumnCount;
-          const weekend = isWeekend(day);
-          isSundayCell = weekend === 'sun';
-        }
-        applyHeaderStyle(cell, isSundayCell);
-      });
-      hr2.eachCell((cell, colNum) => {
-        let isSundayCell = false;
-        if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-          const day = daySplitPoint + (colNum - fixedInfoColumnCount);
-          if (day <= lastDay) {
-            const weekend = isWeekend(day);
-            isSundayCell = weekend === 'sun';
-          }
-        }
-        applyHeaderStyle(cell, isSundayCell);
-      });
-      hr1.height = 32;
-      hr2.height = 32;
-      ws.pageSetup.printTitlesRow = `1:${hr2.number}`;
-    } else {
-      const h: any[] = ['No', '성명', '주민등록번호\n전화번호', '주소'];
-      for (let d = 1; d <= lastDay; d++) {
-        const dow = getDayOfWeek(month, d);
-        h.push(`${String(d).padStart(2, '0')}\n(${dow})`);
-      }
-      h.push('공수', '단가', '총액', ...trailingHeaders);
-      const hr = ws.addRow(h);
-      hr.eachCell((cell, colNum) => {
-        let isSundayCell = false;
-        if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-          const day = colNum - fixedInfoColumnCount;
-          const weekend = isWeekend(day);
-          isSundayCell = weekend === 'sun';
-        }
-        applyHeaderStyle(cell, isSundayCell);
-      });
-      hr.height = 40;
-      ws.pageSetup.printTitlesRow = `1:${hr.number}`;
-    }
-
-    // Column widths
-    ws.getColumn(1).width = 4.5;
-    ws.getColumn(2).width = 10;
-    ws.getColumn(3).width = 15;
-    ws.getColumn(4).width = 40;
-    for (let i = 0; i < dayColCount; i++) ws.getColumn(dayStartColumn + i).width = 4.5;
-    ws.getColumn(summaryStartCol).width = 10;
-    ws.getColumn(summaryStartCol + 1).width = 10;
-    ws.getColumn(summaryStartCol + 2).width = 12;
-    if (showBankDetailsColumn) {
-      ws.getColumn(summaryStartCol + 3).width = 12;
-      ws.getColumn(summaryStartCol + 4).width = 10;
-      ws.getColumn(summaryStartCol + 5).width = 22;
-      ws.getColumn(summaryStartCol + 6).width = 10;
-    } else {
-      ws.getColumn(summaryStartCol + 3).width = 10;
-    }
-
-    const filledRows = rows.filter(r => r.workerName.trim().length > 0);
-    let grandTotalDays = 0;
-    let grandTotalAmount = 0;
-    const dailyTotals = Array.from({ length: lastDay }, () => 0);
-    const primaryDataRows: number[] = [];
-    const secondaryDataRows: number[] = [];
-
-    filledRows.forEach((r, idx) => {
-      const totalDaysVal = sumDaysForMonth(r.days, lastDay);
-      const unitPriceVal = parseFloat(String(r.unitPrice).replace(/,/g, '').trim()) || 0;
-      const totalAmountVal = Math.round(totalDaysVal * unitPriceVal);
-      grandTotalDays = roundManDay(grandTotalDays + totalDaysVal);
-      grandTotalAmount += totalAmountVal;
-
-      const bankCells = showBankDetailsColumn
-        ? [r.bankName, r.bankOwner, r.bankAccount, `${r.payType === 'delegate' ? '위임' : '직불'}\n${getLaborStatementAccountLabel(r.payType, r.accountPurpose)}`]
-        : [r.payType === 'delegate' ? '위임' : '직불'];
-      if (isSplitView) {
-        const d1: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), r.workerSsn, formatAddressCell(r, showBankUnderAddress)];
-        for (let d = 0; d < daySplitPoint; d++) {
-          const val = parseFloat(r.days[d] || '');
-          if (Number.isFinite(val)) dailyTotals[d] = roundManDay(dailyTotals[d] + val);
-          d1.push(Number.isFinite(val) ? val : '');
-        }
-        while (d1.length < fixedInfoColumnCount + dayColCount) d1.push('');
-        d1.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
-
-        const d2: any[] = ['', '', r.workerPhone, ''];
-        for (let d = daySplitPoint; d < lastDay; d++) {
-          const val = parseFloat(r.days[d] || '');
-          if (Number.isFinite(val)) dailyTotals[d] = roundManDay(dailyTotals[d] + val);
-          d2.push(Number.isFinite(val) ? val : '');
-        }
-        while (d2.length < fixedInfoColumnCount + dayColCount) d2.push('');
-        d2.push('', '', '', ...bankCells.map(() => ''));
-
-        const row1 = ws.addRow(d1);
-        const row2 = ws.addRow(d2);
-        primaryDataRows.push(row1.number);
-        secondaryDataRows.push(row2.number);
-
-        for (let col = 1; col <= fixedInfoColumnCount; col++) {
-          if (col === 3) continue;
-          ws.mergeCells(row1.number, col, row2.number, col);
-        }
-        for (let col = summaryStartCol; col <= totalColumns; col++) {
-          ws.mergeCells(row1.number, col, row2.number, col);
-        }
-
-        const dayStartColumnName = toExcelColumnName(dayStartColumn);
-        const dayEndColumnName = toExcelColumnName(dayStartColumn + dayColCount - 1);
-        const totalManDayColumnName = toExcelColumnName(summaryStartCol);
-        const unitPriceColumnName = toExcelColumnName(summaryStartCol + 1);
-        row1.getCell(summaryStartCol).value = {
-          formula: `SUM(${dayStartColumnName}${row1.number}:${dayEndColumnName}${row1.number},${dayStartColumnName}${row2.number}:${dayEndColumnName}${row2.number})`,
-          result: totalDaysVal,
-        };
-        row1.getCell(summaryStartCol + 2).value = {
-          formula: `ROUND(${totalManDayColumnName}${row1.number}*${unitPriceColumnName}${row1.number},0)`,
-          result: totalAmountVal,
-        };
-
-        [row1, row2].forEach(row => {
-          row.eachCell((cell, colNum) => {
-            cell.border = {
-              top: { style: 'thin', color: { argb: blackArgb } },
-              bottom: { style: 'thin', color: { argb: blackArgb } },
-              left: { style: 'thin', color: { argb: blackArgb } },
-              right: { style: 'thin', color: { argb: blackArgb } }
-            };
-            cell.font = { size: 9, color: { argb: blackArgb } };
-            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-
-            if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-              cell.numFmt = manDayCellFormat;
-            }
-
-            if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
-              cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
-              cell.alignment = { horizontal: 'right', vertical: 'middle' };
-              cell.font = { size: 9, bold: colNum === summaryStartCol + 2, color: { argb: blackArgb } };
-            }
-          });
-        });
-
-        applyLaborStatementDayPeriodFills(row1, dayStartColumn, 1, daySplitPoint, lastDay);
-        applyLaborStatementDayPeriodFills(
-          row2,
-          dayStartColumn,
-          daySplitPoint + 1,
-          dayColCount,
-          lastDay
-        );
-
-        if (r.payType === 'delegate') {
-          applyLaborStatementDelegateHighlight(row1, summaryStartCol, showBankDetailsColumn);
-        }
-      } else {
-        const d: any[] = [idx + 1, formatWorkerNameCell(r, showTeamUnderName, false), formatWorkerIdentityCell(r), formatAddressCell(r, showBankUnderAddress)];
-        for (let i = 0; i < lastDay; i++) {
-          const val = parseFloat(r.days[i] || '');
-          if (Number.isFinite(val)) dailyTotals[i] = roundManDay(dailyTotals[i] + val);
-          d.push(Number.isFinite(val) ? val : '');
-        }
-        d.push(totalDaysVal, unitPriceVal, totalAmountVal, ...bankCells);
-        const dr = ws.addRow(d);
-        primaryDataRows.push(dr.number);
-        const dayStartColumnName = toExcelColumnName(dayStartColumn);
-        const dayEndColumnName = toExcelColumnName(dayStartColumn + lastDay - 1);
-        const totalManDayColumnName = toExcelColumnName(summaryStartCol);
-        const unitPriceColumnName = toExcelColumnName(summaryStartCol + 1);
-        dr.getCell(summaryStartCol).value = {
-          formula: `SUM(${dayStartColumnName}${dr.number}:${dayEndColumnName}${dr.number})`,
-          result: totalDaysVal,
-        };
-        dr.getCell(summaryStartCol + 2).value = {
-          formula: `ROUND(${totalManDayColumnName}${dr.number}*${unitPriceColumnName}${dr.number},0)`,
-          result: totalAmountVal,
-        };
-        dr.eachCell((cell, colNum) => {
-          cell.border = {
-            top: { style: 'thin', color: { argb: blackArgb } },
-            bottom: { style: 'thin', color: { argb: blackArgb } },
-            left: { style: 'thin', color: { argb: blackArgb } },
-            right: { style: 'thin', color: { argb: blackArgb } }
-          };
-          cell.font = { size: 9, color: { argb: blackArgb } };
-          cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-
-          if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-            cell.numFmt = manDayCellFormat;
-          }
-
-          if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
-            cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.font = { size: 9, bold: colNum === fixedInfoColumnCount + lastDay + 3, color: { argb: blackArgb } };
-          }
-        });
-
-        applyLaborStatementDayPeriodFills(dr, dayStartColumn, 1, lastDay, lastDay);
-
-        if (r.payType === 'delegate') {
-          applyLaborStatementDelegateHighlight(dr, summaryStartCol, showBankDetailsColumn);
-        }
-      }
-    });
-
-    // --- Footer Row ---
-    const f1: any[] = ['날짜별 공수합계', ...Array.from({ length: fixedInfoColumnCount - 1 }, () => '')];
-    for (let d = 0; d < daySplitPoint; d++) f1.push(dailyTotals[d]);
-    while (f1.length < fixedInfoColumnCount + dayColCount) f1.push('');
-    f1.push(grandTotalDays, '', grandTotalAmount, ...trailingHeaders.map(() => ''));
-
-    if (isSplitView) {
-      const f2: any[] = Array.from({ length: fixedInfoColumnCount }, () => '');
-      for (let d = daySplitPoint; d < lastDay; d++) f2.push(dailyTotals[d]);
-      while (f2.length < fixedInfoColumnCount + dayColCount) f2.push('');
-      f2.push('', '', '', ...trailingHeaders.map(() => ''));
-
-      const fr1 = ws.addRow(f1);
-      const fr2 = ws.addRow(f2);
-      ws.mergeCells(fr1.number, 1, fr2.number, fixedInfoColumnCount);
-      for (let col = summaryStartCol; col <= totalColumns; col++) {
-        ws.mergeCells(fr1.number, col, fr2.number, col);
-      }
-      for (let dayOffset = 0; dayOffset < daySplitPoint; dayOffset++) {
-        const columnName = toExcelColumnName(dayStartColumn + dayOffset);
-        fr1.getCell(dayStartColumn + dayOffset).value = {
-          formula: makeSumFormula(primaryDataRows.map(rowNumber => `${columnName}${rowNumber}`)),
-          result: dailyTotals[dayOffset],
-        };
-      }
-      for (let dayOffset = daySplitPoint; dayOffset < lastDay; dayOffset++) {
-        const columnIndex = dayStartColumn + dayOffset - daySplitPoint;
-        const columnName = toExcelColumnName(columnIndex);
-        fr2.getCell(columnIndex).value = {
-          formula: makeSumFormula(secondaryDataRows.map(rowNumber => `${columnName}${rowNumber}`)),
-          result: dailyTotals[dayOffset],
-        };
-      }
-      const dayStartColumnName = toExcelColumnName(dayStartColumn);
-      const dayEndColumnName = toExcelColumnName(dayStartColumn + dayColCount - 1);
-      const totalManDayColumnName = toExcelColumnName(summaryStartCol);
-      const amountColumnName = toExcelColumnName(summaryStartCol + 2);
-      fr1.getCell(summaryStartCol).value = {
-        formula: `SUM(${dayStartColumnName}${fr1.number}:${dayEndColumnName}${fr1.number},${dayStartColumnName}${fr2.number}:${dayEndColumnName}${fr2.number})`,
-        result: grandTotalDays,
-      };
-      fr1.getCell(summaryStartCol + 2).value = {
-        formula: makeSumFormula(primaryDataRows.map(rowNumber => `${amountColumnName}${rowNumber}`)),
-        result: grandTotalAmount,
-      };
-      [fr1, fr2].forEach(row => {
-        row.eachCell((cell, colNum) => {
-          cell.font = { bold: true, size: 10, color: { argb: blackArgb } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: totalFillArgb } };
-          cell.border = {
-            top: { style: 'thin', color: { argb: blackArgb } },
-            bottom: { style: 'thin', color: { argb: blackArgb } },
-            left: { style: 'thin', color: { argb: blackArgb } },
-            right: { style: 'thin', color: { argb: blackArgb } }
-          };
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-          if (colNum >= dayStartColumn && colNum < dayStartColumn + dayColCount) {
-            cell.numFmt = dailyTotalCellFormat;
-          }
-          if (colNum >= summaryStartCol && colNum <= summaryStartCol + 2) {
-            cell.numFmt = colNum === summaryStartCol ? manDayCellFormat : moneyNumberFormat;
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-          }
-        });
-      });
-      fr1.height = 28;
-      fr2.height = 28;
-    } else {
-      const fr = ws.addRow(f1);
-      ws.mergeCells(fr.number, 1, fr.number, fixedInfoColumnCount);
-      for (let dayOffset = 0; dayOffset < lastDay; dayOffset++) {
-        const columnIndex = dayStartColumn + dayOffset;
-        const columnName = toExcelColumnName(columnIndex);
-        fr.getCell(columnIndex).value = {
-          formula: makeSumFormula(primaryDataRows.map(rowNumber => `${columnName}${rowNumber}`)),
-          result: dailyTotals[dayOffset],
-        };
-      }
-      const dayStartColumnName = toExcelColumnName(dayStartColumn);
-      const dayEndColumnName = toExcelColumnName(dayStartColumn + lastDay - 1);
-      const amountColumnName = toExcelColumnName(summaryStartCol + 2);
-      fr.getCell(summaryStartCol).value = {
-        formula: `SUM(${dayStartColumnName}${fr.number}:${dayEndColumnName}${fr.number})`,
-        result: grandTotalDays,
-      };
-      fr.getCell(summaryStartCol + 2).value = {
-        formula: makeSumFormula(primaryDataRows.map(rowNumber => `${amountColumnName}${rowNumber}`)),
-        result: grandTotalAmount,
-      };
-      fr.eachCell((cell, colNum) => {
-        cell.font = { bold: true, size: 10, color: { argb: blackArgb } };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: totalFillArgb } };
-        cell.border = {
-          top: { style: 'thin', color: { argb: blackArgb } },
-          bottom: { style: 'thin', color: { argb: blackArgb } },
-          left: { style: 'thin', color: { argb: blackArgb } },
-          right: { style: 'thin', color: { argb: blackArgb } }
-        };
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        if (colNum >= dayStartColumn && colNum < dayStartColumn + lastDay) {
-          cell.numFmt = dailyTotalCellFormat;
-        }
-        if (colNum >= fixedInfoColumnCount + lastDay + 1 && colNum <= fixedInfoColumnCount + lastDay + 3) {
-          cell.numFmt = colNum === fixedInfoColumnCount + lastDay + 1 ? manDayCellFormat : moneyNumberFormat;
-          cell.alignment = { horizontal: 'right', vertical: 'middle' };
-        }
-      });
-      fr.height = 32;
-    }
-
-    for (let rowNum = 6; rowNum <= ws.rowCount; rowNum++) {
-      ws.getRow(rowNum).height = 18;
-    }
-
-    const tableStartRow = 4;
-    const headerEndRow = isSplitView ? 5 : 4;
-    const tableEndRow = ws.rowCount;
-    const footerStartRow = isSplitView ? tableEndRow - 1 : tableEndRow;
-    const blackBorder = (style: ExcelJS.BorderStyle): Partial<ExcelJS.Border> => ({
-      style,
-      color: { argb: blackArgb }
-    });
-    const setBorderEdge = (
-      cell: ExcelJS.Cell,
-      edge: 'top' | 'bottom' | 'left' | 'right',
-      style: ExcelJS.BorderStyle
-    ) => {
-      cell.border = {
-        ...cell.border,
-        [edge]: blackBorder(style)
-      };
-    };
-
-    // 머리글 아래와 날짜별 공수합계 위는 이중선
-    for (let col = 1; col <= totalColumns; col++) {
-      setBorderEdge(ws.getCell(headerEndRow, col), 'bottom', 'double');
-      setBorderEdge(ws.getCell(footerStartRow, col), 'top', 'double');
-    }
-    if (isSplitView) {
-      // 세로 병합된 머리글/합계 셀은 좌상단 셀에도 경계를 지정해야 Excel에서 안정적으로 표시된다.
-      for (let col = 1; col <= fixedInfoColumnCount; col++) {
-        if (col !== 3) setBorderEdge(ws.getCell(tableStartRow, col), 'bottom', 'double');
-      }
-      for (let col = summaryStartCol; col <= totalColumns; col++) {
-        setBorderEdge(ws.getCell(tableStartRow, col), 'bottom', 'double');
-      }
-      setBorderEdge(ws.getCell(footerStartRow, 1), 'top', 'double');
-    }
-
-    // 표 전체 외곽 테두리를 굵게 표시
-    for (let col = 1; col <= totalColumns; col++) {
-      setBorderEdge(ws.getCell(tableStartRow, col), 'top', 'thick');
-      setBorderEdge(ws.getCell(tableEndRow, col), 'bottom', 'thick');
-    }
-    for (let row = tableStartRow; row <= tableEndRow; row++) {
-      setBorderEdge(ws.getCell(row, 1), 'left', 'thick');
-      setBorderEdge(ws.getCell(row, totalColumns), 'right', 'thick');
-    }
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buffer]), `노무내역서_${siteNameInput || '전체'}_${month}.xlsx`);
-  }, [rows, month, statementTitle, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName, isSplitView, masterBank, masterOwner, masterAccount, pagePrimaryAccount]);
+    await downloadLaborStatementWorkbook([activeDocument], `노무내역서_${activeDocument.siteNameInput || '전체'}_${month}.xlsx`);
+  };
   const statementSummary = useMemo(() => {
     const visibleLastDay = getMonthLastDay(month);
     let totalDays = 0;
@@ -1641,10 +1157,16 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   return (
     <div className="labor-statement-page flex flex-col h-full bg-[#f8fafc] text-slate-800 font-sans">
       <style>{`
+        /* html2canvas uses a hidden 1px image to measure text. Tailwind's block image reset shifts its baseline. */
+        body > div[style*="visibility: hidden"] > img[width="1"][height="1"] { display: inline-block !important; }
         @media screen {
           .labor-statement-toolbar > div { height: auto; min-height: 56px; flex-wrap: wrap; padding-block: 12px; }
           .labor-statement-toolbar > div > div,
           .labor-statement-toolbar > div > div > div { min-width: 0; max-width: 100%; flex-wrap: wrap; }
+        }
+        @media screen and (max-width: 767px), screen and (max-height: 600px) {
+          .labor-statement-page { height: auto; min-height: 100%; }
+          .labor-statement-shell { flex: none; height: 70dvh; min-height: 360px; }
         }
         @media print {
           @page {
@@ -1740,13 +1262,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 <FileText className="w-6 h-6" />
               </div>
               <h1 className="text-xl font-extrabold text-slate-900 tracking-tight whitespace-nowrap">명세서 생성기</h1>
+              {source && <button type="button" onClick={source.onClose} aria-label="노임명세서 닫기" className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold">명세서 접기</button>}
             </div>
             <div className="hidden sm:block h-6 w-px bg-slate-200 mx-2"></div>
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm transition-colors hover:border-indigo-300">
                 <button
                   type="button"
-                  onClick={() => setMonth((current) => shiftYearMonth(current, -1))}
+                  onClick={() => changeMonth(shiftYearMonth(month, -1))}
                   className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   aria-label="이전 달"
                   title="이전 달"
@@ -1755,14 +1278,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 </button>
                 <div className="flex items-center gap-2 px-2 py-1">
                   <Calendar className="w-4 h-4 text-slate-500" />
-                  <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
+                  <input type="month" value={month} onChange={(e) => { if (!source || toYearMonth(e.target.value)) changeMonth(e.target.value); }}
                     className="bg-transparent text-sm font-bold text-slate-800 outline-none w-[130px] cursor-pointer"
                     aria-label="선택 월"
                   />
                 </div>
                 <button
                   type="button"
-                  onClick={() => setMonth((current) => shiftYearMonth(current, 1))}
+                  onClick={() => changeMonth(shiftYearMonth(month, 1))}
                   className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white hover:text-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   aria-label="다음 달"
                   title="다음 달"
@@ -1807,7 +1330,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                       </div>
                     </div>
                     <div role="listbox" aria-label="현장 목록" className="max-h-64 overflow-y-auto p-1.5">
-                      <button
+                      {!source && <button
                         type="button"
                         role="option"
                         aria-selected={selectedSiteId === 'ALL'}
@@ -1821,7 +1344,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                         }`}
                       >
                         전체 통합
-                      </button>
+                      </button>}
                       {filteredReportSites.map((site) => (
                         <button
                           key={site.id}
@@ -1922,14 +1445,18 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 />
                 <span className="text-sm font-bold text-slate-700">전체 위임</span>
               </label>
-              {loadingWorkerDb && <span role="status" className="text-sm text-slate-500">직불 정보 불러오는 중…</span>}
+                {source && <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input type="checkbox" checked={showBillingColumns} onChange={e => setShowBillingColumns(e.target.checked)} />
+                  청구단가/청구금액 표시
+                </label>}
+                {loadingWorkerDb && <span role="status" className="text-sm text-slate-500">직불 정보 불러오는 중…</span>}
               {workerDbError && <span role="alert" className="text-sm text-red-600">{workerDbError}</span>}
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 bg-white px-2 py-1 rounded-lg border border-slate-200 shadow-sm">
               <span className="text-xs font-bold text-slate-500 px-1">단가 일괄</span>
-              <input type="text" value={formatComma(globalRate)} onChange={e => setGlobalRate(Number(parseComma(e.target.value)))}
+              <input type="text" aria-label="일괄 단가" value={formatComma(globalRate)} onChange={e => setGlobalRate(Number(parseComma(e.target.value)))}
                 className="w-24 text-right text-sm font-bold bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
               />
               <button onClick={handleApplyGlobalRate} className="px-3 py-1 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded text-xs font-bold transition-colors">적용</button>
@@ -1965,6 +1492,29 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             <span className="text-xl font-black text-slate-800 tabular-nums leading-none mt-0.5">{statementSummary.totalAmount.toLocaleString()}<span className="text-xs font-medium text-slate-400 ml-1">원</span></span>
           </div>
         </div>
+        {source?.renderTools({
+          documents, activeIndex: source.sheets.findIndex(sheet => sheet.id === activeSheet?.id), sheetRef: printRootRef,
+          accountReady: () => ensurePagePrimaryAccountReady(pagePrimaryAccount), accountsLoaded: !pagePrimaryAccount.loading,
+          dbPayType: useWorkerMasterPayType, appliedRate: appliedRates[draftKey] ?? 0,
+          applyViewOptions: async options => {
+            setShowBankColumn(options.showBankColumn);
+            setShowBillingColumns(options.showBillingColumns);
+            setShowBankUnderAddress(options.showBankUnderAddress);
+            setShowTeamUnderName(options.showTeamUnderName);
+            setIsSplitView(options.isSplitView);
+            if (options.useWorkerMasterPayType !== useWorkerMasterPayType) await handleUseWorkerMasterPayTypeChange(options.useWorkerMasterPayType);
+            if (options.unitPriceOverride > 0) {
+              setGlobalRate(options.unitPriceOverride);
+              setRows(current => current.map(row => row.workerName ? { ...row, unitPrice: String(options.unitPriceOverride) } : row));
+            } else if (appliedRates[draftKey]) {
+              setRows(current => current.map(row => {
+                const original = baseRows.find(item => item.id === row.id && item.workerId === row.workerId);
+                return original ? { ...row, unitPrice: original.unitPrice } : row;
+              }));
+            }
+            setAppliedRates(current => ({ ...current, [draftKey]: options.unitPriceOverride }));
+          },
+        })}
         {payTypeAutoWarnings.length > 0 && (
           <div className="border-t border-amber-200 bg-amber-50 px-6 py-2 text-xs font-bold text-amber-800">
             <div className="flex items-start gap-2">
@@ -1991,7 +1541,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 className={`labor-statement-preview-surface w-full ${showBankColumn ? 'with-bank' : 'without-bank'}`}
                 style={{ ['--statement-print-scale' as string]: String(printScale) }}
               >
-                <div ref={printRootRef} className="labor-statement-print-root labor-statement-print-sheet">
+                <div ref={printRootRef} data-statement-capture={source ? 'true' : undefined} className="labor-statement-print-root labor-statement-print-sheet">
             <div className="labor-statement-print-header mb-6 flex flex-col gap-4 lg:grid lg:grid-cols-[350px_1fr_350px] lg:items-end" style={{ width: '100%', minWidth: `${previewSurfaceMinWidth}px` }}>
               <div className="hidden lg:block" />
               <div className="text-center">
@@ -2043,8 +1593,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   ))}
                   {hasSplitSpacerColumn && <th className={`${getStatementDayHeaderClass(primaryDayNumbers.length + 1)} ${widthClassByColumn.day}`}></th>}
                   <th className={`${getStatementHeaderCellClass('summary')} ${widthClassByColumn.total}`} rowSpan={isSplitView ? 2 : 1}>출역합계</th>
-                  <th className={`${getStatementHeaderCellClass('rate')} ${widthClassByColumn.unitPrice}`} rowSpan={isSplitView ? 2 : 1}>단가</th>
-                  <th className={`${getStatementHeaderCellClass('amount')} ${widthClassByColumn.amount}`} rowSpan={isSplitView ? 2 : 1}>인건비총액</th>
+                  <th hidden={!showBillingColumns} className={`${getStatementHeaderCellClass('rate')} ${widthClassByColumn.unitPrice}`} rowSpan={isSplitView ? 2 : 1}>단가</th>
+                  <th hidden={!showBillingColumns} className={`${getStatementHeaderCellClass('amount')} ${widthClassByColumn.amount}`} rowSpan={isSplitView ? 2 : 1}>인건비총액</th>
                   {showBankColumn && <th className={`${getStatementHeaderCellClass('bank')} ${widthClassByColumn.bank}`} rowSpan={isSplitView ? 2 : 1}>계좌번호 / 지급구분</th>}
                 </tr>
                 {isSplitView && (
@@ -2108,7 +1658,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                         const value = row.days[dayIndex] ?? '';
                         return (
                           <td key={dayNumber} className="border-r border-black p-0">
-                            <input type="text" value={value}
+                            <input type="text" aria-label={`${row.workerName || row.id} ${dayNumber}일 공수`} value={value}
                               onChange={e => {
                                 const newDays = [...row.days];
                                 newDays[dayIndex] = e.target.value;
@@ -2121,12 +1671,12 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                       })}
                       {hasSplitSpacerColumn && <td className="border-r border-black bg-slate-50"></td>}
                       <td className="border-r border-black text-center text-xs font-black text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{formatManDay(sumDaysForMonth(row.days, statementLastDay))}</td>
-                      <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
-                        <input type="text" value={formatComma(row.unitPrice)} onChange={e => updateRow(row.id, { unitPrice: parseComma(e.target.value) })}
+                      <td hidden={!showBillingColumns} className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
+                        <input type="text" aria-label={`${row.workerName || row.id} 단가`} value={formatComma(row.unitPrice)} onChange={e => updateRow(row.id, { unitPrice: parseComma(e.target.value) })}
                           className="w-full h-full min-h-[30px] px-2 text-right text-[10px] font-bold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 leading-tight"
                         />
                       </td>
-                      <td className="border-r border-black text-right px-2 text-xs font-black text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{getRowTotalAmount(row, statementLastDay).toLocaleString()}</td>
+                      <td hidden={!showBillingColumns} className="border-r border-black text-right px-2 text-xs font-black text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{getRowTotalAmount(row, statementLastDay).toLocaleString()}</td>
                       {showBankColumn && (
                         <td className={`border-black p-1 border-l ${row.payType === 'delegate' ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
                           <div className="flex flex-col gap-1 h-full justify-center">
@@ -2152,7 +1702,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                           const value = row.days[dayIndex] ?? '';
                           return (
                             <td key={dayNumber} className="border-r border-black p-0">
-                              <input type="text" value={value}
+                              <input type="text" aria-label={`${row.workerName || row.id} ${dayNumber}일 공수`} value={value}
                                 onChange={e => {
                                   const newDays = [...row.days];
                                   newDays[dayIndex] = e.target.value;
@@ -2185,10 +1735,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   <td className="border border-black p-0 text-center text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
                     <div className={`flex items-center justify-center px-2 ${footerSpanningRowHeightClass}`}>{formatManDay(statementSummary.totalDays)}</div>
                   </td>
-                  <td className="border border-black p-0 text-center bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
+                  <td hidden={!showBillingColumns} className="border border-black p-0 text-center bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
                     <div className={`${footerSpanningRowHeightClass}`}></div>
                   </td>
-                  <td className="border border-black p-0 text-right text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
+                  <td hidden={!showBillingColumns} className="border border-black p-0 text-right text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
                     <div className={`flex items-center justify-end px-2 ${footerSpanningRowHeightClass}`}>{statementSummary.totalAmount.toLocaleString()}</div>
                   </td>
                   {showBankColumn && (

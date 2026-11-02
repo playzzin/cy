@@ -243,6 +243,14 @@ export const loadLaborStatementPresetDefaults = (
     }
 };
 
+export const loadSavedLaborStatementPreset = (preset: StatementIssueOptionPreset): SharedLaborStatementDefaults | undefined => {
+    try {
+        return window.localStorage.getItem(getIssuePresetStorageKey(preset)) ? loadLaborStatementPresetDefaults(preset) : undefined;
+    } catch {
+        return undefined;
+    }
+};
+
 export const saveLaborStatementPresetDefaults = (
     preset: StatementIssueOptionPreset,
     nextDefaults: Partial<SharedLaborStatementDefaults>
