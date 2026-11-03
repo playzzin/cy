@@ -7,6 +7,7 @@ export type RentalWorkType = 'shoring' | 'scaffold';
 
 export interface RentalMaterialRate {
     materialId: string;
+    workType?: RentalWorkType;
     materialKey?: string;
     category: string;
     itemName: string;
@@ -51,6 +52,7 @@ const normalizeWorkTypeText = (value: unknown): string =>
 
 export const isRentalRateInWorkType = (rate: RentalMaterialRate, workType?: RentalWorkType): boolean => {
     if (!workType) return true;
+    if (rate.workType) return rate.workType === workType;
 
     const text = normalizeWorkTypeText(`${rate.category} ${rate.itemName} ${rate.spec} ${rate.materialKey || ''}`);
     if (workType === 'shoring') {
@@ -119,33 +121,30 @@ const shuffle = <T,>(rows: T[]): T[] => {
 const getLineUnitAmount = (rate: RentalMaterialRate, usageDays: number): number => {
     const base = Math.max(0, Math.round(rate.baseFee || 0));
     const daily = Math.max(0, Math.round(rate.dailyFee || 0));
-    return Math.max(1, base + (Math.max(1, Math.round(usageDays)) * daily));
+    return base + (Math.max(1, Math.round(usageDays)) * daily);
 };
 
 const getMaxQuantity = (rate: RentalMaterialRate): number =>
     Math.max(1, Math.round(rate.maxQuantity || 1));
 
-const createRentalItem = (
+export const createRentalItem = (
     rate: RentalMaterialRate,
     quantity: number,
     usageDays: number,
-    issueDate: string,
-    baseFee = rate.baseFee,
-    dailyFee = rate.dailyFee,
-    note = ''
+    issueDate: string
 ): EstimateItem => {
     const label = [rate.itemName, rate.spec].filter(Boolean).join(' ');
     return createItem({
         category: rate.category,
-        section: label || rate.itemName,
-        label: label || rate.itemName,
+        section: rate.workType ? rate.itemName : label,
+        ...(rate.workType ? { rentalSpec: rate.spec } : {}),
+        label: rate.workType ? rate.itemName : label,
         unit: rate.unit || 'EA',
         quantity,
-        finalUnitPrice: Math.max(0, Math.round(baseFee)),
-        rentalUnitPrice: Math.max(0, Math.round(dailyFee)),
+        finalUnitPrice: Math.max(0, Math.round(rate.baseFee)),
+        rentalUnitPrice: Math.max(0, Math.round(rate.dailyFee)),
         period: Math.max(1, Math.round(usageDays)),
         itemDate: issueDate,
-        note: sanitizeText(note),
     } as Partial<EstimateItem>);
 };
 

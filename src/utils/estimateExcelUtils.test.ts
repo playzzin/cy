@@ -120,7 +120,8 @@ describe('downloadEstimateExcel', () => {
         };
         const item = createItem({
             category: '시스템 동바리',
-            section: '수직재 1900',
+            section: '동바리 수직재',
+            rentalSpec: 'P-17',
             unit: 'EA',
             quantity: 2,
             finalUnitPrice: 1000,
@@ -158,6 +159,10 @@ describe('downloadEstimateExcel', () => {
         expect(sheet!.getCell('G14').value).toBe('사용 일수');
         expect(sheet!.getCell('K14').value).toBe('합     계');
         expect(sheet!.getRow(15).height).toBe(22.5);
+        expect(sheet!.getCell('C15').value).toBe('동바리 수직재 P-17');
+        expect(sheet!.getCell('E15').value).toBe(2);
+        expect(sheet!.getCell('F15').value).toBe(1000);
+        expect(sheet!.getCell('H15').value).toBe(100);
         expect(sheet!.getCell('I15').result).toBe(4000);
         expect(sheet!.getCell('J15').result).toBe(400);
         expect(sheet!.getCell('K15').result).toBe(4400);

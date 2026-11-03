@@ -67,6 +67,7 @@ export const createItem = (input: Partial<EstimateItem> = {}): EstimateItem => (
     category: input.category || '',
     section: input.section || '',
     label: input.label || input.section || '',
+    ...(input.rentalSpec !== undefined ? { rentalSpec: input.rentalSpec } : {}),
     unit: input.unit || '',
     quantity: input.quantity || 0,
     finalUnitPrice: input.finalUnitPrice || 0,

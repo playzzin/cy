@@ -980,7 +980,7 @@ const downloadReferenceTransactionExcel = async (
         const lineTotal = supplyAmount + taxAmount;
         const rentalInputValues = [
             item?.itemDate || '',
-            item?.section || item?.label || item?.category || '',
+            [item?.section || item?.label || item?.category, item?.rentalSpec].filter(Boolean).join(' '),
             item?.unit || '',
             hasItem ? (quantity || null) : null,
             hasItem ? (baseFee || null) : null,

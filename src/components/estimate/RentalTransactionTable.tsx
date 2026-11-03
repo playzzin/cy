@@ -20,7 +20,7 @@ const formatEditableCurrency = (value: number | null | undefined): string => (
     value ? formatCurrency(value) : ''
 );
 
-export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit, updateItem, setDraft }: any) => {
+export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit, updateItem, setDraft, showSpec = false }: any) => {
     const inputStyle: React.CSSProperties = {
         width: '100%',
         border: 'none',
@@ -49,7 +49,8 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
             <table style={{ width: '100%', minWidth: isEdit ? '1320px' : '1265px', margin: '0 auto', borderCollapse: 'collapse', tableLayout: 'fixed', whiteSpace: 'nowrap' }}>
                 <colgroup>
                     <col style={{ width: '110px' }} />
-                    <col style={{ width: '230px' }} />
+                    <col style={{ width: showSpec ? '125px' : '230px' }} />
+                    {showSpec && <col style={{ width: '105px' }} />}
                     <col style={{ width: '65px' }} />
                     <col style={{ width: '75px' }} />
                     <col style={{ width: '100px' }} />
@@ -65,11 +66,12 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
                     <tr style={{ height: 'calc(34px + var(--estimate-table-row-offset, 0px))' }}>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>날짜</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>품목</th>
+                        {showSpec && <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>규격</th>}
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단위</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>수량</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>기본료</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>사용일수</th>
-                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단가</th>
+                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>일단가</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>공급가</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>부가세</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>합계</th>
@@ -92,9 +94,14 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
                                 </td>
                                 <td style={cellStyle({ border: BORDER_THIN, textAlign: 'left', padding: '4px 6px' })}>
                                     {isEdit ? (
-                                        <input value={item.section || item.label || ''} onChange={e => updateItem(item.id, 'section', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} placeholder="품목/규격" />
-                                    ) : (item.section || item.label || '')}
+                                        <input value={item.section || item.label || ''} onChange={e => updateItem(item.id, 'section', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} placeholder={showSpec ? '품목' : '품목/규격'} />
+                                    ) : [item.section || item.label, !showSpec && item.rentalSpec].filter(Boolean).join(' ')}
                                 </td>
+                                {showSpec && (
+                                    <td style={cellStyle({ border: BORDER_THIN, padding: '4px' })}>
+                                        {isEdit ? <input value={item.rentalSpec || ''} onChange={e => updateItem(item.id, 'rentalSpec', e.target.value)} style={inputStyle} placeholder="규격" /> : item.rentalSpec}
+                                    </td>
+                                )}
                                 <td style={cellStyle({ border: BORDER_THIN, padding: '4px' })}>
                                     {isEdit ? (
                                         <>
@@ -163,14 +170,14 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
                     })}
                     {!isEdit && Array.from({ length: Math.max(0, 15 - itemsWithCalc.length) }).map((_, i) => (
                         <tr key={`rental-empty-${i}`} style={{ height: 'calc(28px + var(--estimate-table-row-offset, 0px))' }}>
-                            {Array.from({ length: 11 }).map((__, col) => (
-                                <td key={col} style={cellStyle({ border: BORDER_THIN, ...(col === 10 ? noteColumnStyle : {}) })}></td>
+                            {Array.from({ length: showSpec ? 12 : 11 }).map((__, col) => (
+                                <td key={col} style={cellStyle({ border: BORDER_THIN, ...(col === (showSpec ? 11 : 10) ? noteColumnStyle : {}) })}></td>
                             ))}
                         </tr>
                     ))}
                     {isEdit && (
                         <tr style={{ height: 'calc(34px + var(--estimate-table-row-offset, 0px))', backgroundColor: '#f8fafc' }}>
-                            <td colSpan={11} style={cellStyle({ border: BORDER_THIN, padding: '0' })}>
+                            <td colSpan={showSpec ? 12 : 11} style={cellStyle({ border: BORDER_THIN, padding: '0' })}>
                                 <button
                                     onClick={() => setDraft((d: any) => ({ ...d, items: [...d.items, createItem({ category: '임대자재', section: '', unit: 'EA', period: draft.items?.[0]?.period || 26 })] }))}
                                     style={{ width: '100%', height: '100%', background: 'transparent', color: '#6366f1', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: 'calc(11pt + var(--estimate-font-size-offset, 0pt))' }}

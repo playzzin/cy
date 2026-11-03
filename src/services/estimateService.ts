@@ -45,6 +45,7 @@ export interface EstimateItem {
     itemDate?: string;
 
     // --- 추가 필드 (임대료 방식) ---
+    rentalSpec?: string;
     laborUnitPrice?: number;    // 인건비 단가
     rentalUnitPrice?: number;   // 임대료 단가
     period?: number;            // 기 (기간)
@@ -184,6 +185,7 @@ export const normalizeEstimateItem = (raw: Partial<EstimateItem> | any): Estimat
     };
 
     if (height !== null) item.height = height;
+    if (typeof raw?.rentalSpec === 'string') item.rentalSpec = raw.rentalSpec;
     if (point !== null) item.point = point;
     if (raw?.calculationType) item.calculationType = String(raw.calculationType);
     if (raw?.length !== undefined && raw?.length !== null) item.length = toNumber(raw.length);

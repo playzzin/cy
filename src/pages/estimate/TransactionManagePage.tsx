@@ -9,8 +9,9 @@ import { estimateService, Estimate, EstimateStatus } from '../../services/estima
 import { companyFirestoreService } from '../../services/companyFirestoreService';
 import { CompanyZod } from '../../types/zod/companySchema';
 import Swal from 'sweetalert2';
-import materialService from '../../services/materialService';
-import { Material } from '../../types/materials';
+import { loadRentalCatalog, saveRentalCatalog, RentalCatalogEntry, RentalCatalogSnapshot } from '../../services/rentalCatalogService';
+import RentalCatalogSettings from '../../components/estimate/RentalCatalogSettings';
+import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 
 import { 
     getEmptyDraft, PRINT_STYLES, LOGO_FALLBACK,
@@ -25,12 +26,10 @@ import { SupplierInfoPanel } from '../../components/estimate/SupplierInfoPanel';
 import { downloadEstimateExcel } from '../../utils/estimateExcelUtils';
 import {
     calculateRentalLineAmount,
+    createRentalItem,
     generateRentalTransactionItems,
-    isRentalRateInWorkType,
-    mergeRentalRatesWithMaterials,
     RentalAmountBasis,
     RentalGenerationResult,
-    RentalMaterialRate,
     RentalWorkType
 } from '../../utils/rentalTransactionGenerator';
 
@@ -42,32 +41,9 @@ const STATUS_CONFIG: Record<EstimateStatus, { label: string; color: string; bg: 
     rejected: { label: '반려', color: 'text-rose-600', bg: 'bg-rose-100', icon: faTimesCircle }
 };
 
-const RENTAL_RATE_STORAGE_KEY = 'cy-transaction-rental-material-rates-v1';
 const RENTAL_WORK_TYPE_LABELS: Record<RentalWorkType, string> = {
     shoring: '시스템동바리',
     scaffold: '시스템비계',
-};
-
-const readStoredRentalRates = (): RentalMaterialRate[] => {
-    if (typeof window === 'undefined') return [];
-    try {
-        const raw = window.localStorage.getItem(RENTAL_RATE_STORAGE_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
-        console.warn('[TransactionManagePage] rental rate settings load failed:', error);
-        return [];
-    }
-};
-
-const writeStoredRentalRates = (rates: RentalMaterialRate[]) => {
-    if (typeof window === 'undefined') return;
-    try {
-        window.localStorage.setItem(RENTAL_RATE_STORAGE_KEY, JSON.stringify(rates));
-    } catch (error) {
-        console.warn('[TransactionManagePage] rental rate settings save failed:', error);
-    }
 };
 
 const parseMoneyInput = (value: string): number => {
@@ -85,16 +61,19 @@ const TransactionManagePage: React.FC = () => {
     const [searchText, setSearchText] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | EstimateStatus>('all');
     const [logoUrl, setLogoUrl] = useState<string>('');
-    const [rentalMaterials, setRentalMaterials] = useState<Material[]>([]);
-    const [rentalRates, setRentalRates] = useState<RentalMaterialRate[]>([]);
+    const [catalog, setCatalog] = useState<RentalCatalogSnapshot | null>(null);
+    const [catalogError, setCatalogError] = useState('');
+    const [catalogLoadKey, setCatalogLoadKey] = useState(0);
+    const [catalogSaving, setCatalogSaving] = useState(false);
+    const [selectedMaterialId, setSelectedMaterialId] = useState('');
     const [rentalSettingsOpen, setRentalSettingsOpen] = useState(false);
-    const [rentalRateSearch, setRentalRateSearch] = useState('');
     const [rentalWorkType, setRentalWorkType] = useState<RentalWorkType>('shoring');
     const [rentalTargetAmount, setRentalTargetAmount] = useState('');
     const [rentalAmountBasis, setRentalAmountBasis] = useState<RentalAmountBasis>('supply');
     const [rentalUsageDays, setRentalUsageDays] = useState(26);
     const [rentalRowCount, setRentalRowCount] = useState(10);
     const [lastRentalGeneration, setLastRentalGeneration] = useState<RentalGenerationResult | null>(null);
+    const isRentalTransaction = draft.estimateMode === 'rental';
 
     // 엑셀 다운로드 핸들러
     const handleExcelDownload = async () => {
@@ -160,24 +139,31 @@ const TransactionManagePage: React.FC = () => {
 
     useEffect(() => { loadData(); }, []);
 
-    const loadRentalMaterials = async () => {
+    useEffect(() => {
+        if (!isRentalTransaction) return;
+        let cancelled = false;
+        setCatalog(null);
+        setCatalogError('');
+        loadRentalCatalog().then((loaded) => {
+            if (cancelled) return;
+            setCatalog(loaded);
+            if (loaded.revision === 0) setRentalSettingsOpen(true);
+        }).catch((error) => {
+            if (!cancelled) setCatalogError(error instanceof Error ? error.message : '임대거래자재를 불러오지 못했습니다.');
+        });
+        return () => { cancelled = true; };
+    }, [isRentalTransaction, catalogLoadKey]);
+
+    const saveCatalog = async (entries: RentalCatalogEntry[]) => {
+        if (!catalog) throw new Error('임대거래자재를 다시 불러와 주세요.');
+        setCatalogSaving(true);
         try {
-            const materials = await materialService.getUniqueMaterialsForSelection();
-            const mergedRates = mergeRentalRatesWithMaterials(materials, readStoredRentalRates());
-            setRentalMaterials(materials);
-            setRentalRates(mergedRates);
-        } catch (error) {
-            console.error('Failed to load rental materials:', error);
+            setCatalog(await saveRentalCatalog(entries, catalog.revision));
+            setLastRentalGeneration(null);
+        } finally {
+            setCatalogSaving(false);
         }
     };
-
-    useEffect(() => { loadRentalMaterials(); }, []);
-
-    useEffect(() => {
-        if (rentalRates.length > 0) {
-            writeStoredRentalRates(rentalRates);
-        }
-    }, [rentalRates]);
 
     // 계산 로직
     const itemsWithCalc = useMemo(() => draft.items.map(item => {
@@ -209,6 +195,7 @@ const TransactionManagePage: React.FC = () => {
             if (idx === -1) return d;
             const updated = { ...n[idx], [field]: val };
             if (field === 'finalUnitPrice') updated.unitPrice = val;
+            if (field === 'section' && d.estimateMode === 'rental') updated.label = val;
             n[idx] = updated;
             return { ...d, items: n };
         });
@@ -307,31 +294,18 @@ const TransactionManagePage: React.FC = () => {
         });
     }, [estimates, searchText, statusFilter]);
 
-    const isRentalTransaction = draft.estimateMode === 'rental';
+    const rentalRatesForSelectedWorkType = catalog?.entries.filter(rate => rate.workType === rentalWorkType) ?? [];
+    const activeRentalRates = rentalRatesForSelectedWorkType.filter(rate => rate.active && !rate.dailyFeeMissing);
+    const selectedRentalRate = activeRentalRates.find(rate => rate.materialId === selectedMaterialId);
+    const catalogReady = Boolean(catalog && catalog.revision > 0);
 
-    const rentalRatesForSelectedWorkType = useMemo(() => (
-        rentalRates.filter((rate) => isRentalRateInWorkType(rate, rentalWorkType))
-    ), [rentalRates, rentalWorkType]);
-
-    const filteredRentalRates = useMemo(() => {
-        const keyword = rentalRateSearch.trim().toLowerCase();
-        if (!keyword) return rentalRatesForSelectedWorkType;
-        return rentalRatesForSelectedWorkType.filter((rate) => (
-            `${rate.category} ${rate.itemName} ${rate.spec} ${rate.unit}`.toLowerCase().includes(keyword)
-        ));
-    }, [rentalRatesForSelectedWorkType, rentalRateSearch]);
-
-    const rentalActiveCount = rentalRatesForSelectedWorkType.filter((rate) => rate.active !== false).length;
-
-    const updateRentalRate = (materialId: string, field: keyof RentalMaterialRate, value: any) => {
-        setRentalRates((prev) => prev.map((rate) => (
-            rate.materialId === materialId ? { ...rate, [field]: value } : rate
-        )));
-    };
-
-    const resetRentalRatesFromMaster = () => {
-        const next = mergeRentalRatesWithMaterials(rentalMaterials, []);
-        setRentalRates(next);
+    const insertRentalItem = (rate: RentalCatalogEntry) => {
+        if (!catalogReady || !activeRentalRates.some(entry => entry.materialId === rate.materialId)) return;
+        setDraft(prev => ({
+            ...prev,
+            items: [...prev.items, createRentalItem(rate, rate.quantity, rentalUsageDays, prev.issueDate)],
+        }));
+        setSelectedMaterialId('');
         setLastRentalGeneration(null);
     };
 
@@ -351,12 +325,12 @@ const TransactionManagePage: React.FC = () => {
             Swal.fire('알림', '자동 생성할 목표 금액을 입력해주세요.', 'warning');
             return;
         }
-        if (rentalActiveCount === 0) {
+        if (!catalogReady || !activeRentalRates.length) {
             Swal.fire('알림', `${RENTAL_WORK_TYPE_LABELS[rentalWorkType]} 자재를 1개 이상 선택해주세요.`, 'warning');
             return;
         }
 
-        const result = generateRentalTransactionItems(rentalRates, {
+        const result = generateRentalTransactionItems(activeRentalRates, {
             targetAmount,
             amountBasis: rentalAmountBasis,
             usageDays: rentalUsageDays,
@@ -504,9 +478,9 @@ const TransactionManagePage: React.FC = () => {
                                 <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <h2 className="text-[18px] font-black text-slate-900">임대 금액 자동 생성</h2>
+                                            <h2 className="text-[18px] font-black text-slate-900">임대거래자재</h2>
                                             <span className="rounded-lg bg-amber-100 px-2 py-1 text-[14px] font-black text-amber-700">
-                                                사용 {rentalActiveCount} / 선택 {rentalRatesForSelectedWorkType.length}
+                                                사용 {activeRentalRates.length} / 전체 {rentalRatesForSelectedWorkType.length}
                                             </span>
                                         </div>
                                         {lastRentalGeneration && (
@@ -527,6 +501,7 @@ const TransactionManagePage: React.FC = () => {
                                                 value={rentalWorkType}
                                                 onChange={e => {
                                                     setRentalWorkType(e.target.value as RentalWorkType);
+                                                    setSelectedMaterialId('');
                                                     setLastRentalGeneration(null);
                                                 }}
                                                 className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[17px] font-bold outline-none focus:border-amber-500"
@@ -583,107 +558,53 @@ const TransactionManagePage: React.FC = () => {
                                                 onClick={() => setRentalSettingsOpen(open => !open)}
                                                 className="h-10 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-[15px] font-black text-slate-600 transition hover:border-amber-400 hover:text-amber-700"
                                             >
-                                                단가 설정
+                                                자재 설정
                                             </button>
                                             <button
                                                 onClick={applyRentalGeneration}
-                                                className="h-10 flex-1 rounded-lg bg-amber-600 px-3 text-[15px] font-black text-white shadow-sm transition hover:bg-amber-700"
+                                                disabled={!catalogReady || activeRentalRates.length === 0}
+                                                className="h-10 flex-1 rounded-lg bg-amber-600 px-3 text-[15px] font-black text-white shadow-sm transition hover:bg-amber-700 disabled:opacity-50"
                                             >
-                                                적용
+                                                자동 생성
                                             </button>
                                         </div>
                                     </div>
                                 </div>
 
-                                {rentalSettingsOpen && (
-                                    <div className="mt-5 border-t border-slate-100 pt-4">
-                                        <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                                            <input
-                                                value={rentalRateSearch}
-                                                onChange={e => setRentalRateSearch(e.target.value)}
-                                                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-[17px] font-bold outline-none focus:border-amber-500 md:max-w-sm"
-                                                placeholder="분류, 품목, 규격 검색"
-                                            />
-                                            <div className="flex gap-2">
-                                                <button
-                                                    onClick={loadRentalMaterials}
-                                                    className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[15px] font-black text-slate-600 hover:border-slate-300"
-                                                >
-                                                    자재 새로고침
-                                                </button>
-                                                <button
-                                                    onClick={resetRentalRatesFromMaster}
-                                                    className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[15px] font-black text-amber-700 hover:bg-amber-100"
-                                                >
-                                                    단가 초기화
-                                                </button>
-                                            </div>
+                                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+                                    <label className="font-bold text-slate-700" htmlFor="rental-catalog-item">거래 품목</label>
+                                    <select id="rental-catalog-item" value={selectedRentalRate?.materialId || ''} disabled={!catalogReady}
+                                        onChange={e => setSelectedMaterialId(e.target.value)}
+                                        className="h-10 max-w-full rounded-lg border border-slate-200 bg-white px-3 font-bold">
+                                        <option value="">품목·규격 선택</option>
+                                        {activeRentalRates.map(rate => <option key={rate.materialId} value={rate.materialId}>{rate.itemName} {rate.spec}</option>)}
+                                    </select>
+                                    <button disabled={!catalogReady || !selectedRentalRate}
+                                        onClick={() => selectedRentalRate && insertRentalItem(selectedRentalRate)}
+                                        className="rounded-lg bg-amber-600 px-3 py-2 font-bold text-white disabled:opacity-50">
+                                        명세표에 추가
+                                    </button>
+                                    <span className="text-sm text-slate-500">등록된 기본 수량과 단가로 한 줄을 추가합니다.</span>
+                                </div>
+                                {!catalog && (catalogError ? (
+                                    <div className="mt-3 text-sm text-rose-700" role="alert">
+                                        {catalogError}
+                                        <button className="ml-3 underline" onClick={() => setCatalogLoadKey(key => key + 1)}>다시 불러오기</button>
+                                    </div>
+                                ) : <p role="status" className="mt-3 text-sm text-slate-500">임대거래자재를 불러오는 중입니다.</p>)}
+                                {catalog && (
+                                    <div hidden={!rentalSettingsOpen}>
+                                        <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                                            <span className="text-sm text-slate-600">{isDevAdminSessionEnabled()
+                                                ? '개발 미리보기 · 설정은 이 브라우저에만 저장됩니다.'
+                                                : '공유 임대거래자재 · 설정 등록과 수정은 관리자 계정으로 가능합니다.'}</span>
+                                            <button disabled={catalogSaving} className="text-sm font-bold text-slate-600 underline" onClick={async () => {
+                                                const choice = await Swal.fire({ title: '설정을 다시 불러올까요?', text: '저장하지 않은 자재 편집은 취소됩니다.', showCancelButton: true, confirmButtonText: '불러오기', cancelButtonText: '취소' });
+                                                if (choice.isConfirmed) setCatalogLoadKey(key => key + 1);
+                                            }}>저장본 다시 불러오기</button>
                                         </div>
-                                        <div className="max-h-[320px] overflow-auto rounded-xl border border-slate-200">
-                                            <table className="w-full min-w-[940px] text-[17px]">
-                                                <thead className="sticky top-0 z-10 bg-slate-100 text-[15px] text-slate-600">
-                                                    <tr>
-                                                        <th className="w-16 px-3 py-2 text-center font-black">사용</th>
-                                                        <th className="px-3 py-2 text-left font-black">분류</th>
-                                                        <th className="px-3 py-2 text-left font-black">품목</th>
-                                                        <th className="px-3 py-2 text-left font-black">규격</th>
-                                                        <th className="w-20 px-3 py-2 text-center font-black">단위</th>
-                                                        <th className="w-28 px-3 py-2 text-right font-black">기본료</th>
-                                                        <th className="w-28 px-3 py-2 text-right font-black">일 단가</th>
-                                                        <th className="w-28 px-3 py-2 text-right font-black">최대수량</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-slate-100">
-                                                    {filteredRentalRates.map((rate) => (
-                                                        <tr key={rate.materialId} className="hover:bg-amber-50/50">
-                                                            <td className="px-3 py-2 text-center">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={rate.active !== false}
-                                                                    onChange={e => updateRentalRate(rate.materialId, 'active', e.target.checked)}
-                                                                    className="h-4 w-4 rounded border-slate-300 text-amber-600"
-                                                                />
-                                                            </td>
-                                                            <td className="px-3 py-2 font-bold text-slate-700">{rate.category}</td>
-                                                            <td className="px-3 py-2 font-black text-slate-900">{rate.itemName}</td>
-                                                            <td className="px-3 py-2 text-slate-600">{rate.spec || '-'}</td>
-                                                            <td className="px-3 py-2 text-center font-bold text-slate-600">{rate.unit}</td>
-                                                            <td className="px-3 py-2">
-                                                                <input
-                                                                    type="number"
-                                                                    value={rate.baseFee}
-                                                                    onChange={e => updateRentalRate(rate.materialId, 'baseFee', Math.max(0, Number(e.target.value) || 0))}
-                                                                    className="h-8 w-full rounded-md border border-slate-200 px-2 text-right font-bold outline-none focus:border-amber-500"
-                                                                />
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                <input
-                                                                    type="number"
-                                                                    value={rate.dailyFee}
-                                                                    onChange={e => updateRentalRate(rate.materialId, 'dailyFee', Math.max(0, Number(e.target.value) || 0))}
-                                                                    className="h-8 w-full rounded-md border border-slate-200 px-2 text-right font-bold outline-none focus:border-amber-500"
-                                                                />
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                <input
-                                                                    type="number"
-                                                                    value={rate.maxQuantity}
-                                                                    onChange={e => updateRentalRate(rate.materialId, 'maxQuantity', Math.max(1, Number(e.target.value) || 1))}
-                                                                    className="h-8 w-full rounded-md border border-slate-200 px-2 text-right font-bold outline-none focus:border-amber-500"
-                                                                />
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                    {filteredRentalRates.length === 0 && (
-                                                        <tr>
-                                                            <td colSpan={8} className="px-3 py-10 text-center text-[17px] font-bold text-slate-400">
-                                                                자재가 없습니다.
-                                                            </td>
-                                                        </tr>
-                                                    )}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                        <RentalCatalogSettings rates={catalog.entries} workType={rentalWorkType} needsRegistration={!catalogReady}
+                                            onSave={saveCatalog} onInsert={insertRentalItem} />
                                     </div>
                                 )}
                             </section>
@@ -693,7 +614,7 @@ const TransactionManagePage: React.FC = () => {
                             <InfoTableComponent draft={draft} isEdit={true} updateDraft={updateDraft} />
                             <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} isTransaction={true} draft={draft} />
                             {isRentalTransaction ? (
-                                <RentalTransactionTable draft={draft} itemsWithCalc={itemsWithCalc} isEdit={true} updateItem={updateItem} setDraft={setDraft} />
+                                <RentalTransactionTable draft={draft} itemsWithCalc={itemsWithCalc} isEdit={true} showSpec={true} updateItem={updateItem} setDraft={setDraft} />
                             ) : (
                                 <TransactionTable draft={draft} itemsWithCalc={itemsWithCalc} isEdit={true} updateItem={updateItem} setDraft={setDraft} />
                             )}
