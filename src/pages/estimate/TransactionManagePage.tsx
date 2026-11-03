@@ -183,7 +183,7 @@ const TransactionManagePage: React.FC = () => {
     const { subtotal, tax, total } = useMemo(() => {
         const baseSub = itemsWithCalc.reduce((sum, item) => sum + (item.amount || 0), 0);
         const taxableSub = Math.max(0, baseSub - (draft.discount || 0));
-        const taxAmt = draft.includeVat ? Math.round(taxableSub * (draft.vatRate / 100)) : 0;
+        const taxAmt = draft.includeVat ? Math.round(taxableSub * draft.vatRate / 100) : 0;
         return { subtotal: baseSub, tax: taxAmt, total: taxableSub + taxAmt };
     }, [itemsWithCalc, draft.includeVat, draft.vatRate, draft.discount]);
 
@@ -335,7 +335,7 @@ const TransactionManagePage: React.FC = () => {
             amountBasis: rentalAmountBasis,
             usageDays: rentalUsageDays,
             rowCount: rentalRowCount,
-            vatRate: draft.vatRate || 10,
+            vatRate: draft.vatRate ?? 10,
             includeVat: draft.includeVat !== false,
             issueDate: draft.issueDate || new Date().toISOString().split('T')[0],
             workType: rentalWorkType,

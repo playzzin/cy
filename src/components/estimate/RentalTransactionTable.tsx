@@ -1,4 +1,5 @@
 import React from 'react';
+import { calculateRentalLineTax } from '../../utils/rentalTransactionGenerator';
 import {
     EXCEL_FONT, BORDER_THIN, BORDER_THICK,
     cellStyle, labelCellStyle, tableWrapperStyle,
@@ -30,7 +31,8 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
         fontSize: 'calc(9pt + var(--estimate-font-size-offset, 0pt))',
         textAlign: 'center'
     };
-    const vatRate = draft.vatRate || 10;
+    const vatRate = draft.includeVat === false ? 0 : (draft.vatRate ?? 10);
+    let previousSupply = 0;
     const noteColumnStyle: React.CSSProperties = {
         position: 'sticky',
         right: isEdit ? '55px' : 0,
@@ -82,7 +84,8 @@ export const RentalTransactionTable = React.memo(({ draft, itemsWithCalc, isEdit
                 <tbody style={{ borderBottom: BORDER_THICK }}>
                     {itemsWithCalc.map((item: any) => {
                         const supplyAmt = item.amount || 0;
-                        const vatAmt = draft.includeVat ? Math.round(supplyAmt * vatRate / 100) : 0;
+                        const vatAmt = calculateRentalLineTax(previousSupply, supplyAmt, vatRate);
+                        previousSupply += supplyAmt;
                         const lineTotal = supplyAmt + vatAmt;
 
                         return (

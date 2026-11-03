@@ -185,6 +185,10 @@ export const calculateRentalLineAmount = (item: Partial<EstimateItem>): number =
     return Math.round(quantity * (baseFee + (usageDays * dailyFee)));
 };
 
+// 누계 사이의 세액 차이를 배분하면 행별 부가세의 합이 문서 세액과 일치한다.
+export const calculateRentalLineTax = (previousSupply: number, lineSupply: number, vatRate: number): number =>
+    Math.round((previousSupply + lineSupply) * vatRate / 100) - Math.round(previousSupply * vatRate / 100);
+
 const getRentalItemUnitAmount = (item: Partial<EstimateItem>): number => {
     const usageDays = Math.max(1, Number(item.period || 1));
     const baseFee = Math.max(0, Number(item.finalUnitPrice || item.unitPrice || 0));
@@ -330,7 +334,7 @@ export const generateRentalTransactionItems = (
         items.push(createRentalAdjustmentItem(remainingAdjustment, options.issueDate));
         subtotal += remainingAdjustment;
     }
-    const tax = options.includeVat ? Math.round(subtotal * (Math.max(0, options.vatRate || 0) / 100)) : 0;
+    const tax = options.includeVat ? Math.round(subtotal * Math.max(0, options.vatRate || 0) / 100) : 0;
     const total = subtotal + tax;
 
     return {

@@ -161,6 +161,12 @@ describe('downloadEstimateExcel', () => {
         expect(sheet!.getRow(15).height).toBe(22.5);
         expect(sheet!.getCell('C15').value).toBe('동바리 수직재 P-17');
         expect(sheet!.getCell('E15').value).toBe(2);
+        expect(sheet!.getCell('E15').numFmt).toBe('#,##0');
+        expect(sheet!.getCell('G15').numFmt).toBe('#,##0');
+        expect(sheet).toMatchObject({ conditionalFormattings: ['E', 'G'].map(column => ({
+            ref: `${column}15:${column}24`,
+            rules: [{ type: 'expression', formulae: [`MOD(ROUND(${column}15,2),1)<>0`], style: { numFmt: { formatCode: '#,##0.0#' } } }],
+        })) });
         expect(sheet!.getCell('F15').value).toBe(1000);
         expect(sheet!.getCell('H15').value).toBe(100);
         expect(sheet!.getCell('I15').result).toBe(4000);
@@ -169,6 +175,29 @@ describe('downloadEstimateExcel', () => {
         expect(sheet!.getCell('I25').formula).toBe('SUM(I15:I24)');
         expect(sheet!.pageSetup.orientation).toBe('landscape');
         expect(sheet!.pageSetup.fitToWidth).toBe(1);
+    });
+
+    it.each([22, 23, 24, 25])('matches the document VAT-inclusive total across %i rental rows', async rowCount => {
+        const supply = 27272727;
+        const amounts = [16, 16, ...Array<number>(rowCount - 3).fill(1000), supply - 32 - (rowCount - 3) * 1000];
+        const items = amounts.map(amount => createItem({ quantity: 1, finalUnitPrice: amount }));
+        const draft = { ...getEmptyDraft('transaction'), estimateMode: 'rental' as const };
+        const tax = Math.round(supply * 0.1);
+        expect(amounts.reduce((sum, amount) => sum + amount + Math.round(amount * 0.1), 0)).toBe(30000001);
+
+        await downloadEstimateExcel(draft, items, supply, tax, supply + tax, 'transaction');
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(await blobToArrayBuffer(mockedSaveAs.mock.calls[0][0] as Blob));
+        const sheet = workbook.getWorksheet('임대거래명세표')!;
+        const totalRow = 15 + rowCount;
+        expect(sheet.getCell('E12').value).toContain('30,000,000');
+        expect(sheet.getCell('J16').formula).toBe('IF(I16="","",ROUND(SUM(I$15:I16)*10/100,0)-SUM(J$14:J15))');
+        expect(sheet.getCell('J16').result).toBe(1);
+        const sumCells = (column: string) => items.reduce((sum, _, index) => sum + Number(sheet.getCell(column + (15 + index)).result), 0);
+        expect(sumCells('J')).toBe(tax);
+        expect(sumCells('K')).toBe(30000000);
+        expect(sheet.getCell('J' + totalRow).result).toBe(tax);
+        expect(sheet.getCell('K' + totalRow).result).toBe(30000000);
     });
 
     it('keeps labor and rental grand totals separate across estimate categories', async () => {

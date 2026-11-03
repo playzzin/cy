@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { calculateRentalLineTax } from './rentalTransactionGenerator';
 import { documentStampService } from '../services/documentStampService';
 import { saveAs } from 'file-saver';
 import { EstimateDraft, formatCurrency, numberToKorean, LOGO_FALLBACK } from './estimateUtils';
@@ -757,7 +758,7 @@ const downloadReferenceTransactionExcel = async (
         ]
     } as unknown as ExcelJS.Fill;
     const outputColumns = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
-    const vatRate = draft.vatRate || 10;
+    const vatRate = isRental ? (draft.vatRate ?? 10) : (draft.vatRate || 10);
     const vatInclusionLabel = draft.includeVat === false ? 'VAT 별도' : 'VAT 포함';
     const { bank, account } = splitBankAccount(draft.supplierAccount);
 
@@ -961,6 +962,15 @@ const downloadReferenceTransactionExcel = async (
 
     const firstItemRow = 15;
     const itemRowCount = Math.max(10, items.length);
+    if (isRental) {
+        for (const column of ['E', 'G']) {
+            const firstCell = column + firstItemRow;
+            worksheet.addConditionalFormatting({
+                ref: `${firstCell}:${column}${firstItemRow + itemRowCount - 1}`,
+                rules: [{ type: 'expression', priority: 1, formulae: [`MOD(ROUND(${firstCell},2),1)<>0`], style: { numFmt: '#,##0.0#' } }],
+            });
+        }
+    }
     let totalSupply = 0;
     let totalTax = 0;
     let totalAmount = 0;
@@ -976,7 +986,9 @@ const downloadReferenceTransactionExcel = async (
         const supplyAmount = isRental
             ? Math.round(quantity * (baseFee + (usageDays * dailyFee)))
             : Math.round(normalizeNumber(item?.amount || quantity * baseFee));
-        const taxAmount = draft.includeVat === false ? 0 : Math.round(supplyAmount * vatRate / 100);
+        const taxAmount = draft.includeVat === false ? 0 : isRental
+            ? calculateRentalLineTax(totalSupply, supplyAmount, vatRate)
+            : Math.round(supplyAmount * vatRate / 100);
         const lineTotal = supplyAmount + taxAmount;
         const rentalInputValues = [
             item?.itemDate || '',
@@ -1012,8 +1024,7 @@ const downloadReferenceTransactionExcel = async (
                 fill: (currentRow - firstItemRow) % 2 === 0 ? colorWhite : colorStripe
             });
             setCellBorder(cell);
-            if (isRental && (index === 3 || index === 5)) cell.numFmt = '#,##0.##';
-            if (isRental && [4, 6, 7, 8, 9].includes(index)) cell.numFmt = '#,##0';
+            if (isRental && index >= 3) cell.numFmt = '#,##0';
             if (!isRental && [3, 4, 5, 6, 7].includes(index)) cell.numFmt = '#,##0';
         });
 
@@ -1025,7 +1036,7 @@ const downloadReferenceTransactionExcel = async (
             worksheet.getCell(`J${currentRow}`).value = {
                 formula: draft.includeVat === false
                     ? `IF(I${currentRow}="","",0)`
-                    : `IF(I${currentRow}="","",ROUND(I${currentRow}*${vatRate / 100},0))`,
+                    : `IF(I${currentRow}="","",ROUND(SUM(I$${firstItemRow}:I${currentRow})*${vatRate}/100,0)-SUM(J$${firstItemRow - 1}:J${currentRow - 1}))`,
                 result: hasItem ? taxAmount : undefined
             };
             worksheet.getCell(`K${currentRow}`).value = {
