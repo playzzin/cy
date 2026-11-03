@@ -5695,7 +5695,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                             disabled={summaryActionsBlocked || saving}
                                                             title={`사용 가능 ${summarySettlementLabels.advance} ${formatNumber(rowAvailableAdvance)}원`}
                                                         >
-                                                            {summarySettlementLabels.advance}사용
+                                                            {summarySettlementLabels.advance}{summaryFilter.mode === '미지급금' && '사용'}
                                                         </button>
                                                     )}
                                                     {canOpenReceiptHistory && (
