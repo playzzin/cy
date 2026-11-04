@@ -1,19 +1,24 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { ChevronLeft, ChevronRight, Download, FileSpreadsheet, Plus, RefreshCw, Save, Wrench } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, FileSpreadsheet, ImagePlus, Plus, RefreshCw, Save, Wrench } from 'lucide-react';
 import type { Vehicle } from '../../types/vehicle';
+import type { Team } from '../../services/teamService';
+import type { Worker } from '../../services/manpowerService';
+import type { OfficeStaff } from '../../services/officeStaffService';
 import { getSupportManagementYearMonth, rememberSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
 import { useIssueNavigationGuard } from '../../pages/taxinvoice/useIssueNavigationGuard';
 import { vehicleRepairService } from './service';
-import { classifyRepairImport, COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, matchRepairVehicles, parseRepairWorkbook, RepairRecord, repairReviewNotes, repairTotal, savedRepairRecord } from './model';
+import { classifyRepairImport, COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, matchRepairVehicles, normalizePlate, parseRepairWorkbook, RepairRecord, repairReviewNotes, repairTotal, savedRepairRecord } from './model';
 import { changeDraftAmount, createRepairDraft, hasRepairDraftChanges, invalidDraftAmounts, parseRepairAmountInput, RepairDraft, repairDraftIssues } from './draft';
+import RepairPhotoImport, { PhotoRow } from './RepairPhotoImport';
+import { resolveRepairVehicle } from './vehicleTeam';
 import './VehicleRepairLedger.css';
 
 const errorText = (error: unknown) => String((error as { code?: string })?.code ?? '').includes('permission-denied')
   ? '정비내역에 접근할 권한이 없습니다. 지원업무 권한을 확인해 주세요.'
   : error instanceof Error ? error.message : '처리하지 못했습니다. 다시 시도해 주세요.';
 const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' });
-const blankRecord = (period: string): RepairRecord => ({ id: `vehicle_repair_${crypto.randomUUID()}`, date: period === today().slice(0, 7) ? today() : `${period}-01`, yearMonth: period, originalDate: '', vehicleId: '', vehiclePlate: '', description: '', driver: '', vendor: '신대지자동차', costs: emptyCosts(), memo: '', issues: [], archived: false, revision: 0 });
+const blankRecord = (period: string, id = `vehicle_repair_${crypto.randomUUID()}`): RepairRecord => ({ id, date: period === today().slice(0, 7) ? today() : `${period}-01`, yearMonth: period, originalDate: '', vehicleId: '', vehiclePlate: '', description: '', driver: '', vendor: '신대지자동차', costs: emptyCosts(), memo: '', issues: [], archived: false, revision: 0 });
 
 function exportCsv(rows: RepairRecord[]) {
   const escape = (value: unknown) => {
@@ -21,8 +26,8 @@ function exportCsv(rows: RepairRecord[]) {
     if (/^[=+@\-\t\r]/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
   };
-  const data = [['정비일', '차량번호', '정비내용', '운전자', '정비업체', ...COST_KEYS.map(key => COST_LABELS[key]), '합계', '비고', '확인사항', '원본 시트', '원본 위치'],
-    ...rows.map(row => [row.date || row.originalDate, row.vehiclePlate, row.description, row.driver, row.vendor, ...COST_KEYS.map(key => row.costs[key]), repairTotal(row), row.memo, row.issues.join(' / '), row.source?.sheet, row.source?.cell])];
+  const data = [['정비일', '차량번호', '배정팀', '정비내용', '운전자', '정비업체', ...COST_KEYS.map(key => COST_LABELS[key]), '합계', '비고', '확인사항', '원본 시트', '원본 위치'],
+    ...rows.map(row => [row.date || row.originalDate, row.vehiclePlate, row.teamName, row.description, row.driver, row.vendor, ...COST_KEYS.map(key => row.costs[key]), repairTotal(row), row.memo, row.issues.join(' / '), row.source?.sheet, row.source?.cell])];
   const url = URL.createObjectURL(new Blob(['\uFEFF' + data.map(row => row.map(escape).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8;' }));
   const link = document.createElement('a'); link.href = url; link.download = `차량_정비내역_${today()}.csv`; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -39,8 +44,8 @@ function AmountInput({ value, raw, label, disabled, onChange }: { value: number 
     onChange={event => onChange(event.target.value)} onBlur={() => setFocused(false)} />;
 }
 
-type Props = { vehicles: Vehicle[]; onBeforeLeaveChange?: (guard: (() => boolean) | null) => void };
-export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: Props) {
+type Props = { vehicles: Vehicle[]; teams?: Team[]; workers?: Worker[]; officeStaff?: OfficeStaff[]; loadingVehicles?: boolean; onBeforeLeaveChange?: (guard: (() => boolean) | null) => void };
+export default function VehicleRepairLedger({ vehicles, teams = [], workers = [], officeStaff = [], loadingVehicles, onBeforeLeaveChange }: Props) {
   const [records, setRecords] = useState<RepairRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -57,24 +62,26 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [focusId, setFocusId] = useState('');
   const [preview, setPreview] = useState<RepairRecord[] | null>(null);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [progress, setProgress] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const lock = useRef(false);
   const loadSequence = useRef(0);
+  const publishingMonth = useRef(false);
   const changedDrafts = useMemo(() => Object.values(drafts).filter(hasRepairDraftChanges), [drafts]);
   const changedIds = useMemo(() => new Set(changedDrafts.map(draft => draft.record.id)), [changedDrafts]);
   const draftCount = changedDrafts.length;
   const pending = useRef({ dirty: false, busy: false });
-  pending.current = { dirty: draftCount > 0, busy };
+  pending.current = { dirty: draftCount > 0 || photoOpen, busy };
 
   const canLeave = useCallback(() => {
     if (pending.current.busy) { window.alert('저장이 끝난 후 이동해 주세요.'); return false; }
     if (pending.current.dirty && !window.confirm('저장하지 않은 정비내역이 있습니다. 변경사항을 취소하고 이동할까요?')) return false;
     pending.current.dirty = false;
-    setDrafts({}); setRowErrors({}); setError('');
+    setPhotoOpen(false); setDrafts({}); setRowErrors({}); setError('');
     return true;
   }, []);
-  useIssueNavigationGuard(draftCount > 0 || busy, canLeave);
+  useIssueNavigationGuard(draftCount > 0 || photoOpen || busy, canLeave);
   useEffect(() => { onBeforeLeaveChange?.(canLeave); return () => onBeforeLeaveChange?.(null); }, [onBeforeLeaveChange, canLeave]);
 
   const refresh = async () => {
@@ -88,15 +95,19 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
   useEffect(() => { void refresh(); return () => { loadSequence.current++; }; }, []);
   useEffect(() => { setPage(1); }, [yearMonth, allPeriods, cost, search, status]);
   useEffect(() => subscribeSupportManagementYearMonth(next => {
-    if (next === yearMonth) return;
+    if (publishingMonth.current || next === yearMonth) return;
     if (canLeave()) { setYearMonth(next); setAllPeriods(false); }
     else rememberSupportManagementYearMonth(yearMonth);
   }), [yearMonth, canLeave]);
   useEffect(() => { if (focusId) document.getElementById(`repair-date-${focusId}`)?.focus(); }, [focusId]);
 
+  const selectMonth = (next: string) => {
+    setYearMonth(next); setAllPeriods(false);
+    publishingMonth.current = true;
+    try { rememberSupportManagementYearMonth(next); } finally { publishingMonth.current = false; }
+  };
   const changeMonth = (next: string) => {
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(next) || !canLeave()) return;
-    setYearMonth(next); setAllPeriods(false); rememberSupportManagementYearMonth(next);
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(next) && canLeave()) selectMonth(next);
   };
   const stepMonth = (offset: number) => {
     const [year, month] = yearMonth.split('-').map(Number);
@@ -115,7 +126,7 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
       if (!allPeriods && row.yearMonth !== yearMonth) return false;
       if (cost && row.costs[cost as CostKey] === null) return false;
       const query = search.replace(/\s/g, '').toLowerCase();
-      return !query || [row.vehiclePlate, row.description, row.driver, row.vendor, row.memo].some(value => value.replace(/\s/g, '').toLowerCase().includes(query));
+      return !query || [row.vehiclePlate, row.teamName || '', row.description, row.driver, row.vendor, row.memo].some(value => value.replace(/\s/g, '').toLowerCase().includes(query));
     }).sort((a, b) => order.get(a.id)! - order.get(b.id)!);
   }, [records, drafts, changedIds, yearMonth, allPeriods, cost, search, status]);
   const invalidAmounts = useMemo(() => new Set(changedDrafts.filter(draft => invalidDraftAmounts(draft).length).map(draft => draft.record.id)), [changedDrafts]);
@@ -143,10 +154,24 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
     setRowErrors(current => { const next = { ...current }; delete next[row.id]; return next; });
     setNotice('');
   };
-  const addRow = () => {
+  const addRow = (row: RepairRecord) => {
     if (lock.current || draftCount >= 100) return;
-    const row = blankRecord(yearMonth);
     setDrafts(current => ({ ...current, [row.id]: createRepairDraft(row) })); setPage(1); setFocusId(row.id); setNotice('');
+  };
+  const lookupVehicle = (plate: string) => resolveRepairVehicle(plate, vehicles, teams, workers, officeStaff);
+  const rowVehicle = (original: RepairRecord, plate: string) => {
+    const link = lookupVehicle(plate);
+    if (original.revision && original.teamName !== undefined && original.vehicleId === link.vehicleId && normalizePlate(original.vehiclePlate) === normalizePlate(plate)) {
+      return { ...link, teamId: original.teamId ?? '', teamName: original.teamName };
+    }
+    return link;
+  };
+  const addPhoto = (photo: PhotoRow) => {
+    const month = photo.date.slice(0, 7);
+    if (!draftCount && !allPeriods && month !== yearMonth) selectMonth(month);
+    addRow({ ...blankRecord(month, photo.id), ...photo });
+    setPhotoOpen(false);
+    setNotice(`${month} 정비내역을 추가했습니다. 상단 저장을 눌러 등록하세요.`);
   };
   const undoRow = (id: string) => {
     setDrafts(current => { const next = { ...current }; delete next[id]; return next; });
@@ -155,7 +180,7 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
   };
   const save = async () => {
     if (lock.current || !draftCount) return;
-    const next = matchRepairVehicles(changedDrafts.map(({ record }) => ({ ...record, yearMonth: record.date.slice(0, 7) })), vehicles);
+    const next = changedDrafts.map(({ record, original }) => ({ ...record, ...rowVehicle(original, record.vehiclePlate), yearMonth: record.date.slice(0, 7) }));
     const errors = Object.fromEntries(changedDrafts.map(draft => [draft.record.id, repairDraftIssues(draft).join(' · ')]).filter(([, value]) => value));
     setRowErrors(errors);
     if (Object.keys(errors).length) { const index = filtered.findIndex(row => errors[row.id]); setPage(Math.floor(Math.max(0, index) / 50) + 1); setError('표에 표시된 입력 항목을 확인해 주세요. 아직 저장되지 않았습니다.'); return; }
@@ -212,7 +237,8 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
         <label className="repair-sticky-toggle"><input type="checkbox" checked={sticky} onChange={event => setSticky(event.target.checked)} /> 목록 고정</label>
         <button type="button" className="repair-export" onClick={() => exportCsv(filtered)} disabled={busy || loading || !filtered.length || draftCount > 0}><Download size={16} /> 엑셀용 CSV</button>
         <button type="button" onClick={() => fileInput.current?.click()} disabled={busy || loading || draftCount > 0 || Boolean(error)}><FileSpreadsheet size={16} /> 엑셀 가져오기</button>
-        <button type="button" onClick={addRow} disabled={busy || loading || status === 'archived' || draftCount >= 100}><Plus size={16} /> 행 추가</button>
+        <button type="button" className="repair-photo-action" onClick={() => setPhotoOpen(true)} disabled={busy || loading || loadingVehicles || status === 'archived' || draftCount >= 100}><ImagePlus size={16} /> 정비명세서 사진 인식</button>
+        <button type="button" onClick={() => addRow(blankRecord(yearMonth))} disabled={busy || loading || status === 'archived' || draftCount >= 100}><Plus size={16} /> 행 추가</button>
         <button type="button" className="repair-primary" onClick={() => void save()} disabled={busy || loading || !draftCount}><Save size={16} /> {busy ? '저장 중…' : '저장'}</button>
         <input ref={fileInput} type="file" accept=".xlsx,.xls" aria-label="정비 엑셀 파일" hidden onChange={event => void readFile(event.target.files?.[0])} />
       </div>
@@ -223,21 +249,22 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
       <button type="button" className={allPeriods ? 'repair-period-active' : ''} aria-pressed={allPeriods} disabled={busy} onClick={() => { if (canLeave()) setAllPeriods(!allPeriods); }}>전체 기간</button>
       <label>비용 구분<select aria-label="정비 비용 구분" value={cost} onChange={event => setCost(event.target.value)}><option value="">전체 구분</option>{COST_KEYS.map(key => <option key={key} value={key}>{COST_LABELS[key]}</option>)}</select></label>
       <label>상태<select aria-label="정비 상태" value={status} disabled={busy || draftCount > 0} onChange={event => setStatus(event.target.value)}><option value="active">전체 내역</option><option value="review">확인 필요</option><option value="archived">휴지통</option></select></label>
-      <label className="repair-search">검색<input value={search} onChange={event => setSearch(event.target.value)} placeholder="차량번호, 정비내용, 운전자, 업체" /></label>
+      <label className="repair-search">검색<input value={search} onChange={event => setSearch(event.target.value)} placeholder="차량번호, 배정팀, 정비내용, 운전자, 업체" /></label>
       <button type="button" onClick={() => { setCost(''); setStatus('active'); setSearch(''); }}>초기화</button>
       <span className="repair-count">{allPeriods ? '전체 기간' : yearMonth} · {filtered.length}건</span>
       {draftCount > 0 && <button type="button" disabled={busy} onClick={() => { if (window.confirm('저장하지 않은 변경사항을 모두 취소할까요?')) { setDrafts({}); setRowErrors({}); setError(''); } }}>변경 취소</button>}
     </div>
     <datalist id="repair-vehicle-options">{vehicles.map(vehicle => <option key={vehicle.id} value={vehicle.licensePlate}>{vehicle.model}</option>)}</datalist>
     <div className={`repair-table-wrap${sticky ? ' repair-table-fixed' : ''}`}>
-      <table><caption className="sr-only">차량 정비내역 입력 대장</caption><colgroup><col style={{ width: 140 }} /><col style={{ width: 130 }} /><col style={{ width: 200 }} /><col style={{ width: 110 }} /><col style={{ width: 125 }} />{COST_KEYS.map(key => <col key={key} style={{ width: 110 }} />)}<col style={{ width: 120 }} /><col style={{ width: 160 }} /><col style={{ width: 90 }} /></colgroup>
-        <thead><tr><th>정비일</th><th>차량번호</th><th>정비내용</th><th>운전자</th><th>정비업체</th>{COST_KEYS.map(key => <th className="repair-number" key={key}>{COST_LABELS[key]}{key === 'cheongyeon' && <small>VAT포함</small>}</th>)}<th className="repair-number">합계</th><th>비고</th><th>관리</th></tr></thead>
-        <tbody>{loading ? <tr><td colSpan={12} className="repair-empty">정비내역을 불러오는 중입니다.</td></tr> : !visible.length ? <tr><td colSpan={12} className="repair-empty">{status === 'archived' ? '삭제한 정비내역이 없습니다.' : '조회 조건에 맞는 정비내역이 없습니다. 행 추가로 입력하거나 전체 기간을 확인해 주세요.'}</td></tr> : visible.map((row, index) => {
+      <table><caption className="sr-only">차량 정비내역 입력 대장</caption><colgroup><col style={{ width: 140 }} /><col style={{ width: 130 }} /><col style={{ width: 115 }} /><col style={{ width: 200 }} /><col style={{ width: 110 }} /><col style={{ width: 125 }} />{COST_KEYS.map(key => <col key={key} style={{ width: 110 }} />)}<col style={{ width: 120 }} /><col style={{ width: 160 }} /><col style={{ width: 90 }} /></colgroup>
+        <thead><tr><th>정비일</th><th>차량번호</th><th>배정팀</th><th>정비내용</th><th>운전자</th><th>정비업체</th>{COST_KEYS.map(key => <th className="repair-number" key={key}>{COST_LABELS[key]}{key === 'cheongyeon' && <small>VAT포함</small>}</th>)}<th className="repair-number">합계</th><th>비고</th><th>관리</th></tr></thead>
+        <tbody>{loading ? <tr><td colSpan={13} className="repair-empty">정비내역을 불러오는 중입니다.</td></tr> : !visible.length ? <tr><td colSpan={13} className="repair-empty">{status === 'archived' ? '삭제한 정비내역이 없습니다.' : '조회 조건에 맞는 정비내역이 없습니다. 행 추가로 입력하거나 전체 기간을 확인해 주세요.'}</td></tr> : visible.map((row, index) => {
           const label = `${(currentPage - 1) * 50 + index + 1}행`;
           const disabled = busy || row.archived || (draftCount >= 100 && !changedIds.has(row.id));
           return <tr key={row.id} className={`${changedIds.has(row.id) ? 'repair-row-dirty' : ''} ${rowErrors[row.id] || invalidAmounts.has(row.id) ? 'repair-row-error' : ''}`}>
             <td><input id={`repair-date-${row.id}`} aria-label={`${label} 정비일`} type="date" value={row.date} disabled={disabled} onChange={event => updateRow(row, { date: event.target.value })} />{!row.date && row.originalDate && <small>원본: {row.originalDate}</small>}{row.issues.length > 0 && <span className="repair-review" title={row.issues.join(' · ')}>확인 필요</span>}{row.revision === 0 && <span className="repair-new">신규</span>}{rowErrors[row.id] && <span role="alert" className="repair-cell-error">{rowErrors[row.id]}</span>}</td>
-            <td><input aria-label={`${label} 차량번호`} list="repair-vehicle-options" value={row.vehiclePlate} disabled={disabled} placeholder="차량번호 입력" onChange={event => updateRow(row, { vehiclePlate: event.target.value })} />{!row.vehicleId && row.revision > 0 && <small>과거 / 미연결 차량</small>}</td>
+            <td><input aria-label={`${label} 차량번호`} list="repair-vehicle-options" value={row.vehiclePlate} disabled={disabled} placeholder="차량번호 입력" onChange={event => updateRow(row, { vehiclePlate: event.target.value, ...rowVehicle(drafts[row.id]?.original ?? row, event.target.value) })} />{!row.vehicleId && row.revision > 0 && <small>과거 / 미연결 차량</small>}</td>
+            <td className="repair-team-cell">{row.teamName || '—'}</td>
             <td><input aria-label={`${label} 정비내용`} value={row.description} title={row.description} disabled={disabled} placeholder="정비내용 입력" onChange={event => updateRow(row, { description: event.target.value })} />{row.source && <small>{row.source.sheet} · {row.source.cell}</small>}</td>
             <td><input aria-label={`${label} 운전자`} value={row.driver} disabled={disabled} placeholder="—" onChange={event => updateRow(row, { driver: event.target.value })} /></td>
             <td><input aria-label={`${label} 정비업체`} value={row.vendor} disabled={disabled} placeholder="업체 입력" onChange={event => updateRow(row, { vendor: event.target.value })} /></td>
@@ -247,11 +274,13 @@ export default function VehicleRepairLedger({ vehicles, onBeforeLeaveChange }: P
             <td>{changedIds.has(row.id) ? <button type="button" disabled={busy} onClick={() => undoRow(row.id)}>{row.revision === 0 ? '행 취소' : '되돌리기'}</button> : <button type="button" disabled={busy || draftCount > 0} onClick={() => void archive(row)}>{row.archived ? '복원' : '삭제'}</button>}</td>
           </tr>;
         })}</tbody>
-        <tfoot><tr><th colSpan={5}>조회 내역 합계 ({filtered.length}건)</th>{COST_KEYS.map(key => <td className="repair-number" key={key}>{filtered.some(row => drafts[row.id] && invalidDraftAmounts(drafts[row.id]).includes(key)) ? '확인 필요' : formatRepairAmount(totals[key])}</td>)}<td className="repair-number repair-total-cell">{hasInvalidAmounts ? '확인 필요' : formatRepairAmount(total)}</td><td colSpan={2}>{draftCount > 0 ? '저장 전 입력 포함' : '저장된 내역'}</td></tr></tfoot>
+        <tfoot><tr><th colSpan={6}>조회 내역 합계 ({filtered.length}건)</th>{COST_KEYS.map(key => <td className="repair-number" key={key}>{filtered.some(row => drafts[row.id] && invalidDraftAmounts(drafts[row.id]).includes(key)) ? '확인 필요' : formatRepairAmount(totals[key])}</td>)}<td className="repair-number repair-total-cell">{hasInvalidAmounts ? '확인 필요' : formatRepairAmount(total)}</td><td colSpan={2}>{draftCount > 0 ? '저장 전 입력 포함' : '저장된 내역'}</td></tr></tfoot>
       </table>
     </div>
     <div className="repair-footer"><span>표에서 바로 입력 · Tab 키로 다음 칸 이동</span><div><button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>이전</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>다음</button></div></div>
-    <div className="repair-guide"><strong>입력 가이드</strong><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>직접 등록한 정비비는 차량번호가 연결된 해당 월 경비대장의 수리비에 자동 반영됩니다. 엑셀로 가져온 과거 이력은 기존 월별 수리비와 중복 합산하지 않습니다. 청구·정산 반영은 월별 경비대장에서 확인 후 저장해 주세요. 삭제한 내역은 휴지통에서 복원할 수 있습니다.</p></div>
+    <div className="repair-guide"><strong>입력 가이드</strong><p><b>정비명세서 사진 인식</b>에서 사진을 선택하고 배정팀과 합계금액을 확인하세요. 비용 구분을 선택해 대장에 추가한 뒤 <b>저장</b>을 누르세요.</p><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>직접 등록한 정비비는 차량번호가 연결된 해당 월 경비대장의 수리비에 자동 반영됩니다. 엑셀로 가져온 과거 이력은 기존 월별 수리비와 중복 합산하지 않습니다. 청구·정산 반영은 월별 경비대장에서 확인 후 저장해 주세요. 삭제한 내역은 휴지통에서 복원할 수 있습니다.</p></div>
+
+    {photoOpen && <RepairPhotoImport vehicles={vehicles} lookup={lookupVehicle} alreadyAdded={id => Boolean(drafts[id]) || records.some(row => row.id === id)} onAdd={addPhoto} onClose={() => setPhotoOpen(false)} />}
 
     <Dialog.Root open={Boolean(preview)} onOpenChange={open => { if (!open && !busy) setPreview(null); }}><Dialog.Portal><Dialog.Overlay className="repair-overlay" /><Dialog.Content className="repair-dialog repair-import-dialog" onInteractOutside={event => { if (busy) event.preventDefault(); }}>
       <Dialog.Title>엑셀 정비내역 가져오기</Dialog.Title><Dialog.Description>월별 합계 행을 제외하고 개별 정비 이력만 가져옵니다. 기존 기록은 덮어쓰지 않습니다.</Dialog.Description>

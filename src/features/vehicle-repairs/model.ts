@@ -11,6 +11,8 @@ export interface RepairRecord {
   originalDate: string;
   vehiclePlate: string;
   vehicleId: string;
+  teamId?: string;
+  teamName?: string;
   description: string;
   driver: string;
   vendor: string;
@@ -35,6 +37,7 @@ export function readRepairRecord(value: unknown, id: string): RepairRecord {
   const row = value as RepairRecord | undefined;
   const strings = ['date', 'yearMonth', 'originalDate', 'vehiclePlate', 'vehicleId', 'description', 'driver', 'vendor', 'memo'] as const;
   const valid = row && strings.every(key => typeof row[key] === 'string')
+    && (row.teamId === undefined || typeof row.teamId === 'string') && (row.teamName === undefined || typeof row.teamName === 'string')
     && row.costs && COST_KEYS.every(key => row.costs[key] === null || (typeof row.costs[key] === 'number' && Number.isFinite(row.costs[key])))
     && typeof row.archived === 'boolean' && Number.isSafeInteger(row.revision) && row.revision >= 0
     && Array.isArray(row.issues) && row.issues.every(issue => typeof issue === 'string')
@@ -136,11 +139,15 @@ export function parseRepairWorkbook(workbook: XLSX.WorkBook, fileName: string): 
   return records;
 }
 
+export function findRepairVehicle<T extends { licensePlate: string }>(plate: string, vehicles: T[]): T | undefined {
+  const normalized = normalizePlate(plate);
+  if (!normalized) return undefined;
+  const matches = vehicles.filter(vehicle => normalizePlate(vehicle.licensePlate) === normalized);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 export function matchRepairVehicles(records: RepairRecord[], vehicles: Array<{ id: string; licensePlate: string }>): RepairRecord[] {
-  return records.map(record => {
-    const matches = vehicles.filter(vehicle => normalizePlate(vehicle.licensePlate) === normalizePlate(record.vehiclePlate));
-    return { ...record, vehicleId: matches.length === 1 ? matches[0].id : '' };
-  });
+  return records.map(record => ({ ...record, vehicleId: findRepairVehicle(record.vehiclePlate, vehicles)?.id ?? '' }));
 }
 
 export function classifyRepairImport(records: RepairRecord[], existing: RepairRecord[]) {

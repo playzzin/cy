@@ -624,7 +624,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({
                         <button type="button" aria-pressed={!repairView} onClick={() => changeLedgerView(false)} className={`rounded-lg border px-4 py-2 text-sm font-bold ${!repairView ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>월별 경비대장</button>
                         <button type="button" aria-pressed={repairView} onClick={() => changeLedgerView(true)} className={`rounded-lg border px-4 py-2 text-sm font-bold ${repairView ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>정비내역 관리</button>
                     </div>
-                    {repairView ? <React.Suspense fallback={<p className="p-8 text-center text-slate-500">정비내역 화면을 여는 중입니다.</p>}><VehicleRepairLedger vehicles={vehicles} onBeforeLeaveChange={registerRepairLeaveGuard} /></React.Suspense> : <VehicleMonthlyLedger
+                    {repairView ? <React.Suspense fallback={<p className="p-8 text-center text-slate-500">정비내역 화면을 여는 중입니다.</p>}><VehicleRepairLedger vehicles={vehicles} teams={teams} workers={workers} officeStaff={officeStaffRows} loadingVehicles={loading} onBeforeLeaveChange={registerRepairLeaveGuard} /></React.Suspense> : <VehicleMonthlyLedger
                         key={refreshKey}
                         vehicles={vehicles}
                         fineImportVehicles={vehicles}

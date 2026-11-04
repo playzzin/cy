@@ -21,6 +21,7 @@ async function saveRows(records: RepairRecord[]): Promise<void> {
     const snapshots = await Promise.all(records.map(row => transaction.get(refFor(row.id))));
     snapshots.forEach((current, index) => {
       const row = records[index];
+      if (current.exists() && row.revision === 0) throw new Error('이미 등록된 정비내역입니다. 중복된 행을 취소하고 기존 내역을 확인해 주세요.');
       if (current.exists() && current.data().data.revision !== row.revision) throw new Error('다른 사용자가 수정했습니다. 입력 내용은 유지됩니다. 변경 취소 후 새로고침해 다시 확인해 주세요.');
       if (!current.exists() && row.revision !== 0) throw new Error('기록을 찾을 수 없습니다. 새로고침해 주세요.');
     });

@@ -161,8 +161,8 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
     },
     {
         id: 'support-vehicle-fine-import',
-        name: '차량 과태료 고지서 등록',
-        description: '주정차·교통 과태료 이미지/PDF Gemini 분석 및 차량 대장 검수',
+        name: '차량 증빙 AI 분석',
+        description: '정비명세서 사진과 과태료·통행료 증빙을 Gemini로 분석하고 차량 대장에서 검수',
         paths: ['/support/vehicles'],
         modelScope: 'server'
     },

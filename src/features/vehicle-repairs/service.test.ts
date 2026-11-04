@@ -18,6 +18,13 @@ test('동시 수정 충돌을 감지하고 기존 기록을 덮어쓰지 않는�
   expect(transaction.set).not.toHaveBeenCalled();
 });
 
+test('다른 사용자가 같은 사진을 먼저 저장하면 중복 행을 생성하거나 덮어쓰지 않는다', async () => {
+  const photo = { ...record('vehicle_repair_photo_fixture'), revision: 0 };
+  transaction.get.mockResolvedValue({ exists: () => true, data: () => ({ data: { ...photo, revision: 1 } }) });
+  await expect(vehicleRepairService.saveRows([photo])).rejects.toThrow('이미 등록된 정비내역');
+  expect(transaction.set).not.toHaveBeenCalled();
+});
+
 test('중복 및 원본 변경은 보존하고 새로운 행만 생성한다', async () => {
   transaction.get.mockImplementation(async id => ({ exists: () => id !== 'new', data: () => ({ data: { ...record(id), source: { signature: id === 'duplicate' ? 'original' : 'changed' } } }) }));
   const result = await vehicleRepairService.importRecords([record('new'), record('duplicate'), record('conflict')]);
