@@ -17,6 +17,8 @@ import { UserRole } from '../../types/roles';
 import { shiftYearMonth } from '../../components/common/MonthNavigator';
 import { getKoreanDateKey } from '../../utils/koreanBusinessDate';
 import { normalizeHexColor } from '../../utils/color';
+import AdvanceTeamSelector from './components/AdvanceTeamSelector';
+import { getAdvanceTeamOptions } from './utils/advanceTeamOptions';
 import { buildAdvanceSummary, isAdvanceSummaryFilter, isAdvanceSummaryMonth, type AdvanceSummaryTeam, type AdvanceSummaryRow, type AdvanceSummaryWorker } from './utils/advanceSummary';
 import AdvanceSummaryMemoDialog from './components/AdvanceSummaryMemoDialog';
 import AdvanceSummaryDepositAccountSelect from './components/AdvanceSummaryDepositAccountSelect';
@@ -40,7 +42,6 @@ type LoadResult = {
 };
 const emptyResult = { requests: [], teams: [], workers: [] };
 const won = (amount: number) => amount.toLocaleString('ko-KR');
-const companyKey = (value?: string | null) => String(value ?? '').replace(/\s*소속팀\s*$/, '').replace(/\s+/g, '').toLowerCase();
 
 const AdvanceSummaryPage: React.FC = () => {
     const { currentUser } = useAuth();
@@ -132,13 +133,7 @@ const AdvanceSummaryPage: React.FC = () => {
                     advanceRequestService.listByYearMonth(yearMonth),
                     manpowerService.getWorkers(refresh > 0),
                 ]);
-                const companyIds = new Set(companies.map(company => company.id).filter(Boolean));
-                const companyNames = new Set(companies.map(company => companyKey(company.name)).filter(Boolean));
-                const allowedTeams = teams.filter(team => team.id && (team.companyId
-                    ? companyIds.has(team.companyId) : companyNames.has(companyKey(team.companyName))))
-                    .map(team => ({ id: team.id!, legacyId: team.legacyId, name: team.name, color: team.color }))
-                    .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-                commit({ status: 'ready', requests, teams: allowedTeams,
+                commit({ status: 'ready', requests, teams: getAdvanceTeamOptions(teams, companies, 'ignore-spaces').selectable,
                     workers: workers.map(({ id, legacyId, bankName, accountNumber, accountHolder, name, teamId, teamName }) => ({ id, legacyId, bankName, accountNumber, accountHolder, name, teamId, teamName })) });
             } catch {
                 commit({ status: 'error' });
@@ -261,6 +256,12 @@ const AdvanceSummaryPage: React.FC = () => {
             </header>
 
             <section className="as-controls" aria-label="가불내역 조회 조건">
+                <AdvanceTeamSelector
+                    teams={status === 'ready' ? result.teams : []}
+                    selectedTeamId={teamId ? selectedTeam?.id ?? teamId : null}
+                    onChange={id => updateFilter('teamId', id ?? '')}
+                    disabled={status !== 'ready'}
+                />
                 <div className="as-month-control">
                     <span className="as-label">조회 월</span>
                     <div>
@@ -271,13 +272,6 @@ const AdvanceSummaryPage: React.FC = () => {
                         <button type="button" aria-label="다음 달" onClick={() => updateFilter('yearMonth', shiftYearMonth(yearMonth, 1))}><FontAwesomeIcon icon={faChevronRight} /></button>
                     </div>
                 </div>
-                <label>팀 선택
-                    <select aria-label="팀 선택" value={selectedTeam?.id || teamId} onChange={event => updateFilter('teamId', event.target.value)}>
-                        <option value="">전체 팀</option>
-                        {teamId && !selectedTeam && <option value={teamId}>선택한 팀 (조회 불가)</option>}
-                        {result.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
-                    </select>
-                </label>
                 <label className="as-search">이름·팀·비고 검색
                     <input type="search" value={query} placeholder="검색어를 입력하세요" onChange={event => setQuery(event.target.value)} />
                 </label>

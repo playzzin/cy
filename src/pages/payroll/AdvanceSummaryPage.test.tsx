@@ -1,7 +1,7 @@
 import React from 'react';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import * as XLSX from 'xlsx-js-style';
 import AdvanceSummaryPage from './AdvanceSummaryPage';
 import { advanceRequestService } from '../../services/advanceRequestService';
@@ -30,7 +30,10 @@ jest.mock('xlsx-js-style', () => ({ ...jest.requireActual('xlsx-js-style'), writ
 
 const record = { id: 'entry', workerId: 'test-worker', workerName: '검증 작업자', teamId: 'test-team',
     yearMonth: '2026-10', category: 'first', status: 'requested', requestedAmount: 150000, memo: '검증용 비고' };
-const renderPage = () => render(<MemoryRouter initialEntries={['/payroll/advance-summary?yearMonth=2026-10']}><AdvanceSummaryPage /></MemoryRouter>);
+const QueryProbe = () => <span hidden data-testid="query-string">{useLocation().search}</span>;
+const renderPage = (url = '/payroll/advance-summary?yearMonth=2026-10') => render(
+    <MemoryRouter initialEntries={[url]} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AdvanceSummaryPage /><QueryProbe /></MemoryRouter>
+);
 beforeEach(() => {
     jest.clearAllMocks();
     (userService.getUser as jest.Mock).mockResolvedValue({ role: 'admin' });
@@ -244,14 +247,61 @@ test('보기 방식을 바꿔도 모든 내역과 합계를 유지하고 팀 바
 test('검색·팀·가불 필터를 한 번에 초기화하고 조회 월은 유지한다', async () => {
     renderPage();
     await screen.findByRole('rowheader', { name: '검증 작업자' });
-    fireEvent.change(screen.getByLabelText('팀 선택'), { target: { value: 'test-team' } });
+    fireEvent.click(within(screen.getByRole('group', { name: '팀 선택' })).getByRole('button', { name: '검증 A팀' }));
     fireEvent.click(within(screen.getByRole('group', { name: '목록 신청 분류' })).getByRole('button', { name: '1회차' }));
     fireEvent.change(screen.getByLabelText('이름·팀·비고 검색'), { target: { value: '없는 이름' } });
     fireEvent.click(screen.getByRole('button', { name: '검색·필터 초기화' }));
-    expect(screen.getByLabelText('팀 선택')).toHaveValue('');
+    expect(within(screen.getByRole('group', { name: '팀 선택' })).getByRole('button', { name: '전체 보기' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(screen.getByRole('group', { name: '목록 신청 분류' })).getByRole('button', { name: '전체' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByLabelText('이름·팀·비고 검색')).toHaveValue('');
     expect(screen.getByLabelText('조회 월')).toHaveValue('2026-10');
+    expect(screen.getByRole('rowheader', { name: '검증 작업자' })).toBeInTheDocument();
+});
+
+test('팀 색상 버튼은 기존 ID 링크를 인식하고 선택한 팀의 표·합계·URL을 함께 바꾼다', async () => {
+    (teamService.getTeams as jest.Mock).mockResolvedValue([
+        { id: 'b', name: '검증 B팀', color: '#225599', companyName: '검증 시공사 소속팀' },
+        { id: 'test-team', legacyId: 'old-a', name: '검증 A팀', color: '#ddaa33', companyId: 'test-company' },
+        { id: 'outside', name: '범위 밖 팀', companyId: 'other', companyName: '검증 시공사' },
+    ]);
+    (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([
+        { ...record, teamId: 'old-a' },
+        { ...record, id: 'b1', teamId: 'b', workerId: 'b-worker', workerName: 'B 작업자', requestedAmount: 27000 },
+        { ...record, id: 'out', teamId: 'outside', requestedAmount: 500000 },
+    ]);
+    renderPage('/payroll/advance-summary?yearMonth=2026-10&teamId=old-a&item=first');
+    await screen.findByRole('rowheader', { name: '검증 작업자' });
+    const group = within(screen.getByRole('group', { name: '팀 선택' }));
+    const [all, teamA, teamB] = group.getAllByRole('button');
+    expect(group.getAllByRole('button').map(button => button.textContent)).toEqual(['전체 보기', '검증 A팀', '검증 B팀']);
+    expect(teamA).toHaveAttribute('aria-pressed', 'true');
+    expect(teamA.style.getPropertyValue('--advance-team-color')).toBe('#ddaa33');
+    expect(within(teamA).getByRole('img', { hidden: true })).toHaveAttribute('data-icon', 'check');
+    expect(screen.getByLabelText('조회 결과 합계')).toHaveTextContent('가불 합계150,000원');
+
+    fireEvent.click(teamB);
+    expect(teamB).toHaveAttribute('aria-pressed', 'true');
+    expect(teamA).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('rowheader', { name: '검증 작업자' })).not.toBeInTheDocument();
+    expect(screen.getByRole('rowheader', { name: 'B 작업자' })).toBeInTheDocument();
+    expect(screen.getByLabelText('조회 결과 합계')).toHaveTextContent('가불 합계27,000원');
+    expect(screen.getByTestId('query-string')).toHaveTextContent('?yearMonth=2026-10&teamId=b&item=first');
+
+    fireEvent.click(all);
+    expect(all).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('조회 결과 합계')).toHaveTextContent('가불 합계177,000원');
+    expect(screen.getByTestId('query-string')).toHaveTextContent('?yearMonth=2026-10&item=first');
+    expect(advanceRequestService.listByYearMonth).toHaveBeenCalledTimes(1);
+});
+
+test('조회할 수 없는 팀 링크는 빈 결과를 유지하고 전체 보기를 직접 누르면 복귀한다', async () => {
+    renderPage('/payroll/advance-summary?yearMonth=2026-10&teamId=gone');
+    const group = within(screen.getByRole('group', { name: '팀 선택' }));
+    expect(await group.findByText('선택한 팀 (조회 불가)')).toBeInTheDocument();
+    const all = group.getByRole('button', { name: '전체 보기' });
+    expect(all).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('rowheader', { name: '검증 작업자' })).not.toBeInTheDocument();
+    fireEvent.click(all);
     expect(screen.getByRole('rowheader', { name: '검증 작업자' })).toBeInTheDocument();
 });
 

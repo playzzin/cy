@@ -28,11 +28,13 @@ import type { AccommodationAssignment } from '../../types/accommodationAssignmen
 import type { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
 import type { UtilityRecord } from '../../types/accommodation';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight, faUsers, faCheck, faExpand, faCompress } from '@fortawesome/free-solid-svg-icons';
+import { faSave, faSearch, faSpinner, faCalculator, faFloppyDisk, faTrash, faRotateRight, faArrowUp, faArrowDown, faChevronLeft, faChevronRight, faCheck, faExpand, faCompress } from '@fortawesome/free-solid-svg-icons';
 import SweetAlert from 'sweetalert2';
 import { Link, useSearchParams } from 'react-router-dom';
 import { shiftYearMonth } from '../../components/common/MonthNavigator';
 import { normalizeHexColor } from '../../utils/color';
+import AdvanceTeamSelector from './components/AdvanceTeamSelector';
+import { getAdvanceTeamOptions, type AdvanceTeamOption } from './utils/advanceTeamOptions';
 import './AdvancePaymentPage.css';
 
 // Keep feedback and confirmations inside the active view, including the modal top layer.
@@ -79,13 +81,6 @@ const PERSONAL_ACCOMMODATION_FIELDS: readonly PersonalAccommodationField[] = [
 const normalizeDeductionLabel = (label: string): string =>
     String(label ?? '').replace(/\s+/g, '').trim();
 
-const normalizeCompanyNameKey = (value?: string | null): string =>
-    String(value ?? '')
-        .replace(/\s+/g, ' ')
-        .replace(/\s*소속팀\s*$/, '')
-        .trim()
-        .toLowerCase();
-
 type WorkerPaymentSummary = {
     laborManDay: number;
     laborAmount: number;
@@ -97,16 +92,6 @@ type SalaryModelBucket = 'daily' | 'monthly' | 'service';
 type WorkerSalaryModelPresence = Partial<Record<SalaryModelBucket, true>>;
 type WorkerSalaryModelPresenceMap = Record<string, WorkerSalaryModelPresence>;
 type SalaryModelFilter = 'all' | SalaryModelBucket;
-type AdvanceTeamOption = {
-    id: string;
-    legacyId?: string;
-    name: string;
-    color?: string;
-    companyId?: string;
-    companyName?: string;
-    parentTeamId?: string;
-    parentTeamName?: string;
-};
 type PayrollAdvanceWorkerRow = Worker & {
     id: string;
     advanceWorkerId?: string;
@@ -767,7 +752,7 @@ const AdvancePaymentPage: React.FC = () => {
     const [workerNameQuery, setWorkerNameQuery] = useState('');
 
     // Data State
-    const [teams, setTeams] = useState<AdvanceTeamOption[]>([]);
+    const [filteredTeams, setFilteredTeams] = useState<AdvanceTeamOption[]>([]);
     const [allTeamOptions, setAllTeamOptions] = useState<AdvanceTeamOption[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [advances, setAdvances] = useState<{ [workerId: string]: AdvancePayment }>({});
@@ -1114,58 +1099,15 @@ const AdvancePaymentPage: React.FC = () => {
                 companyService.getCompaniesByType('시공사')
             ]);
 
-            const constructionCompanyIdSet = new Set(
-                constructionCompanies
-                    .map((c) => c.id)
-                    .filter((id): id is string => Boolean(id))
-            );
-            const constructionCompanyNameKeySet = new Set(
-                constructionCompanies.map((c) => normalizeCompanyNameKey(c.name))
-            );
-            const constructionCompanyNameById = new Map(
-                constructionCompanies
-                    .map((c) => (c.id ? ([c.id, c.name] as const) : null))
-                    .filter((entry): entry is readonly [string, string] => entry !== null)
-            );
-
-            const allowedTeams = teamList.filter((team) => {
-                if (team.companyId) return constructionCompanyIdSet.has(team.companyId);
-                if (team.companyName) return constructionCompanyNameKeySet.has(normalizeCompanyNameKey(team.companyName));
-                return false;
-            });
-
-            const formatTeamOption = (team: typeof teamList[number]): AdvanceTeamOption => ({
-                id: team.id || '',
-                legacyId: team.legacyId ?? undefined,
-                name: team.name,
-                color: team.color ?? undefined,
-                companyId: team.companyId ?? undefined,
-                parentTeamId: team.parentTeamId ?? undefined,
-                parentTeamName: team.parentTeamName ?? undefined,
-                companyName:
-                    (normalizeCompanyNameKey(team.companyName)
-                        ? String(team.companyName).replace(/\s*소속팀\s*$/, '').trim()
-                        : '') ||
-                    (team.companyId ? constructionCompanyNameById.get(team.companyId) : undefined) ||
-                    '기타'
-            });
-
-            setAllTeamOptions(teamList.map(formatTeamOption));
-
-            const formattedTeams = allowedTeams.map(formatTeamOption);
-            setTeams(formattedTeams);
+            const options = getAdvanceTeamOptions(teamList, constructionCompanies);
+            setAllTeamOptions(options.all);
+            setFilteredTeams(options.selectable);
         } catch (error) {
             console.error("Failed to load teams:", error);
         }
     };
 
     const normalizeTeamName = (name: string = '') => name.replace(/\s+/g, '').toLowerCase();
-
-    // 업체 선택 없이 조회 가능한 시공사 팀을 모두 표시한다.
-    const filteredTeams = useMemo(
-        () => [...teams].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko')),
-        [teams]
-    );
 
     // Auto-select first team
     useEffect(() => {
@@ -1280,7 +1222,7 @@ const AdvancePaymentPage: React.FC = () => {
                 const canonicalSelectedTeamId = resolveTeamCanonicalId(teamId);
                 const selectedTeam =
                     allTeamOptions.find((team) => resolveTeamCanonicalId(team.id) === canonicalSelectedTeamId) ??
-                    teams.find((team) => team.id === teamId);
+                    filteredTeams.find((team) => team.id === teamId);
                 const selectedTeamNameKey = normalizeTeamName(selectedTeam?.name ?? '');
                 addAllowedTeamId(teamId);
 
@@ -1920,12 +1862,12 @@ const AdvancePaymentPage: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [allTeamOptions, calculateTotalDeduction, canUseAdvanceManagement, createEmptyAdvance, filteredTeams, resolvedOtherDeductionId, selectedMonth, selectedTeamId, teams]);
+    }, [allTeamOptions, calculateTotalDeduction, canUseAdvanceManagement, createEmptyAdvance, filteredTeams, resolvedOtherDeductionId, selectedMonth, selectedTeamId]);
 
     useEffect(() => {
         if (didApplyQueryRef.current) return;
         if (canUseAdvanceManagement !== true) return;
-        if (teams.length === 0) return;
+        if (filteredTeams.length === 0) return;
 
         if (!queryTeamId && !queryYearMonth && !queryHighlightWorkerId) {
             didApplyQueryRef.current = true;
@@ -1946,7 +1888,7 @@ const AdvancePaymentPage: React.FC = () => {
 
         setAutoSearchRequested(true);
         didApplyQueryRef.current = true;
-    }, [canUseAdvanceManagement, queryHighlightWorkerId, queryTeamId, queryYearMonth, teams]);
+    }, [canUseAdvanceManagement, queryHighlightWorkerId, queryTeamId, queryYearMonth, filteredTeams]);
 
     useEffect(() => {
         if (!autoSearchRequested) return;
@@ -2585,53 +2527,13 @@ const AdvancePaymentPage: React.FC = () => {
 
             {/* Filters */}
             <div className="advance-filter-bar">
-                <div className="advance-team-selector">
-                    <span className="advance-filter-label" aria-hidden="true">
-                        <FontAwesomeIcon icon={faUsers} />
-                        팀 선택
-                    </span>
-                    <div className="advance-team-buttons" role="group" aria-label="팀 선택">
-                        <button
-                            type="button"
-                            className="advance-team-button advance-team-button--all"
-                            aria-pressed={selectedTeamId === ALL_TEAMS_VALUE}
-                            aria-label="전체 보기 (조회 전용)"
-                            title="전체 보기 (조회 전용)"
-                            disabled={loading && !autoSearchRequested}
-                            onClick={() => setSelectedTeamId(ALL_TEAMS_VALUE)}
-                        >
-                            전체 보기
-                        </button>
-                        {filteredTeams.map((team) => {
-                            const color = normalizeHexColor(team.color);
-                            const isSelected = selectedTeamId === team.id;
-                            return (
-                                <button
-                                    key={team.id}
-                                    type="button"
-                                    className="advance-team-button"
-                                    aria-pressed={isSelected}
-                                    disabled={loading && !autoSearchRequested}
-                                    onClick={() => setSelectedTeamId(team.id)}
-                                    title={team.name}
-                                    style={{ '--advance-team-color': color } as React.CSSProperties}
-                                >
-                                    <span
-                                        className="advance-team-marker"
-                                        style={{ color }}
-                                        aria-hidden="true"
-                                    >
-                                        {isSelected ? <FontAwesomeIcon icon={faCheck} /> : <span />}
-                                    </span>
-                                    {team.name}
-                                </button>
-                            );
-                        })}
-                        {filteredTeams.length === 0 && (
-                            <span className="advance-team-empty">선택할 팀이 없습니다</span>
-                        )}
-                    </div>
-                </div>
+                <AdvanceTeamSelector
+                    teams={filteredTeams}
+                    selectedTeamId={selectedTeamId === ALL_TEAMS_VALUE ? null : selectedTeamId}
+                    onChange={id => setSelectedTeamId(id ?? ALL_TEAMS_VALUE)}
+                    disabled={loading && !autoSearchRequested}
+                    allReadOnly
+                />
 
                 <div className="advance-month-actions" role="group" aria-label="월 선택 및 조회">
                         <label htmlFor="advance-payment-month" className="advance-filter-label">조회 월</label>
