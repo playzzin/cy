@@ -3,6 +3,7 @@ import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Vehicle } from '../../types/vehicle';
+import type { Team } from '../../services/teamService';
 import VehicleRepairLedger from './VehicleRepairLedger';
 import { COST_KEYS, COST_LABELS, emptyCosts } from './model';
 import { analyzeRepairPhoto, identifyRepairPhoto, RepairPhotoResult } from './photoAnalysis';
@@ -11,6 +12,7 @@ import { vehicleRepairService } from './service';
 jest.mock('./photoAnalysis', () => ({ analyzeRepairPhoto: jest.fn(), identifyRepairPhoto: jest.fn() }));
 jest.mock('./service', () => ({ vehicleRepairService: { list: jest.fn(), saveRows: jest.fn() } }));
 const vehicle = { id: 'v1', model: '승합차', licensePlate: '123하 4567', currentAssigneeType: 'TEAM', currentAssigneeId: 't1', currentAssigneeName: '테스트 배정팀' } as Vehicle;
+const team = { id: 't1', name: '테스트 배정팀', color: '#ffe066', iconKey: 'fa-truck-front' } as Team;
 const photoId = 'vehicle_repair_photo_fixture';
 const result: RepairPhotoResult = { date: '2026-10-31', vehiclePlate: '123하4567', vendor: '정비소',
   description: '오일·필터 교환\n타이어 교환', total: 360000, category: 'personal' };
@@ -30,7 +32,7 @@ const upload = (name = 'sample.jpg') => fireEvent.change(screen.getByLabelText('
   target: { files: [new File(['fixture'], name, { type: 'image/jpeg' })] },
 });
 async function openLedger() {
-  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><VehicleRepairLedger vehicles={[vehicle]} /></MemoryRouter>);
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><VehicleRepairLedger vehicles={[vehicle]} teams={[team]} /></MemoryRouter>);
   await screen.findByText(/조회 조건에 맞는 정비내역/);
   fireEvent.click(screen.getByRole('button', { name: '정비명세서 사진 인식' }));
   upload();
@@ -41,6 +43,9 @@ test.each(COST_KEYS)('검수한 합계 전액을 %s 한 곳에 넣고 명시적�
   const dialog = within(screen.getByRole('dialog'));
   expect(await dialog.findByDisplayValue('360,000')).toBeInTheDocument();
   expect(dialog.getByText('테스트 배정팀')).toBeInTheDocument();
+  const previewBadge = dialog.getByTitle(team.name);
+  expect(previewBadge).toHaveStyle({ backgroundColor: team.color });
+  expect(within(previewBadge).getByRole('img', { hidden: true })).toHaveAttribute('data-icon', 'truck-front');
   expect(dialog.getByLabelText('비용 구분')).toHaveValue('personal');
   fireEvent.change(dialog.getByLabelText('비용 구분'), { target: { value: category } });
   fireEvent.click(dialog.getByRole('button', { name: '대장에 추가' }));
@@ -49,10 +54,11 @@ test.each(COST_KEYS)('검수한 합계 전액을 %s 한 곳에 넣고 명시적�
   expect(screen.getByLabelText('정비 조회 월')).toHaveValue('2026-10');
   expect(screen.getByLabelText('1행 ' + COST_LABELS[category] + ' 금액')).toHaveValue('360,000');
   expect(screen.getByLabelText('1행 정비내용')).toHaveValue('오일·필터 교환 / 타이어 교환');
+  expect(within(screen.getByTitle(team.name)).getByRole('img', { hidden: true })).toHaveAttribute('data-icon', 'truck-front');
   fireEvent.click(screen.getByRole('button', { name: '저장' }));
   await screen.findByText('1건의 정비내역을 저장했습니다.');
   expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({
-    id: photoId, date: result.date, yearMonth: '2026-10', vehicleId: 'v1', teamId: 't1', teamName: '테스트 배정팀',
+    id: photoId, date: result.date, yearMonth: '2026-10', vehicleId: 'v1', teamId: 't1', teamName: '테스트 배정팀', teamColor: '#ffe066', teamIcon: 'fa-truck-front',
     costs: { ...emptyCosts(), [category]: 360000 }, revision: 0,
   })]);
 });
@@ -76,7 +82,7 @@ test('누락된 합계와 구분을 직접 보완하고 차량번호를 고치�
   fireEvent.click(screen.getByRole('button', { name: '저장' }));
   await screen.findByText('1건의 정비내역을 저장했습니다.');
   expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({
-    vehicleId: '', teamId: '', teamName: '', costs: { ...emptyCosts(), corporate: 0 },
+    vehicleId: '', teamId: '', teamName: '', teamColor: '', teamIcon: '', costs: { ...emptyCosts(), corporate: 0 },
   })]);
 });
 
@@ -119,13 +125,37 @@ test('교체 전 사진의 늦은 응답은 무시하고, 실패한 사진은 �
 test('차량이 재배정된 뒤 다른 항목을 수정해도 등록할 때 확인한 팀을 보존한다', async () => {
   (vehicleRepairService.list as jest.Mock).mockResolvedValue([{
     id: photoId, yearMonth: '2026-11', date: '2026-11-01', originalDate: '', vehicleId: vehicle.id,
-    vehiclePlate: result.vehiclePlate, teamId: 'previous', teamName: '기존 배정팀', description: '수리', driver: '',
+    vehiclePlate: result.vehiclePlate, teamId: 'previous', teamName: '기존 배정팀', teamColor: '#144088', teamIcon: 'fa-wrench', description: '수리', driver: '',
     vendor: '정비소', archived: false, issues: [], costs: { ...emptyCosts(), personal: 1000 }, memo: '', revision: 1,
   }]);
-  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><VehicleRepairLedger vehicles={[vehicle]} /></MemoryRouter>);
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><VehicleRepairLedger vehicles={[vehicle]} teams={[team]} /></MemoryRouter>);
   await screen.findByText('기존 배정팀');
+  expect(screen.getByTitle('기존 배정팀')).toHaveStyle({ backgroundColor: '#144088' });
+  expect(within(screen.getByTitle('기존 배정팀')).getByRole('img', { hidden: true })).toHaveAttribute('data-icon', 'wrench');
   fireEvent.change(screen.getByLabelText('1행 비고'), { target: { value: '확인 완료' } });
   fireEvent.click(screen.getByRole('button', { name: '저장' }));
   await screen.findByText('1건의 정비내역을 저장했습니다.');
-  expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({ teamId: 'previous', teamName: '기존 배정팀' })]);
+  expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({ teamId: 'previous', teamName: '기존 배정팀', teamColor: '#144088', teamIcon: 'fa-wrench' })]);
+});
+
+test('이전 기록은 다시 저장하지 않아도 팀 명부의 아이콘과 색상을 보여 준다', async () => {
+  const old = { yearMonth: '2026-11', date: '2026-11-01', originalDate: '', vehicleId: vehicle.id, vehiclePlate: result.vehiclePlate,
+    description: '정비', driver: '', vendor: '', costs: { ...emptyCosts(), personal: 1 }, memo: '', issues: [], archived: false, revision: 1 };
+  (vehicleRepairService.list as jest.Mock).mockResolvedValue([
+    { ...old, id: 'saved-team', teamId: team.id, teamName: '저장된 팀명' }, { ...old, id: 'no-snapshot' },
+    { ...old, id: 'no-link', vehiclePlate: '4567', vehicleId: '' },
+    { ...old, id: 'no-icon', teamId: 'default', teamName: '아이콘 미설정팀' },
+  ]);
+  const defaultTeam = { ...team, id: 'default', name: '아이콘 미설정팀', iconKey: '', color: '#225599' };
+  render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><VehicleRepairLedger vehicles={[vehicle]} teams={[team, defaultTeam]} /></MemoryRouter>);
+  for (const title of ['저장된 팀명', '현재 차량 배정팀 · 테스트 배정팀']) {
+    const badge = await screen.findByTitle(title);
+    expect(badge).toHaveStyle({ backgroundColor: '#ffe066' });
+    expect(within(badge).getByRole('img', { hidden: true })).toHaveAttribute('data-icon', 'truck-front');
+  }
+  const fallback = screen.getByTitle('아이콘 미설정팀');
+  expect(fallback).toHaveStyle({ backgroundColor: '#225599' });
+  expect(within(fallback).getByRole('img', { hidden: true })).toHaveAttribute('data-icon', 'users');
+  expect(within(screen.getByRole('cell', { name: '—' })).queryByRole('img', { hidden: true })).not.toBeInTheDocument();
+  expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
 });

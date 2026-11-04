@@ -2,15 +2,33 @@ import type { Vehicle } from '../../types/vehicle';
 import type { Team } from '../../services/teamService';
 import type { Worker } from '../../services/manpowerService';
 import type { OfficeStaff } from '../../services/officeStaffService';
-import { isOfficeStaffAssignmentReference, OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME } from '../../utils/supportAssignmentTargets';
-import { findRepairVehicle } from './model';
+import { isOfficeAssignmentTeam, isOfficeStaffAssignmentReference, OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME } from '../../utils/supportAssignmentTargets';
+import { findRepairVehicle, type RepairRecord } from './model';
 
-export interface RepairVehicleLink { vehicleId: string; teamId: string; teamName: string }
+type TeamFields = Pick<RepairRecord, 'teamId' | 'teamName' | 'teamColor' | 'teamIcon'>;
+export type RepairTeam = Required<TeamFields>;
+export type RepairVehicleLink = RepairTeam & { vehicleId: string };
+
+const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+
+export function resolveRepairTeam(ref: TeamFields, teams: Team[]): RepairTeam {
+  let team = ref.teamId ? teams.find(item => item.id === ref.teamId || item.legacyId === ref.teamId) : undefined;
+  if (!team && ref.teamId === OFFICE_ASSIGNMENT_TEAM_ID) team = teams.find(isOfficeAssignmentTeam);
+  if (!ref.teamId && ref.teamName) {
+    const matches = teams.filter(item => item.name === ref.teamName);
+    if (matches.length === 1) team = matches[0];
+  }
+  return {
+    teamId: team?.id || ref.teamId || '', teamName: team?.name || ref.teamName || '',
+    teamColor: text(team ? team.color : ref.teamColor),
+    teamIcon: team ? text(team.iconKey) || text(team.icon) : text(ref.teamIcon),
+  };
+}
 
 export function resolveRepairVehicle(plate: string, vehicles: Vehicle[], teams: Team[], workers: Worker[], officeStaff: OfficeStaff[]): RepairVehicleLink {
   const vehicle = findRepairVehicle(plate, vehicles);
-  const link = { vehicleId: vehicle?.id ?? '', teamId: '', teamName: '' };
-  if (!vehicle) return link;
+  if (!vehicle) return { vehicleId: '', teamId: '', teamName: '', teamColor: '', teamIcon: '' };
+  const linkTeam = (teamId: string, teamName: string) => ({ vehicleId: vehicle.id, ...resolveRepairTeam({ teamId, teamName }, teams) });
   const id = vehicle.currentAssigneeId?.trim() ?? '';
   const name = vehicle.currentAssigneeName?.trim() ?? '';
   let teamId = '', teamName = '';
@@ -22,17 +40,15 @@ export function resolveRepairVehicle(plate: string, vehicles: Vehicle[], teams: 
     const names = !id && name ? workers.filter(worker => worker.name === name) : [];
     const worker = byId || (names.length === 1 ? names[0] : undefined);
     if (!worker && isOfficeStaffAssignmentReference(officeStaff, id, id ? '' : name)) {
-      return { ...link, teamId: OFFICE_ASSIGNMENT_TEAM_ID, teamName: OFFICE_ASSIGNMENT_TEAM_NAME };
+      return linkTeam(OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME);
     }
     teamId = worker?.teamId?.trim() ?? '';
     teamName = worker?.teamName?.trim() ?? '';
     if (!teamId && !teamName) {
       const ids = [id, worker?.id, worker?.legacyId, worker?.uid].filter(Boolean);
       const memberships = teams.filter(team => [team.leaderId, ...(team.memberIds ?? [])].some(key => key && ids.includes(key)));
-      if (memberships.length === 1) return { ...link, teamId: memberships[0].id || '', teamName: memberships[0].name };
+      if (memberships.length === 1) return linkTeam(memberships[0].id || '', memberships[0].name);
     }
   }
-  const team = teamId ? teams.find(item => item.id === teamId || item.legacyId === teamId)
-    : teamName ? teams.find(item => item.name === teamName) : undefined;
-  return { ...link, teamId: team?.id || teamId, teamName: team?.name || teamName };
+  return linkTeam(teamId, teamName);
 }

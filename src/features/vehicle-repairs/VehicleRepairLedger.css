@@ -50,7 +50,10 @@
 .repair-number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .repair-number input { text-align: right; font-variant-numeric: tabular-nums; }
 .repair-ledger tbody .repair-row-total { color: #4338ca; font-weight: 800; background: #eef2ff66; padding: 16px 8px; }
-.repair-ledger tbody .repair-team-cell { padding: 16px 8px; }
+.repair-ledger tbody .repair-team-cell { padding: 11px 6px; }
+.repair-team-badge { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 1.35; vertical-align: middle; }
+.repair-team-badge svg { width: 1em; flex-shrink: 0; }
+.repair-team-badge > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .repair-ledger tbody .repair-row-dirty td { background: #fffbeb; }
 .repair-ledger tbody .repair-row-dirty td:first-child { box-shadow: inset 3px 0 #f59e0b; }
 .repair-ledger tbody .repair-row-error td { background: #fff1f2; }
@@ -87,8 +90,7 @@
 .repair-photo-fields input, .repair-photo-fields textarea, .repair-photo-fields select { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px; color: #1e293b; background: #fff; font: inherit; font-weight: 400; }
 .repair-photo-fields textarea { resize: vertical; }
 .repair-photo-team, .repair-photo-wide { grid-column: 1 / -1; }
-.repair-photo-team { padding: 9px; background: #eef2ff; color: #3730a3; border-radius: 7px; font-size: 12px; }
-.repair-photo-team b { margin-right: 6px; }
+.repair-photo-team { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px; background: #f8fafc; color: #334155; border-radius: 7px; font-size: 12px; }
 .repair-photo-fields .repair-help { margin: 0; }
 @media (max-width: 600px) {
   .repair-photo-review { flex-direction: column; gap: 12px; }

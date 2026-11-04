@@ -6,6 +6,7 @@ import { parseRepairAmountInput } from './draft';
 import { COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, isValidRepairDate, RepairRecord } from './model';
 import { analyzeRepairPhoto, identifyRepairPhoto, RepairPhotoResult } from './photoAnalysis';
 import type { RepairVehicleLink } from './vehicleTeam';
+import RepairTeamBadge from './RepairTeamBadge';
 
 export type PhotoRow = Pick<RepairRecord, 'id' | 'date' | 'vehiclePlate' | 'description' | 'vendor' | 'costs'> & RepairVehicleLink;
 type PhotoForm = Omit<RepairPhotoResult, 'total'> & { id: string; amount: string };
@@ -89,7 +90,7 @@ export default function RepairPhotoImport({ vehicles, lookup, alreadyAdded, onAd
             <label>정비일<input type="date" value={form.date} onChange={event => update({ date: event.target.value })} /></label>
             <label>차량번호<input list="repair-photo-vehicles" value={form.vehiclePlate} onChange={event => update({ vehiclePlate: event.target.value })} /></label>
             <datalist id="repair-photo-vehicles">{vehicles.map(vehicle => <option key={vehicle.id} value={vehicle.licensePlate}>{vehicle.model}</option>)}</datalist>
-            <div className="repair-photo-team" role="status"><b>차량 대장 배정팀</b> {link.teamName || (link.vehicleId ? '등록된 배정팀이 없습니다.' : '일치하는 차량이 한 대인지 번호를 확인해 주세요.')}</div>
+            <div className="repair-photo-team" role="status"><b>차량 대장 배정팀</b> {link.teamName ? <RepairTeamBadge team={link} /> : (link.vehicleId ? '등록된 배정팀이 없습니다.' : '일치하는 차량이 한 대인지 번호를 확인해 주세요.')}</div>
             <label className="repair-photo-wide">정비업체<input value={form.vendor} onChange={event => update({ vendor: event.target.value })} /></label>
             <label className="repair-photo-wide">정비내용<textarea rows={5} value={form.description} onChange={event => update({ description: event.target.value })} /></label>
             <label>합계금액 (원)<input inputMode="decimal" value={form.amount} aria-invalid={!amount.valid} onChange={event => update({ amount: event.target.value })} /></label>

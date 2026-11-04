@@ -13,6 +13,8 @@ export interface RepairRecord {
   vehicleId: string;
   teamId?: string;
   teamName?: string;
+  teamColor?: string;
+  teamIcon?: string;
   description: string;
   driver: string;
   vendor: string;

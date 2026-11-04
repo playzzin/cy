@@ -11,7 +11,8 @@ import { vehicleRepairService } from './service';
 import { classifyRepairImport, COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, matchRepairVehicles, normalizePlate, parseRepairWorkbook, RepairRecord, repairReviewNotes, repairTotal, savedRepairRecord } from './model';
 import { changeDraftAmount, createRepairDraft, hasRepairDraftChanges, invalidDraftAmounts, parseRepairAmountInput, RepairDraft, repairDraftIssues } from './draft';
 import RepairPhotoImport, { PhotoRow } from './RepairPhotoImport';
-import { resolveRepairVehicle } from './vehicleTeam';
+import RepairTeamBadge from './RepairTeamBadge';
+import { resolveRepairTeam, resolveRepairVehicle, type RepairTeam, type RepairVehicleLink } from './vehicleTeam';
 import './VehicleRepairLedger.css';
 
 const errorText = (error: unknown) => String((error as { code?: string })?.code ?? '').includes('permission-denied')
@@ -114,6 +115,22 @@ export default function VehicleRepairLedger({ vehicles, teams = [], workers = []
     const date = new Date(year, month - 1 + offset, 1);
     changeMonth(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`);
   };
+  const lookupVehicle = useMemo(() => {
+    const links = new Map<string, RepairVehicleLink>();
+    return (plate: string) => {
+      const key = normalizePlate(plate);
+      const cached = links.get(key);
+      if (cached) return cached;
+      const link = resolveRepairVehicle(key, vehicles, teams, workers, officeStaff);
+      links.set(key, link);
+      return link;
+    };
+  }, [vehicles, teams, workers, officeStaff]);
+  const getRowTeam = useCallback((row: RepairRecord): RepairTeam => {
+    if (row.teamName === undefined && row.teamId === undefined) return lookupVehicle(row.vehiclePlate);
+    const team = resolveRepairTeam(row, teams);
+    return { ...team, teamId: row.teamId ?? team.teamId, teamName: row.teamName ?? team.teamName };
+  }, [lookupVehicle, teams]);
   const filtered = useMemo(() => {
     const order = new Map(records.slice().sort((a, b) => (b.date || b.yearMonth).localeCompare(a.date || a.yearMonth) || a.id.localeCompare(b.id)).map((row, index) => [row.id, index]));
     const added = Object.values(drafts).map(draft => draft.record).filter(row => row.revision === 0);
@@ -126,9 +143,9 @@ export default function VehicleRepairLedger({ vehicles, teams = [], workers = []
       if (!allPeriods && row.yearMonth !== yearMonth) return false;
       if (cost && row.costs[cost as CostKey] === null) return false;
       const query = search.replace(/\s/g, '').toLowerCase();
-      return !query || [row.vehiclePlate, row.teamName || '', row.description, row.driver, row.vendor, row.memo].some(value => value.replace(/\s/g, '').toLowerCase().includes(query));
+      return !query || [row.vehiclePlate, getRowTeam(row).teamName, row.description, row.driver, row.vendor, row.memo].some(value => value.replace(/\s/g, '').toLowerCase().includes(query));
     }).sort((a, b) => order.get(a.id)! - order.get(b.id)!);
-  }, [records, drafts, changedIds, yearMonth, allPeriods, cost, search, status]);
+  }, [records, drafts, changedIds, yearMonth, allPeriods, cost, search, status, getRowTeam]);
   const invalidAmounts = useMemo(() => new Set(changedDrafts.filter(draft => invalidDraftAmounts(draft).length).map(draft => draft.record.id)), [changedDrafts]);
   const hasInvalidAmounts = filtered.some(row => invalidAmounts.has(row.id));
   const totals = useMemo(() => COST_KEYS.reduce((result, key) => ({ ...result, [key]: Math.round(filtered.reduce((sum, row) => sum + (Number.isFinite(row.costs[key]) ? row.costs[key]! : 0), 0) * 100) / 100 }), {} as Record<CostKey, number>), [filtered]);
@@ -158,11 +175,10 @@ export default function VehicleRepairLedger({ vehicles, teams = [], workers = []
     if (lock.current || draftCount >= 100) return;
     setDrafts(current => ({ ...current, [row.id]: createRepairDraft(row) })); setPage(1); setFocusId(row.id); setNotice('');
   };
-  const lookupVehicle = (plate: string) => resolveRepairVehicle(plate, vehicles, teams, workers, officeStaff);
   const rowVehicle = (original: RepairRecord, plate: string) => {
     const link = lookupVehicle(plate);
-    if (original.revision && original.teamName !== undefined && original.vehicleId === link.vehicleId && normalizePlate(original.vehiclePlate) === normalizePlate(plate)) {
-      return { ...link, teamId: original.teamId ?? '', teamName: original.teamName };
+    if (original.revision && original.teamName !== undefined && (!link.vehicleId || original.vehicleId === link.vehicleId) && normalizePlate(original.vehiclePlate) === normalizePlate(plate)) {
+      return { ...link, ...getRowTeam(original) };
     }
     return link;
   };
@@ -261,10 +277,15 @@ export default function VehicleRepairLedger({ vehicles, teams = [], workers = []
         <tbody>{loading ? <tr><td colSpan={13} className="repair-empty">정비내역을 불러오는 중입니다.</td></tr> : !visible.length ? <tr><td colSpan={13} className="repair-empty">{status === 'archived' ? '삭제한 정비내역이 없습니다.' : '조회 조건에 맞는 정비내역이 없습니다. 행 추가로 입력하거나 전체 기간을 확인해 주세요.'}</td></tr> : visible.map((row, index) => {
           const label = `${(currentPage - 1) * 50 + index + 1}행`;
           const disabled = busy || row.archived || (draftCount >= 100 && !changedIds.has(row.id));
+          const team = getRowTeam(row);
+          const currentTeamOnly = row.teamName === undefined && row.teamId === undefined;
           return <tr key={row.id} className={`${changedIds.has(row.id) ? 'repair-row-dirty' : ''} ${rowErrors[row.id] || invalidAmounts.has(row.id) ? 'repair-row-error' : ''}`}>
             <td><input id={`repair-date-${row.id}`} aria-label={`${label} 정비일`} type="date" value={row.date} disabled={disabled} onChange={event => updateRow(row, { date: event.target.value })} />{!row.date && row.originalDate && <small>원본: {row.originalDate}</small>}{row.issues.length > 0 && <span className="repair-review" title={row.issues.join(' · ')}>확인 필요</span>}{row.revision === 0 && <span className="repair-new">신규</span>}{rowErrors[row.id] && <span role="alert" className="repair-cell-error">{rowErrors[row.id]}</span>}</td>
             <td><input aria-label={`${label} 차량번호`} list="repair-vehicle-options" value={row.vehiclePlate} disabled={disabled} placeholder="차량번호 입력" onChange={event => updateRow(row, { vehiclePlate: event.target.value, ...rowVehicle(drafts[row.id]?.original ?? row, event.target.value) })} />{!row.vehicleId && row.revision > 0 && <small>과거 / 미연결 차량</small>}</td>
-            <td className="repair-team-cell">{row.teamName || '—'}</td>
+            <td className="repair-team-cell">{team.teamName ? <>
+              <RepairTeamBadge team={team} title={currentTeamOnly ? `현재 차량 배정팀 · ${team.teamName}` : team.teamName} />
+              {currentTeamOnly && <small>현재 배정</small>}
+            </> : '—'}</td>
             <td><input aria-label={`${label} 정비내용`} value={row.description} title={row.description} disabled={disabled} placeholder="정비내용 입력" onChange={event => updateRow(row, { description: event.target.value })} />{row.source && <small>{row.source.sheet} · {row.source.cell}</small>}</td>
             <td><input aria-label={`${label} 운전자`} value={row.driver} disabled={disabled} placeholder="—" onChange={event => updateRow(row, { driver: event.target.value })} /></td>
             <td><input aria-label={`${label} 정비업체`} value={row.vendor} disabled={disabled} placeholder="업체 입력" onChange={event => updateRow(row, { vendor: event.target.value })} /></td>
