@@ -61,6 +61,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
         try {
             validateWorkerBankPhoto(file);
             setPhoto({ file, id: newPhotoId() }); setViewedPhoto(null);
+            setFields(normalizeBankAccountFields({}));
             setInvalidPhoto(false);
             void analyzePhoto(file);
         } catch (failure) {

@@ -144,10 +144,12 @@ test('일부만 인식되면 이전 계좌정보를 섞지 않고 빈 항목의 
 
 test('분석 실패 후 같은 사진으로 다시 분석할 수 있다', async () => {
     (analyzeBankAccountPhoto as jest.Mock).mockRejectedValueOnce(new Error('Gemini 연결 실패'));
-    open();
+    open({ ...worker, directPayBankName: '이전은행', directPayAccountNumber: '000123456789', directPayAccountHolder: '이전예금주' });
     fireEvent.change(screen.getByLabelText('직불용 계좌 사진 선택'), { target: { files: [file] } });
     expect(await screen.findByRole('alert')).toHaveTextContent('다시 분석하거나 계좌정보를 직접 입력');
     expect(screen.getByLabelText('직불용 계좌 계좌번호')).toBeEnabled();
+    expect(screen.getByLabelText('직불용 계좌 계좌번호')).toHaveValue('');
+    expect(screen.getByRole('button', { name: '직불용 계좌 저장' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Gemini로 자동입력' }));
     await waitFor(() => expect(screen.getByLabelText('직불용 계좌 계좌번호')).toHaveValue(analyzedAccount.accountNumber));
     expect(analyzeBankAccountPhoto).toHaveBeenCalledTimes(2);

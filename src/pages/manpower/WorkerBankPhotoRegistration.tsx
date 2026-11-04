@@ -2,15 +2,22 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Worker } from '../../services/manpowerService';
 import { BANK_PHOTO_ACCEPT, saveWorkerBankPhoto, validateWorkerBankPhoto } from '../../services/workerBankPhotoService';
+import WorkerAccountRegistrationModal from '../../components/accounts/WorkerAccountRegistrationModal';
+import { isCompleteBankAccount } from '../../services/bankAccountPhotoService';
+import { getWorkerAccount } from '../../utils/workerAccount';
 import './WorkerIdImageShare.css';
 
-type PhotoWorker = Pick<Worker, 'id' | 'name' | 'teamName' | 'directPayBankPhotoId'>;
 type Row = { file: File; url: string; photoId: string; saved?: boolean; error?: string };
 const newPhotoId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
-export default function WorkerBankPhotoRegistration({ workers, disabled, onSaved }: {
-    workers: PhotoWorker[]; disabled?: boolean; onSaved: (updates: { workerId: string; directPayBankPhotoId: string }[]) => void;
+export default function WorkerBankPhotoRegistration({ workers, disabled, onSaved, onAccountSaved }: {
+    workers: Worker[]; disabled?: boolean; onSaved: (updates: { workerId: string; directPayBankPhotoId: string }[]) => void;
+    onAccountSaved?: (workerId: string, updates: Partial<Worker>) => void;
 }) {
     const [open, setOpen] = useState(false), [busy, setBusy] = useState(false);
+    const [photoOnly, setPhotoOnly] = useState(false);
+    const [accountWorkerId, setAccountWorkerId] = useState('');
+    const accountWorker = workers.find(worker => worker.id === accountWorkerId);
+    const chooseAccount = !!onAccountSaved && !photoOnly;
     const [rows, setRows] = useState<Record<string, Row>>({}), [message, setMessage] = useState('');
     const [errors, setErrors] = useState<Record<string, string>>({});
     const dialog = useRef<HTMLDialogElement>(null), trigger = useRef<HTMLButtonElement>(null);
@@ -20,8 +27,8 @@ export default function WorkerBankPhotoRegistration({ workers, disabled, onSaved
     const titleId = useId();
     const clear = () => { urls.current.forEach(url => URL.revokeObjectURL(url)); urls.current.clear(); setRows({}); setErrors({}); setMessage(''); };
     useEffect(() => { alive.current = true; const currentUrls = urls.current; return () => { alive.current = false; currentUrls.forEach(url => URL.revokeObjectURL(url)); }; }, []);
-    useEffect(() => { setOpen(false); clear(); }, [selection]);
-    useEffect(() => { if (open && !dialog.current?.open) dialog.current?.showModal(); }, [open]);
+    useEffect(() => { setOpen(false); setAccountWorkerId(''); clear(); }, [selection]);
+    useEffect(() => { if (open && !accountWorker && !dialog.current?.open) dialog.current?.showModal(); }, [open, accountWorker]);
     const close = () => { if (running.current) return; dialog.current?.close(); setOpen(false); clear(); trigger.current?.focus(); };
     const choose = (workerId: string, file?: File) => {
         if (!file || running.current) return;
@@ -57,9 +64,21 @@ export default function WorkerBankPhotoRegistration({ workers, disabled, onSaved
         } finally { running.current = false; if (alive.current) setBusy(false); }
     };
     return <>
-        <button ref={trigger} type="button" className="ws-id-share-trigger ws-bank-register" disabled={disabled || !workers.length || busy} onClick={() => { clear(); setOpen(true); }}>직불용 통장사본 등록</button>
-        {open && createPortal(<dialog ref={dialog} className="worker-id-share" aria-labelledby={titleId} onCancel={event => { event.preventDefault(); close(); }}>
-            <header><div><h2 id={titleId}>직불용 통장사본 원본 등록</h2><p>작업자마다 직불용 통장사본이나 은행 앱의 계좌 화면 사진을 선택하세요. JPG·PNG·WEBP, 사진당 5MB까지 가능합니다.</p></div><button type="button" disabled={busy} onClick={close} aria-label="직불용 통장사본 등록 닫기">닫기</button></header>
+        <button ref={trigger} type="button" className="ws-id-share-trigger ws-bank-register" disabled={disabled || !workers.length || busy} onClick={() => { clear(); setPhotoOnly(false); setOpen(true); }}>직불용 통장사본 등록</button>
+        {open && accountWorker?.id && onAccountSaved && <WorkerAccountRegistrationModal key={accountWorker.id}
+            worker={accountWorker} purpose="directPay" onSaved={updates => onAccountSaved(accountWorker.id!, updates)}
+            onClose={() => setAccountWorkerId('')} />}
+        {open && !accountWorker && createPortal(<dialog ref={dialog} className="worker-id-share" aria-labelledby={titleId} onCancel={event => { event.preventDefault(); close(); }}>
+            <header><div><h2 id={titleId}>{chooseAccount ? '직불용 계좌·통장사본 등록' : '직불용 통장사본 원본 등록'}</h2>
+                <p>{chooseAccount ? '작업자를 선택해 통장사본을 Gemini로 분석하세요. 은행명·계좌번호·예금주를 확인한 뒤 저장합니다.' : '작업자마다 직불용 통장사본이나 은행 앱의 계좌 화면 사진을 선택하세요. JPG·PNG·WEBP, 사진당 5MB까지 가능합니다.'}</p></div><button type="button" disabled={busy} onClick={close} aria-label="직불용 통장사본 등록 닫기">닫기</button></header>
+            {chooseAccount ? <>
+                <div className="worker-id-share__images">{workers.map(worker => worker.id && <article key={worker.id}>
+                    <strong>{worker.name}</strong><span>{worker.teamName}</span>
+                    <p>직불 계좌 {isCompleteBankAccount(getWorkerAccount(worker, 'directPay')) ? '등록됨' : '미등록'} · 통장사본 {worker.directPayBankPhotoId ? '등록됨' : '미등록'}</p>
+                    <button type="button" aria-label={`${worker.name} 직불용 계좌 등록/수정`} onClick={() => setAccountWorkerId(worker.id!)}>계좌 분석·등록</button>
+                </article>)}</div>
+                <p><button type="button" onClick={() => setPhotoOnly(true)}>계좌 입력 없이 사진만 등록</button></p>
+            </> : <>
             <p>공유할 직불용 통장사본 사진만 저장합니다. 은행명·계좌번호·예금주는 변경되지 않습니다. 등록할 작업자를 확인해 주세요. 기존 사진이 있으면 새 원본으로 교체됩니다.</p>
             <p role="status" aria-live="polite">{message}</p>
             <div className="worker-id-share__images">{workers.map(worker => worker.id && <article key={worker.id}>
@@ -70,6 +89,7 @@ export default function WorkerBankPhotoRegistration({ workers, disabled, onSaved
                 {(errors[worker.id] || rows[worker.id]?.error) && <p role="alert" className="worker-id-share__error">{errors[worker.id] || rows[worker.id]?.error}</p>}
             </article>)}</div>
             <button type="button" className="worker-id-share__primary" style={{ marginTop: 16 }} disabled={busy || !pending.length} onClick={() => void save()}>{busy ? '등록 중…' : `사진 ${pending.length}장 원본 등록`}</button>
+            </>}
         </dialog>, document.body)}
     </>;
 }

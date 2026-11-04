@@ -872,6 +872,8 @@ const WorkerSummaryPage: React.FC = () => {
                             <WorkerIdImageShare key={restricted ? 'team' : 'office'} workers={selectedDocumentWorkers} disabled={isSendingImage}
                                 loadImage={needsSupportRead ? readSupportIdentity : undefined} />
                             <WorkerBankPhotoRegistration key={restricted ? 'team-bank-register' : 'office-bank-register'} workers={selectedOwnDocumentWorkers} disabled={isSendingImage || isDevPreviewFrame}
+                                onAccountSaved={restricted ? undefined : (workerId, updates) => setWorkers(previous =>
+                                    previous.map(worker => worker.id === workerId ? { ...worker, ...updates } : worker))}
                                 onSaved={updates => setWorkers(previous => previous.map(worker => {
                                     const update = updates.find(item => item.workerId === worker.id);
                                     return update ? { ...worker, directPayBankPhotoId: update.directPayBankPhotoId } : worker;
