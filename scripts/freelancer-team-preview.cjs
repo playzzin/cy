@@ -13,9 +13,11 @@ const compiler = webpack({
     resolve: { extensions: ['.tsx', '.ts', '.js'] },
     module: { rules: [
         { test: /\.[jt]sx?$/, exclude: /node_modules/, use: { loader: require.resolve('babel-loader'), options: { presets: [[require.resolve('babel-preset-react-app'), { runtime: 'automatic' }]] } } },
-        { test: /\.css$/, use: [require.resolve('style-loader'), require.resolve('css-loader')] },
+        { test: /\.css$/, use: [require.resolve('style-loader'), require.resolve('css-loader'), { loader: require.resolve('postcss-loader'), options: { postcssOptions: {
+            plugins: [require('tailwindcss')({ content: [path.join(root, 'src/components/common/CompanyTeamSelector.tsx'), path.join(root, 'src/pages/manpower/Freelancer*.tsx')] })],
+        } } }] },
     ] },
-    plugins: [new webpack.NormalModuleReplacementPlugin(/(services\/freelancerService|contexts\/MasterDataContext)$/, path.join(fixture, 'service.ts'))],
+    plugins: [new webpack.NormalModuleReplacementPlugin(/(services\/(freelancerService|teamSettlementService)|contexts\/MasterDataContext)$/, path.join(fixture, 'service.ts'))],
 });
 compiler.run((error, stats) => {
     if (error || stats.hasErrors()) { console.error(error || stats.toString('errors-only')); process.exitCode = 1; compiler.close(() => {}); return; }

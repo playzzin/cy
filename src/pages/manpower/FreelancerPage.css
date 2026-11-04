@@ -11,11 +11,7 @@
 .freelancer-page-container .year-picker-container button { width: 32px; height: 36px; background: #f8fafc; }
 .freelancer-page-container .year-picker-container button:hover { background: #e5f4ef; }
 .freelancer-page-container .year-picker-container > span { min-width: 86px; padding: 0 8px; color: #172b46; text-align: center; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.freelancer-team-buttons { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 200px; overflow-x: auto; padding: 3px 2px; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
-.freelancer-page-container .team-tab-btn { --tab-color: #0b8d69; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 7px; height: 38px; padding: 0 12px; border: 1px solid #e2e8f0; border-radius: 7px; background: white; color: #475569; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.freelancer-page-container .team-tab-btn:hover, .freelancer-page-container .team-tab-btn.active { border-color: color-mix(in srgb, var(--tab-color) 45%, white); background: color-mix(in srgb, var(--tab-color) 12%, white); color: #172b46; }
-.freelancer-page-container .team-tab-btn.active { box-shadow: inset 0 2px var(--tab-color); font-weight: 700; }
-.freelancer-team-dot { width: 8px; height: 8px; flex-shrink: 0; border-radius: 50%; background: var(--tab-color); }
+.freelancer-team-selector { flex: 1 1 320px; min-width: 0; }
 .freelancer-page-container :is(button, select):focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .freelancer-ledger { min-width: 0; border: 1px solid color-mix(in srgb, var(--freelancer-team-color) 30%, white); border-top: 5px solid var(--freelancer-team-color); border-radius: 8px; background: white; overflow: hidden; }
 .freelancer-ledger-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; min-height: 62px; padding: 18px 12px; background: color-mix(in srgb, var(--freelancer-team-color) 12%, white); color: #172b46; }
@@ -62,7 +58,7 @@
 @media (max-width: 700px) {
   .freelancer-page-container { padding: 10px; }
   .freelancer-year-filter { width: 100%; }
-  .freelancer-team-buttons { flex-basis: 100%; min-width: 0; }
+  .freelancer-team-selector { flex-basis: 100%; min-width: 0; }
   .freelancer-page-container .year-picker-container { height: 42px; }
   .freelancer-actions { justify-content: flex-start; }
   .freelancer-action { flex: 1 1 auto; min-height: 42px; }

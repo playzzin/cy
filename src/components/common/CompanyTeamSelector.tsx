@@ -20,6 +20,7 @@ type Props = {
     internalLabel?: string;
     selectedTeamId: string;
     onChange: (teamId: string) => void;
+    onMissingSelection?: (firstTeamId: string | null) => void;
     allowAllTeams?: boolean;
     ariaLabel?: string;
     compact?: boolean;
@@ -81,7 +82,7 @@ const TeamButton: React.FC<{
     );
 };
 
-const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = [], internalLabel = '', selectedTeamId, onChange, allowAllTeams = true, ariaLabel = '통합 현황 팀 선택', compact = false }) => {
+const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = [], internalLabel = '', selectedTeamId, onChange, onMissingSelection, allowAllTeams = true, ariaLabel = '통합 현황 팀 선택', compact = false }) => {
     const [savedOrder, setSavedOrder] = useState(readCompanyTeamOrder);
     const [draftOrder, setDraftOrder] = useState<string[]>([]);
     const [editing, setEditing] = useState(false);
@@ -108,6 +109,13 @@ const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = []
         });
         return () => { cancelled = true; };
     }, []);
+
+    useEffect(() => {
+        if (!onMissingSelection || allowAllTeams || editing || (!orderReady && !error)) return;
+        if (internal.some(team => team.id === selectedTeamId) || support.some(team => team.id === selectedTeamId)) return;
+        const firstTeamId = internal[0]?.id ?? support[0]?.id ?? null;
+        if (firstTeamId !== (selectedTeamId || null)) onMissingSelection(firstTeamId);
+    }, [allowAllTeams, editing, error, internal, onMissingSelection, orderReady, selectedTeamId, support]);
 
     const handleDragEnd = ({ active, over }: DragEndEvent) => {
         if (!editing || saving || !over || active.id === over.id) return;

@@ -9,6 +9,18 @@ const teams = [
 ];
 const master = { teams, companies: [{ id: 'company', name: '청연 검증' }], loading: false };
 export const useMasterData = () => master;
+const orderKey = 'fixture:freelancer:company-team-order';
+export const teamSettlementService = {
+    async getTeamDisplayOrder(): Promise<string[]> {
+        return JSON.parse(sessionStorage.getItem(orderKey) ?? '["a","hidden","b","c"]');
+    },
+    async saveTeamDisplayOrder(ids: string[]) {
+        sessionStorage.setItem(orderKey, JSON.stringify(ids));
+    },
+    async resetTeamDisplayOrder() {
+        sessionStorage.setItem(orderKey, '[]');
+    },
+};
 const payments: FreelancerPayment[] = [];
 const saved = (year: number, month: number, teamId: string, value: number, workerId: string, name: string) => ({
     year, yearMonth: `${year}-${String(month).padStart(2, '0')}`, teamId, teamName: teamId,

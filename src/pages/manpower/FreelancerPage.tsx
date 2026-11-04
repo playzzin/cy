@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useMasterData } from '../../contexts/MasterDataContext';
+import CompanyTeamSelector from '../../components/common/CompanyTeamSelector';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
@@ -214,6 +215,11 @@ const FreelancerPage: React.FC = () => {
             .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
     }, [reportTeams, cheongyeonTeams, cheongyeonTeamIdMap, cheongyeonTeamNameMap, normalizeTeamId]);
 
+    const teamOptions = useMemo(() => visibleTeams.map((team, index) => ({
+        ...team, color: freelancerAccentColor(team, index),
+    })), [visibleTeams]);
+    const ledgerLoading = loading || masterLoading || (teamOptions.length > 0 && !teamOptions.some(team => team.id === selectedTeamId));
+
     const recalcTableHeight = useCallback(() => {
         if (!tableWrapRef.current) return;
         const rect = tableWrapRef.current.getBoundingClientRect();
@@ -281,13 +287,6 @@ const FreelancerPage: React.FC = () => {
             window.removeEventListener('resize', onResize);
         };
     }, [recalcTableHeight, selectedTeamId, displayData.length, loading]);
-
-    // 초기 로드 시 첫 번째 팀 자동 선택
-    useEffect(() => {
-        if (!selectedTeamId && visibleTeams.length > 0) {
-            setSelectedTeamId(visibleTeams[0].id || null);
-        }
-    }, [visibleTeams, selectedTeamId]);
 
     // 표시 데이터 필터링 (전체 보기) 및 합계 행 추가
     useEffect(() => {
@@ -416,13 +415,7 @@ const FreelancerPage: React.FC = () => {
     const closeHistoryDetails = useCallback(() => setHistoryDetails(null), []);
     useEffect(() => { closeHistoryDetails(); }, [selectedTeamId, year, closeHistoryDetails]);
 
-    const selectedTeamTheme = useMemo(() => {
-        const selectedIndex = visibleTeams.findIndex((team: any) => team.id === selectedTeamId);
-        if (selectedIndex < 0) {
-            return '#0b8d69';
-        }
-        return freelancerAccentColor(visibleTeams[selectedIndex], selectedIndex);
-    }, [selectedTeamId, visibleTeams]);
+    const selectedTeamTheme = teamOptions.find(team => team.id === selectedTeamId)?.color ?? '#0b8d69';
 
     const columns = useMemo((): any[] => [
         { data: 'no', title: 'No', readOnly: true, width: 45, renderer: centerRenderer },
@@ -715,9 +708,10 @@ const FreelancerPage: React.FC = () => {
     };
 
     const handleTeamChange = async (teamId: string | null) => {
+        if (selectedTeamId === teamId) return;
         syncRefToState();
 
-        if (modifiedRowsRef.current.size > 0 && selectedTeamId !== teamId) {
+        if (modifiedRowsRef.current.size > 0) {
             const result = await Swal.fire({
                 title: '미저장 데이터 경고',
                 text: '팀을 변경하면 현재 입력 중인 내역이 소실될 수 있습니다. 계속하시겠습니까?',
@@ -1086,18 +1080,15 @@ const FreelancerPage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="freelancer-team-buttons" role="group" aria-label="팀 선택">
-                {visibleTeams.map((team: any, idx: number) => (
-                    <button
-                        key={team.id}
-                        onClick={() => handleTeamChange(team.id)}
-                        className={`team-tab-btn ${selectedTeamId === team.id ? 'active' : ''}`}
-                        aria-pressed={selectedTeamId === team.id}
-                        style={{ '--tab-color': freelancerAccentColor(team, idx) } as React.CSSProperties}
-                    >
-                        <span className="freelancer-team-dot" aria-hidden="true" />{team.name}
-                    </button>
-                ))}
+                <div className="freelancer-team-selector">
+                    <CompanyTeamSelector
+                        internalTeams={teamOptions}
+                        selectedTeamId={selectedTeamId ?? ''}
+                        onChange={handleTeamChange}
+                        onMissingSelection={loading || masterLoading ? undefined : setSelectedTeamId}
+                        allowAllTeams={false}
+                        ariaLabel="프리랜서 신고 팀 선택"
+                    />
                 </div>
             </div>
 
@@ -1127,7 +1118,7 @@ const FreelancerPage: React.FC = () => {
 
             <main className="excel-main">
                 <div className="relative freelancer-table-shell" ref={tableWrapRef}>
-                    {loading && (
+                    {ledgerLoading && (
                         <div className="absolute inset-0 bg-white/40 backdrop-blur-sm z-[100] flex items-center justify-center">
                             <div className="freelancer-loading" role="status"><FontAwesomeIcon icon={faSpinner} spin />데이터 로딩 중...</div>
                         </div>
@@ -1135,7 +1126,7 @@ const FreelancerPage: React.FC = () => {
                     <HotTable
                         ref={hotRef}
                         data={displayData}
-                        readOnly={!!loadError}
+                        readOnly={!!loadError || ledgerLoading}
                         columns={columns}
                         rowHeaders={false}
                         nestedHeaders={nestedHeaders}
@@ -1218,7 +1209,7 @@ const FreelancerPage: React.FC = () => {
                     <select
                         value={taxExcelMonth}
                         onChange={(event) => setTaxExcelMonth(Number(event.target.value))}
-                        disabled={loading || !!loadError || downloadingTaxExcel}
+                        disabled={ledgerLoading || !!loadError || downloadingTaxExcel}
                         aria-label="세무용 엑셀 월 선택"
                         className="freelancer-export-month"
                     >
@@ -1228,7 +1219,7 @@ const FreelancerPage: React.FC = () => {
                     </select>
                     <button
                         onClick={handleDownloadTaxExcel}
-                        disabled={loading || !!loadError || downloadingTaxExcel}
+                        disabled={ledgerLoading || !!loadError || downloadingTaxExcel}
                         className="freelancer-action"
                     >
                         <FontAwesomeIcon icon={downloadingTaxExcel ? faSpinner : faFileExcel} spin={downloadingTaxExcel} />
@@ -1236,7 +1227,7 @@ const FreelancerPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleDownloadExcel}
-                        disabled={loading || !!loadError || downloadingExcel}
+                        disabled={ledgerLoading || !!loadError || downloadingExcel}
                         className="freelancer-action"
                     >
                         <FontAwesomeIcon icon={downloadingExcel ? faSpinner : faFileExcel} spin={downloadingExcel} />
@@ -1244,7 +1235,7 @@ const FreelancerPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={loading || !!loadError}
+                        disabled={ledgerLoading || !!loadError}
                         className="freelancer-action freelancer-action--primary"
                     >
                         <FontAwesomeIcon icon={faSave} />
