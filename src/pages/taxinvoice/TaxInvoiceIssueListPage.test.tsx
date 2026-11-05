@@ -76,6 +76,48 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
+test('기본 한글 검색으로 영문 키를 즉시 조합하고 영문 모드도 검색한다', async () => {
+    mount(); await ready();
+    const input = screen.getByRole('searchbox', { name: '발행리스트 통합검색' });
+    userEvent.type(input, 'gkqtjd');
+    expect(input).toHaveValue('합성');
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /발행리스트 통합검색 입력 언어: 한글/ }));
+    userEvent.type(input, ' A');
+    expect(input).toHaveValue('합성 A');
+    expect(screen.getByText('1 / 2건 표시')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '통합검색어 지우기' }));
+    expect(input).toHaveValue('');
+    expect(input).toHaveFocus();
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+});
+
+test('통합검색은 한글 조합 종료 후 목록을 갱신하고 열 필터 Enter는 조합을 보호한다', async () => {
+    mount(); await ready();
+    const input = screen.getByRole('searchbox', { name: '발행리스트 통합검색' });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '없는 항목' } });
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+    fireEvent.compositionEnd(input);
+    expect(screen.getByText('0 / 2건 표시')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '통합검색어 지우기' }));
+    fireEvent.click(screen.getByRole('button', { name: '공급받는자 필터' }));
+    const column = screen.getByRole('textbox', { name: '공급받는자 필터 검색' });
+    userEvent.type(column, 'gkqtjd');
+    expect(column).toHaveValue('합성');
+    fireEvent.compositionStart(column);
+    fireEvent.change(column, { target: { value: '합성 A' } });
+    fireEvent.keyDown(column, { key: 'Enter' });
+    expect(column).toBeInTheDocument();
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+    fireEvent.compositionEnd(column);
+    fireEvent.keyDown(column, { key: 'Enter', keyCode: 229 });
+    expect(column).toBeInTheDocument();
+    fireEvent.keyDown(column, { key: 'Enter' });
+    expect(column).not.toBeInTheDocument();
+    expect(screen.getByText('1 / 2건 표시')).toBeInTheDocument();
+});
+
 test('월 변경과 새로고침은 선택을 지우며 현재 월 항목만 삭제한다', async () => {
     (service.getIssuesByMonth as jest.Mock).mockImplementation(async ym => [row(ym === month ? 'A' : 'NEW_MONTH', 1, ym)]);
     mount(); await ready();

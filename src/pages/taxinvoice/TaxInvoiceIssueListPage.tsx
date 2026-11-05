@@ -26,6 +26,7 @@ import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typed
 import { applySavedIssueUpdates, getIssuePendingChanges, getNextIssueNo, IssueBatchWriteError, IssueDeleteConflictError, IssueSaveConflict, IssueSaveConflictError, parseIssueNumber } from '../../utils/taxInvoiceIssueDraft';
 import { useIssueNavigationGuard } from './useIssueNavigationGuard';
 import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
+import TaxInvoiceSearchInput from './components/TaxInvoiceSearchInput';
 import { showConfirmAlert, toast } from '../../utils/swal';
 import html2canvas from 'html2canvas';
 
@@ -438,12 +439,12 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
                 {/* Filters */}
                 <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-4 flex-wrap">
                     <div className="relative min-w-[240px] flex-1">
-                        <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
-                        <input
+                        <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-slate-400 text-xs" />
+                        <TaxInvoiceSearchInput
                             type="search"
                             aria-label="현장 데이터 검색"
                             value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
+                            onChange={setSearchTerm}
                             placeholder="현장명, 발주사, 담당팀 검색"
                             className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-8 pr-3 text-xs font-semibold text-slate-700 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                             autoFocus
@@ -925,16 +926,16 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
                     
                     {/* 검색창 (목록이 있을 때도 필터링을 위해 항상 표시 또는 조건부 표시) */}
                     <div className="relative mb-2">
-                        <input
+                        <TaxInvoiceSearchInput
                             autoFocus
                             type="text"
                             aria-label={`${label} 필터 검색`}
                             value={options ? searchTerm : value}
-                            onChange={(e) => {
+                            onChange={(next) => {
                                 if (options) {
-                                    setSearchTerm(e.target.value);
+                                    setSearchTerm(next);
                                 } else {
-                                    onChange(e.target.value);
+                                    onChange(next);
                                 }
                             }}
                             placeholder="검색..."
@@ -2301,27 +2302,18 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                     </div>
 
                     <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center xl:justify-end">
-                        <label className="relative block min-w-0 flex-1 xl:max-w-md">
-                            <span className="sr-only">발행리스트 통합검색</span>
-                            <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
-                            <input
+                        <div className="relative block min-w-0 flex-1 xl:max-w-md">
+                            <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-xs text-slate-400" />
+                            <TaxInvoiceSearchInput
                                 type="search"
+                                aria-label="발행리스트 통합검색"
                                 value={globalSearch}
-                                onChange={event => setGlobalSearch(event.target.value)}
+                                onChange={setGlobalSearch}
+                                clearLabel="통합검색어 지우기"
                                 placeholder="공급받는자, 현장, 팀, 품목 통합검색"
                                 className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-10 text-sm font-medium text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
                             />
-                            {globalSearch && (
-                                <button
-                                    type="button"
-                                    onClick={() => setGlobalSearch('')}
-                                    className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                                    aria-label="통합검색어 지우기"
-                                >
-                                    <FontAwesomeIcon icon={faXmark} />
-                                </button>
-                            )}
-                        </label>
+                        </div>
                         <span className="whitespace-nowrap text-xs font-bold text-slate-500" aria-live="polite">
                             {filteredIssues.length} / {issues.length}건 표시
                         </span>
