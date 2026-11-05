@@ -14,9 +14,9 @@ jest.mock('../../services/supportSharedDataService', () => ({ supportSharedDataS
 const legacyState = () => ({
     items: [{ id: 'impact', name: '임팩' }, { id: 'skill', name: '스킬' }, { id: 'legacy-other', name: '기타' }],
     rows: {
-        main: { id: 'main', quantities: { impact: 2, skill: 1, 'legacy-other': 4 }, note: '본팀 메모' },
+        main: { id: 'main', quantities: { impact: 2, skill: 1, 'legacy-other': 4 }, note: '새끼팀 메모' },
         parent: { id: 'parent', quantities: { impact: 3, skill: 2, 'legacy-other': 6 }, note: '', useForemanTotals: true,
-            foremen: [{ id: 'foreman_a', name: '검증 반장', quantities: { impact: 3, skill: 2, 'legacy-other': 6 }, note: '하위 메모' }] },
+            foremen: [{ id: 'foreman_a', name: '검증 반장', quantities: { impact: 3, skill: 2, 'legacy-other': 6 }, note: '반장 메모' }] },
         hidden: { id: 'hidden', quantities: { impact: 10, skill: 0, 'legacy-other': 0 }, note: '보존할 다른 팀' },
     },
 });
@@ -27,7 +27,7 @@ beforeEach(() => {
     localStorage.setItem('team_equipment_inventory_firestore_migrated_v1', 'done');
     saved = legacyState();
     (teamService.getTeams as jest.Mock).mockResolvedValue([
-        { id: 'main', name: '검증 본팀', type: '시공팀', color: '#047857' },
+        { id: 'main', name: '검증 새끼팀', type: '시공팀', color: '#047857' },
         { id: 'parent', name: '이재욱팀', type: '시공팀', color: '#2563eb' },
         { id: 'hidden', name: '관리팀', type: '관리팀' },
     ]);
@@ -37,45 +37,123 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 const mount = () => render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><TeamEquipmentStatusPage /></MemoryRouter>);
-const ready = () => screen.findByRole('spinbutton', { name: '검증 본팀 임팩 수량' });
+const ready = () => screen.findByRole('spinbutton', { name: '검증 새끼팀 임팩 수량' });
 const openRename = (name: string) => {
     fireEvent.click(screen.getByRole('button', { name: '장비 항목 관리' }));
     fireEvent.click(screen.getByRole('button', { name: `${name} 이름 수정` }));
     return screen.getByRole('textbox', { name: `${name} 장비 이름` });
 };
 
-test('본팀과 하위팀은 별도 표에 표시하며 기타 수량을 함마로 보존한다', async () => {
+test('이재욱팀은 본팀, 나머지 시공팀은 새끼팀으로 나누고 각각 총수량을 표시한다', async () => {
     mount(); await ready();
     const main = screen.getByRole('region', { name: '본팀 장비 현황' });
-    const children = screen.getByRole('region', { name: '하위팀 장비 현황' });
-    expect(within(main).getAllByRole('table')).toHaveLength(1);
-    expect(within(main).queryByText('검증 반장')).not.toBeInTheDocument();
-    expect(within(children).getByText('검증 반장')).toBeInTheDocument();
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 함마 수량' })).toHaveValue(4);
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 기타 수량' })).toHaveValue(0);
+    const children = screen.getByRole('region', { name: '새끼팀 장비 현황' });
+    expect(within(main).getAllByRole('table')).toHaveLength(2);
+    expect(within(main).getByRole('rowheader', { name: /이재욱팀/ })).toBeInTheDocument();
+    expect(within(main).getByText('검증 반장')).toBeInTheDocument();
+    expect(within(main).queryByText('검증 새끼팀')).not.toBeInTheDocument();
+    expect(within(children).getAllByRole('table')).toHaveLength(1);
+    expect(within(children).getByText('검증 새끼팀')).toBeInTheDocument();
+    expect(within(children).queryByText('이재욱팀')).not.toBeInTheDocument();
+    expect(within(children).queryByText('검증 반장')).not.toBeInTheDocument();
+    expect(screen.queryByText('관리팀')).not.toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 함마 수량' })).toHaveValue(4);
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 기타 수량' })).toHaveValue(0);
     expect(screen.getByRole('spinbutton', { name: '이재욱팀 검증 반장 함마 수량' })).toHaveValue(6);
-    expect(screen.getByLabelText('함마 전체 수량')).toHaveTextContent('10');
+    expect(within(main).getByRole('heading', { name: '본팀 총수량' })).toBeInTheDocument();
+    expect(within(children).getByRole('heading', { name: '새끼팀 총수량' })).toBeInTheDocument();
+    expect(screen.getByLabelText('본팀 함마 총수량')).toHaveTextContent(/^6대$/);
+    expect(screen.getByLabelText('새끼팀 함마 총수량')).toHaveTextContent(/^4대$/);
+    expect(screen.getByLabelText('본팀 전체 장비 수량')).toHaveTextContent(/^11대$/);
+    expect(screen.getByLabelText('새끼팀 전체 장비 수량')).toHaveTextContent(/^7대$/);
     expect(storage.save).not.toHaveBeenCalled();
 });
 
-test('하위팀 수량 변경은 본팀과 전체 합계에 한 번 반영되고 저장 후 복원된다', async () => {
+test('반장별 수량 변경은 본팀 총수량에만 한 번 반영되고 저장 후 복원된다', async () => {
     const view = mount(); await ready();
     fireEvent.change(screen.getByRole('spinbutton', { name: '이재욱팀 검증 반장 함마 수량' }), { target: { value: '9' } });
     expect(screen.getByLabelText('이재욱팀 함마 합계')).toHaveTextContent('9');
-    expect(screen.getByLabelText('함마 전체 수량')).toHaveTextContent('13');
-    fireEvent.click(screen.getByRole('button', { name: '이재욱팀 하위팀 저장' }));
+    expect(screen.getByLabelText('본팀 함마 총수량')).toHaveTextContent(/^9대$/);
+    expect(screen.getByLabelText('새끼팀 함마 총수량')).toHaveTextContent(/^4대$/);
+    expect(screen.getByLabelText('본팀 전체 장비 수량')).toHaveTextContent(/^14대$/);
+    fireEvent.click(screen.getByRole('button', { name: '이재욱팀 반장별 저장' }));
     await waitFor(() => expect(storage.save).toHaveBeenCalled());
     expect(saved.catalogVersion).toBe(2);
     expect(saved.rows.parent.foremen[0].quantities['legacy-other']).toBe(9);
     expect(saved.rows.hidden.note).toBe('보존할 다른 팀');
     view.unmount(); mount(); await ready();
     expect(screen.getByRole('spinbutton', { name: '이재욱팀 검증 반장 함마 수량' })).toHaveValue(9);
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 기타 수량' })).toHaveValue(0);
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 기타 수량' })).toHaveValue(0);
+});
+
+test('여러 새끼팀의 수량을 합산하고 새끼팀 저장 시 본팀 기록을 보존한다', async () => {
+    (teamService.getTeams as jest.Mock).mockResolvedValueOnce([
+        { id: 'main', name: '검증 새끼팀', type: '시공팀' },
+        { id: 'parent', name: '이재욱팀', type: '시공팀' },
+        { id: 'second', name: '검증 둘째팀', type: '시공팀' },
+    ]);
+    saved.rows.second = { id: 'second', quantities: { impact: 5, skill: 0, 'legacy-other': 2 }, note: '' };
+    const parentBefore = JSON.parse(JSON.stringify(saved.rows.parent));
+    mount(); await ready();
+    expect(screen.getByLabelText('새끼팀 임팩 총수량')).toHaveTextContent(/^7대$/);
+    expect(screen.getByLabelText('새끼팀 함마 총수량')).toHaveTextContent(/^6대$/);
+    fireEvent.change(screen.getByRole('spinbutton', { name: '검증 새끼팀 함마 수량' }), { target: { value: '8' } });
+    expect(screen.getByLabelText('새끼팀 함마 총수량')).toHaveTextContent(/^10대$/);
+    expect(screen.getByLabelText('새끼팀 전체 장비 수량')).toHaveTextContent(/^18대$/);
+    expect(screen.getByLabelText('본팀 함마 총수량')).toHaveTextContent(/^6대$/);
+    fireEvent.click(screen.getByRole('button', { name: '검증 새끼팀 저장' }));
+    await waitFor(() => expect(storage.save).toHaveBeenCalled());
+    expect(saved.rows.main.quantities['legacy-other']).toBe(8);
+    expect(saved.rows.second.quantities['legacy-other']).toBe(2);
+    expect(saved.rows.parent.quantities['legacy-other']).toBe(parentBefore.quantities['legacy-other']);
+    expect(saved.rows.parent.foremen[0].quantities['legacy-other']).toBe(parentBefore.foremen[0].quantities['legacy-other']);
+    expect(saved.rows.hidden.note).toBe('보존할 다른 팀');
+});
+
+test('팀명과 반장 검색은 표만 필터링하고 본팀·새끼팀 총수량은 유지한다', async () => {
+    mount(); await ready();
+    const search = screen.getByRole('textbox', { name: '본팀·새끼팀·반장 검색' });
+    fireEvent.change(search, { target: { value: '검증 새끼팀' } });
+    expect(screen.getByText('표시할 본팀이 없습니다.')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 함마 수량' })).toBeInTheDocument();
+    expect(screen.getByLabelText('본팀 함마 총수량')).toHaveTextContent(/^6대$/);
+    expect(screen.getByLabelText('새끼팀 함마 총수량')).toHaveTextContent(/^4대$/);
+    fireEvent.change(search, { target: { value: '검증 반장' } });
+    expect(screen.getByText('표시할 새끼팀이 없습니다.')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: '이재욱팀 검증 반장 함마 수량' })).toBeInTheDocument();
+    expect(screen.getByLabelText('본팀 전체 장비 수량')).toHaveTextContent(/^11대$/);
+    expect(screen.getByLabelText('새끼팀 전체 장비 수량')).toHaveTextContent(/^7대$/);
+});
+
+test('본팀 직접 입력 수량도 별도로 집계하며 이재욱팀 유사 이름은 새끼팀에 둔다', async () => {
+    saved.rows.parent.foremen = [];
+    saved.rows.parent.useForemanTotals = false;
+    (teamService.getTeams as jest.Mock).mockResolvedValueOnce([
+        { id: 'main', name: '이재욱팀 지원', type: '시공팀' },
+        { id: 'parent', name: ' 이재욱 팀 ', type: '시공팀' },
+    ]);
+    mount();
+    const input = await screen.findByRole('spinbutton', { name: '이재욱 팀 함마 수량' });
+    expect(within(screen.getByRole('region', { name: '새끼팀 장비 현황' })).getByText('이재욱팀 지원')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '12' } });
+    expect(screen.getByLabelText('본팀 함마 총수량')).toHaveTextContent(/^12대$/);
+    expect(screen.getByLabelText('새끼팀 함마 총수량')).toHaveTextContent(/^4대$/);
+});
+
+test('이재욱팀이 없으면 본팀 총수량은 0이고 나머지 시공팀만 새끼팀에 표시한다', async () => {
+    (teamService.getTeams as jest.Mock).mockResolvedValueOnce([
+        { id: 'main', name: '검증 새끼팀', type: '시공팀' },
+    ]);
+    mount(); await ready();
+    expect(screen.getByText('표시할 본팀이 없습니다.')).toBeInTheDocument();
+    expect(screen.getByLabelText('본팀 전체 장비 수량')).toHaveTextContent(/^0대$/);
+    expect(screen.getByLabelText('새끼팀 전체 장비 수량')).toHaveTextContent(/^7대$/);
+    expect(manpowerService.getWorkers).not.toHaveBeenCalled();
 });
 
 test('장비 이름 저장은 기존 ID·전체 팀 기록을 보존하고 미저장 수량을 함께 저장하지 않는다', async () => {
     const view = mount(); await ready();
-    fireEvent.change(screen.getByRole('spinbutton', { name: '검증 본팀 함마 수량' }), { target: { value: '99' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: '검증 새끼팀 함마 수량' }), { target: { value: '99' } });
     fireEvent.change(openRename('함마'), { target: { value: '충전 함마' } });
     fireEvent.click(screen.getByRole('button', { name: '이름 저장' }));
     await screen.findByRole('button', { name: '충전 함마 이름 수정' });
@@ -83,10 +161,10 @@ test('장비 이름 저장은 기존 ID·전체 팀 기록을 보존하고 미�
     expect(saved.rows.main.quantities['legacy-other']).toBe(4);
     expect(saved.rows.parent.foremen[0].quantities['legacy-other']).toBe(6);
     expect(saved.rows.hidden.note).toBe('보존할 다른 팀');
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 충전 함마 수량' })).toHaveValue(99);
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 충전 함마 수량' })).toHaveValue(99);
     expect(screen.getByText('1팀 변경 · 저장 필요')).toBeInTheDocument();
     view.unmount(); mount(); await ready();
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 충전 함마 수량' })).toHaveValue(4);
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 충전 함마 수량' })).toHaveValue(4);
 });
 
 test('중복 이름과 빈 이름을 거부하고 한글 조합 Enter로 저장하지 않는다', async () => {
@@ -111,7 +189,7 @@ test('이름 저장 실패 시 기존 이름과 수량을 유지하고 다시 �
     fireEvent.change(openRename('함마'), { target: { value: '충전 함마' } });
     fireEvent.click(screen.getByRole('button', { name: '이름 저장' }));
     await screen.findByText('장비 이름을 저장하지 못했습니다. 목록을 확인하고 다시 시도해 주세요.');
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 함마 수량' })).toHaveValue(4);
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 함마 수량' })).toHaveValue(4);
     expect(screen.getByRole('textbox', { name: '함마 장비 이름' })).toHaveValue('충전 함마');
     fireEvent.click(screen.getByRole('button', { name: '이름 저장' }));
     await screen.findByRole('button', { name: '충전 함마 이름 수정' });
@@ -127,9 +205,9 @@ test('사용자가 추가하거나 삭제한 항목은 저장 후 재접속해�
     fireEvent.click(screen.getByRole('button', { name: '배터리 삭제' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: '배터리 삭제' })).not.toBeInTheDocument());
     view.unmount(); mount(); await ready();
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 충전기 수량' })).toHaveValue(0);
-    expect(screen.queryByRole('spinbutton', { name: '검증 본팀 배터리 수량' })).not.toBeInTheDocument();
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 함마 수량' })).toHaveValue(4);
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 충전기 수량' })).toHaveValue(0);
+    expect(screen.queryByRole('spinbutton', { name: '검증 새끼팀 배터리 수량' })).not.toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 함마 수량' })).toHaveValue(4);
 });
 
 test('공용 데이터 조회 실패 시 이름·수량 저장과 항목 변경을 차단한다', async () => {
@@ -138,7 +216,7 @@ test('공용 데이터 조회 실패 시 이름·수량 저장과 항목 변경�
     mount(); await ready();
     expect(screen.getByRole('alert')).toHaveTextContent('공용 DB를 불러오지 못해');
     expect(screen.getByRole('button', { name: '전체 저장' })).toBeDisabled();
-    expect(screen.getByRole('spinbutton', { name: '검증 본팀 임팩 수량' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: '검증 새끼팀 임팩 수량' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '장비 항목 관리' }));
     expect(screen.getByRole('button', { name: '함마 이름 수정' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '항목 추가' })).toBeDisabled();

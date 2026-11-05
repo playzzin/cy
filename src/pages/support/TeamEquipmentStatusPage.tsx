@@ -572,13 +572,13 @@ const TeamEquipmentStatusPage: React.FC = () => {
     };
 
     const equipmentTotals = useMemo(() => {
-        return equipmentItems.map((item) => ({
-            ...item,
-            total: records.reduce((sum, record) => {
-                const quantities = getRecordDisplayQuantities(record, equipmentItems);
-                return sum + toQuantity(quantities[item.id]);
-            }, 0)
-        }));
+        const totals = { main: createEmptyQuantities(equipmentItems), subteams: createEmptyQuantities(equipmentItems) };
+        records.forEach(record => {
+            const group = record.isForemanBreakdown ? totals.main : totals.subteams;
+            const quantities = getRecordDisplayQuantities(record, equipmentItems);
+            equipmentItems.forEach(item => { group[item.id] += toQuantity(quantities[item.id]); });
+        });
+        return totals;
     }, [equipmentItems, records]);
 
     const visibleRecords = useMemo(() => {
@@ -903,7 +903,10 @@ const TeamEquipmentStatusPage: React.FC = () => {
 
     const tableMinWidth = 222 + equipmentItems.length * 46;
     const controlsDisabled = loading || saving || Boolean(loadError);
-    const breakdownRecords = visibleRecords.filter(record => record.isForemanBreakdown);
+    const visibleMainRecords = visibleRecords.filter(record => record.isForemanBreakdown);
+    const visibleSubteamRecords = visibleRecords.filter(record => !record.isForemanBreakdown);
+    const mainTeamCount = records.filter(record => record.isForemanBreakdown).length;
+    const subteamCount = records.length - mainTeamCount;
     const isComposingKey = (event: React.KeyboardEvent<HTMLInputElement>) => (
         event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
     );
@@ -918,6 +921,31 @@ const TeamEquipmentStatusPage: React.FC = () => {
         {equipmentItems.map(item => <th key={item.id} scope="col" title={item.name}>{item.name}</th>)}
         <th scope="col">비고</th><th scope="col"><span className="sr-only">관리</span></th>
     </tr></thead>;
+    const renderTotals = (name: string, totals: Record<string, number>) => <section className="equipment-group-summary" aria-label={`${name} 총수량`}>
+        <div className="equipment-summary-heading"><h3>{name} 총수량</h3>
+            <strong aria-label={`${name} 전체 장비 수량`}>{equipmentItems.reduce((sum, item) => sum + totals[item.id], 0).toLocaleString('ko-KR')}<small>대</small></strong>
+        </div>
+        <div className="equipment-summary">
+            {equipmentItems.map(item => <div key={item.id} className="equipment-total">
+                <span><FontAwesomeIcon icon={item.id === 'impact' ? faWrench : faBoxesStacked} /> {item.name}</span>
+                <strong aria-label={`${name} ${item.name} 총수량`}>{totals[item.id].toLocaleString('ko-KR')}<small>대</small></strong>
+            </div>)}
+        </div>
+    </section>;
+    const renderTeamRow = (record: TeamEquipmentRecord) => {
+        const quantities = getRecordDisplayQuantities(record, equipmentItems);
+        const locked = record.isForemanBreakdown && record.useForemanTotals;
+        return <tr key={record.id} className={changedIds.has(record.id) ? 'is-changed' : ''}>
+            <th scope="row"><div className="equipment-team-name" title={record.teamName}><i style={{ backgroundColor: record.teamColor }} /><span>{record.teamName}</span></div>
+                {record.isForemanBreakdown && <small className="equipment-team-hint">{locked ? '반장별 합계' : '직접 입력'} · {record.foremen.length}명</small>}</th>
+            {equipmentItems.map(item => <td key={item.id}>{locked
+                ? <output className="equipment-derived" aria-label={`${record.teamName} ${item.name} 합계`}>{toQuantity(quantities[item.id])}</output>
+                : <input type="number" min={0} step={1} aria-label={`${record.teamName} ${item.name} 수량`} value={quantities[item.id] ?? 0} disabled={controlsDisabled}
+                    onChange={event => updateQuantity(record.id, item.id, event.target.value)} />}</td>)}
+            <td><input className="equipment-note" aria-label={`${record.teamName} 비고`} value={record.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateNote(record.id, event.target.value)} /></td>
+            <td><button type="button" className={`equipment-icon-button ${changedIds.has(record.id) ? 'equipment-primary' : ''}`} aria-label={`${record.teamName} 저장`} title="팀 저장" disabled={controlsDisabled} onClick={() => saveRecord(record.id)}><FontAwesomeIcon icon={faFloppyDisk} /></button></td>
+        </tr>;
+    };
 
     return (
         <div className="team-equipment-page">
@@ -925,7 +953,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                 <header className="equipment-header">
                     <div className="equipment-heading">
                         <span className="equipment-heading-icon"><FontAwesomeIcon icon={faScrewdriverWrench} /></span>
-                        <div><h1>시공팀 장비 수량 현황</h1><p>본팀과 하위팀의 보유 장비를 한눈에 확인하세요.</p></div>
+                        <div><h1>시공팀 장비 수량 현황</h1><p>본팀과 새끼팀의 보유 장비를 각각 확인하세요.</p></div>
                     </div>
                     <div className="equipment-actions">
                         <button type="button" onClick={() => navigate('/support/vehicles')}><FontAwesomeIcon icon={faArrowLeft} /> 차량 관리</button>
@@ -933,16 +961,9 @@ const TeamEquipmentStatusPage: React.FC = () => {
                     </div>
                 </header>
 
-                <section className="equipment-summary" aria-label="장비별 전체 수량">
-                    {equipmentTotals.map(item => <div key={item.id} className="equipment-total">
-                        <span><FontAwesomeIcon icon={item.id === 'impact' ? faWrench : faBoxesStacked} /> {item.name}</span>
-                        <strong aria-label={`${item.name} 전체 수량`}>{item.total.toLocaleString('ko-KR')}<small>대</small></strong>
-                    </div>)}
-                </section>
-
                 <div className="equipment-toolbar">
                     <label className="equipment-search"><FontAwesomeIcon icon={faMagnifyingGlass} />
-                        <input aria-label="팀·하위팀 검색" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} placeholder="팀명, 하위팀 또는 비고 검색" />
+                        <input aria-label="본팀·새끼팀·반장 검색" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} placeholder="팀명, 반장명 또는 비고 검색" />
                     </label>
                     <span className="equipment-pending" role="status">{changedIds.size > 0 ? `${changedIds.size}팀 변경 · 저장 필요` : '시공팀 전체 보유 현황'}</span>
                     <button type="button" aria-expanded={showEquipmentManager} onClick={() => setShowEquipmentManager(prev => !prev)}><FontAwesomeIcon icon={faPen} /> 장비 항목 관리</button>
@@ -950,7 +971,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                 </div>
 
                 {showEquipmentManager && <section className="equipment-manager" aria-label="장비 항목 관리">
-                    <div className="equipment-manager-heading"><div><h2>장비 항목 관리</h2><p>이름을 바꿔도 본팀·하위팀의 기존 수량은 유지됩니다.</p></div>
+                    <div className="equipment-manager-heading"><div><h2>장비 항목 관리</h2><p>이름을 바꿔도 본팀·새끼팀의 기존 수량은 유지됩니다.</p></div>
                         <button type="button" className="equipment-danger" disabled={controlsDisabled} onClick={resetEquipmentData}><FontAwesomeIcon icon={faRotateLeft} /> 수량 초기화</button>
                     </div>
                     <div className="equipment-item-list">
@@ -985,45 +1006,27 @@ const TeamEquipmentStatusPage: React.FC = () => {
 
                 <div className="equipment-columns">
                     <section className="equipment-panel" aria-label="본팀 장비 현황">
-                        <header className="equipment-panel-heading"><div><h2><FontAwesomeIcon icon={faUsers} /> 본팀</h2><p>하위팀 합계는 본팀에 한 번만 반영됩니다.</p></div><span>{visibleRecords.length}팀</span></header>
+                        <header className="equipment-panel-heading"><div><h2><FontAwesomeIcon icon={faUsers} /> 본팀</h2><p>이재욱팀 · 반장별 수량은 본팀 합계에 한 번만 반영됩니다.</p></div><span>{mainTeamCount}팀</span></header>
+                        {renderTotals('본팀', equipmentTotals.main)}
                         <div className="equipment-table-scroll" tabIndex={0} aria-label="본팀 장비 표 스크롤">
                             <table className="equipment-table" style={{ minWidth: tableMinWidth }}>
                                 {tableColumns}{tableHead('본팀')}
                                 <tbody>
                                     {loading ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">팀 정보를 불러오는 중입니다.</td></tr>
-                                    : visibleRecords.length === 0 ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">표시할 시공팀이 없습니다.</td></tr>
-                                    : visibleRecords.map(record => {
-                                        const quantities = getRecordDisplayQuantities(record, equipmentItems);
-                                        const locked = record.isForemanBreakdown && record.useForemanTotals;
-                                        return <tr key={record.id} className={changedIds.has(record.id) ? 'is-changed' : ''}>
-                                            <th scope="row"><div className="equipment-team-name" title={record.teamName}><i style={{ backgroundColor: record.teamColor }} /><span>{record.teamName}</span></div>
-                                                {record.isForemanBreakdown && <small className="equipment-team-hint">{locked ? '하위 합계' : '직접 입력'} · {record.foremen.length}명</small>}</th>
-                                            {equipmentItems.map(item => <td key={item.id}>{locked
-                                                ? <output className="equipment-derived" aria-label={`${record.teamName} ${item.name} 합계`}>{toQuantity(quantities[item.id])}</output>
-                                                : <input type="number" min={0} step={1} aria-label={`${record.teamName} ${item.name} 수량`} value={quantities[item.id] ?? 0} disabled={controlsDisabled}
-                                                    onChange={event => updateQuantity(record.id, item.id, event.target.value)} />}</td>)}
-                                            <td><input className="equipment-note" aria-label={`${record.teamName} 비고`} value={record.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateNote(record.id, event.target.value)} /></td>
-                                            <td><button type="button" className={`equipment-icon-button ${changedIds.has(record.id) ? 'equipment-primary' : ''}`} aria-label={`${record.teamName} 저장`} title="팀 저장" disabled={controlsDisabled} onClick={() => saveRecord(record.id)}><FontAwesomeIcon icon={faFloppyDisk} /></button></td>
-                                        </tr>;
-                                    })}
+                                    : visibleMainRecords.length === 0 ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">표시할 본팀이 없습니다.</td></tr>
+                                    : visibleMainRecords.map(renderTeamRow)}
                                 </tbody>
                             </table>
                         </div>
-                        <footer className="equipment-panel-footer">조회 {visibleRecords.length.toLocaleString('ko-KR')} / {records.length.toLocaleString('ko-KR')}팀</footer>
-                    </section>
-
-                    <section className="equipment-panel equipment-subteams" aria-label="하위팀 장비 현황">
-                        <header className="equipment-panel-heading"><div><h2><FontAwesomeIcon icon={faUsers} /> 하위팀</h2><p>반장별 수량을 입력하면 왼쪽 본팀 합계에 반영됩니다.</p></div><span>{breakdownRecords.reduce((sum, record) => sum + record.foremen.length, 0)}명</span></header>
-                        {loading ? <div className="equipment-empty">하위팀 정보를 불러오는 중입니다.</div>
-                        : breakdownRecords.length === 0 ? <div className="equipment-empty">조회된 본팀에 하위팀이 없습니다.</div>
-                        : breakdownRecords.map(record => {
+                        <footer className="equipment-panel-footer">조회 {visibleMainRecords.length.toLocaleString('ko-KR')} / {mainTeamCount.toLocaleString('ko-KR')}팀 · 총수량은 검색과 관계없이 표시됩니다.</footer>
+                        {!loading && visibleMainRecords.map(record => {
                             const totals = calculateForemanTotals(record.foremen, equipmentItems);
-                            return <section key={record.id} className="equipment-subteam-group" aria-label={`${record.teamName} 하위팀`}>
+                            return <section key={record.id} className="equipment-foreman-group" aria-label={`${record.teamName} 반장별 내역`}>
                                 <div className="equipment-subteam-heading"><strong><i style={{ backgroundColor: record.teamColor }} />{record.teamName} <span>반장별</span></strong>
-                                    <button type="button" className={changedIds.has(record.id) ? 'equipment-primary' : ''} disabled={controlsDisabled} onClick={() => saveRecord(record.id)} aria-label={`${record.teamName} 하위팀 저장`}><FontAwesomeIcon icon={faFloppyDisk} /> 저장</button></div>
-                                <div className="equipment-table-scroll" tabIndex={0} aria-label={`${record.teamName} 하위팀 표 스크롤`}>
+                                    <button type="button" className={changedIds.has(record.id) ? 'equipment-primary' : ''} disabled={controlsDisabled} onClick={() => saveRecord(record.id)} aria-label={`${record.teamName} 반장별 저장`}><FontAwesomeIcon icon={faFloppyDisk} /> 저장</button></div>
+                                <div className="equipment-table-scroll" tabIndex={0} aria-label={`${record.teamName} 반장별 표 스크롤`}>
                                     <table className="equipment-table" style={{ minWidth: tableMinWidth }}>
-                                        {tableColumns}{tableHead('하위팀·반장')}
+                                        {tableColumns}{tableHead('반장')}
                                         <tbody>{record.foremen.length === 0
                                             ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">아래에서 반장을 추가하세요.</td></tr>
                                             : record.foremen.map(foreman => <tr key={foreman.id}>
@@ -1033,7 +1036,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                                 <td><input className="equipment-note" aria-label={`${record.teamName} ${foreman.name} 비고`} value={foreman.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateForemanNote(record.id, foreman.id, event.target.value)} /></td>
                                                 <td><button type="button" className="equipment-icon-button equipment-danger" aria-label={`${foreman.name} 반장 삭제`} title="반장 삭제" disabled={controlsDisabled} onClick={() => removeForeman(record.id, foreman)}><FontAwesomeIcon icon={faTrash} /></button></td>
                                             </tr>)}</tbody>
-                                        <tfoot><tr><th scope="row">하위팀 합계</th>{equipmentItems.map(item => <td key={item.id}><output aria-label={`${record.teamName} 하위팀 ${item.name} 합계`}>{totals[item.id]}</output></td>)}<td colSpan={2} /></tr></tfoot>
+                                        <tfoot><tr><th scope="row">반장별 합계</th>{equipmentItems.map(item => <td key={item.id}><output aria-label={`${record.teamName} 반장별 ${item.name} 합계`}>{totals[item.id]}</output></td>)}<td colSpan={2} /></tr></tfoot>
                                     </table>
                                 </div>
                                 <div className="equipment-add-foreman"><input aria-label={`${record.teamName} 반장명 추가`} placeholder="반장명 추가" disabled={controlsDisabled} value={newForemanNames[record.id] ?? ''}
@@ -1042,6 +1045,22 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                     <button type="button" disabled={controlsDisabled} onClick={() => addForeman(record.id)}><FontAwesomeIcon icon={faPlus} /> 반장 추가</button></div>
                             </section>;
                         })}
+                    </section>
+
+                    <section className="equipment-panel equipment-subteams" aria-label="새끼팀 장비 현황">
+                        <header className="equipment-panel-heading"><div><h2><FontAwesomeIcon icon={faUsers} /> 새끼팀</h2><p>이재욱팀 외 시공팀의 보유 장비입니다.</p></div><span>{subteamCount}팀</span></header>
+                        {renderTotals('새끼팀', equipmentTotals.subteams)}
+                        <div className="equipment-table-scroll" tabIndex={0} aria-label="새끼팀 장비 표 스크롤">
+                            <table className="equipment-table" style={{ minWidth: tableMinWidth }}>
+                                {tableColumns}{tableHead('새끼팀')}
+                                <tbody>
+                                    {loading ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">팀 정보를 불러오는 중입니다.</td></tr>
+                                    : visibleSubteamRecords.length === 0 ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">표시할 새끼팀이 없습니다.</td></tr>
+                                    : visibleSubteamRecords.map(renderTeamRow)}
+                                </tbody>
+                            </table>
+                        </div>
+                        <footer className="equipment-panel-footer">조회 {visibleSubteamRecords.length.toLocaleString('ko-KR')} / {subteamCount.toLocaleString('ko-KR')}팀 · 총수량은 검색과 관계없이 표시됩니다.</footer>
                     </section>
                 </div>
             </div>

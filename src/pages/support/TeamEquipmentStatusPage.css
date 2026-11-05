@@ -14,8 +14,13 @@
 .equipment-heading h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.7px; }
 .equipment-heading p, .equipment-manager-heading p { margin: 3px 0 0; color: #768298; font-size: 12px; }
 .equipment-actions { flex-wrap: wrap; }
-.equipment-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-.equipment-total { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 12px 14px; border: 1px solid #e0e7f0; border-radius: 10px; background: #fff; }
+.equipment-group-summary { padding: 12px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+.equipment-summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.equipment-summary-heading h3 { margin: 0; color: #335780; font-size: 13px; font-weight: 800; }
+.equipment-summary-heading > strong { color: #233b60; font-size: 20px; font-variant-numeric: tabular-nums; }
+.equipment-summary-heading small { margin-left: 5px; color: #8995a7; font-size: 11px; font-weight: 500; }
+.equipment-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.equipment-total { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; padding: 10px; border: 1px solid #e0e7f0; border-radius: 10px; background: #fff; }
 .equipment-total > span { min-width: 0; color: #60718b; font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
 .equipment-total svg { color: #7594c4; margin-right: 4px; }
 .equipment-total strong { font-size: 24px; font-weight: 800; line-height: 1.1; color: #1c355d; }
@@ -32,6 +37,7 @@
 .equipment-panel-heading p { margin: 3px 0 0; color: #8290a5; font-size: 10px; }
 .equipment-panel-heading > span { padding: 3px 7px; border-radius: 6px; background: #eef3fa; color: #60789c; font-size: 11px; font-weight: 700; }
 .equipment-subteams .equipment-panel-heading { background: #f4f8ff; }
+.equipment-foreman-group { border-top: 1px solid #e2e8f0; }
 .equipment-table-scroll { position: relative; overflow-x: auto; max-width: 100%; scrollbar-width: thin; }
 .equipment-table { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; }
 .equipment-table th, .equipment-table td { height: 36px; padding: 4px; border-bottom: 1px solid #edf0f5; vertical-align: middle; }
