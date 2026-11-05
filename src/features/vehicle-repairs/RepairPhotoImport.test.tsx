@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { Vehicle } from '../../types/vehicle';
 import type { Team } from '../../services/teamService';
 import VehicleRepairLedger from './VehicleRepairLedger';
+import RepairPhotoImport from './RepairPhotoImport';
 import { COST_KEYS, COST_LABELS, emptyCosts } from './model';
 import { analyzeRepairPhoto, identifyRepairPhoto, RepairPhotoResult } from './photoAnalysis';
 import { vehicleRepairService } from './service';
@@ -28,15 +29,122 @@ beforeEach(() => {
   (identifyRepairPhoto as jest.Mock).mockResolvedValue(photoId);
   analyze.mockResolvedValue(result);
 });
-const upload = (name = 'sample.jpg') => fireEvent.change(screen.getByLabelText('정비명세서 사진 파일'), {
-  target: { files: [new File(['fixture'], name, { type: 'image/jpeg' })] },
+const upload = (...names: string[]) => fireEvent.change(screen.getByLabelText('정비명세서 사진 파일'), {
+  target: { files: (names.length ? names : ['sample.jpg']).map(name => new File([name], name, { type: 'image/jpeg' })) },
 });
-async function openLedger() {
+async function openLedger(...names: string[]) {
   render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><VehicleRepairLedger vehicles={[vehicle]} teams={[team]} /></MemoryRouter>);
   await screen.findByText(/조회 조건에 맞는 정비내역/);
   fireEvent.click(screen.getByRole('button', { name: '정비명세서 사진 인식' }));
-  upload();
+  await act(async () => upload(...names));
 }
+
+test('여러 사진의 검수 내용을 유지하고 서로 다른 월의 내역을 한꺼번에 추가·저장한다', async () => {
+  (identifyRepairPhoto as jest.Mock).mockImplementation((file: File) => Promise.resolve(photoId + file.name));
+  analyze.mockResolvedValueOnce(result).mockResolvedValueOnce({ ...result, date: '2026-11-02', total: 120000 });
+  await openLedger('october.jpg', 'november.jpg');
+  expect(screen.getByLabelText('정비명세서 사진 파일')).toHaveAttribute('multiple');
+  const add = await screen.findByRole('button', { name: '인식된 2건 대장에 추가' });
+  await waitFor(() => expect(add).toBeEnabled());
+  fireEvent.change(screen.getByLabelText('합계금액 (원)'), { target: { value: '350000' } });
+  fireEvent.click(screen.getByRole('button', { name: /2\. november.jpg/ }));
+  expect(screen.getByLabelText('합계금액 (원)')).toHaveValue('120,000');
+  fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('비용 구분'), { target: { value: 'corporate' } });
+  fireEvent.click(screen.getByRole('button', { name: /1\. october.jpg/ }));
+  expect(screen.getByLabelText('합계금액 (원)')).toHaveValue('350000');
+  fireEvent.click(add);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: '전체 기간' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByText('수정사항 2건')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  await screen.findByText('2건의 정비내역을 저장했습니다.');
+  expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([
+    expect.objectContaining({ id: photoId + 'october.jpg', yearMonth: '2026-10', costs: { ...emptyCosts(), personal: 350000 } }),
+    expect.objectContaining({ id: photoId + 'november.jpg', yearMonth: '2026-11', costs: { ...emptyCosts(), corporate: 120000 } }),
+  ]);
+});
+
+test('실패한 사진 뒤에도 나머지 사진을 인식하고 해당 사진만 다시 시도한다', async () => {
+  (identifyRepairPhoto as jest.Mock).mockImplementation((file: File) => Promise.resolve(photoId + file.name));
+  analyze.mockResolvedValueOnce(result).mockRejectedValueOnce(new Error('두 번째 사진 인식 실패')).mockResolvedValueOnce(result);
+  await openLedger('first.jpg', 'failed.jpg', 'last.jpg');
+  const add = await screen.findByRole('button', { name: '인식된 2건 대장에 추가' });
+  await waitFor(() => expect(add).toBeEnabled());
+  expect(analyze.mock.calls.map(([file]) => file.name)).toEqual(['first.jpg', 'failed.jpg', 'last.jpg']);
+  fireEvent.click(screen.getByRole('button', { name: /2\. failed.jpg/ }));
+  expect(screen.getByRole('alert')).toHaveTextContent('두 번째 사진 인식 실패');
+  fireEvent.click(screen.getByRole('button', { name: '다시 인식' }));
+  const retryAdd = await screen.findByRole('button', { name: '인식된 3건 대장에 추가' });
+  await waitFor(() => expect(retryAdd).toBeEnabled());
+  expect(analyze.mock.calls.map(([file]) => file.name)).toEqual(['first.jpg', 'failed.jpg', 'last.jpg', 'failed.jpg']);
+  fireEvent.click(retryAdd);
+  expect(screen.getByText('수정사항 3건')).toBeInTheDocument();
+  expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
+});
+
+test('정상 결과를 먼저 추가해도 누락된 결과는 보존하고 보완 후 추가할 수 있다', async () => {
+  (identifyRepairPhoto as jest.Mock).mockImplementation((file: File) => Promise.resolve(photoId + file.name));
+  analyze.mockResolvedValueOnce(result).mockResolvedValueOnce({ ...result, date: '2026-11-03', total: null, category: '' });
+  await openLedger('ready.jpg', 'incomplete.jpg');
+  await screen.findByRole('button', { name: /2\. incomplete.jpg 확인 필요/ });
+  fireEvent.click(screen.getByRole('button', { name: '인식된 1건 대장에 추가' }));
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /1\. ready.jpg/ })).not.toBeInTheDocument();
+  expect(screen.getByLabelText('합계금액 (원)')).toHaveValue('');
+  expect(screen.getByRole('button', { name: '대장에 추가' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('합계금액 (원)'), { target: { value: '75000' } });
+  fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('비용 구분'), { target: { value: 'joeun' } });
+  fireEvent.click(screen.getByRole('button', { name: '대장에 추가' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '전체 기간' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  await screen.findByText('2건의 정비내역을 저장했습니다.');
+  expect(vehicleRepairService.saveRows).toHaveBeenCalledWith(expect.arrayContaining([
+    expect.objectContaining({ id: photoId + 'ready.jpg', costs: { ...emptyCosts(), personal: 360000 } }),
+    expect.objectContaining({ id: photoId + 'incomplete.jpg', costs: { ...emptyCosts(), joeun: 75000 } }),
+  ]));
+});
+
+test('한 번에 선택한 같은 사진은 중복 인식·추가하지 않고 다른 사진은 계속 처리한다', async () => {
+  (identifyRepairPhoto as jest.Mock).mockResolvedValueOnce(photoId).mockResolvedValueOnce(photoId).mockResolvedValueOnce(photoId + '_other');
+  await openLedger('first.jpg', 'duplicate.jpg', 'other.jpg');
+  const add = await screen.findByRole('button', { name: '인식된 2건 대장에 추가' });
+  await waitFor(() => expect(add).toBeEnabled());
+  expect(analyze).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button', { name: /2\. duplicate.jpg/ }));
+  expect(screen.getByRole('alert')).toHaveTextContent('함께 선택한 사진 중 같은 사진');
+  fireEvent.click(add);
+  expect(screen.getByRole('button', { name: '대장에 추가' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+  expect(screen.getByText('수정사항 2건')).toBeInTheDocument();
+});
+
+test('남은 추가 가능 건수를 넘긴 선택은 인식 요청 전에 차단한다', () => {
+  const onAdd = jest.fn();
+  render(<RepairPhotoImport vehicles={[]} lookup={() => ({ vehicleId: '', teamId: '', teamName: '', teamColor: '', teamIcon: '' })}
+    alreadyAdded={() => false} remaining={1} onAdd={onAdd} onClose={jest.fn()} />);
+  upload('one.jpg', 'two.jpg');
+  expect(screen.getByRole('alert')).toHaveTextContent('현재 1장까지 선택할 수 있습니다');
+  expect(identifyRepairPhoto).not.toHaveBeenCalled();
+  expect(analyze).not.toHaveBeenCalled();
+  expect(onAdd).not.toHaveBeenCalled();
+});
+
+test('여러 장 인식 중 닫으면 진행 중 요청을 취소하고 다음 사진을 요청하지 않는다', async () => {
+  let finish!: (value: RepairPhotoResult) => void;
+  analyze.mockImplementationOnce(() => new Promise<RepairPhotoResult>(resolve => { finish = resolve; }));
+  await openLedger('first.jpg', 'second.jpg');
+  await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1));
+  const signal = analyze.mock.calls[0][1] as AbortSignal;
+  expect(screen.getByRole('button', { name: '인식된 0건 대장에 추가' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+  expect(signal.aborted).toBe(true);
+  await act(async () => finish(result));
+  expect(analyze).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText(/수정사항/)).not.toBeInTheDocument();
+  expect(URL.revokeObjectURL).toHaveBeenCalled();
+});
 
 test.each(COST_KEYS)('검수한 합계 전액을 %s 한 곳에 넣고 명시적인 저장 때만 등록한다', async category => {
   await openLedger();

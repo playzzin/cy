@@ -182,12 +182,19 @@ export default function VehicleRepairLedger({ vehicles, teams = [], workers = []
     }
     return link;
   };
-  const addPhoto = (photo: PhotoRow) => {
-    const month = photo.date.slice(0, 7);
-    if (!draftCount && !allPeriods && month !== yearMonth) selectMonth(month);
-    addRow({ ...blankRecord(month, photo.id), ...photo });
-    setPhotoOpen(false);
-    setNotice(`${month} 정비내역을 추가했습니다. 상단 저장을 눌러 등록하세요.`);
+  const addPhotos = (photos: PhotoRow[]) => {
+    if (lock.current || !photos.length || draftCount + photos.length > 100) return false;
+    const ids = new Set(photos.map(photo => photo.id));
+    if (ids.size !== photos.length || photos.some(photo => drafts[photo.id] || records.some(row => row.id === photo.id))) return false;
+    const months = new Set(photos.map(photo => photo.date.slice(0, 7)));
+    if (months.size > 1 || (draftCount && !months.has(yearMonth))) setAllPeriods(true);
+    else if (!draftCount && !allPeriods) selectMonth(photos[0].date.slice(0, 7));
+    setDrafts(current => ({ ...current, ...Object.fromEntries(photos.map(photo => [photo.id,
+      createRepairDraft({ ...blankRecord(photo.date.slice(0, 7), photo.id), ...photo }),
+    ])) }));
+    setPage(1); setFocusId(photos[photos.length - 1].id);
+    setNotice(`${photos.length}건의 정비내역을 추가했습니다. 상단 저장을 눌러 등록하세요.`);
+    return true;
   };
   const undoRow = (id: string) => {
     setDrafts(current => { const next = { ...current }; delete next[id]; return next; });
@@ -301,7 +308,7 @@ export default function VehicleRepairLedger({ vehicles, teams = [], workers = []
     <div className="repair-footer"><span>표에서 바로 입력 · Tab 키로 다음 칸 이동</span><div><button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>이전</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>다음</button></div></div>
     <div className="repair-guide"><strong>입력 가이드</strong><p><b>정비명세서 사진 인식</b>에서 사진을 선택하고 배정팀과 합계금액을 확인하세요. 비용 구분을 선택해 대장에 추가한 뒤 <b>저장</b>을 누르세요.</p><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>직접 등록한 정비비는 차량번호가 연결된 해당 월 경비대장의 수리비에 자동 반영됩니다. 엑셀로 가져온 과거 이력은 기존 월별 수리비와 중복 합산하지 않습니다. 청구·정산 반영은 월별 경비대장에서 확인 후 저장해 주세요. 삭제한 내역은 휴지통에서 복원할 수 있습니다.</p></div>
 
-    {photoOpen && <RepairPhotoImport vehicles={vehicles} lookup={lookupVehicle} alreadyAdded={id => Boolean(drafts[id]) || records.some(row => row.id === id)} onAdd={addPhoto} onClose={() => setPhotoOpen(false)} />}
+    {photoOpen && <RepairPhotoImport vehicles={vehicles} lookup={lookupVehicle} alreadyAdded={id => Boolean(drafts[id]) || records.some(row => row.id === id)} remaining={100 - draftCount} onAdd={addPhotos} onClose={() => setPhotoOpen(false)} />}
 
     <Dialog.Root open={Boolean(preview)} onOpenChange={open => { if (!open && !busy) setPreview(null); }}><Dialog.Portal><Dialog.Overlay className="repair-overlay" /><Dialog.Content className="repair-dialog repair-import-dialog" onInteractOutside={event => { if (busy) event.preventDefault(); }}>
       <Dialog.Title>엑셀 정비내역 가져오기</Dialog.Title><Dialog.Description>월별 합계 행을 제외하고 개별 정비 이력만 가져옵니다. 기존 기록은 덮어쓰지 않습니다.</Dialog.Description>

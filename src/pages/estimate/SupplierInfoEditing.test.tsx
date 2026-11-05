@@ -16,6 +16,10 @@ jest.mock('../../services/estimateService', () => ({
 jest.mock('../../services/companyFirestoreService', () => ({
     companyFirestoreService: { getCompanies: jest.fn() },
 }));
+jest.mock('../../services/rentalCatalogService', () => ({
+    loadRentalCatalog: jest.fn().mockResolvedValue({ entries: [], revision: 0 }),
+    saveRentalCatalog: jest.fn(),
+}));
 jest.mock('../../services/materialService', () => ({
     __esModule: true,
     default: { getUniqueMaterialsForSelection: jest.fn().mockResolvedValue([]) },
