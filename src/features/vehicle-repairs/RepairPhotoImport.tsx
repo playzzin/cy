@@ -40,12 +40,18 @@ function entryStatus(entry: PhotoEntry) {
   return { waiting: '인식 대기', reading: '인식 중', error: '인식 실패', duplicate: '중복 사진' }[entry.status];
 }
 
+const hasFiles = (transfer: DataTransfer | null) => Array.from(transfer?.types ?? []).includes('Files');
+const isPhotoFile = (file: File) => file.type.toLowerCase().startsWith('image/')
+  || ((!file.type || file.type === 'application/octet-stream') && /\.(jpe?g|png|webp|heic|heif|bmp|gif|avif)$/i.test(file.name));
+
 export default function RepairPhotoImport({ vehicles, lookup, alreadyAdded, remaining, onAdd, onClose }: Props) {
   const [entries, setEntries] = useState<PhotoEntry[]>([]);
   const [activeKey, setActiveKey] = useState<number>();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const input = useRef<HTMLInputElement>(null);
   const request = useRef<AbortController>();
   const sequence = useRef(0);
@@ -53,6 +59,23 @@ export default function RepairPhotoImport({ vehicles, lookup, alreadyAdded, rema
   const file = active?.file;
   const form = active?.form;
   useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => {
+    const resetDrag = () => { dragDepth.current = 0; setDragging(false); };
+    const preventFileNavigation = (event: DragEvent) => {
+      if (!hasFiles(event.dataTransfer)) return;
+      if (event.type === 'dragover' && !event.defaultPrevented && event.dataTransfer) event.dataTransfer.dropEffect = 'none';
+      event.preventDefault();
+      if (event.type === 'drop') resetDrag();
+    };
+    window.addEventListener('dragover', preventFileNavigation);
+    window.addEventListener('drop', preventFileNavigation);
+    window.addEventListener('dragend', resetDrag);
+    return () => {
+      window.removeEventListener('dragover', preventFileNavigation);
+      window.removeEventListener('drop', preventFileNavigation);
+      window.removeEventListener('dragend', resetDrag);
+    };
+  }, []);
   useEffect(() => {
     setUrl('');
     if (!file) return;
@@ -97,6 +120,10 @@ export default function RepairPhotoImport({ vehicles, lookup, alreadyAdded, rema
   };
   const selectFiles = (files: File[]) => {
     if (!files.length) return;
+    if (files.some(file => !isPhotoFile(file))) {
+      setError('사진 파일만 선택하거나 끌어다 놓아 주세요. JPG, PNG, WEBP, HEIC 등의 사진을 사용할 수 있습니다.');
+      return;
+    }
     if (files.length > remaining) {
       setError(`현재 ${remaining}장까지 선택할 수 있습니다. 작성 중인 행을 포함해 한 번에 100건까지 추가할 수 있습니다.`);
       return;
@@ -104,6 +131,29 @@ export default function RepairPhotoImport({ vehicles, lookup, alreadyAdded, rema
     const next: PhotoEntry[] = files.map(file => ({ key: ++sequence.current, file, status: 'waiting' }));
     setEntries(next); setActiveKey(next[0].key);
     void analyze(next);
+  };
+  const handleDragEnter = (event: React.DragEvent) => {
+    if (!hasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepth.current++;
+    setDragging(true);
+  };
+  const handleDragOver = (event: React.DragEvent) => {
+    if (!hasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  };
+  const handleDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (!dragDepth.current) setDragging(false);
+  };
+  const handleDrop = (event: React.DragEvent) => {
+    if (!hasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth.current = 0;
+    setDragging(false);
+    selectFiles(Array.from(event.dataTransfer.files));
   };
   const retry = (entry: PhotoEntry) => {
     if (busy) return;
@@ -139,15 +189,18 @@ export default function RepairPhotoImport({ vehicles, lookup, alreadyAdded, rema
 
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose(); }}>
     <Dialog.Portal><Dialog.Overlay className="repair-overlay" />
-      <Dialog.Content className="repair-dialog repair-photo-dialog" onInteractOutside={event => event.preventDefault()}>
+      <Dialog.Content className="repair-dialog repair-photo-dialog" onInteractOutside={event => event.preventDefault()}
+        onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
         <Dialog.Title>정비명세서 사진 인식</Dialog.Title>
-        <Dialog.Description>사진 여러 장을 한 번에 선택하면 Gemini가 사진별로 차량번호, 작업내용과 최종 합계를 읽습니다. 목록에서 사진을 눌러 원본과 대조한 뒤 한꺼번에 대장에 추가하세요.</Dialog.Description>
-        <div className="repair-photo-upload">
+        <Dialog.Description>사진 여러 장을 한 번에 선택하거나 이 창에 끌어다 놓으면 Gemini가 사진별로 차량번호, 작업내용과 최종 합계를 읽습니다. 목록에서 사진을 눌러 원본과 대조한 뒤 한꺼번에 대장에 추가하세요.</Dialog.Description>
+        <div className={`repair-photo-upload${dragging ? ' repair-photo-upload-dragging' : ''}`} role="region" aria-label="정비명세서 사진 놓기">
+          <strong className="repair-photo-drop-hint">{dragging ? '여기에 놓으면 사진 인식을 시작합니다' : '사진 여러 장을 여기에 끌어다 놓으세요'}</strong>
           <button type="button" onClick={() => input.current?.click()}><ImagePlus size={16} />{file ? '다른 사진 선택' : '사진 선택'}</button>
           <input ref={input} aria-label="정비명세서 사진 파일" type="file" accept="image/*,.heic,.heif" multiple hidden onChange={event => {
             const next = Array.from(event.target.files ?? []); event.target.value = ''; selectFiles(next);
           }} />
           <span>{entries.length ? `${entries.length}장 선택 · ` : ''}여러 장 선택 가능 · 사진당 최대 25MB · 현재 {remaining}장까지</span>
+          {Boolean(entries.length) && <span className="repair-photo-drop-replace">새 사진을 선택하거나 놓으면 현재 사진 목록을 바꿉니다.</span>}
         </div>
         {Boolean(entries.length) && <>
           <p role="status" className="repair-help">{busy ? `Gemini가 정비명세서를 읽고 있습니다… ${processed}/${entries.length}장 처리` : `${entries.length}장 처리 완료 · 추가 가능 ${ready.length}건`}</p>

@@ -81,6 +81,9 @@
 .repair-dialog-actions { justify-content: flex-end; margin-top: 22px; }
 .repair-photo-dialog { width: min(820px, calc(100vw - 24px)); }
 .repair-photo-upload { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px; border: 1px dashed #a5b4fc; border-radius: 10px; background: #f8faff; }
+.repair-photo-upload-dragging { border-color: #4f46e5; background: #e0e7ff; box-shadow: inset 0 0 0 1px #4f46e5; }
+.repair-photo-drop-hint { flex-basis: 100%; font-size: 13px; color: #4338ca; }
+.repair-photo-drop-replace { flex-basis: 100%; color: #64748b; }
 .repair-photo-upload span, .repair-photo-original span { font-size: 12px; overflow-wrap: anywhere; }
 .repair-photo-list { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; margin: 12px 0; padding: 3px; list-style: none; }
 .repair-photo-list li { display: flex; gap: 6px; min-width: 0; }

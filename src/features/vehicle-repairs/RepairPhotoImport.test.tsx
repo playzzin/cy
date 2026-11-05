@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Vehicle } from '../../types/vehicle';
 import type { Team } from '../../services/teamService';
@@ -32,12 +32,69 @@ beforeEach(() => {
 const upload = (...names: string[]) => fireEvent.change(screen.getByLabelText('정비명세서 사진 파일'), {
   target: { files: (names.length ? names : ['sample.jpg']).map(name => new File([name], name, { type: 'image/jpeg' })) },
 });
-async function openLedger(...names: string[]) {
+const drop = (...names: string[]) => fireEvent.drop(screen.getByRole('region', { name: '정비명세서 사진 놓기' }), {
+  dataTransfer: { types: ['Files'], files: names.map(name => new File([name], name, { type: 'image/jpeg' })) },
+});
+async function openPhotoDialog() {
   render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><VehicleRepairLedger vehicles={[vehicle]} teams={[team]} /></MemoryRouter>);
   await screen.findByText(/조회 조건에 맞는 정비내역/);
   fireEvent.click(screen.getByRole('button', { name: '정비명세서 사진 인식' }));
+}
+async function openLedger(...names: string[]) {
+  await openPhotoDialog();
   await act(async () => upload(...names));
 }
+
+test('사진 여러 장을 창에 놓아 인식하고 내부 요소를 지날 때도 놓기 표시를 유지한다', async () => {
+  (identifyRepairPhoto as jest.Mock).mockImplementation((file: File) => Promise.resolve(photoId + file.name));
+  await openPhotoDialog();
+  const zone = screen.getByRole('region', { name: '정비명세서 사진 놓기' });
+  const dialog = screen.getByRole('dialog');
+  const button = screen.getByRole('button', { name: '사진 선택' });
+  const dataTransfer = { types: ['Files'], dropEffect: 'none', files: [
+    new File(['first'], 'first.png', { type: 'image/png' }), new File(['second'], 'second.HEIC'),
+  ] };
+  fireEvent.dragEnter(dialog, { dataTransfer });
+  fireEvent.dragEnter(button, { dataTransfer });
+  fireEvent.dragLeave(button, { dataTransfer });
+  expect(zone).toHaveClass('repair-photo-upload-dragging');
+  expect(fireEvent.dragOver(zone, { dataTransfer })).toBe(false);
+  expect(dataTransfer.dropEffect).toBe('copy');
+  await act(async () => { expect(fireEvent.drop(dialog, { dataTransfer })).toBe(false); });
+  expect(zone).not.toHaveClass('repair-photo-upload-dragging');
+  expect(analyze.mock.calls.map(([file]) => file.name)).toEqual(['first.png', 'second.HEIC']);
+  fireEvent.click(screen.getByRole('button', { name: '인식된 2건 대장에 추가' }));
+  expect(screen.getByText('수정사항 2건')).toBeInTheDocument();
+  expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
+});
+
+test('사진이 아닌 파일이 섞여 있는 놓기는 기존 사진과 검수 내용을 유지한다', async () => {
+  await openLedger();
+  fireEvent.change(screen.getByLabelText('합계금액 (원)'), { target: { value: '99000' } });
+  fireEvent.drop(screen.getByRole('dialog'), { dataTransfer: { types: ['Files'], files: [
+    new File(['photo'], 'another.jpg', { type: 'image/jpeg' }), new File(['document'], 'document.pdf', { type: 'application/pdf' }),
+  ] } });
+  expect(screen.getByRole('alert')).toHaveTextContent('사진 파일만 선택하거나 끌어다 놓아 주세요');
+  expect(screen.getByLabelText('합계금액 (원)')).toHaveValue('99000');
+  expect(screen.getByRole('button', { name: /1\. sample.jpg/ })).toBeInTheDocument();
+  expect(analyze).toHaveBeenCalledTimes(1);
+});
+
+test('창 밖에 놓은 파일의 브라우저 이동을 막되 글자 드래그와 창을 닫은 후의 동작은 가로채지 않는다', async () => {
+  await openPhotoDialog();
+  const files = { types: ['Files'], files: [new File(['outside'], 'outside.jpg', { type: 'image/jpeg' })] };
+  const outsideDrop = createEvent.drop(document.body, { dataTransfer: files });
+  fireEvent(document.body, outsideDrop);
+  expect(outsideDrop.defaultPrevented).toBe(true);
+  const textDrop = createEvent.drop(screen.getByRole('dialog'), { dataTransfer: { types: ['text/plain'], files: [] } });
+  fireEvent(screen.getByRole('dialog'), textDrop);
+  expect(textDrop.defaultPrevented).toBe(false);
+  expect(analyze).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+  const afterClose = createEvent.drop(document.body, { dataTransfer: files });
+  fireEvent(document.body, afterClose);
+  expect(afterClose.defaultPrevented).toBe(false);
+});
 
 test('여러 사진의 검수 내용을 유지하고 서로 다른 월의 내역을 한꺼번에 추가·저장한다', async () => {
   (identifyRepairPhoto as jest.Mock).mockImplementation((file: File) => Promise.resolve(photoId + file.name));
@@ -120,11 +177,11 @@ test('한 번에 선택한 같은 사진은 중복 인식·추가하지 않고 �
   expect(screen.getByText('수정사항 2건')).toBeInTheDocument();
 });
 
-test('남은 추가 가능 건수를 넘긴 선택은 인식 요청 전에 차단한다', () => {
+test.each(['선택', '놓기'])('남은 추가 가능 건수를 넘기면 %s도 인식 요청 전에 차단한다', method => {
   const onAdd = jest.fn();
   render(<RepairPhotoImport vehicles={[]} lookup={() => ({ vehicleId: '', teamId: '', teamName: '', teamColor: '', teamIcon: '' })}
     alreadyAdded={() => false} remaining={1} onAdd={onAdd} onClose={jest.fn()} />);
-  upload('one.jpg', 'two.jpg');
+  (method === '놓기' ? drop : upload)('one.jpg', 'two.jpg');
   expect(screen.getByRole('alert')).toHaveTextContent('현재 1장까지 선택할 수 있습니다');
   expect(identifyRepairPhoto).not.toHaveBeenCalled();
   expect(analyze).not.toHaveBeenCalled();
@@ -212,14 +269,14 @@ test('다시 올린 사진은 저장된 행과 작성 중인 행을 중복 생�
   expect(analyze).toHaveBeenCalledTimes(1);
 });
 
-test('교체 전 사진의 늦은 응답은 무시하고, 실패한 사진은 같은 파일로 다시 인식한다', async () => {
+test.each(['선택', '놓기'])('사진 %s 후에는 이전 응답을 무시하고 실패한 사진만 다시 인식한다', async method => {
   let finish!: (value: RepairPhotoResult) => void;
   analyze.mockImplementationOnce(() => new Promise<RepairPhotoResult>(resolve => { finish = resolve; }))
     .mockRejectedValueOnce(new Error('AI 요청 실패'));
   await openLedger();
   await waitFor(() => expect(analyze).toHaveBeenCalledTimes(1));
   const signal = analyze.mock.calls[0][1] as AbortSignal;
-  upload('new.jpg');
+  (method === '놓기' ? drop : upload)('new.jpg');
   expect(signal.aborted).toBe(true);
   expect(await screen.findByRole('alert')).toHaveTextContent('AI 요청 실패');
   await act(async () => finish({ ...result, total: 111 }));
