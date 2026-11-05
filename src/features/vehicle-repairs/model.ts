@@ -3,6 +3,9 @@ import * as XLSX from 'xlsx';
 export const COST_LABELS = { personal: '개인', joeun: '조은', cheongyeon: '청연', corporate: '법인(미구분)' } as const;
 export type CostKey = keyof typeof COST_LABELS;
 export const COST_KEYS = Object.keys(COST_LABELS) as CostKey[];
+export const REPAIR_COST_LABELS = { personal: '개인', corporate: '법인' } as const;
+export type RepairCostCategory = keyof typeof REPAIR_COST_LABELS;
+export const REPAIR_COST_KEYS = Object.keys(REPAIR_COST_LABELS) as RepairCostCategory[];
 export type RepairCosts = Record<CostKey, number | null>;
 export interface RepairRecord {
   id: string;
@@ -29,6 +32,27 @@ export interface RepairRecord {
 export const emptyCosts = (): RepairCosts => ({ personal: null, joeun: null, cheongyeon: null, corporate: null });
 export const normalizePlate = (value: string) => value.replace(/[\s-]/g, '').toUpperCase();
 export const repairTotal = (row: Pick<RepairRecord, 'costs'>) => Math.round(COST_KEYS.reduce((total, key) => total + (row.costs[key] ?? 0), 0) * 100) / 100;
+const roundAmount = (value: number) => Math.round(value * 100) / 100;
+
+/** Stored company costs remain VAT-inclusive, including all legacy company columns. */
+export function repairAmounts(row: Pick<RepairRecord, 'costs'>) {
+  const values = [row.costs.joeun, row.costs.cheongyeon, row.costs.corporate];
+  const gross = values.every(value => value === null) ? null : roundAmount(values.reduce<number>((sum, value) => sum + (value ?? 0), 0));
+  const corporate = gross === null ? null : roundAmount(gross / 1.1);
+  return { personal: row.costs.personal, corporate, vat: gross === null ? 0 : roundAmount(gross - corporate!), total: repairTotal(row) };
+}
+
+/** Add VAT only to newly entered supply amounts, rounding at the existing two-decimal precision. */
+export function repairGrossFromSupply(supply: number): number {
+  const cents = Math.round(supply * 100);
+  return (cents + Math.round(cents / 10)) / 100;
+}
+
+export function sumRepairAmounts(rows: Array<Pick<RepairRecord, 'costs'>>) {
+  const amounts = rows.map(repairAmounts);
+  const sum = (key: keyof ReturnType<typeof repairAmounts>) => roundAmount(amounts.reduce((total, row) => total + (row[key] ?? 0), 0));
+  return { personal: sum('personal'), corporate: sum('corporate'), vat: sum('vat'), total: sum('total') };
+}
 export const formatRepairAmount = (amount: number | null) => amount === null ? '—' : amount.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
 export const isValidRepairAmount = (amount: number) => Number.isFinite(amount) && amount >= 0
   && Number.isSafeInteger(Math.round(amount * 100)) && Math.round(amount * 100) / 100 === amount;

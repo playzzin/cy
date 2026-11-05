@@ -1,7 +1,7 @@
 import { aiSettingsService } from '../../services/aiSettingsService';
 import { requestGeminiContent } from '../../services/geminiGatewayClient';
 import { prepareGeminiDocumentImage } from '../../utils/geminiDocumentImage';
-import { COST_KEYS, CostKey, isValidRepairAmount, isValidRepairDate, normalizePlate } from './model';
+import { REPAIR_COST_KEYS, RepairCostCategory, isValidRepairAmount, isValidRepairDate, normalizePlate } from './model';
 
 export interface RepairPhotoResult {
   date: string;
@@ -9,7 +9,7 @@ export interface RepairPhotoResult {
   description: string;
   vendor: string;
   total: number | null;
-  category: CostKey | '';
+  category: RepairCostCategory | '';
 }
 
 const instructions = [
@@ -19,7 +19,7 @@ const instructions = [
   'date는 정비 완료일(없으면 출고일, 그다음 정비 의뢰일)을 YYYY-MM-DD로 읽으세요. 차량 등록일을 사용하지 마세요. vendor는 정비업체 상호입니다.',
   'workItems에는 작업내용 표에 실제로 기재된 모든 정비 항목을 한 줄에 한 항목씩 원문 순서대로 담으세요. 수량, 단가, 법적 안내문은 제외하세요.',
   'total은 명세서 하단 최종 합계(부가세 포함) 칸의 원화 금액입니다. 부품 계, 공임, 소계, 부가세를 다시 더하거나 다른 칸에서 추정하지 마세요. 명시된 0원만 0으로 반환하세요.',
-  'category는 비용 부담 구분으로 명시된 인쇄 또는 손글씨 표기만 읽으세요. 개인=personal, 조은=joeun, 청연=cheongyeon, 법인 또는 법인(미구분)=corporate입니다. 없거나 상충하면 빈 문자열입니다. 업체명으로 추측하지 마세요.',
+  'category는 비용 부담 구분으로 명시된 인쇄 또는 손글씨 표기만 읽으세요. 개인=personal, 조은·청연·법인·법인(미구분)=corporate입니다. 없거나 개인과 법인 표기가 상충하면 빈 문자열입니다. 정비업체명으로 추측하지 마세요.',
 ].join('\n');
 
 const responseSchema = {
@@ -27,7 +27,7 @@ const responseSchema = {
   properties: {
     validDocument: { type: 'boolean' }, date: { type: 'string' }, vehiclePlate: { type: 'string' },
     vendor: { type: 'string' }, workItems: { type: 'array', items: { type: 'string' } },
-    total: { type: ['number', 'null'] }, category: { type: 'string', enum: ['', ...COST_KEYS] },
+    total: { type: ['number', 'null'] }, category: { type: 'string', enum: ['', ...REPAIR_COST_KEYS] },
   },
   required: ['validDocument', 'date', 'vehiclePlate', 'vendor', 'workItems', 'total', 'category'],
   additionalProperties: false,
@@ -75,6 +75,6 @@ export async function analyzeRepairPhoto(file: File, signal: AbortSignal): Promi
     date: isValidRepairDate(date) ? date : '', vehiclePlate: normalizePlate(text(fields.vehiclePlate)), vendor: text(fields.vendor),
     description: Array.isArray(fields.workItems) ? fields.workItems.map(text).filter(Boolean).join('\n') : '',
     total: typeof fields.total === 'number' && isValidRepairAmount(fields.total) ? fields.total : null,
-    category: COST_KEYS.find(key => key === fields.category) ?? '',
+    category: fields.category === 'personal' ? 'personal' : ['corporate', 'joeun', 'cheongyeon'].includes(String(fields.category)) ? 'corporate' : '',
   };
 }

@@ -2,3 +2,21 @@
 .ct-tax-card input[aria-label="적용 예상 세율"]{width:68px}.ct-table .ct-amount{white-space:normal}
 
 .ct-company-tabs{display:flex;gap:5px;border-left:1px solid #dce4dd;padding-left:12px}.ct-company-tabs button{border:1px solid #d2ded7;background:#fff;color:#587062;border-radius:6px;padding:6px 18px;font-weight:700}.ct-company-tabs button[aria-pressed=true]{background:#225f49;color:white;border-color:#225f49}
+
+.ct-keyboard-help{margin:0;padding:10px 18px;color:#637568;font-size:12px;line-height:1.6;border-top:1px solid #dce4dd}
+.ct-company-tabs button[data-company=dawon]{color:#1d4ed8;border-color:#bfdbfe;background:#eff6ff}
+.ct-company-tabs button[data-company=dawon][aria-pressed=true]{color:white;background:#1d4ed8;border-color:#1d4ed8}
+.corporate-tax-page[data-company=dawon]{background:#f3f6fc;color:#203653}
+.corporate-tax-page[data-company=dawon] .ct-sheet-heading{background:#eff6ff;color:#1e40af}
+.corporate-tax-page[data-company=dawon] .ct-actions .ct-primary{background:#1d4ed8;border-color:#1d4ed8}
+.corporate-tax-page[data-company=dawon] .ct-summary>div:nth-child(3){background:#eaf2ff;border-color:#bfdbfe}
+.corporate-tax-page[data-company=dawon] .ct-table thead th{background:#dbeafe;color:#1e3a8a}
+.corporate-tax-page[data-company=dawon] .ct-table thead th small{color:#526b94}
+.corporate-tax-page[data-company=dawon] .ct-table tbody th,
+.corporate-tax-page[data-company=dawon] .ct-profit{background:#eff6ff}
+.corporate-tax-page[data-company=dawon] .ct-auto-cell .ct-amount{color:#1d4ed8;text-decoration-color:#bfdbfe}
+.corporate-tax-page[data-company=dawon] .ct-table tbody tr:nth-child(even) .ct-auto-cell{background:#f7faff}
+.corporate-tax-page[data-company=dawon] .ct-auto-dot{background:#6093d4}
+.corporate-tax-page[data-company=dawon] .ct-money-input:focus{outline-color:#3b82f6}
+.corporate-tax-page[data-company=dawon] .ct-tax-total strong{color:#1d4ed8}
+.corporate-tax-page[data-company=dawon] .ct-tax-total{border-top-color:#3b82f6}

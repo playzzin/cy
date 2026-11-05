@@ -134,7 +134,36 @@ const CorporateTaxPage: React.FC = () => {
     const manualDetail = detail && detail.field !== 'profit' && !selectedColumn?.auto ? detail.field as ManualField : null;
     const origin = detail && detail.field !== 'profit' ? fieldSource(detail.field) : null;
 
-    return <main className="corporate-tax-page">
+    const navigateAmount = (event: React.KeyboardEvent<HTMLTableElement>) => {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.nativeEvent.isComposing) return;
+        const input = event.target;
+        if (!(input instanceof HTMLInputElement) || !input.classList.contains('ct-money-input')) return;
+        const cell = input.closest('td');
+        const row = cell?.parentElement as HTMLTableRowElement | null;
+        if (!cell || !row) return;
+        const rows = Array.from(event.currentTarget.tBodies[0].rows);
+        let rowIndex = rows.indexOf(row);
+        let column = cell.cellIndex;
+        const step = event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 1;
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') rowIndex += step;
+        else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            // Keep cursor editing available inside a value; move cells at either edge or with the value selected.
+            const selected = input.selectionStart === 0 && input.selectionEnd === input.value.length;
+            const atEdge = step < 0 ? input.selectionStart === 0 : input.selectionEnd === input.value.length;
+            if (!selected && !atEdge) return;
+            column += step;
+        } else return;
+        event.preventDefault();
+        if (rowIndex < 0 || rowIndex >= rows.length) return;
+        while (column >= 0 && column < rows[rowIndex].cells.length) {
+            const target = rows[rowIndex].cells[column].querySelector<HTMLInputElement>('input.ct-money-input:not(:disabled)');
+            if (target) { target.focus(); target.select(); return; }
+            if (event.key === 'ArrowUp' || event.key === 'ArrowDown') return;
+            column += step;
+        }
+    };
+
+    return <main className="corporate-tax-page" data-company={company}>
         <header className="ct-header">
             <div><p className="ct-eyebrow">세무관리 / 연간 정산</p><h1><Calculator size={26} /> 법인세 관리</h1>
                 <p>월별 수익과 비용을 모아 보고, 금액을 눌러 산출 근거를 확인하세요.</p></div>
@@ -149,7 +178,7 @@ const CorporateTaxPage: React.FC = () => {
                 <select aria-label="정산 연도" value={year} disabled={saving} onChange={event => selectYear(Number(event.target.value))}>{Array.from({ length: 101 }, (_, i) => 2000 + i).map(y => <option key={y} value={y}>{y}년</option>)}</select>
                 <button aria-label="다음 연도" disabled={year >= 2100 || saving} onClick={() => selectYear(year + 1)}><ChevronRight size={18} /></button></div>
             <div className="ct-company-tabs" role="group" aria-label="정산 회사">
-                {CORPORATE_TAX_COMPANIES.map(item => <button key={item.key} aria-pressed={company === item.key} disabled={saving} onClick={() => selectCompany(item.key)}>{item.label}</button>)}
+                {CORPORATE_TAX_COMPANIES.map(item => <button key={item.key} data-company={item.key} aria-pressed={company === item.key} disabled={saving} onClick={() => selectCompany(item.key)}>{item.label}</button>)}
             </div><span className="ct-save-status">{dirty ? '저장하지 않은 변경사항' : manualReady ? (revision ? '수기 저장 자료 불러옴' : '새 정산 · 수기 미입력') : '수기 자료 확인 중'}</span>
         </div>
         {notice && <div role="status" className="ct-notice">{notice}</div>}
@@ -162,7 +191,7 @@ const CorporateTaxPage: React.FC = () => {
         <section className="ct-sheet" aria-labelledby="ct-sheet-title">
             <div className="ct-sheet-heading"><h2 id="ct-sheet-title">{companyInfo.title} {year}년 정산 내역서</h2><div className="ct-legend"><span className="ct-auto-dot" /> 자동 집계 · 클릭하여 근거 <span className="ct-manual-dot" /> 수기 입력 <span>단위: 원</span></div></div>
             <div className="ct-table-scroll" tabIndex={0} aria-label="월별 정산 표, 좌우로 스크롤할 수 있습니다">
-                <table className="ct-table"><thead><tr><th scope="col">월</th>{AMOUNT_COLUMNS.map(col => <th key={col.key} scope="col">{col.label}<small>{col.auto ? (col.key === 'sales' || col.key === 'purchases' ? '공급가액 · 자동' : '월세 + 관리비 · 자동') : '수기 입력'}</small></th>)}<th scope="col">이익<small>자동 계산</small></th></tr></thead>
+                <table className="ct-table" onKeyDown={navigateAmount}><thead><tr><th scope="col">월</th>{AMOUNT_COLUMNS.map(col => <th key={col.key} scope="col">{col.label}<small>{col.auto ? (col.key === 'sales' || col.key === 'purchases' ? '공급가액 · 자동' : '월세 + 관리비 · 자동') : '수기 입력'}</small></th>)}<th scope="col">이익<small>자동 계산</small></th></tr></thead>
                     <tbody>{report.months.map(row => <tr key={row.month}><th scope="row">{row.month}월</th>{AMOUNT_COLUMNS.map(col => <td key={col.key} className={col.auto ? 'ct-auto-cell' : 'ct-manual-cell'}>
                         {col.auto ? <button className="ct-amount" onClick={() => setDetail({ month: row.month, field: col.key })} aria-label={`${row.month}월 ${col.label} 근거`}>
                             {renderAmount(col.key, row.amounts[col.key], row.month)}</button>
@@ -172,6 +201,7 @@ const CorporateTaxPage: React.FC = () => {
                     <tfoot><tr><th scope="row">합계</th>{AMOUNT_COLUMNS.map(col => <td key={col.key}>{col.auto ? renderAmount(col.key, report.totals[col.key]) : manualReady ? money(report.totals[col.key]) : '—'}</td>)}<td className={report.profit < 0 ? 'ct-negative' : ''}>{blocked ? '—' : money(report.profit)}</td></tr></tfoot>
                 </table>
             </div>
+            <p className="ct-keyboard-help">수기 입력 칸에서 ↑↓로 월 이동 · ←→로 항목 이동 (입력값 선택 또는 커서가 양 끝일 때) · Tab으로 다음 칸 이동</p>
             <div className="ct-formula">이익 = 매출액 − 매입액 − 계산서발행 − 노무비신고 − 급여 − 카드사용금액 − 숙소비 − 감가상각비 − 경조사비 − 기타비용</div>
         </section>
         <div className="ct-bottom">

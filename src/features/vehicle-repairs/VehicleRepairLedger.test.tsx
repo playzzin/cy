@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import VehicleRepairLedger from './VehicleRepairLedger';
 import { vehicleRepairService } from './service';
@@ -34,7 +34,7 @@ test('월별 목록과 합계를 보여 주며 전체 기간에서 과거 내역
 test('기존 행의 금액을 바로 수정하고 저장 전까지 서버에 쓰지 않는다', async () => {
   renderLedger();
   await screen.findByDisplayValue('테스트 수리 two');
-  const amount = screen.getByLabelText('1행 청연 금액');
+  const amount = screen.getByLabelText('1행 법인 금액');
   fireEvent.focus(amount);
   fireEvent.change(amount, { target: { value: '1234.70' } });
   fireEvent.blur(amount);
@@ -43,7 +43,9 @@ test('기존 행의 금액을 바로 수정하고 저장 전까지 서버에 쓰
   expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '저장' }));
   await screen.findByText('1건의 정비내역을 저장했습니다.');
-  expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({ id: 'two', revision: 1, costs: { ...emptyCosts(), cheongyeon: 1234.7 } })]);
+  expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({ id: 'two', revision: 1, costs: { ...emptyCosts(), corporate: 1358.17 } })]);
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent('123.47');
+  expect(screen.getByLabelText('1행 합계')).toHaveTextContent('1,358.17');
 });
 
 test('새 행과 기존 행을 한 번에 저장하고 0원과 빈 비용을 구분한다', async () => {
@@ -164,10 +166,10 @@ test('잘못 입력한 금액도 페이지를 이동했다 돌아오면 원문�
   (vehicleRepairService.list as jest.Mock).mockResolvedValue(Array.from({ length: 51 }, (_, i) => row(`row-${String(i).padStart(2, '0')}`, '2026-04-01', 100)));
   renderLedger();
   await screen.findByDisplayValue('테스트 수리 row-00');
-  fireEvent.change(screen.getByLabelText('1행 청연 금액'), { target: { value: '12.345' } });
+  fireEvent.change(screen.getByLabelText('1행 법인 금액'), { target: { value: '12.345' } });
   fireEvent.click(screen.getByRole('button', { name: '다음' }));
   fireEvent.click(screen.getByRole('button', { name: '이전' }));
-  expect(screen.getByLabelText('1행 청연 금액')).toHaveValue('12.345');
+  expect(screen.getByLabelText('1행 법인 금액')).toHaveValue('12.345');
 });
 
 test('입력값을 원래 값으로 되돌리면 미저장 변경으로 남지 않는다', async () => {
@@ -182,10 +184,10 @@ test('입력값을 원래 값으로 되돌리면 미저장 변경으로 남지 �
 test('잘못된 쉼표 구분을 임의 금액으로 변환해 저장하지 않는다', async () => {
   renderLedger();
   await screen.findByDisplayValue('테스트 수리 two');
-  fireEvent.change(screen.getByLabelText('1행 청연 금액'), { target: { value: '1,2' } });
+  fireEvent.change(screen.getByLabelText('1행 법인 금액'), { target: { value: '1,2' } });
   fireEvent.click(screen.getByRole('button', { name: '저장' }));
   expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
-  expect(screen.getByLabelText('1행 청연 금액')).toHaveValue('1,2');
+  expect(screen.getByLabelText('1행 법인 금액')).toHaveValue('1,2');
 });
 
 test('비용 메모를 명시적으로 확인하기 전에는 수정·저장 후에도 표시한다', async () => {
@@ -206,9 +208,45 @@ test('비용 메모를 명시적으로 확인하기 전에는 수정·저장 후
 test('같은 금액의 표기만 바꿨다가 새로고침하면 최신 서버 값을 보여준다', async () => {
   renderLedger();
   await screen.findByDisplayValue('테스트 수리 two');
-  fireEvent.change(screen.getByLabelText('1행 청연 금액'), { target: { value: '220,000.00' } });
+  fireEvent.change(screen.getByLabelText('1행 법인 금액'), { target: { value: '200,000.00' } });
   expect(screen.getByRole('button', { name: '저장' })).toBeDisabled();
   (vehicleRepairService.list as jest.Mock).mockResolvedValue([row('two', '2026-04-01', 330000)]);
   fireEvent.click(screen.getByRole('button', { name: '정비내역 새로고침' }));
-  expect(await screen.findByDisplayValue('330,000')).toBeInTheDocument();
+  expect(await screen.findByDisplayValue('300,000')).toBeInTheDocument();
+});
+
+test('기존 세 법인 금액은 합산 후 VAT를 분리하고 조회만으로 원본이나 합계를 바꾸지 않는다', async () => {
+  const original = { ...row('legacy', '2026-04-01', 22000), costs: { personal: 25000, joeun: 11000, cheongyeon: 22000, corporate: 33000 } };
+  (vehicleRepairService.list as jest.Mock).mockResolvedValue([original]);
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 legacy');
+  const headers = screen.getAllByRole('columnheader').map(header => header.textContent);
+  expect(headers).not.toEqual(expect.arrayContaining(['조은', '청연', '법인(미구분)']));
+  expect(screen.getByLabelText('1행 개인 금액')).toHaveValue('25,000');
+  expect(screen.getByLabelText('1행 법인 금액')).toHaveValue('60,000');
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent('6,000');
+  expect(screen.getByLabelText('1행 합계')).toHaveTextContent('91,000');
+  expect(within(screen.getByLabelText('정비 비용 구분')).getAllByRole('option').map(option => option.textContent)).toEqual(['전체 구분', '개인', '법인']);
+  fireEvent.change(screen.getByLabelText('정비 비용 구분'), { target: { value: 'corporate' } });
+  expect(screen.getByDisplayValue('테스트 수리 legacy')).toBeInTheDocument();
+  expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('1행 비고'), { target: { value: '검토 완료' } });
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
+  await screen.findByText('1건의 정비내역을 저장했습니다.');
+  expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({ costs: original.costs })]);
+});
+
+test('개인·법인 혼합 입력은 법인에만 VAT를 더하고 잘못된 법인 입력은 VAT·합계를 숨긴다', async () => {
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 two');
+  fireEvent.change(screen.getByLabelText('1행 개인 금액'), { target: { value: '50000' } });
+  fireEvent.change(screen.getByLabelText('1행 법인 금액'), { target: { value: '100000' } });
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent('10,000');
+  expect(screen.getByLabelText('1행 합계')).toHaveTextContent('160,000');
+  fireEvent.change(screen.getByLabelText('1행 법인 금액'), { target: { value: '1,2' } });
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent('확인 필요');
+  expect(screen.getByLabelText('1행 합계')).toHaveTextContent('확인 필요');
+  fireEvent.change(screen.getByLabelText('1행 법인 금액'), { target: { value: '' } });
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent('0');
+  expect(screen.getByLabelText('1행 합계')).toHaveTextContent('50,000');
 });

@@ -13,6 +13,7 @@ interface Props {
     targets: AccountPhotoTarget[];
     initialTargetId?: string;
     onSave: (targetId: string, fields: BankAccountFields) => Promise<void>;
+    onSavePhoto?: (targetId: string, file: File) => Promise<void>;
     onClose: () => void;
 }
 interface PhotoRow {
@@ -27,7 +28,7 @@ interface PhotoRow {
 const labels: Record<keyof BankAccountFields, string> = { bankName: '은행명', accountNumber: '계좌번호', accountHolder: '예금주' };
 const inputClass = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100';
 
-export default function AccountPhotoRegistrationModal({ targets, initialTargetId, onSave, onClose }: Props) {
+export default function AccountPhotoRegistrationModal({ targets, initialTargetId, onSave, onSavePhoto, onClose }: Props) {
     const [rows, setRows] = useState<PhotoRow[]>([]);
     const [busy, setBusy] = useState<'analysis' | 'save' | null>(null);
     const [error, setError] = useState('');
@@ -38,6 +39,7 @@ export default function AccountPhotoRegistrationModal({ targets, initialTargetId
     const urls = useRef(new Set<string>());
     const running = useRef(false);
     const alive = useRef(true);
+    const savedFields = useRef(new Map<number, string>());
 
     useEffect(() => {
         alive.current = true;
@@ -109,12 +111,22 @@ export default function AccountPhotoRegistrationModal({ targets, initialTargetId
         try {
             for (const row of pending) {
                 if (!alive.current) break;
+                const fields = normalizeBankAccountFields(row.fields);
+                const accountKey = JSON.stringify([row.targetId, fields]);
                 try {
-                    await onSave(row.targetId, normalizeBankAccountFields(row.fields));
+                    // Retrying a failed photo must not overwrite an account changed elsewhere meanwhile.
+                    if (savedFields.current.get(row.id) !== accountKey) {
+                        await onSave(row.targetId, fields);
+                        savedFields.current.set(row.id, accountKey);
+                    }
+                    await onSavePhoto?.(row.targetId, row.file);
                     updateRow(row.id, { status: 'saved', error: undefined });
-                } catch {
+                } catch (failure) {
                     failed = true;
-                    updateRow(row.id, { error: '저장하지 못했습니다. 연결 상태와 권한을 확인한 뒤 다시 저장해 주세요.' });
+                    const partial = onSavePhoto && savedFields.current.get(row.id) === accountKey;
+                    updateRow(row.id, { error: partial
+                        ? `계좌정보는 저장됐지만 통장사진은 저장하지 못했습니다. 다시 저장을 눌러 주세요. ${failure instanceof Error ? failure.message : ''}`
+                        : '저장하지 못했습니다. 연결 상태와 권한을 확인한 뒤 다시 저장해 주세요.' });
                 }
             }
             if (alive.current) {
@@ -136,7 +148,9 @@ export default function AccountPhotoRegistrationModal({ targets, initialTargetId
                 <div className="flex items-start justify-between gap-3 border-b border-slate-200 p-4 sm:p-5">
                     <div>
                         <Dialog.Title className="flex items-center gap-2 text-lg font-bold text-slate-900"><Camera size={20} className="text-orange-600" />계좌번호 등록 (사진 분석)</Dialog.Title>
-                        <Dialog.Description className="mt-1 text-sm text-slate-600">사진에서 은행·계좌번호·예금주를 읽어 계좌정보를 등록합니다. 공유용 통장사본 사진은 저장하거나 교체하지 않습니다.</Dialog.Description>
+                        <Dialog.Description className="mt-1 text-sm text-slate-600">{onSavePhoto
+                            ? '사진에서 은행·계좌번호·예금주를 읽어 기본 계좌정보와 통장사본 사진을 함께 등록합니다. 기존 기본 계좌사진은 선택한 사진으로 교체됩니다.'
+                            : '사진에서 은행·계좌번호·예금주를 읽어 계좌정보를 등록합니다. 공유용 통장사본 사진은 저장하거나 교체하지 않습니다.'}</Dialog.Description>
                     </div>
                     <button type="button" aria-label="계좌번호 등록 (사진 분석) 닫기" disabled={!!busy} onClick={close} className="rounded-lg p-2 text-slate-600 disabled:opacity-40"><X size={20} /></button>
                 </div>

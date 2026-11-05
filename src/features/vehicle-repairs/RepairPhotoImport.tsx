@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { ImagePlus } from 'lucide-react';
 import type { Vehicle } from '../../types/vehicle';
 import { parseRepairAmountInput } from './draft';
-import { COST_KEYS, COST_LABELS, CostKey, emptyCosts, formatRepairAmount, isValidRepairDate, RepairRecord } from './model';
+import { REPAIR_COST_KEYS, REPAIR_COST_LABELS, RepairCostCategory, emptyCosts, formatRepairAmount, isValidRepairDate, RepairRecord } from './model';
 import { analyzeRepairPhoto, identifyRepairPhoto, RepairPhotoResult } from './photoAnalysis';
 import type { RepairVehicleLink } from './vehicleTeam';
 import RepairTeamBadge from './RepairTeamBadge';
@@ -223,10 +223,10 @@ export default function RepairPhotoImport({ vehicles, lookup, alreadyAdded, rema
             <label className="repair-photo-wide">정비업체<input value={form.vendor} onChange={event => update({ vendor: event.target.value })} /></label>
             <label className="repair-photo-wide">정비내용<textarea rows={5} value={form.description} onChange={event => update({ description: event.target.value })} /></label>
             <label>합계금액 (원)<input inputMode="decimal" value={form.amount} aria-invalid={!amount.valid} onChange={event => update({ amount: event.target.value })} /></label>
-            <label>비용 구분<select value={form.category} onChange={event => update({ category: event.target.value as CostKey | '' })}><option value="">선택해 주세요</option>
-              {COST_KEYS.map(key => <option key={key} value={key}>{COST_LABELS[key]}</option>)}
+            <label>비용 구분<select value={form.category} onChange={event => update({ category: event.target.value as RepairCostCategory | '' })}><option value="">선택해 주세요</option>
+              {REPAIR_COST_KEYS.map(key => <option key={key} value={key}>{REPAIR_COST_LABELS[key]}</option>)}
             </select></label>
-            <p className="repair-photo-wide repair-help">{missing.length ? missing.join(' · ') + ' 항목을 확인해 주세요.' : '선택한 비용 구분에 합계금액 전액을 넣습니다.'}</p>
+            <p className="repair-photo-wide repair-help">{missing.length ? missing.join(' · ') + ' 항목을 확인해 주세요.' : form.category === 'corporate' ? '합계금액은 VAT 포함 금액입니다. 대장에서 공급가액과 VAT를 나눠 표시하며 합계는 유지합니다.' : '개인 금액에는 VAT를 더하지 않습니다.'}</p>
           </div>}
         </div>}
         {entries.length > 1 && <p className="repair-help">필수 항목이 채워진 {ready.length}건을 함께 추가합니다. 확인이 필요한 사진과 실패·중복 사진은 목록에 남습니다. 실제 저장은 대장 상단의 저장 버튼을 눌러 주세요.</p>}

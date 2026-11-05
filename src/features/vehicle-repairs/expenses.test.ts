@@ -1,5 +1,6 @@
 import { repairLedgerExpenses } from './expenses';
 import { emptyCosts, RepairRecord } from './model';
+import { changeDraftDisplayAmount, createRepairDraft } from './draft';
 
 const row: RepairRecord = { id: 'r1', date: '2026-10-05', yearMonth: '2026-10', originalDate: '',
   vehicleId: '', vehiclePlate: '12가 3456', description: '수리', driver: '', vendor: '',
@@ -10,6 +11,12 @@ test('저장한 정비비는 연결 차량의 해당 월 수리비로 한 번 �
     id: 'repair-ledger-source:r1', vehicleId: 'v1', amount: 32000, date: '2026-10-05', type: 'REPAIR'
   })]);
   expect(repairLedgerExpenses([row], vehicles, '2026-09')).toEqual([]);
+});
+
+test('법인 공급가액 편집은 VAT 포함 총액을 월별 경비에 한 번만 반영한다', () => {
+  const edited = changeDraftDisplayAmount(createRepairDraft(row), 'corporate', '100000').record;
+  expect(repairLedgerExpenses([edited], vehicles, '2026-10')[0].amount).toBe(120000);
+  expect(repairLedgerExpenses([row], vehicles, '2026-10')[0].amount).toBe(32000);
 });
 test('삭제·미연결·중복 차량·잘못된 날짜와 금액은 합산하지 않는다', () => {
   expect(repairLedgerExpenses([{ ...row, archived: true }, { ...row, date: '2026-10-32' },

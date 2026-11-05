@@ -17,7 +17,7 @@ export const requestGeminiContent = async () => {
         validDocument: true, bankName: '분석은행', accountNumber: '000222333444', accountHolder: '가상 분석예금주',
     }) }] } }] };
 };
-export const geminiService = {};
+export const geminiService = { analyzeBankBook: async () => ({ bankName: '분석은행', accountNumber: '000222333444', accountHolder: '가상 분석예금주' }) };
 export const siteService = { getSites: async () => [] };
 export const positionService = { getPositions: async () => [] };
 export const statisticsService = { getCumulativeManpower: async () => ({ workerStats: {} }) };
@@ -32,6 +32,12 @@ export const validateWorkerBankPhoto = () => undefined;
 export const readWorkerBankPhoto = async (workerId: string, name: string, signal?: AbortSignal, purpose = 'default') => {
     const worker = rows().find((row: any) => row.id === workerId);
     if (!worker?.[purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId']) return null;
+    const saved = localStorage.getItem(`${key}-photo-${worker[purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId']}`);
+    if (saved) {
+        const bytes = Uint8Array.from(atob(saved.split(',')[1]), char => char.charCodeAt(0));
+        const type = saved.slice(5, saved.indexOf(';'));
+        return new File([bytes], `${name}.png`, { type });
+    }
     const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 300;
     const context = canvas.getContext('2d')!; context.fillStyle = '#eff6ff'; context.fillRect(0, 0, 600, 300);
     context.fillStyle = '#1e3a8a'; context.font = 'bold 30px sans-serif'; context.fillText(purpose === 'directPay' ? 'DIRECT PAY PHOTO' : 'BASIC ACCOUNT PHOTO', 55, 100); context.font = '22px sans-serif'; context.fillText('Synthetic data / 001234567890', 55, 170);
@@ -39,6 +45,13 @@ export const readWorkerBankPhoto = async (workerId: string, name: string, signal
     return new File([blob], `${name}.png`, { type: 'image/png' });
 };
 export const saveWorkerBankPhoto = async (id: string, file: File, photoId: string, expected: string, purpose: string) => {
+    const field = purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId';
+    const current = rows().find((row: any) => row.id === id)?.[field] || '';
+    if (current !== expected && current !== photoId) throw new Error('사진이 변경되었습니다.');
+    const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file);
+    });
+    localStorage.setItem(`${key}-photo-${photoId}`, data);
     await manpowerService.updateWorker(id, { [purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId']: photoId });
     return photoId;
 };

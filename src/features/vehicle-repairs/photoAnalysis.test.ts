@@ -41,6 +41,11 @@ test('명시적인 무상 정비 0원을 보존한다', async () => {
   expect(await analyze()).toMatchObject({ total: 0, category: 'corporate' });
 });
 
+test.each(['joeun', 'cheongyeon', 'corporate'])('명시된 %s 비용 구분은 법인으로 합치고 VAT 포함 원금은 유지한다', async category => {
+  respond({ ...fields, total: 110000, category });
+  expect(await analyze()).toMatchObject({ total: 110000, category: 'corporate' });
+});
+
 test('관련 없는 문서와 잘린 응답을 거절하고 서버 오류를 전달한다', async () => {
   respond({ ...fields, validDocument: false });
   await expect(analyze()).rejects.toThrow('정비명세서 사진');

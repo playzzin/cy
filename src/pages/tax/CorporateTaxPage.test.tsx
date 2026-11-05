@@ -29,6 +29,50 @@ it('수기 입력에 따라 이익을 재계산하고 금액 근거/메모와 �
     await waitFor(() => expect(corporateTaxService.saveManual).toHaveBeenCalledWith(expect.any(Number), expect.objectContaining({ months: { 1: { amounts: { invoice: 100000 }, notes: { invoice: '검증용 계산서 1건' } } } }), 0, 'cheongyeon'));
     expect(await screen.findByRole('status')).toHaveTextContent('저장했습니다');
 });
+
+it('방향키로 월과 수기 항목을 이동하고 자동 집계 열은 건너뛰며 값과 저장 상태를 유지한다', async () => {
+    renderPage();
+    const first = screen.getByLabelText('1월 카드사용금액') as HTMLInputElement;
+    await waitFor(() => expect(first).toBeEnabled());
+    fireEvent.change(first, { target: { value: '12000' } });
+    first.focus(); first.select();
+    fireEvent.keyDown(first, { key: 'ArrowRight' });
+    const next = screen.getByLabelText('1월 감가상각비');
+    expect(next).toHaveFocus();
+    fireEvent.keyDown(next, { key: 'ArrowDown' });
+    expect(screen.getByLabelText('2월 감가상각비')).toHaveFocus();
+    fireEvent.keyDown(screen.getByLabelText('2월 감가상각비'), { key: 'ArrowLeft' });
+    expect(screen.getByLabelText('2월 카드사용금액')).toHaveFocus();
+    fireEvent.keyDown(screen.getByLabelText('2월 카드사용금액'), { key: 'ArrowUp' });
+    expect(first).toHaveFocus();
+    expect(first).toHaveValue('12,000');
+    expect(first.selectionStart).toBe(0);
+    expect(first.selectionEnd).toBe(first.value.length);
+    expect(corporateTaxService.saveManual).not.toHaveBeenCalled();
+});
+
+it('문자열 내부 커서 이동·조합 입력·보조키를 유지하고 표 경계를 넘지 않는다', async () => {
+    renderPage();
+    const first = screen.getByLabelText('1월 계산서발행') as HTMLInputElement;
+    await waitFor(() => expect(first).toBeEnabled());
+    fireEvent.change(first, { target: { value: '1234' } });
+    first.focus(); first.setSelectionRange(2, 2);
+    fireEvent.keyDown(first, { key: 'ArrowRight' });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: 'ArrowDown', shiftKey: true });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: 'ArrowDown', isComposing: true });
+    expect(first).toHaveFocus();
+    first.select();
+    fireEvent.keyDown(first, { key: 'ArrowLeft' });
+    fireEvent.keyDown(first, { key: 'ArrowUp' });
+    expect(first).toHaveFocus();
+    const last = screen.getByLabelText('12월 기타비용');
+    act(() => last.focus());
+    fireEvent.keyDown(last, { key: 'ArrowRight' });
+    fireEvent.keyDown(last, { key: 'ArrowDown' });
+    expect(last).toHaveFocus();
+});
 it('자료 조회 실패는 0원이 아닌 실패로 표시하고 이익 계산을 중지한다', async () => {
     (corporateTaxService.loadSources as jest.Mock).mockResolvedValue({ evidence: [], errors: { ledger: '장부 실패' } });
     renderPage();

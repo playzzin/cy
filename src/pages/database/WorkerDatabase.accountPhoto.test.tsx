@@ -80,7 +80,7 @@ it('shows an account-only list with full numbers and restores the other columns 
     expect(screen.getByRole('columnheader', { name: /주민번호/ })).toBeInTheDocument();
 });
 
-it('registers only account fields for the clicked person without requiring an ID photo', async () => {
+it('선택한 직원의 기본 계좌정보와 사진을 함께 갱신하고 신분정보는 유지한다', async () => {
     render(<WorkerDatabase hideHeader />);
     await openRowPhoto();
     expect(screen.getByLabelText('1번 등록할 사람·대상')).toHaveValue('worker-a');
@@ -93,7 +93,30 @@ it('registers only account fields for the clicked person without requiring an ID
     expect(within(row).getByText(fields.accountNumber)).toBeInTheDocument();
     expect(workers[0].name).toBe('검증작업자');
     expect(workers[0].idNumber).toBe('synthetic-id');
-    expect(workers[0].bankPhotoId).toBe('a'.repeat(32));
+    expect(workers[0].bankPhotoId).not.toBe('a'.repeat(32));
+    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('worker-a', expect.any(File), workers[0].bankPhotoId, 'a'.repeat(32), 'default');
+});
+
+it('기본 계좌를 사진 분석으로 바꾼 뒤 동일 계좌 복사는 새 사진을 직불용으로 저장한다', async () => {
+    const photos = new Map<string, File>();
+    (saveWorkerBankPhoto as jest.Mock).mockImplementation(async (id: string, file: File, photoId: string, _expected: string, purpose: string) => {
+        photos.set(`${id}-${purpose}`, file);
+        workers = workers.map(worker => worker.id === id ? { ...worker, [purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId']: photoId } : worker);
+        return photoId;
+    });
+    (readWorkerBankPhoto as jest.Mock).mockImplementation(async (id: string, _name: string, _signal: unknown, purpose = 'default') => photos.get(`${id}-${purpose}`) ?? null);
+    render(<WorkerDatabase hideHeader />);
+    await openRowPhoto(); await savePhoto();
+    const basicPhoto = photos.get('worker-a-default');
+    expect(basicPhoto).toBeInstanceOf(File);
+    fireEvent.click(screen.getByRole('button', { name: '검증작업자 직불용 계좌·사진 등록/수정' }));
+    fireEvent.click(screen.getByRole('button', { name: '기본 계좌와 동일' }));
+    await screen.findByAltText('직불용 계좌 사진 미리보기');
+    expect(screen.getByLabelText('직불용 계좌 계좌번호')).toHaveValue(fields.accountNumber);
+    fireEvent.click(screen.getByRole('button', { name: '직불용 계좌 저장' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(photos.get('worker-a-directPay')).toBe(basicPhoto);
+    expect(workers[0].directPayAccountNumber).toBe(fields.accountNumber);
 });
 
 it('supports changing the recipient and clears the list selection when reopening from the toolbar', async () => {

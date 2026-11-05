@@ -24,6 +24,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const [invalidPhoto, setInvalidPhoto] = useState(false);
+    const [copiedPhotoRequired, setCopiedPhotoRequired] = useState(false);
     const running = useRef(false);
     // A photo retry must not write the already-saved account over a later edit elsewhere.
     const savedAccount = useRef<string | null>(null);
@@ -63,6 +64,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
             setPhoto({ file, id: newPhotoId() }); setViewedPhoto(null);
             setFields(normalizeBankAccountFields({}));
             setInvalidPhoto(false);
+            setCopiedPhotoRequired(false);
             void analyzePhoto(file);
         } catch (failure) {
             setInvalidPhoto(true); setError((failure as Error).message);
@@ -86,9 +88,12 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
             const copiedPhoto = file ? { file, id: newPhotoId() } : null;
             setFields(basic);
             setPhoto(copiedPhoto);
+            setPreview('');
             setViewedPhoto(null);
             setInvalidPhoto(false);
+            setCopiedPhotoRequired(!file && Boolean(expectedPhotoId.current));
             setNotice(file ? '기본 계좌정보와 사진을 가져왔습니다. 저장하면 직불용으로 별도 보관됩니다.'
+                : expectedPhotoId.current ? '기본 계좌사진이 없습니다. 이전 직불용 사진과 섞이지 않도록 새 사진을 선택한 뒤 저장해 주세요.'
                 : '기본 계좌정보를 가져왔습니다. 기본 계좌사진이 없어 직불용 사진은 아래에서 선택해 주세요.');
         } catch (failure) { setError(failure instanceof Error ? failure.message : '기본 계좌를 가져오지 못했습니다.'); }
         finally { running.current = false; setBusy(false); }
@@ -109,7 +114,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
     useEffect(() => { const urls = viewedUrls.current; return () => urls.forEach(url => URL.revokeObjectURL(url)); }, []);
 
     const save = async () => {
-        if (running.current || analyzing || !worker.id || invalidPhoto || !isCompleteBankAccount(fields)) return;
+        if (running.current || analyzing || !worker.id || invalidPhoto || copiedPhotoRequired || !isCompleteBankAccount(fields)) return;
         running.current = true; setBusy(true); setError('');
         let accountSaved = savedAccount.current !== null;
         try {
@@ -155,8 +160,8 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
                     {key === 'accountNumber' && fields.accountNumber.trim() && !normalizeBankAccountFields(fields).accountNumber && <span role="alert" className="mt-1 block text-xs text-red-700">계좌번호는 앞자리 0을 포함한 숫자 6~20자리로 입력해 주세요. 공백과 하이픈은 저장할 때 제거됩니다.</span>}
                 </label>)}
                 <div className="rounded-xl border border-slate-200 p-3">
-                    <div className="mb-2 flex items-center justify-between gap-2"><span className="text-sm font-semibold">{label} 사진 · {photo ? '저장 대기' : expectedPhotoId.current ? '등록됨' : '미등록'}</span>
-                        {!!expectedPhotoId.current && !photo && <button type="button" disabled={analyzing} className="text-sm text-indigo-700 underline disabled:opacity-50" onClick={() => void viewPhoto()}>등록된 사진 보기</button>}
+                    <div className="mb-2 flex items-center justify-between gap-2"><span className="text-sm font-semibold">{label} 사진 · {copiedPhotoRequired ? '새 사진 필요' : photo ? '저장 대기' : expectedPhotoId.current ? '등록됨' : '미등록'}</span>
+                        {!!expectedPhotoId.current && !photo && !copiedPhotoRequired && <button type="button" disabled={analyzing} className="text-sm text-indigo-700 underline disabled:opacity-50" onClick={() => void viewPhoto()}>등록된 사진 보기</button>}
                     </div>
                     <input type="file" accept={BANK_PHOTO_ACCEPT} aria-label={`${label} 사진 선택`} className="w-full text-sm" onChange={event => {
                         const file = event.target.files?.[0]; event.target.value = '';
@@ -175,7 +180,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
             {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
             <div className="mt-5 flex justify-end gap-2">
                 <button type="button" disabled={busy} onClick={close} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">취소</button>
-                <button type="button" disabled={busy || analyzing || invalidPhoto || !isCompleteBankAccount(fields)} onClick={() => void save()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? '처리 중…' : `${label} 저장`}</button>
+                <button type="button" disabled={busy || analyzing || invalidPhoto || copiedPhotoRequired || !isCompleteBankAccount(fields)} onClick={() => void save()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? '처리 중…' : `${label} 저장`}</button>
             </div>
         </Dialog.Content>
     </Dialog.Portal></Dialog.Root>;

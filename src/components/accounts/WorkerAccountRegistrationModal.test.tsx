@@ -50,7 +50,7 @@ test('복사 후 취소하면 계좌나 사진을 저장하지 않는다', async
 });
 test('기본 사진이 없어도 정보를 복사하고 직불 사진을 별도로 선택할 수 있다', async () => {
     open({ ...worker, bankPhotoId: undefined }); await copy();
-    expect(readWorkerBankPhoto).not.toHaveBeenCalled(); expect(screen.getByRole('status')).toHaveTextContent('기본 계좌사진이 없어');
+    expect(readWorkerBankPhoto).not.toHaveBeenCalled(); expect(screen.getByRole('status')).toHaveTextContent('기본 계좌사진이 없습니다');
     fireEvent.change(screen.getByLabelText('직불용 계좌 사진 선택'), { target: { files: [file] } });
     await waitFor(() => expect(screen.getByLabelText('직불용 계좌 계좌번호')).toHaveValue(analyzedAccount.accountNumber));
     fireEvent.change(screen.getByLabelText('직불용 계좌 계좌번호'), { target: { value: '009876543210' } });
@@ -58,6 +58,18 @@ test('기본 사진이 없어도 정보를 복사하고 직불 사진을 별도�
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(manpowerService.updateWorker).toHaveBeenCalledWith('one', expect.objectContaining({ directPayAccountNumber: '009876543210' }));
     expect(saveWorkerBankPhoto).toHaveBeenCalled();
+});
+
+test('기본 사진 없이 동일 계좌 복사 시 이전 직불 사진을 숨기고 새 사진 전에는 저장을 막는다', async () => {
+    open({ ...worker, bankPhotoId: undefined });
+    fireEvent.click(screen.getByRole('button', { name: '등록된 사진 보기' }));
+    await screen.findByAltText('직불용 계좌 사진 미리보기');
+    await copy();
+    expect(screen.queryByAltText('직불용 계좌 사진 미리보기')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '등록된 사진 보기' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('새 사진을 선택한 뒤 저장');
+    expect(screen.getByRole('button', { name: '직불용 계좌 저장' })).toBeDisabled();
+    expect(manpowerService.updateWorker).not.toHaveBeenCalled();
 });
 test('사진 복사 실패 시 빈 직불 초안을 유지하고 오류를 표시한다', async () => {
     (readWorkerBankPhoto as jest.Mock).mockRejectedValueOnce(new Error('사진 조회 실패'));

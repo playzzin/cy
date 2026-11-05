@@ -1963,6 +1963,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     workers={filteredWorkers}
                     initialWorkerId={bankBookWorkerId}
                     onUpdateWorkers={handleBankBookUpdate}
+                    onPhotoSaved={(workerId, bankPhotoId) => setWorkers(previous => previous.map(worker => worker.id === workerId ? { ...worker, bankPhotoId } : worker))}
                 />
             )}
 

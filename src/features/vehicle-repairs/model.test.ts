@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { classifyRepairImport, emptyCosts, isValidRepairDate, matchRepairVehicles, parseRepairWorkbook, repairTotal } from './model';
+import { classifyRepairImport, emptyCosts, isValidRepairDate, matchRepairVehicles, parseRepairWorkbook, repairAmounts, repairTotal, sumRepairAmounts } from './model';
 
 const book = (rows: unknown[][], sheet = '2026년') => {
   const workbook = XLSX.utils.book_new();
@@ -56,4 +56,19 @@ test('차량번호 전체가 유일하게 일치할 때만 연결한다', () => 
   expect(matchRepairVehicles(records, [{ id: 'match', licensePlate: '12가3456' }])[0].vehicleId).toBe('match');
   expect(matchRepairVehicles(records, [{ id: 'wrong', licensePlate: '99가3456' }])[0].vehicleId).toBe('');
   expect(matchRepairVehicles(records, [{ id: 'a', licensePlate: '12가3456' }, { id: 'b', licensePlate: '12가3456' }])[0].vehicleId).toBe('');
+});
+
+test('개인에는 VAT를 더하지 않고 기존 법인 총액에서만 공급가액·VAT를 분리한다', () => {
+  const costs = { personal: 50000, joeun: 11000, cheongyeon: 22000, corporate: 33000 };
+  expect(repairAmounts({ costs })).toEqual({ personal: 50000, corporate: 60000, vat: 6000, total: 116000 });
+  expect(costs).toEqual({ personal: 50000, joeun: 11000, cheongyeon: 22000, corporate: 33000 });
+  expect(repairAmounts({ costs: { ...emptyCosts(), personal: 12345 } })).toEqual({ personal: 12345, corporate: null, vat: 0, total: 12345 });
+});
+
+test('원본의 소수 총액과 0원·미입력 상태를 보존하고 합계는 행별 VAT를 더한다', () => {
+  const rows = [1, 1, 1].map(corporate => ({ costs: { ...emptyCosts(), corporate } }));
+  expect(sumRepairAmounts(rows)).toEqual({ personal: 0, corporate: 2.73, vat: 0.27, total: 3 });
+  expect(repairAmounts({ costs: { ...emptyCosts(), corporate: 100000.7 } })).toEqual({ personal: null, corporate: 90909.73, vat: 9090.97, total: 100000.7 });
+  expect(repairAmounts({ costs: emptyCosts() })).toEqual({ personal: null, corporate: null, vat: 0, total: 0 });
+  expect(repairAmounts({ costs: { ...emptyCosts(), corporate: 0 } }).corporate).toBe(0);
 });

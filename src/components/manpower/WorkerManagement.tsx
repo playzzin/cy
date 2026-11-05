@@ -1156,6 +1156,7 @@ const WorkerManagement: React.FC = () => {
                         onClose={() => setIsBankBookModalOpen(false)}
                         workers={filteredWorkers}
                         onUpdateWorkers={handleBankBookUpdate}
+                        onPhotoSaved={(workerId, bankPhotoId) => setWorkers(previous => previous.map(worker => worker.id === workerId ? { ...worker, bankPhotoId } : worker))}
                     />
                 )
             }

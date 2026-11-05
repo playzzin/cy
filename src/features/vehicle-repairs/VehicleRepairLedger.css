@@ -49,6 +49,7 @@
 .repair-ledger tbody button { font-size: 10px; padding: 7px; margin-top: 3px; border-radius: 7px; }
 .repair-number { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .repair-number input { text-align: right; font-variant-numeric: tabular-nums; }
+.repair-ledger tbody .repair-vat-cell { padding: 16px 8px; background: #f8fafc; color: #475569; }
 .repair-ledger tbody .repair-row-total { color: #4338ca; font-weight: 800; background: #eef2ff66; padding: 16px 8px; }
 .repair-ledger tbody .repair-team-cell { padding: 11px 6px; }
 .repair-team-badge { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; min-width: 0; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 1.35; vertical-align: middle; }

@@ -1,4 +1,4 @@
-import { COST_KEYS, CostKey, isValidRepairAmount, RepairRecord, repairIssues } from './model';
+import { COST_KEYS, CostKey, isValidRepairAmount, RepairCostCategory, RepairRecord, repairAmounts, repairGrossFromSupply, repairIssues } from './model';
 
 export interface RepairDraft {
   original: RepairRecord;
@@ -16,7 +16,12 @@ export function parseRepairAmountInput(raw: string): { valid: true; value: numbe
 }
 
 export const createRepairDraft = (row: RepairRecord): RepairDraft => ({ original: row, record: row, amountInputs: {} });
-export const invalidDraftAmounts = (draft: RepairDraft): CostKey[] => COST_KEYS.filter(key => draft.amountInputs[key] !== undefined && !parseRepairAmountInput(draft.amountInputs[key]!).valid);
+export const invalidDraftAmounts = (draft: RepairDraft): CostKey[] => COST_KEYS.filter(key => {
+  const raw = draft.amountInputs[key];
+  if (raw === undefined) return false;
+  const parsed = parseRepairAmountInput(raw);
+  return !parsed.valid || (key === 'corporate' && parsed.value !== null && !isValidRepairAmount(repairGrossFromSupply(parsed.value)));
+});
 export function hasRepairDraftChanges(draft: RepairDraft): boolean {
   if (draft.record.revision === 0 || invalidDraftAmounts(draft).length) return true;
   const { original, record } = draft;
@@ -33,6 +38,20 @@ export function changeDraftAmount(draft: RepairDraft, key: CostKey, text: string
     // Keep persisted values numeric; the raw input and its validation survive pagination separately.
     record: parsed.valid ? { ...draft.record, costs: { ...draft.record.costs, [key]: parsed.value } } : draft.record,
   };
+}
+
+export function changeDraftDisplayAmount(draft: RepairDraft, key: RepairCostCategory, text: string): RepairDraft {
+  if (key === 'personal') return changeDraftAmount(draft, key, text);
+  const parsed = parseRepairAmountInput(text);
+  const result = { ...draft, amountInputs: { ...draft.amountInputs, corporate: text } };
+  if (parsed.valid && parsed.value === repairAmounts(draft.original).corporate) return {
+    ...result, record: { ...draft.record, costs: { ...draft.record.costs,
+      joeun: draft.original.costs.joeun, cheongyeon: draft.original.costs.cheongyeon, corporate: draft.original.costs.corporate } },
+  };
+  if (!parsed.valid || parsed.value === repairAmounts(draft.record).corporate) return result;
+  const gross = parsed.value === null ? null : repairGrossFromSupply(parsed.value);
+  if (gross !== null && !isValidRepairAmount(gross)) return result;
+  return { ...result, record: { ...draft.record, costs: { ...draft.record.costs, joeun: null, cheongyeon: null, corporate: gross } } };
 }
 
 export function repairDraftIssues(draft: RepairDraft): string[] {

@@ -5,9 +5,11 @@ import AccountPhotoRegistrationModal from './AccountPhotoRegistrationModal';
 import BankBookAnalysisModal from '../manpower/BankBookAnalysisModal';
 import { geminiService } from '../../services/geminiService';
 import { GeminiBillingError } from '../../services/geminiGatewayClient';
+import { saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
 
 jest.mock('../../services/geminiService', () => ({ geminiService: { analyzeBankBook: jest.fn() } }));
 jest.mock('../../services/aiSettingsService', () => ({ aiSettingsService: {} }));
+jest.mock('../../services/workerBankPhotoService', () => ({ validateWorkerBankPhoto: jest.fn(), saveWorkerBankPhoto: jest.fn() }));
 
 const fields = { bankName: '검증은행', accountNumber: '001234567890', accountHolder: '별도예금주' };
 const targets = [{ id: 'worker-a', label: '검증작업자 · 검증팀' }, { id: 'worker-b', label: '다른작업자 · 다른팀' }];
@@ -26,6 +28,8 @@ beforeEach(() => {
     URL.createObjectURL = jest.fn(file => `blob:${(file as File).name}`);
     URL.revokeObjectURL = jest.fn();
     (geminiService.analyzeBankBook as jest.Mock).mockResolvedValue(fields);
+    Object.defineProperty(window, 'crypto', { configurable: true, value: jest.requireActual('crypto').webcrypto });
+    (saveWorkerBankPhoto as jest.Mock).mockResolvedValue('new-basic-photo');
 });
 
 it('requires manual recipient selection, shows the full account and saves a third-party holder without changing the worker name', async () => {
@@ -39,6 +43,24 @@ it('requires manual recipient selection, shows the full account and saves a thir
     select(); review(); save();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(onUpdateWorkers).toHaveBeenCalledWith([{ workerId: 'worker-a', ...fields }]);
+    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('worker-a', expect.any(File), expect.stringMatching(/^[a-f0-9]{32}$/), '', 'default');
+});
+
+it('사진 저장 실패를 안내하고 계좌정보를 다시 덮어쓰지 않으며 동일 업로드로 재시도한다', async () => {
+    const onUpdateWorkers = jest.fn().mockResolvedValue(undefined), onPhotoSaved = jest.fn(), onClose = jest.fn();
+    (saveWorkerBankPhoto as jest.Mock).mockRejectedValueOnce(new Error('사진 저장 연결 실패'));
+    render(<BankBookAnalysisModal isOpen initialWorkerId="worker-a" onClose={onClose}
+        workers={[{ id: 'worker-a', name: '검증작업자', bankPhotoId: 'old-photo' }]}
+        onUpdateWorkers={onUpdateWorkers} onPhotoSaved={onPhotoSaved} />);
+    upload(); await analyze(); review(); save();
+    await screen.findByText(/계좌정보는 저장됐지만 통장사진은 저장하지 못했습니다/);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onPhotoSaved).not.toHaveBeenCalled();
+    save(); await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onUpdateWorkers).toHaveBeenCalledTimes(1);
+    expect((saveWorkerBankPhoto as jest.Mock).mock.calls[0]).toEqual((saveWorkerBankPhoto as jest.Mock).mock.calls[1]);
+    expect(saveWorkerBankPhoto).toHaveBeenLastCalledWith('worker-a', expect.any(File), expect.any(String), 'old-photo', 'default');
+    expect(onPhotoSaved).toHaveBeenCalledWith('worker-a', 'new-basic-photo');
 });
 
 it('requires confirmation again after correcting OCR, and never saves before the explicit save action', async () => {

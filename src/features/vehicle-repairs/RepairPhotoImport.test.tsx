@@ -6,7 +6,7 @@ import type { Vehicle } from '../../types/vehicle';
 import type { Team } from '../../services/teamService';
 import VehicleRepairLedger from './VehicleRepairLedger';
 import RepairPhotoImport from './RepairPhotoImport';
-import { COST_KEYS, COST_LABELS, emptyCosts } from './model';
+import { REPAIR_COST_KEYS, REPAIR_COST_LABELS, emptyCosts } from './model';
 import { analyzeRepairPhoto, identifyRepairPhoto, RepairPhotoResult } from './photoAnalysis';
 import { vehicleRepairService } from './service';
 
@@ -151,7 +151,7 @@ test('정상 결과를 먼저 추가해도 누락된 결과는 보존하고 보�
   expect(screen.getByLabelText('합계금액 (원)')).toHaveValue('');
   expect(screen.getByRole('button', { name: '대장에 추가' })).toBeDisabled();
   fireEvent.change(screen.getByLabelText('합계금액 (원)'), { target: { value: '75000' } });
-  fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('비용 구분'), { target: { value: 'joeun' } });
+  fireEvent.change(within(screen.getByRole('dialog')).getByLabelText('비용 구분'), { target: { value: 'corporate' } });
   fireEvent.click(screen.getByRole('button', { name: '대장에 추가' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '전체 기간' })).toHaveAttribute('aria-pressed', 'true');
@@ -159,7 +159,7 @@ test('정상 결과를 먼저 추가해도 누락된 결과는 보존하고 보�
   await screen.findByText('2건의 정비내역을 저장했습니다.');
   expect(vehicleRepairService.saveRows).toHaveBeenCalledWith(expect.arrayContaining([
     expect.objectContaining({ id: photoId + 'ready.jpg', costs: { ...emptyCosts(), personal: 360000 } }),
-    expect.objectContaining({ id: photoId + 'incomplete.jpg', costs: { ...emptyCosts(), joeun: 75000 } }),
+    expect.objectContaining({ id: photoId + 'incomplete.jpg', costs: { ...emptyCosts(), corporate: 75000 } }),
   ]));
 });
 
@@ -203,7 +203,7 @@ test('여러 장 인식 중 닫으면 진행 중 요청을 취소하고 다음 �
   expect(URL.revokeObjectURL).toHaveBeenCalled();
 });
 
-test.each(COST_KEYS)('검수한 합계 전액을 %s 한 곳에 넣고 명시적인 저장 때만 등록한다', async category => {
+test.each(REPAIR_COST_KEYS)('검수한 합계 전액을 %s 한 곳에 넣고 명시적인 저장 때만 등록한다', async category => {
   await openLedger();
   const dialog = within(screen.getByRole('dialog'));
   expect(await dialog.findByDisplayValue('360,000')).toBeInTheDocument();
@@ -217,7 +217,9 @@ test.each(COST_KEYS)('검수한 합계 전액을 %s 한 곳에 넣고 명시적�
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
   expect(screen.getByLabelText('정비 조회 월')).toHaveValue('2026-10');
-  expect(screen.getByLabelText('1행 ' + COST_LABELS[category] + ' 금액')).toHaveValue('360,000');
+  expect(screen.getByLabelText('1행 ' + REPAIR_COST_LABELS[category] + ' 금액')).toHaveValue(category === 'personal' ? '360,000' : '327,272.73');
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent(category === 'personal' ? '0' : '32,727.27');
+  expect(screen.getByLabelText('1행 합계')).toHaveTextContent('360,000');
   expect(screen.getByLabelText('1행 정비내용')).toHaveValue('오일·필터 교환 / 타이어 교환');
   expect(within(screen.getByTitle(team.name)).getByRole('img', { hidden: true })).toHaveAttribute('data-icon', 'truck-front');
   fireEvent.click(screen.getByRole('button', { name: '저장' }));
