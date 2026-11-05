@@ -1,0 +1,31 @@
+.ai-orbit { display: block; width: 100%; height: auto; max-height: 30rem; margin-inline: auto; overflow: visible; }
+.ai-orbit text { text-anchor: middle; font-family: inherit; }
+.ai-orbit-register, .ai-orbit-guide, .ai-orbit-sector, .ai-orbit-rail, .ai-orbit-spoke, .ai-orbit-inner-link { fill: none; }
+.ai-orbit-aura { fill: #bfe4c507; stroke: none; }
+.ai-orbit-register { stroke: #bedace65; stroke-dasharray: 1.5 4; stroke-width: 1; }
+.ai-orbit-guide { stroke: #b9d8c533; stroke-width: .8; }
+.ai-orbit-sector { stroke: var(--station); stroke-width: 14; }
+.ai-orbit-rail, .ai-orbit-spoke { stroke: var(--station); stroke-width: 1.2; opacity: .72; }
+.ai-orbit-rail { opacity: .42; }
+.ai-orbit-inner-link { stroke: var(--station); opacity: .38; stroke-width: 1; }
+.ai-orbit-port { fill: var(--station); stroke: #f4ffe7; stroke-width: .5; opacity: .88; }
+.ai-orbit-station[data-flow="idle"] .ai-orbit-sector { opacity: .3; }
+.ai-orbit-station[data-flow="idle"] :is(.ai-orbit-rail,.ai-orbit-spoke,.ai-orbit-port) { opacity: .26; }
+.ai-orbit-role { fill: #f1f7ed; font-size: 16px; font-weight: 750; }
+.ai-orbit-note { fill: var(--station); font-size: 15px; font-weight: 700; }
+.ai-orbit-share { fill: var(--station); font-size: 24px; font-weight: 830; }
+.ai-orbit-caption { fill: #c9e0d2; font-size: 12px; font-weight: 650; }
+.ai-orbit-title { fill: #f6faed; font-size: 20px; font-weight: 810; letter-spacing: -.06em; }
+.ai-orbit-ticks { fill: none; stroke: #c3e0ca; stroke-width: .8; opacity: .25; }
+.ai-orbit-scan { fill: none; stroke: var(--scene,#cfe7ca); stroke-width: 1.4; stroke-dasharray: 7 93; opacity: .7; stroke-linecap: round; }
+.ai-orbit[data-income="true"] .ai-orbit-sector { stroke-width: 2; opacity: .4; }
+.ai-orbit[data-income="true"] .ai-orbit-guide { stroke: #f4c88755; stroke-dasharray: 1.5 4; }
+.ai-orbit[data-income="true"] .ai-orbit-title { fill: #f7d6a5; }
+@keyframes ai-orbit-scan { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+@media (prefers-reduced-motion: no-preference) {
+    .ai-orbit-scan { animation: ai-orbit-scan 12s linear infinite; animation-play-state: paused; }
+    [data-running="true"] .ai-orbit-scan { animation-play-state: running; }
+    .ai-orbit-sector, .ai-orbit-rail, .ai-orbit-spoke, .ai-orbit-port { transition: opacity .65s ease, stroke .65s ease; }
+}
+.ai-orbit[data-portrait="true"] .ai-orbit-role { font-size: 16.5px; }
+.ai-orbit[data-portrait="true"] .ai-orbit-caption { font-size: 13px; }

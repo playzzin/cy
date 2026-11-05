@@ -1,6 +1,7 @@
 import { useLayoutEffect } from 'react';
 import { matchPath, useLocation } from 'react-router-dom';
 import { MENU_PATHS } from '../../constants/menuPaths';
+import { ALLIANCE_SITE_NAME, INVESTMENT_LABEL, INVESTMENT_PATH } from '../../constants/siteModes';
 
 const SITE_TITLE = '청연ENG ERP';
 const pageNames: Record<string, string> = {
@@ -99,6 +100,7 @@ Object.entries(MENU_PATHS).forEach(([name, path]) => {
 
 export const getRouteDocumentTitle = (pathname: string, search = ''): string => {
     const currentPath = pathname.replace(/\/+$/, '') || '/';
+    if (currentPath === INVESTMENT_PATH) return `${INVESTMENT_LABEL} | ${ALLIANCE_SITE_NAME}`;
     const currentParams = new URLSearchParams(search);
     let bestName = '';
     let bestScore = -1;

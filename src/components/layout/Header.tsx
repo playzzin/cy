@@ -20,6 +20,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../../config/firebase';
 import { resolveIcon } from '../../constants/iconMap';
 import { DEFAULT_HEADER_ACTIONS } from '../../constants/headerActions';
+import { ALLIANCE_SITE_KEY, INVESTMENT_LABEL, SITE_HOME_PATHS } from '../../constants/siteModes';
 import { manpowerService } from '../../services/manpowerService';
 import { userService, type UserData } from '../../services/userService';
 import { userMenuPositionService } from '../../services/userMenuPositionService';
@@ -109,6 +110,8 @@ const isQuickToolAction = (action: string): action is QuickTool =>
 const getMenuDisplayText = (text: string): string => {
     return text === '일보목록v2' ? '일보목록' : text;
 };
+
+const menuPathname = (path: string): string => path.split(/[?#]/, 1)[0].replace(/\/+$/, '');
 
 const normalizePositionValue = (value: unknown): string =>
     String(value || '')
@@ -347,8 +350,9 @@ const Header: React.FC<HeaderProps> = ({
         }
     };
 
-    // `test` and `nation` share the SITE-style top navigation shell.
-    const isSiteLayerMode = currentSite === 'test' || currentSite === 'nation';
+    const siteLandingPath = SITE_HOME_PATHS[currentSite];
+    const isSiteLayerMode = Boolean(siteLandingPath);
+    const featuredMenu = currentSite === 'nation' ? '모집공고' : currentSite === ALLIANCE_SITE_KEY ? INVESTMENT_LABEL : undefined;
     const hidesCalculator = !isSiteLayerMode && currentPosition !== 'full'
         && [currentPosition, resolvePositionLabel(currentPosition, positions), safeCurrentSiteData.name]
             .some(value => [
@@ -358,7 +362,6 @@ const Header: React.FC<HeaderProps> = ({
                 '발주사', '건설', '건설사', '원청', 'client', 'clientcompany', 'constructioncompany',
                 '소개소', '소개자', 'referral', 'recruiting', 'agency',
             ].includes(normalizePositionValue(value)));
-    const siteLandingPath = currentSite === 'nation' ? '/dashboard3' : '/dashboard2';
     const headerStyle = isSiteLayerMode
         ? isDarkMode
             ? { backgroundColor: '#0f172a', color: '#e2e8f0', borderBottom: '1px solid #1e293b' }
@@ -389,6 +392,7 @@ const Header: React.FC<HeaderProps> = ({
                 return;
             }
 
+            if (featuredMenu && child.hide) return;
             const directPath = resolvePath(child);
             if (directPath) {
                 result.push({ label: getMenuDisplayText(child.text), path: directPath, sourceGroup: parentText });
@@ -408,8 +412,14 @@ const Header: React.FC<HeaderProps> = ({
         return Array.from(dedup.values());
     };
 
-    const cheongyeonTopNav: CheongyeonNavSection[] = Array.isArray(safeCurrentSiteData.menu)
-        ? safeCurrentSiteData.menu
+    const getSiteTopNav = (): CheongyeonNavSection[] => {
+        const menu = safeCurrentSiteData.menu;
+        if (!Array.isArray(menu)) return [];
+        if (featuredMenu) {
+            const featured = collectChildLinks(menu).find(link => menuPathname(link.path) === menuPaths[featuredMenu]);
+            return featured ? [{ key: menuPaths[featuredMenu], label: featured.label, path: featured.path, children: [] }] : [];
+        }
+        return menu
             .filter((item: MenuItem) => !item.hide)
             .map((item: MenuItem, index: number) => {
                 const children = collectChildLinks(item.sub || [], item.text);
@@ -421,8 +431,8 @@ const Header: React.FC<HeaderProps> = ({
                     children,
                 };
             })
-            .filter((item: CheongyeonNavSection) => !!item.path || item.children.length > 0)
-        : [];
+            .filter((item: CheongyeonNavSection) => !!item.path || item.children.length > 0);
+    };
 
     const handleTopNavRoute = (path: string) => {
         if (!path) return;
@@ -435,6 +445,7 @@ const Header: React.FC<HeaderProps> = ({
     };
 
     const isTopNavActive = (section: CheongyeonNavSection) => {
+        if (featuredMenu) return menuPathname(location.pathname) === menuPathname(section.path);
         if (section.path && location.pathname === section.path) return true;
         return section.children.some((child) => location.pathname.startsWith(child.path));
     };
@@ -624,17 +635,17 @@ const Header: React.FC<HeaderProps> = ({
                     )}
                 </button>
 
-                {isSiteLayerMode && (
+                {siteLandingPath && (
                     <button
                         type="button"
                         className="cheongyeon-header-logo cheongyeon-header-home-logo"
                         onClick={() => navigate(siteLandingPath)}
-                        aria-label="청연 메인으로 이동"
+                        aria-label={`${safeCurrentSiteData.name} 메인으로 이동`}
                     >
                         {logoUrl ? (
                             <img
                                 src={logoUrl}
-                                alt="청연 로고"
+                                alt={`${safeCurrentSiteData.name} 로고`}
                                 className="cheongyeon-header-logo-image"
                             />
                         ) : (
@@ -653,7 +664,7 @@ const Header: React.FC<HeaderProps> = ({
                     onMouseEnter={clearTopNavCloseTimer}
                     onMouseLeave={handleTopNavMouseLeave}
                 >
-                    {cheongyeonTopNav.map((section) => (
+                    {getSiteTopNav().map((section) => (
                         <div
                             key={section.key}
                             className="cheongyeon-top-nav-item"

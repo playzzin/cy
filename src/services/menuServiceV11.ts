@@ -21,7 +21,10 @@ import { ensureTeamPersonnelMenu } from '../utils/teamPersonnelMenu';
 import { ensureBankTransferMenu } from '../utils/bankTransferMenu';
 import { ensureCorporateTaxMenu } from '../utils/corporateTaxMenu';
 import { ensureAdvanceSummaryMenu } from '../utils/advanceSummaryMenu';
-import { hasRegisteredMenus, legacyDeletedMenuFilter, MENU_REGISTRATION_VERSION } from '../utils/menuRegistration';
+import {
+    hasRegisteredMenus, legacyDeletedMenuFilter, MENU_REGISTRATION_VERSION, needsAllianceInvestmentMenu,
+    needsNationRecruitmentMenu, registerAllianceInvestmentMenu, registerNationRecruitmentMenu,
+} from '../utils/menuRegistration';
 import { getRegisteredPositionGroups, isDevPositionSite } from '../utils/linkedPositionMenus';
 import { registerActivityMenu } from '../features/activity-center/activityMenu';
 
@@ -1182,6 +1185,8 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     const final = normalizeSiteDataType(incomingConfig);
     const legacy = !hasRegisteredMenus(final);
     if (legacy) registerLegacyMenus(final);
+    registerNationRecruitmentMenu(final);
+    registerAllianceInvestmentMenu(final);
     removeWorkbookLedgerUpgradeMenus(final, legacy);
     Object.entries(final).forEach(([key, site]) => {
         site.menuRegistrationVersion = Math.max(site.menuRegistrationVersion || 0, MENU_REGISTRATION_VERSION);
@@ -1239,7 +1244,8 @@ const setupSnapshotListener = () => {
 };
 
 export const menuServiceV11 = {
-    isMenuRegistrationPending: (): boolean => Boolean(currentRawConfig && !hasRegisteredMenus(currentRawConfig)),
+    isMenuRegistrationPending: (): boolean => Boolean(currentRawConfig &&
+        (!hasRegisteredMenus(currentRawConfig) || needsNationRecruitmentMenu(currentRawConfig) || needsAllianceInvestmentMenu(currentRawConfig))),
     subscribe: (callback: (data: SiteDataType) => void, options: MenuSubscribeOptions = {}) => {
         const listener: MenuListener = { callback, onError: options.onError };
         listeners.add(listener);
@@ -1689,7 +1695,7 @@ export const menuServiceV11 = {
     runOneTimeMigrations: async (): Promise<void> => {
         try {
             const config = await menuServiceV11.getMenuConfig();
-            if (!config || !menuServiceV11.isMenuRegistrationPending()) return;
+            if (!config || !currentRawConfig || hasRegisteredMenus(currentRawConfig)) return;
             const base = deepClone(config);
 
             const addedNationwidePage = ensureMenuChild(config, '현황관리', '전국페이지');

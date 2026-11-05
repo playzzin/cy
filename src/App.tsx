@@ -7,6 +7,7 @@ import Login from './components/auth/Login';
 import AppIntroScreen from './components/common/AppIntroScreen';
 import AnalyticsRouteTracker from './components/analytics/AnalyticsRouteTracker';
 import RouteDocumentTitle from './components/common/RouteDocumentTitle';
+import { INVESTMENT_PATH } from './constants/siteModes';
 import DevPreviewFrameBridge from './components/developer/DevPreviewFrameBridge';
 import { isDevPreviewFrame } from './utils/devPreviewRuntime';
 import { lazyNamed } from './utils/lazyNamed';
@@ -162,6 +163,8 @@ const DataConsolePage = React.lazy(() => import('./pages/admin/DataConsolePage')
 const DataBackupPage = React.lazy(() => import('./pages/admin/DataBackupPage'));
 const StatusGraphPage = React.lazy(() => import('./pages/jeonkuk/StatusGraphPage'));
 const NationwidePartnersPage = React.lazy(() => import('./pages/jeonkuk/NationwidePartnersPage'));
+const NationwideRecruitmentPage = React.lazy(() => import('./pages/jeonkuk/NationwideRecruitmentPage'));
+const AllianceInvestmentPage = React.lazy(() => import('./pages/alliance/AllianceInvestmentPage'));
 const SalaryModelUpdater = React.lazy(() => import('./pages/admin/SalaryModelUpdater'));
 const AdminDataIntegrityPage = React.lazy(() => import('./pages/admin/AdminDataIntegrityPage'));
 const UserManagementPage = React.lazy(() => import('./pages/admin/UserManagementPage'));
@@ -290,6 +293,7 @@ const App: React.FC = () => {
             {/* 청연사이트 전용 대시보드 */}
             <Route path="/dashboard2" element={<CheongyeonHome />} />
             <Route path="/dashboard3" element={<NationwideDashboardHome />} />
+            <Route path={INVESTMENT_PATH} element={<AllianceInvestmentPage />} />
             <Route path="/cheongyeon/home" element={<Navigate to="/dashboard2" replace />} />
 
             {/* Construction-plan quick PDF creation and document management */}
@@ -703,6 +707,7 @@ const App: React.FC = () => {
               <Route path="db-design" element={<SchemaDesignViewer />} />
               <Route path="integrated-status" element={<WhiteboardStatusBoard />} />
               <Route path="nationwide-partners" element={<NationwidePartnersPage />} />
+              <Route path="recruitment" element={<NationwideRecruitmentPage />} />
               <Route path="status-graph" element={<StatusGraphPage />} />
               <Route path="integrated-support-status" element={<IntegratedSupportStatusBoard />} />
               <Route path="total-history" element={<TotalPersonnelHistoryPage />} />
