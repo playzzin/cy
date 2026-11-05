@@ -162,6 +162,7 @@ export type TeamSettlementSupportDetailSnapshot = z.infer<typeof TeamSettlementS
 
 export const TeamSettlementSourceSnapshotSchema = z.object({
   version: z.union([z.literal(1), z.literal(2)]),
+  manualContractDirectAmounts: z.boolean().optional(),
   capturedAt: z.string().datetime(),
   dailyReports: z.array(TeamSettlementDailyReportSnapshotSchema).default([]),
   supportDetails: z.array(TeamSettlementSupportDetailSnapshotSchema).optional(),

@@ -2716,7 +2716,8 @@ export const TeamSettlementPage: React.FC = () => {
                 className="mx-auto block w-28 border rounded px-2 py-1 text-center"
                 value={line.amount}
                 disabled={!editableAmount}
-                emptyWhenZero={line.kind === '도급'}
+                emptyWhenZero={line.direction === 'sales' && showSiteInsteadOfCounterTeam}
+                placeholder={line.direction === 'sales' && showSiteInsteadOfCounterTeam ? '금액 입력' : undefined}
                 onChange={(n) => {
                   if (line.direction === 'sales') {
                     updateDoc((prev) => ({
@@ -3886,7 +3887,7 @@ export const TeamSettlementPage: React.FC = () => {
                   <span className="mr-2 text-blue-600">01</span>매출·매입 조정
                 </h2>
                 <div className="team-settlement-page__transaction-subtitle text-xs text-slate-500 mt-0.5">
-                  도급/직영/지원 공수 기반 자동집계 + 상세(출력/인력교류) 아코디언
+                  도급·직영 공수 자동집계 · 매출금액 직접 입력 · 지원단가 자동집계
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -3960,6 +3961,7 @@ export const TeamSettlementPage: React.FC = () => {
                       + 수기 직영 매출
                     </button>
                   </div>
+                  <p className="mt-1 text-xs text-slate-500">공수만 자동집계하며, 금액은 직접 입력합니다.</p>
                   <div className="mt-2 overflow-auto">
                     <table aria-label="도급/직영 매출" data-compact="transaction" className="w-full text-sm border-collapse">
                       <thead>
