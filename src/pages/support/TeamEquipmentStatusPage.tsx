@@ -4,11 +4,10 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowLeft,
     faBoxesStacked,
-    faChevronDown,
-    faChevronRight,
     faFloppyDisk,
     faMagnifyingGlass,
     faPlus,
+    faPen,
     faRotateLeft,
     faRotateRight,
     faScrewdriverWrench,
@@ -19,11 +18,8 @@ import {
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { supportSharedDataService } from '../../services/supportSharedDataService';
-
-interface EquipmentItem {
-    id: string;
-    name: string;
-}
+import { DEFAULT_EQUIPMENT_ITEMS, EQUIPMENT_CATALOG_VERSION, EquipmentItem, upgradeEquipmentCatalog } from './teamEquipmentCatalog';
+import './TeamEquipmentStatusPage.css';
 
 interface ForemanEquipmentMetric {
     id: string;
@@ -49,8 +45,15 @@ interface TeamEquipmentRecord extends TeamEquipmentMetric {
 }
 
 type PersistedEquipmentState = {
+    catalogVersion?: number;
     items?: EquipmentItem[];
     rows?: Record<string, TeamEquipmentMetric>;
+};
+
+type NormalizedEquipmentState = {
+    catalogVersion: number;
+    items: EquipmentItem[];
+    rows: Record<string, TeamEquipmentMetric>;
 };
 
 type LegacyEquipmentInput = {
@@ -65,10 +68,6 @@ const LEGACY_STORAGE_KEY = 'team_equipment_status_v1';
 const MIGRATION_KEY = 'team_equipment_inventory_firestore_migrated_v1';
 const DEFAULT_TEAM_COLOR = '#94a3b8';
 const FOREMAN_BREAKDOWN_TEAM_NAME = '이재욱팀';
-const DEFAULT_EQUIPMENT_ITEMS: EquipmentItem[] = [
-    { id: 'impact', name: '임팩' },
-    { id: 'skill', name: '스킬' }
-];
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 const normalizeComparableText = (value: unknown): string => normalizeKey(value).replace(/\s+/g, '').toLowerCase();
@@ -192,17 +191,17 @@ const normalizeMetric = (id: string, value: Partial<TeamEquipmentMetric> | undef
     };
 };
 
-const normalizePersistedState = (value: unknown): { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> } | null => {
+const normalizePersistedState = (value: unknown): NormalizedEquipmentState | null => {
     if (!value || typeof value !== 'object') return null;
     const parsed = value as PersistedEquipmentState;
-    const items = normalizeItems(parsed.items, !Array.isArray(parsed.items));
+    const items = upgradeEquipmentCatalog(normalizeItems(parsed.items, !Array.isArray(parsed.items)), parsed.catalogVersion);
     const rows = Object.entries(parsed.rows ?? {}).reduce<Record<string, TeamEquipmentMetric>>((acc, [id, metric]) => {
         const key = normalizeKey(id);
         if (!key) return acc;
         acc[key] = normalizeMetric(key, metric as Partial<TeamEquipmentMetric>, items);
         return acc;
     }, {});
-    return { items, rows };
+    return { catalogVersion: EQUIPMENT_CATALOG_VERSION, items, rows };
 };
 
 const hasLocalSavedState = (): boolean => (
@@ -210,8 +209,8 @@ const hasLocalSavedState = (): boolean => (
     && Boolean(window.localStorage.getItem(STORAGE_KEY) || window.localStorage.getItem(LEGACY_STORAGE_KEY))
 );
 
-const loadLocalSavedState = (): { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> } => {
-    if (typeof window === 'undefined') return { items: DEFAULT_EQUIPMENT_ITEMS, rows: {} };
+const loadLocalSavedState = (): NormalizedEquipmentState => {
+    if (typeof window === 'undefined') return { catalogVersion: EQUIPMENT_CATALOG_VERSION, items: DEFAULT_EQUIPMENT_ITEMS, rows: {} };
 
     try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -225,7 +224,7 @@ const loadLocalSavedState = (): { items: EquipmentItem[]; rows: Record<string, T
         const legacyRaw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
         const legacyParsed = legacyRaw ? JSON.parse(legacyRaw) : null;
         if (!legacyParsed || typeof legacyParsed !== 'object') {
-            return { items: DEFAULT_EQUIPMENT_ITEMS, rows: {} };
+            return { catalogVersion: EQUIPMENT_CATALOG_VERSION, items: DEFAULT_EQUIPMENT_ITEMS, rows: {} };
         }
 
         const entries = Array.isArray(legacyParsed)
@@ -249,10 +248,10 @@ const loadLocalSavedState = (): { items: EquipmentItem[]; rows: Record<string, T
             return acc;
         }, {});
 
-        return { items: DEFAULT_EQUIPMENT_ITEMS, rows };
+        return { catalogVersion: EQUIPMENT_CATALOG_VERSION, items: DEFAULT_EQUIPMENT_ITEMS, rows };
     } catch (error) {
         console.warn('[TeamEquipmentStatusPage] Failed to migrate legacy equipment status:', error);
-        return { items: DEFAULT_EQUIPMENT_ITEMS, rows: {} };
+        return { catalogVersion: EQUIPMENT_CATALOG_VERSION, items: DEFAULT_EQUIPMENT_ITEMS, rows: {} };
     }
 };
 
@@ -299,9 +298,9 @@ const mergeForemen = (
 };
 
 const mergeEquipmentStates = (
-    sharedState: { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> },
-    localState: { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> }
-): { items: EquipmentItem[]; rows: Record<string, TeamEquipmentMetric> } => {
+    sharedState: NormalizedEquipmentState,
+    localState: NormalizedEquipmentState
+): NormalizedEquipmentState => {
     const items = normalizeItems([...localState.items, ...sharedState.items], false);
     const rowIds = new Set([...Object.keys(localState.rows), ...Object.keys(sharedState.rows)]);
     const rows = Array.from(rowIds).reduce<Record<string, TeamEquipmentMetric>>((acc, id) => {
@@ -330,10 +329,11 @@ const mergeEquipmentStates = (
         };
         return acc;
     }, {});
-    return { items, rows };
+    return { catalogVersion: EQUIPMENT_CATALOG_VERSION, items, rows };
 };
 
 const buildPersistedState = (items: EquipmentItem[], records: TeamEquipmentRecord[]): PersistedEquipmentState => ({
+        catalogVersion: EQUIPMENT_CATALOG_VERSION,
         items,
         rows: records.reduce<Record<string, TeamEquipmentMetric>>((acc, record) => {
             acc[record.id] = {
@@ -429,14 +429,6 @@ const getRecordDisplayQuantities = (record: TeamEquipmentRecord, items: Equipmen
         : record.quantities
 );
 
-const inputClassName = (changed = false) => (
-    `h-10 w-24 rounded-lg border px-2.5 py-2 text-right text-sm font-black tabular-nums text-slate-900 outline-none transition-colors ${
-        changed
-            ? 'border-sky-400 bg-sky-50'
-            : 'border-slate-200 bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-100'
-    }`
-);
-
 const TeamEquipmentStatusPage: React.FC = () => {
     const navigate = useNavigate();
     const [equipmentItems, setEquipmentItems] = useState<EquipmentItem[]>(DEFAULT_EQUIPMENT_ITEMS);
@@ -446,8 +438,10 @@ const TeamEquipmentStatusPage: React.FC = () => {
     const [refreshKey, setRefreshKey] = useState(0);
     const [searchTerm, setSearchTerm] = useState('');
     const [newEquipmentName, setNewEquipmentName] = useState('');
+    const [showEquipmentManager, setShowEquipmentManager] = useState(false);
+    const [editingEquipmentId, setEditingEquipmentId] = useState<string | null>(null);
+    const [equipmentNameDraft, setEquipmentNameDraft] = useState('');
     const [newForemanNames, setNewForemanNames] = useState<Record<string, string>>({});
-    const [expandedTeamIds, setExpandedTeamIds] = useState<Set<string>>(() => new Set());
     const [changedIds, setChangedIds] = useState<Set<string>>(() => new Set());
     const [saving, setSaving] = useState(false);
     const [toastMessage, setToastMessage] = useState('');
@@ -535,13 +529,6 @@ const TeamEquipmentStatusPage: React.FC = () => {
             setRecords(sortRecords(nextRecords));
             persistLocalState(items, nextRecords);
             setLoadError(loadWarning);
-            setExpandedTeamIds((prev) => {
-                const next = new Set(prev);
-                nextRecords
-                    .filter((record) => record.isForemanBreakdown)
-                    .forEach((record) => next.add(record.id));
-                return next;
-            });
             setChangedIds(new Set());
             if (migratedLocalData) {
                 showToast('기존 장비 기록을 공용 DB로 이전했습니다.');
@@ -680,6 +667,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
             const sharedState = await supportSharedDataService.load<PersistedEquipmentState>('team_equipment_inventory');
             const baseState = normalizePersistedState(sharedState) || buildPersistedState(equipmentItems, records);
             const nextState: PersistedEquipmentState = {
+                catalogVersion: EQUIPMENT_CATALOG_VERSION,
                 items: equipmentItems,
                 rows: {
                     ...baseState.rows,
@@ -761,6 +749,40 @@ const TeamEquipmentStatusPage: React.FC = () => {
         showToast(`${name} 항목을 추가했습니다.`);
     };
 
+    const renameEquipmentItem = async () => {
+        if (!editingEquipmentId || saving || loadError) return;
+        const name = normalizeKey(equipmentNameDraft);
+        if (!name) { showToast('장비명을 입력하세요.'); return; }
+        if (equipmentItems.some(item => item.id !== editingEquipmentId && normalizeComparableText(item.name) === normalizeComparableText(name))) {
+            showToast('이미 등록된 장비 이름입니다.');
+            return;
+        }
+        setSaving(true);
+        try {
+            // A name edit must not also save unrelated, unsaved quantity edits.
+            const shared = await supportSharedDataService.load<PersistedEquipmentState>('team_equipment_inventory');
+            const base = normalizePersistedState(shared);
+            const sourceItems = base?.items ?? equipmentItems;
+            if (!sourceItems.some(item => item.id === editingEquipmentId)) throw new Error('Item no longer exists');
+            if (sourceItems.some(item => item.id !== editingEquipmentId && normalizeComparableText(item.name) === normalizeComparableText(name))) {
+                showToast('이미 등록된 장비 이름입니다.');
+                return;
+            }
+            const nextItems = sourceItems.map(item => item.id === editingEquipmentId ? { ...item, name } : item);
+            await supportSharedDataService.save('team_equipment_inventory', {
+                catalogVersion: EQUIPMENT_CATALOG_VERSION,
+                items: nextItems,
+                rows: base?.rows ?? {},
+            });
+            setEquipmentItems(nextItems);
+            setEditingEquipmentId(null);
+            showToast('장비 이름을 변경했습니다. 기존 수량은 유지됩니다.');
+        } catch (error) {
+            console.error('[TeamEquipmentStatusPage] Failed to rename equipment:', error);
+            showToast('장비 이름을 저장하지 못했습니다. 목록을 확인하고 다시 시도해 주세요.');
+        } finally { setSaving(false); }
+    };
+
     const addForeman = async (teamId: string) => {
         const name = normalizeKey(newForemanNames[teamId]);
         if (!name) {
@@ -808,7 +830,6 @@ const TeamEquipmentStatusPage: React.FC = () => {
         if (!saved) return;
         setRecords(nextRecords);
         setNewForemanNames((prev) => ({ ...prev, [teamId]: '' }));
-        setExpandedTeamIds((prev) => new Set(prev).add(teamId));
         showToast(`${name} 반장 메뉴를 추가했습니다.`);
     };
 
@@ -880,452 +901,151 @@ const TeamEquipmentStatusPage: React.FC = () => {
         showToast('장비 수량과 비고를 초기화했습니다.');
     };
 
-    const tableMinWidth = Math.max(820, 480 + equipmentItems.length * 150);
+    const tableMinWidth = 222 + equipmentItems.length * 46;
+    const controlsDisabled = loading || saving || Boolean(loadError);
+    const breakdownRecords = visibleRecords.filter(record => record.isForemanBreakdown);
+    const isComposingKey = (event: React.KeyboardEvent<HTMLInputElement>) => (
+        event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+    );
+    const tableColumns = <colgroup>
+        <col style={{ width: 100 }} />
+        {equipmentItems.map(item => <col key={item.id} style={{ width: 46 }} />)}
+        <col />
+        <col style={{ width: 38 }} />
+    </colgroup>;
+    const tableHead = (name: string) => <thead><tr>
+        <th scope="col">{name}</th>
+        {equipmentItems.map(item => <th key={item.id} scope="col" title={item.name}>{item.name}</th>)}
+        <th scope="col">비고</th><th scope="col"><span className="sr-only">관리</span></th>
+    </tr></thead>;
 
     return (
-        <div className="min-h-screen w-[calc(100vw-30px)] max-w-full overflow-x-hidden bg-slate-50 px-3 py-4 text-slate-900 sm:w-full sm:p-6 xl:p-8">
-            <div className="mx-auto flex max-w-[1500px] flex-col gap-4">
-                <header className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="flex min-w-0 items-start gap-3">
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-xl text-white shadow-lg shadow-blue-100">
-                                <FontAwesomeIcon icon={faScrewdriverWrench} />
-                            </div>
-                            <div className="min-w-0">
-                                <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-4xl">
-                                    시공팀 장비 수량 현황
-                                </h1>
-                                <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-slate-500">
-                                    시공팀만 표시하고, 장비별 보유 수량과 비고를 팀별로 저장합니다.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => navigate('/support/vehicles')}
-                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 transition-colors hover:bg-slate-50"
-                            >
-                                <FontAwesomeIcon icon={faArrowLeft} className="text-xs" />
-                                차량 관리
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setRefreshKey((prev) => prev + 1)}
-                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 transition-colors hover:bg-slate-50"
-                            >
-                                <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
-                                팀정보 새로고침
-                            </button>
-                            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">
-                                시공팀 전용 · 팀색상 자동반영 · 공용 DB 저장
-                            </div>
-                        </div>
+        <div className="team-equipment-page">
+            <div className="equipment-workspace">
+                <header className="equipment-header">
+                    <div className="equipment-heading">
+                        <span className="equipment-heading-icon"><FontAwesomeIcon icon={faScrewdriverWrench} /></span>
+                        <div><h1>시공팀 장비 수량 현황</h1><p>본팀과 하위팀의 보유 장비를 한눈에 확인하세요.</p></div>
+                    </div>
+                    <div className="equipment-actions">
+                        <button type="button" onClick={() => navigate('/support/vehicles')}><FontAwesomeIcon icon={faArrowLeft} /> 차량 관리</button>
+                        <button type="button" disabled={loading || saving} onClick={() => setRefreshKey(prev => prev + 1)}><FontAwesomeIcon icon={faRotateRight} /> 팀정보 새로고침</button>
                     </div>
                 </header>
 
-                <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {equipmentTotals.map((item) => (
-                        <div
-                            key={item.id}
-                            className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm"
-                        >
-                            <div className="flex items-start justify-between gap-3">
-                                <span className="flex min-w-0 items-center gap-2 text-sm font-bold text-slate-500">
-                                    <FontAwesomeIcon icon={item.id === 'impact' ? faWrench : faBoxesStacked} />
-                                    <span className="truncate">{item.name}</span>
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => removeEquipmentItem(item)}
-                                    disabled={saving}
-                                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-xs text-red-600 transition-colors hover:bg-red-100"
-                                    title={`${item.name} 삭제`}
-                                    aria-label={`${item.name} 삭제`}
-                                >
-                                    <FontAwesomeIcon icon={faTrash} />
-                                </button>
-                            </div>
-                            <strong className="mt-2 block text-3xl font-black tracking-tight text-slate-950">
-                                {item.total.toLocaleString('ko-KR')}
-                            </strong>
-                        </div>
-                    ))}
+                <section className="equipment-summary" aria-label="장비별 전체 수량">
+                    {equipmentTotals.map(item => <div key={item.id} className="equipment-total">
+                        <span><FontAwesomeIcon icon={item.id === 'impact' ? faWrench : faBoxesStacked} /> {item.name}</span>
+                        <strong aria-label={`${item.name} 전체 수량`}>{item.total.toLocaleString('ko-KR')}<small>대</small></strong>
+                    </div>)}
                 </section>
 
-                <main className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-                    <div className="grid gap-2 xl:grid-cols-[minmax(220px,1fr)_minmax(240px,360px)_auto_auto] xl:items-center">
-                        <label className="relative block min-w-0">
-                            <FontAwesomeIcon icon={faMagnifyingGlass} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
-                            <input
-                                value={searchTerm}
-                                onChange={(event) => setSearchTerm(event.target.value)}
-                                placeholder="팀명 또는 비고 검색"
-                                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm font-bold text-slate-800 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-                            />
-                        </label>
+                <div className="equipment-toolbar">
+                    <label className="equipment-search"><FontAwesomeIcon icon={faMagnifyingGlass} />
+                        <input aria-label="팀·하위팀 검색" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} placeholder="팀명, 하위팀 또는 비고 검색" />
+                    </label>
+                    <span className="equipment-pending" role="status">{changedIds.size > 0 ? `${changedIds.size}팀 변경 · 저장 필요` : '시공팀 전체 보유 현황'}</span>
+                    <button type="button" aria-expanded={showEquipmentManager} onClick={() => setShowEquipmentManager(prev => !prev)}><FontAwesomeIcon icon={faPen} /> 장비 항목 관리</button>
+                    <button type="button" className="equipment-primary" onClick={saveAll} disabled={controlsDisabled}><FontAwesomeIcon icon={faFloppyDisk} /> {saving ? '저장 중…' : '전체 저장'}</button>
+                </div>
 
-                        <div className="flex min-w-0 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
-                            <input
-                                value={newEquipmentName}
-                                onChange={(event) => setNewEquipmentName(event.target.value)}
-                                onKeyDown={(event) => {
-                                    if (event.key === 'Enter') {
-                                        event.preventDefault();
-                                        void addEquipmentItem();
-                                    }
-                                }}
-                                placeholder="장비 항목 추가"
-                                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 outline-none placeholder:text-slate-400 focus:border-blue-500"
-                            />
-                            <button
-                                type="button"
-                                onClick={addEquipmentItem}
-                                disabled={saving}
-                                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white transition-colors hover:bg-blue-700"
-                            >
-                                <FontAwesomeIcon icon={faPlus} />
-                                추가
-                            </button>
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={saveAll}
-                            disabled={saving || Boolean(loadError)}
-                            title={loadError ? '공용 DB 조회가 실패한 상태에서는 저장할 수 없습니다' : undefined}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                        >
-                            <FontAwesomeIcon icon={faFloppyDisk} />
-                            전체 저장
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={resetEquipmentData}
-                            disabled={saving}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-black text-red-700 transition-colors hover:bg-red-100"
-                        >
-                            <FontAwesomeIcon icon={faRotateLeft} />
-                            수량 초기화
-                        </button>
+                {showEquipmentManager && <section className="equipment-manager" aria-label="장비 항목 관리">
+                    <div className="equipment-manager-heading"><div><h2>장비 항목 관리</h2><p>이름을 바꿔도 본팀·하위팀의 기존 수량은 유지됩니다.</p></div>
+                        <button type="button" className="equipment-danger" disabled={controlsDisabled} onClick={resetEquipmentData}><FontAwesomeIcon icon={faRotateLeft} /> 수량 초기화</button>
                     </div>
+                    <div className="equipment-item-list">
+                        {equipmentItems.map(item => <div key={item.id} className="equipment-item-editor">
+                            {editingEquipmentId === item.id ? <>
+                                <input autoFocus aria-label={`${item.name} 장비 이름`} value={equipmentNameDraft} disabled={controlsDisabled}
+                                    onChange={event => setEquipmentNameDraft(event.target.value)}
+                                    onKeyDown={event => {
+                                        if (isComposingKey(event)) return;
+                                        if (event.key === 'Enter') { event.preventDefault(); void renameEquipmentItem(); }
+                                        if (event.key === 'Escape') setEditingEquipmentId(null);
+                                    }} />
+                                <button type="button" className="equipment-primary" disabled={controlsDisabled} onClick={renameEquipmentItem}>이름 저장</button>
+                                <button type="button" disabled={saving} onClick={() => setEditingEquipmentId(null)}>취소</button>
+                            </> : <>
+                                <span>{item.name}</span>
+                                <button type="button" className="equipment-icon-button" aria-label={`${item.name} 이름 수정`} title="이름 수정" disabled={controlsDisabled}
+                                    onClick={() => { setEditingEquipmentId(item.id); setEquipmentNameDraft(item.name); }}><FontAwesomeIcon icon={faPen} /></button>
+                                <button type="button" className="equipment-icon-button equipment-danger" aria-label={`${item.name} 삭제`} title="항목 삭제" disabled={controlsDisabled}
+                                    onClick={() => removeEquipmentItem(item)}><FontAwesomeIcon icon={faTrash} /></button>
+                            </>}
+                        </div>)}
+                    </div>
+                    <div className="equipment-add-item">
+                        <input aria-label="장비 항목 추가" value={newEquipmentName} disabled={controlsDisabled} onChange={event => setNewEquipmentName(event.target.value)} placeholder="새 장비 이름"
+                            onKeyDown={event => { if (event.key === 'Enter' && !isComposingKey(event)) { event.preventDefault(); void addEquipmentItem(); } }} />
+                        <button type="button" disabled={controlsDisabled} onClick={addEquipmentItem}><FontAwesomeIcon icon={faPlus} /> 항목 추가</button>
+                    </div>
+                </section>}
 
-                    <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                        <div className="mb-2 flex items-center gap-2 text-xs font-black text-slate-500">
-                            <FontAwesomeIcon icon={faBoxesStacked} />
-                            항목 관리
+                {loadError && <div className="equipment-error" role="alert">{loadError}</div>}
+
+                <div className="equipment-columns">
+                    <section className="equipment-panel" aria-label="본팀 장비 현황">
+                        <header className="equipment-panel-heading"><div><h2><FontAwesomeIcon icon={faUsers} /> 본팀</h2><p>하위팀 합계는 본팀에 한 번만 반영됩니다.</p></div><span>{visibleRecords.length}팀</span></header>
+                        <div className="equipment-table-scroll" tabIndex={0} aria-label="본팀 장비 표 스크롤">
+                            <table className="equipment-table" style={{ minWidth: tableMinWidth }}>
+                                {tableColumns}{tableHead('본팀')}
+                                <tbody>
+                                    {loading ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">팀 정보를 불러오는 중입니다.</td></tr>
+                                    : visibleRecords.length === 0 ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">표시할 시공팀이 없습니다.</td></tr>
+                                    : visibleRecords.map(record => {
+                                        const quantities = getRecordDisplayQuantities(record, equipmentItems);
+                                        const locked = record.isForemanBreakdown && record.useForemanTotals;
+                                        return <tr key={record.id} className={changedIds.has(record.id) ? 'is-changed' : ''}>
+                                            <th scope="row"><div className="equipment-team-name" title={record.teamName}><i style={{ backgroundColor: record.teamColor }} /><span>{record.teamName}</span></div>
+                                                {record.isForemanBreakdown && <small className="equipment-team-hint">{locked ? '하위 합계' : '직접 입력'} · {record.foremen.length}명</small>}</th>
+                                            {equipmentItems.map(item => <td key={item.id}>{locked
+                                                ? <output className="equipment-derived" aria-label={`${record.teamName} ${item.name} 합계`}>{toQuantity(quantities[item.id])}</output>
+                                                : <input type="number" min={0} step={1} aria-label={`${record.teamName} ${item.name} 수량`} value={quantities[item.id] ?? 0} disabled={controlsDisabled}
+                                                    onChange={event => updateQuantity(record.id, item.id, event.target.value)} />}</td>)}
+                                            <td><input className="equipment-note" aria-label={`${record.teamName} 비고`} value={record.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateNote(record.id, event.target.value)} /></td>
+                                            <td><button type="button" className={`equipment-icon-button ${changedIds.has(record.id) ? 'equipment-primary' : ''}`} aria-label={`${record.teamName} 저장`} title="팀 저장" disabled={controlsDisabled} onClick={() => saveRecord(record.id)}><FontAwesomeIcon icon={faFloppyDisk} /></button></td>
+                                        </tr>;
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            {equipmentItems.length === 0 ? (
-                                <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-400">
-                                    등록된 장비 항목이 없습니다. 위 입력창에서 항목을 추가하세요.
+                        <footer className="equipment-panel-footer">조회 {visibleRecords.length.toLocaleString('ko-KR')} / {records.length.toLocaleString('ko-KR')}팀</footer>
+                    </section>
+
+                    <section className="equipment-panel equipment-subteams" aria-label="하위팀 장비 현황">
+                        <header className="equipment-panel-heading"><div><h2><FontAwesomeIcon icon={faUsers} /> 하위팀</h2><p>반장별 수량을 입력하면 왼쪽 본팀 합계에 반영됩니다.</p></div><span>{breakdownRecords.reduce((sum, record) => sum + record.foremen.length, 0)}명</span></header>
+                        {loading ? <div className="equipment-empty">하위팀 정보를 불러오는 중입니다.</div>
+                        : breakdownRecords.length === 0 ? <div className="equipment-empty">조회된 본팀에 하위팀이 없습니다.</div>
+                        : breakdownRecords.map(record => {
+                            const totals = calculateForemanTotals(record.foremen, equipmentItems);
+                            return <section key={record.id} className="equipment-subteam-group" aria-label={`${record.teamName} 하위팀`}>
+                                <div className="equipment-subteam-heading"><strong><i style={{ backgroundColor: record.teamColor }} />{record.teamName} <span>반장별</span></strong>
+                                    <button type="button" className={changedIds.has(record.id) ? 'equipment-primary' : ''} disabled={controlsDisabled} onClick={() => saveRecord(record.id)} aria-label={`${record.teamName} 하위팀 저장`}><FontAwesomeIcon icon={faFloppyDisk} /> 저장</button></div>
+                                <div className="equipment-table-scroll" tabIndex={0} aria-label={`${record.teamName} 하위팀 표 스크롤`}>
+                                    <table className="equipment-table" style={{ minWidth: tableMinWidth }}>
+                                        {tableColumns}{tableHead('하위팀·반장')}
+                                        <tbody>{record.foremen.length === 0
+                                            ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">아래에서 반장을 추가하세요.</td></tr>
+                                            : record.foremen.map(foreman => <tr key={foreman.id}>
+                                                <th scope="row" title={foreman.name}><span className="equipment-foreman-name">{foreman.name}</span></th>
+                                                {equipmentItems.map(item => <td key={item.id}><input type="number" min={0} step={1} aria-label={`${record.teamName} ${foreman.name} ${item.name} 수량`}
+                                                    value={foreman.quantities[item.id] ?? 0} disabled={controlsDisabled} onChange={event => updateForemanQuantity(record.id, foreman.id, item.id, event.target.value)} /></td>)}
+                                                <td><input className="equipment-note" aria-label={`${record.teamName} ${foreman.name} 비고`} value={foreman.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateForemanNote(record.id, foreman.id, event.target.value)} /></td>
+                                                <td><button type="button" className="equipment-icon-button equipment-danger" aria-label={`${foreman.name} 반장 삭제`} title="반장 삭제" disabled={controlsDisabled} onClick={() => removeForeman(record.id, foreman)}><FontAwesomeIcon icon={faTrash} /></button></td>
+                                            </tr>)}</tbody>
+                                        <tfoot><tr><th scope="row">하위팀 합계</th>{equipmentItems.map(item => <td key={item.id}><output aria-label={`${record.teamName} 하위팀 ${item.name} 합계`}>{totals[item.id]}</output></td>)}<td colSpan={2} /></tr></tfoot>
+                                    </table>
                                 </div>
-                            ) : equipmentTotals.map((item) => (
-                                <div
-                                    key={item.id}
-                                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black text-slate-700 shadow-sm"
-                                >
-                                    <span>{item.name}</span>
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
-                                        {item.total.toLocaleString('ko-KR')}
-                                    </span>
-                                    <button
-                                        type="button"
-                                        onClick={() => removeEquipmentItem(item)}
-                                        disabled={saving}
-                                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-xs text-red-500 transition-colors hover:bg-red-50 hover:text-red-700"
-                                        title={`${item.name} 삭제`}
-                                        aria-label={`${item.name} 삭제`}
-                                    >
-                                        <FontAwesomeIcon icon={faTrash} />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="mt-3 text-xs font-semibold leading-5 text-slate-500">
-                        상단 현황은 현재 조회된 시공팀 전체의 장비별 총수량입니다. 항목은 위 입력창에서 추가하고, 항목 관리의 삭제 버튼으로 제거할 수 있습니다.
-                    </div>
-
-                    {loadError && (
-                        <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">
-                            {loadError}
-                        </div>
-                    )}
-
-                    <div className="support-scroll-x mt-4 rounded-2xl border border-slate-200">
-                        <table className="w-full border-collapse bg-white text-sm" style={{ minWidth: `${tableMinWidth}px` }}>
-                            <thead className="sticky top-0 z-10 bg-slate-100 text-slate-600">
-                                <tr>
-                                    <th className="px-3 py-3 text-left text-xs font-black">팀</th>
-                                    {equipmentItems.map((item) => (
-                                        <th key={item.id} className="px-3 py-3 text-right text-xs font-black">
-                                            {item.name}
-                                        </th>
-                                    ))}
-                                    <th className="px-3 py-3 text-left text-xs font-black">비고</th>
-                                    <th className="px-3 py-3 text-right text-xs font-black">관리</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {loading ? (
-                                    <tr>
-                                        <td colSpan={equipmentItems.length + 3} className="px-3 py-16 text-center text-sm font-bold text-slate-400">
-                                            팀 정보를 불러오는 중입니다.
-                                        </td>
-                                    </tr>
-                                ) : visibleRecords.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={equipmentItems.length + 3} className="px-3 py-8">
-                                            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
-                                                표시할 시공팀이 없습니다.
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ) : visibleRecords.map((record) => {
-                                    const changed = changedIds.has(record.id);
-                                    const expanded = expandedTeamIds.has(record.id);
-                                    const displayQuantities = getRecordDisplayQuantities(record, equipmentItems);
-                                    const lockTeamInputs = record.isForemanBreakdown && record.useForemanTotals;
-                                    const foremanTotals = calculateForemanTotals(record.foremen, equipmentItems);
-
-                                    return (
-                                        <React.Fragment key={record.id}>
-                                            <tr className={`border-b border-slate-100 transition-colors ${changed ? 'bg-sky-50' : 'bg-white hover:bg-slate-50'}`}>
-                                                <td className="px-3 py-2 font-black text-slate-900">
-                                                    <span className="inline-flex items-center gap-2">
-                                                        {record.isForemanBreakdown && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setExpandedTeamIds((prev) => {
-                                                                    const next = new Set(prev);
-                                                                    if (next.has(record.id)) {
-                                                                        next.delete(record.id);
-                                                                    } else {
-                                                                        next.add(record.id);
-                                                                    }
-                                                                    return next;
-                                                                })}
-                                                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-100 bg-blue-50 text-xs text-blue-700 transition-colors hover:bg-blue-100"
-                                                                aria-expanded={expanded}
-                                                                aria-label={`${record.teamName} 반장별 하위메뉴 ${expanded ? '접기' : '펼치기'}`}
-                                                                title={`반장별 하위메뉴 ${expanded ? '접기' : '펼치기'}`}
-                                                            >
-                                                                <FontAwesomeIcon icon={expanded ? faChevronDown : faChevronRight} />
-                                                            </button>
-                                                        )}
-                                                        <span
-                                                            className="inline-block h-5 w-1.5 rounded-full shadow-sm"
-                                                            style={{ backgroundColor: record.teamColor }}
-                                                            aria-hidden="true"
-                                                        />
-                                                        <span className="min-w-0">
-                                                            <span className="flex items-center gap-2">
-                                                                <span className="truncate">{record.teamName}</span>
-                                                                {record.isForemanBreakdown && (
-                                                                    <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-black text-blue-700">
-                                                                        반장별
-                                                                    </span>
-                                                                )}
-                                                            </span>
-                                                            {record.isForemanBreakdown && (
-                                                                <span className="mt-0.5 block text-[11px] font-bold text-slate-400">
-                                                                    반장 {record.foremen.length.toLocaleString('ko-KR')}명 · {record.useForemanTotals ? '하위 합계 적용' : '팀 직접 입력'}
-                                                                </span>
-                                                            )}
-                                                        </span>
-                                                    </span>
-                                                </td>
-                                                {equipmentItems.map((item) => (
-                                                    <td key={item.id} className="px-3 py-2 text-right">
-                                                        {lockTeamInputs ? (
-                                                            <span className="inline-flex h-10 w-24 items-center justify-end rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-2 text-sm font-black tabular-nums text-blue-800">
-                                                                {toQuantity(displayQuantities[item.id]).toLocaleString('ko-KR')}
-                                                            </span>
-                                                        ) : (
-                                                            <input
-                                                                value={displayQuantities[item.id] ?? 0}
-                                                                type="number"
-                                                                min={0}
-                                                                step={1}
-                                                                onChange={(event) => updateQuantity(record.id, item.id, event.target.value)}
-                                                                className={inputClassName(changed)}
-                                                            />
-                                                        )}
-                                                    </td>
-                                                ))}
-                                                <td className="px-3 py-2">
-                                                    <input
-                                                        value={record.note}
-                                                        onChange={(event) => updateNote(record.id, event.target.value)}
-                                                        placeholder="비고 입력"
-                                                        className={`w-full min-w-[220px] rounded-lg border px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition-colors ${
-                                                            changed
-                                                                ? 'border-sky-400 bg-white'
-                                                                : 'border-slate-200 bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-100'
-                                                        }`}
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2">
-                                                    <div className="flex justify-end">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => saveRecord(record.id)}
-                                                            disabled={saving || Boolean(loadError)}
-                                                            title={loadError ? '공용 DB 조회가 실패한 상태에서는 저장할 수 없습니다' : undefined}
-                                                            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-black transition-colors ${
-                                                                changed
-                                                                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                                                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                                            } disabled:cursor-not-allowed disabled:opacity-50`}
-                                                        >
-                                                            <FontAwesomeIcon icon={faFloppyDisk} />
-                                                            저장
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-
-                                            {record.isForemanBreakdown && expanded && (
-                                                <tr className="border-b border-blue-100 bg-blue-50/40">
-                                                    <td colSpan={equipmentItems.length + 3} className="px-3 py-3">
-                                                        <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white">
-                                                            <div className="flex flex-col gap-3 border-b border-blue-100 bg-blue-50/70 p-3 xl:flex-row xl:items-center xl:justify-between">
-                                                                <div className="min-w-0">
-                                                                    <div className="flex flex-wrap items-center gap-2">
-                                                                        <span className="text-sm font-black text-blue-900">이재욱팀 반장별 하위메뉴</span>
-                                                                        {equipmentItems.map((item) => (
-                                                                            <span key={item.id} className="rounded-full bg-white px-2.5 py-1 text-xs font-black text-blue-700">
-                                                                                {item.name} {toQuantity(foremanTotals[item.id]).toLocaleString('ko-KR')}
-                                                                            </span>
-                                                                        ))}
-                                                                    </div>
-                                                                    <div className="mt-1 text-xs font-semibold text-blue-700/80">
-                                                                        반장별 입력값 합계가 이재욱팀 행과 상단 총수량에 반영됩니다.
-                                                                    </div>
-                                                                </div>
-
-                                                                <div className="flex min-w-0 gap-2">
-                                                                    <input
-                                                                        value={newForemanNames[record.id] ?? ''}
-                                                                        onChange={(event) => setNewForemanNames((prev) => ({ ...prev, [record.id]: event.target.value }))}
-                                                                        onKeyDown={(event) => {
-                                                                            if (event.key === 'Enter') {
-                                                                                event.preventDefault();
-                                                                                void addForeman(record.id);
-                                                                            }
-                                                                        }}
-                                                                        placeholder="반장명 추가"
-                                                                        className="min-w-0 flex-1 rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm font-bold text-slate-800 outline-none placeholder:text-slate-400 focus:border-blue-500"
-                                                                    />
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => addForeman(record.id)}
-                                                                        disabled={saving}
-                                                                        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-black text-white transition-colors hover:bg-blue-700"
-                                                                    >
-                                                                        <FontAwesomeIcon icon={faPlus} />
-                                                                        반장 추가
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-
-                                                            {record.foremen.length === 0 ? (
-                                                                <div className="p-5 text-center text-sm font-bold text-slate-400">
-                                                                    등록된 반장 하위메뉴가 없습니다. 반장명을 추가하면 장비별 수량을 입력할 수 있습니다.
-                                                                </div>
-                                                            ) : (
-                                                                <div className="support-scroll-x">
-                                                                    <table className="w-full border-collapse text-sm" style={{ minWidth: `${Math.max(700, 360 + equipmentItems.length * 130)}px` }}>
-                                                                        <thead className="bg-white text-slate-500">
-                                                                            <tr>
-                                                                                <th className="px-3 py-2 text-left text-xs font-black">반장</th>
-                                                                                {equipmentItems.map((item) => (
-                                                                                    <th key={item.id} className="px-3 py-2 text-right text-xs font-black">
-                                                                                        {item.name}
-                                                                                    </th>
-                                                                                ))}
-                                                                                <th className="px-3 py-2 text-left text-xs font-black">비고</th>
-                                                                                <th className="px-3 py-2 text-right text-xs font-black">관리</th>
-                                                                            </tr>
-                                                                        </thead>
-                                                                        <tbody>
-                                                                            {record.foremen.map((foreman) => (
-                                                                                <tr key={foreman.id} className="border-t border-slate-100">
-                                                                                    <td className="px-3 py-2 font-black text-slate-800">
-                                                                                        {foreman.name}
-                                                                                    </td>
-                                                                                    {equipmentItems.map((item) => (
-                                                                                        <td key={item.id} className="px-3 py-2 text-right">
-                                                                                            <input
-                                                                                                value={foreman.quantities[item.id] ?? 0}
-                                                                                                type="number"
-                                                                                                min={0}
-                                                                                                step={1}
-                                                                                                onChange={(event) => updateForemanQuantity(record.id, foreman.id, item.id, event.target.value)}
-                                                                                                className="h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-right text-sm font-black tabular-nums text-slate-900 outline-none transition-colors focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-                                                                                            />
-                                                                                        </td>
-                                                                                    ))}
-                                                                                    <td className="px-3 py-2">
-                                                                                        <input
-                                                                                            value={foreman.note}
-                                                                                            onChange={(event) => updateForemanNote(record.id, foreman.id, event.target.value)}
-                                                                                            placeholder="비고 입력"
-                                                                                            className="w-full min-w-[180px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 outline-none transition-colors focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
-                                                                                        />
-                                                                                    </td>
-                                                                                    <td className="px-3 py-2">
-                                                                                        <div className="flex justify-end">
-                                                                                            <button
-                                                                                                type="button"
-                                                                                                onClick={() => removeForeman(record.id, foreman)}
-                                                                                                disabled={saving}
-                                                                                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-100 bg-red-50 text-xs text-red-600 transition-colors hover:bg-red-100"
-                                                                                                title={`${foreman.name} 반장 삭제`}
-                                                                                                aria-label={`${foreman.name} 반장 삭제`}
-                                                                                            >
-                                                                                                <FontAwesomeIcon icon={faTrash} />
-                                                                                            </button>
-                                                                                        </div>
-                                                                                    </td>
-                                                                                </tr>
-                                                                            ))}
-                                                                        </tbody>
-                                                                    </table>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            )}
-                                        </React.Fragment>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between gap-3 text-xs font-bold text-slate-500">
-                        <span>조회 {visibleRecords.length.toLocaleString('ko-KR')} / {records.length.toLocaleString('ko-KR')}팀</span>
-                        <span className="inline-flex items-center gap-1.5">
-                            <FontAwesomeIcon icon={faUsers} />
-                            시공팀만 표시
-                        </span>
-                    </div>
-                </main>
+                                <div className="equipment-add-foreman"><input aria-label={`${record.teamName} 반장명 추가`} placeholder="반장명 추가" disabled={controlsDisabled} value={newForemanNames[record.id] ?? ''}
+                                    onChange={event => setNewForemanNames(prev => ({ ...prev, [record.id]: event.target.value }))}
+                                    onKeyDown={event => { if (event.key === 'Enter' && !isComposingKey(event)) { event.preventDefault(); void addForeman(record.id); } }} />
+                                    <button type="button" disabled={controlsDisabled} onClick={() => addForeman(record.id)}><FontAwesomeIcon icon={faPlus} /> 반장 추가</button></div>
+                            </section>;
+                        })}
+                    </section>
+                </div>
             </div>
-
-            <div
-                className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-slate-200 bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-2xl shadow-slate-300 transition-all ${
-                    toastVisible ? 'translate-y-0 opacity-100' : 'translate-y-5 opacity-0'
-                }`}
-            >
-                {toastMessage}
-            </div>
+            {toastVisible && <div className="equipment-toast" role="status">{toastMessage}</div>}
         </div>
     );
 };

@@ -11,6 +11,7 @@ import { reserveImageClipboardWrite } from '../../utils/taxInvoiceClipboard';
 import html2canvas from 'html2canvas';
 import { IssueBatchWriteError, IssueDeleteConflictError, IssueSaveConflictError } from '../../utils/taxInvoiceIssueDraft';
 import userEvent from '@testing-library/user-event';
+import { recoverFromChunkLoadError } from '../../app/bootstrap/runtimeRecovery';
 
 // Multi-step save/conflict workflows exercise the real ledger UI. Five seconds
 // is too short under release-test contention; successful tests still finish
@@ -29,6 +30,10 @@ jest.mock('../../utils/swal', () => ({ showConfirmAlert: jest.fn(), toast: {
 } }));
 jest.mock('html2canvas', () => jest.fn());
 jest.mock('../../utils/taxInvoiceClipboard', () => ({ reserveImageClipboardWrite: jest.fn() }));
+jest.mock('../../app/bootstrap/runtimeRecovery', () => ({
+    ...jest.requireActual('../../app/bootstrap/runtimeRecovery'),
+    recoverFromChunkLoadError: jest.fn().mockReturnValue(true),
+}));
 
 const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
 const row = (id: string, no = 1, yearMonth = month): TaxInvoiceIssue => ({
@@ -75,6 +80,87 @@ beforeEach(() => {
     (showConfirmAlert as jest.Mock).mockResolvedValue({ isConfirmed: true });
 });
 afterEach(() => jest.restoreAllMocks());
+
+test('영문 키 입력을 보존하면서 한글 검색을 보완하고 영문 조건도 함께 검색한다', async () => {
+    mount(); await ready();
+    const input = screen.getByRole('searchbox', { name: '발행리스트 통합검색' });
+    userEvent.type(input, 'gkqtjd');
+    expect(input).toHaveValue('gkqtjd');
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+    userEvent.type(input, ' A');
+    expect(input).toHaveValue('gkqtjd A');
+    expect(screen.getByText('1 / 2건 표시')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '통합검색어 지우기' }));
+    expect(input).toHaveValue('');
+    expect(input).toHaveFocus();
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+});
+
+test('통합검색은 한글 조합 종료 후 목록을 갱신하고 열 필터 Enter는 조합을 보호한다', async () => {
+    mount(); await ready();
+    const input = screen.getByRole('searchbox', { name: '발행리스트 통합검색' });
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: '없는 항목' } });
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+    fireEvent.compositionEnd(input);
+    expect(screen.getByText('0 / 2건 표시')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '통합검색어 지우기' }));
+    fireEvent.click(screen.getByRole('button', { name: '공급받는자 필터' }));
+    const column = screen.getByRole('textbox', { name: '공급받는자 필터 검색' });
+    userEvent.type(column, 'gkqtjd');
+    expect(column).toHaveValue('gkqtjd');
+    fireEvent.compositionStart(column);
+    fireEvent.change(column, { target: { value: '합성 A' } });
+    fireEvent.keyDown(column, { key: 'Enter' });
+    expect(column).toBeInTheDocument();
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+    fireEvent.compositionEnd(column);
+    fireEvent.keyDown(column, { key: 'Enter', keyCode: 229 });
+    expect(column).toBeInTheDocument();
+    fireEvent.keyDown(column, { key: 'Enter' });
+    expect(column).not.toBeInTheDocument();
+    expect(screen.getByText('1 / 2건 표시')).toBeInTheDocument();
+});
+
+test('현장 조회 실패 뒤 기존 목록을 유지하고 다시 조회할 수 있다', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    (service.fetchMonthlySiteData as jest.Mock).mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce([]);
+    mount(); await ready();
+    fireEvent.click(screen.getByRole('button', { name: '현장 데이터 가져오기' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('현장 데이터를 불러오지 못했습니다');
+    expect(screen.getByText('2 / 2건 표시')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '현장 데이터 다시 불러오기' }));
+    expect(await screen.findByRole('dialog', { name: '현장 데이터 가져오기' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(service.fetchMonthlySiteData).toHaveBeenCalledTimes(2);
+    expect(service.addIssue).not.toHaveBeenCalled();
+});
+
+test('오래된 화면 파일 오류는 자동 새로고침 없이 복구 버튼을 제공한다', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    (service.fetchMonthlySiteData as jest.Mock).mockRejectedValueOnce(new Error('Loading chunk 123 failed.'));
+    mount(); await ready();
+    fireEvent.click(screen.getByRole('button', { name: '현장 데이터 가져오기' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('화면을 새로고침');
+    expect(recoverFromChunkLoadError).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '새 화면으로 다시 열기' }));
+    expect(recoverFromChunkLoadError).toHaveBeenCalledWith({ manual: true });
+});
+
+test.each([false, true])('현장 조회 복구로 미저장 입력을 지우지 않는다 (편집 중 %s)', async activeDraft => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    (service.fetchMonthlySiteData as jest.Mock).mockRejectedValueOnce(new Error('Loading chunk 123 failed.'));
+    mount(); await ready();
+    if (activeDraft) startEdit('품목', '보존할 입력');
+    else edit('품목', '보존할 입력');
+    fireEvent.click(screen.getByRole('button', { name: '현장 데이터 가져오기' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('입력 중인 내용이 있습니다');
+    const reload = screen.getByRole('button', { name: '새 화면으로 다시 열기' });
+    expect(reload).toBeDisabled();
+    fireEvent.click(reload);
+    expect(recoverFromChunkLoadError).not.toHaveBeenCalled();
+    expect(service.saveIssuesWithConflictCheck).not.toHaveBeenCalled();
+});
 
 test('월 변경과 새로고침은 선택을 지우며 현재 월 항목만 삭제한다', async () => {
     (service.getIssuesByMonth as jest.Mock).mockImplementation(async ym => [row(ym === month ? 'A' : 'NEW_MONTH', 1, ym)]);

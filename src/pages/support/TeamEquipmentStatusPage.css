@@ -1,0 +1,85 @@
+.team-equipment-page { width: 100%; min-width: 0; padding: 18px; color: #172033; background: #f5f7fb; }
+.equipment-workspace { display: flex; flex-direction: column; gap: 12px; max-width: 1440px; margin: 0 auto; }
+.team-equipment-page button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 10px; border: 1px solid #dce3ed; border-radius: 7px; color: #46546a; background: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.team-equipment-page button:hover { background: #eef4fc; border-color: #b8ccec; }
+.team-equipment-page button:disabled { opacity: .45; cursor: not-allowed; }
+.team-equipment-page button:focus-visible, .team-equipment-page input:focus-visible, .equipment-table-scroll:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.team-equipment-page .equipment-primary { color: #fff; background: #2563eb; border-color: #2563eb; }
+.team-equipment-page .equipment-primary:hover { background: #1d4ed8; }
+.team-equipment-page .equipment-danger { color: #c44b56; }
+.team-equipment-page .equipment-icon-button { width: 28px; min-height: 28px; padding: 5px; }
+.equipment-header, .equipment-heading, .equipment-actions, .equipment-toolbar, .equipment-manager-heading { display: flex; align-items: center; gap: 10px; }
+.equipment-header { justify-content: space-between; flex-wrap: wrap; padding: 4px 0; }
+.equipment-heading-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px; background: #e8efff; color: #2563eb; font-size: 18px; }
+.equipment-heading h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.7px; }
+.equipment-heading p, .equipment-manager-heading p { margin: 3px 0 0; color: #768298; font-size: 12px; }
+.equipment-actions { flex-wrap: wrap; }
+.equipment-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.equipment-total { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 12px 14px; border: 1px solid #e0e7f0; border-radius: 10px; background: #fff; }
+.equipment-total > span { min-width: 0; color: #60718b; font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+.equipment-total svg { color: #7594c4; margin-right: 4px; }
+.equipment-total strong { font-size: 24px; font-weight: 800; line-height: 1.1; color: #1c355d; }
+.equipment-total small { margin-left: 5px; color: #8995a7; font-size: 11px; font-weight: 500; }
+.equipment-toolbar { flex-wrap: wrap; }
+.equipment-search { display: flex; align-items: center; gap: 8px; min-width: 200px; max-width: 330px; flex: 1; padding: 0 10px; border: 1px solid #dce3ed; border-radius: 7px; color: #8a99ae; background: #fff; }
+.team-equipment-page input { box-sizing: border-box; min-width: 0; border: 1px solid #dce3ed; border-radius: 5px; padding: 5px 7px; background: #fff; color: #23334e; font-size: 12px; }
+.equipment-search input { width: 100%; height: 34px; padding: 5px 0; border: 0; outline: none; }
+.equipment-pending { flex: 1; font-size: 11px; color: #6b7d97; }
+.equipment-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.equipment-panel { min-width: 0; overflow: hidden; background: #fff; border: 1px solid #dce3ed; border-radius: 10px; }
+.equipment-panel-heading { display: flex; justify-content: space-between; align-items: center; min-height: 60px; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
+.equipment-panel-heading h2 { display: flex; align-items: center; gap: 6px; margin: 0; color: #233b60; font-size: 14px; font-weight: 800; }
+.equipment-panel-heading p { margin: 3px 0 0; color: #8290a5; font-size: 10px; }
+.equipment-panel-heading > span { padding: 3px 7px; border-radius: 6px; background: #eef3fa; color: #60789c; font-size: 11px; font-weight: 700; }
+.equipment-subteams .equipment-panel-heading { background: #f4f8ff; }
+.equipment-table-scroll { position: relative; overflow-x: auto; max-width: 100%; scrollbar-width: thin; }
+.equipment-table { width: 100%; table-layout: fixed; border-collapse: collapse; text-align: left; }
+.equipment-table th, .equipment-table td { height: 36px; padding: 4px; border-bottom: 1px solid #edf0f5; vertical-align: middle; }
+.equipment-table th:first-child { padding-left: 9px; }
+.equipment-table thead th { height: 32px; color: #6b7d97; background: #f8fafc; font-size: 11px; font-weight: 700; overflow-wrap: anywhere; }
+.equipment-table thead th:not(:first-child), .equipment-table tfoot td { text-align: center; }
+.equipment-table tbody th { color: #34445d; font-size: 12px; font-weight: 700; }
+.equipment-table tbody tr:hover { background: #f8fbff; }
+.equipment-table tbody tr.is-changed { background: #f0f7ff; }
+.equipment-table input[type=number] { width: 100%; height: 28px; padding: 3px 2px; text-align: center; font-variant-numeric: tabular-nums; font-size: 12px; appearance: textfield; -moz-appearance: textfield; }
+.equipment-table input[type=number]::-webkit-inner-spin-button, .equipment-table input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.equipment-table .equipment-note { width: 100%; height: 28px; padding: 3px 5px; font-size: 11px; }
+.equipment-team-name { display: flex; align-items: center; gap: 5px; }
+.equipment-team-name i, .equipment-subteam-heading i { display: inline-block; flex-shrink: 0; width: 4px; height: 15px; border-radius: 3px; }
+.equipment-team-name span, .equipment-foreman-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.equipment-team-hint { display: block; margin-top: 2px; color: #7794b9; font-size: 9px; font-weight: 500; }
+.equipment-derived { display: block; padding: 4px 1px; text-align: center; border-radius: 4px; color: #2563a8; background: #eaf3ff; font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.equipment-subteam-heading { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid #e8eef6; }
+.equipment-subteam-heading strong { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #335780; }
+.equipment-subteam-heading strong span { font-size: 10px; font-weight: 500; color: #7990af; }
+.equipment-subteam-heading button { min-height: 26px; padding: 3px 8px; font-size: 11px; }
+.equipment-table tfoot th, .equipment-table tfoot td { height: 33px; color: #335c97; background: #f0f6ff; font-size: 11px; font-weight: 800; }
+.equipment-panel-footer { padding: 9px 12px; font-size: 11px; color: #8290a5; }
+.equipment-empty { padding: 30px 12px !important; text-align: center; color: #8795a9; font-size: 12px; }
+.equipment-add-foreman, .equipment-add-item { display: flex; align-items: center; gap: 6px; }
+.equipment-add-foreman { padding: 10px; }
+.equipment-add-foreman input { width: 150px; height: 30px; }
+.equipment-manager { padding: 12px; border: 1px solid #cddcf2; border-radius: 10px; background: #f7faff; }
+.equipment-manager-heading { justify-content: space-between; margin-bottom: 10px; }
+.equipment-manager-heading h2 { margin: 0; font-size: 13px; font-weight: 800; }
+.equipment-item-list { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.equipment-item-editor { display: flex; align-items: center; gap: 5px; min-height: 34px; padding: 4px 6px 4px 10px; border: 1px solid #dde5f1; border-radius: 7px; background: #fff; font-size: 12px; font-weight: 700; }
+.equipment-item-editor input { width: 130px; }
+.equipment-item-editor button { min-height: 26px; padding: 4px 7px; font-size: 11px; }
+.equipment-add-item input { width: 180px; height: 32px; }
+.equipment-error { padding: 12px; border: 1px solid #f0c5ca; border-radius: 8px; color: #a52d3a; background: #fff3f4; font-size: 12px; }
+.equipment-toast { position: fixed; z-index: 100; bottom: 24px; left: 50%; max-width: calc(100vw - 32px); transform: translateX(-50%); padding: 12px 18px; border-radius: 9px; color: #fff; background: #243655; box-shadow: 0 5px 18px #24365533; font-size: 13px; }
+@media (max-width: 1099px) {
+    .equipment-columns { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 639px) {
+    .team-equipment-page { padding: 10px; }
+    .equipment-heading h1 { font-size: 18px; }
+    .equipment-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .equipment-total { padding: 9px; flex-direction: column; align-items: flex-start; }
+    .equipment-total strong { font-size: 22px; }
+    .equipment-pending { flex-basis: 100%; order: 1; }
+    .equipment-search { max-width: none; flex-basis: 100%; }
+    .equipment-manager-heading { align-items: flex-start; }
+    .equipment-manager-heading p { max-width: 200px; }
+}
