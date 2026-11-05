@@ -1089,7 +1089,7 @@ export const TeamSettlementPage: React.FC = () => {
     return { salesTotal, purchasesTotal, deductionsTotal, additionsTotal, prevCarryover, deposit, net };
   }, [doc, transactionSectionTotals]);
 
-  const siteSkkumiRows = useMemo<SiteSkkumiRow[]>(() => {
+  const siteSkkumiTotals = useMemo<SiteSkkumiRow[]>(() => {
     if (!doc) return [];
 
     const bySite = new Map<string, SiteSkkumiRow>();
@@ -1107,7 +1107,7 @@ export const TeamSettlementPage: React.FC = () => {
         });
       });
 
-    return Array.from(bySite.values()).sort((a, b) => b.amount - a.amount);
+    return Array.from(bySite.values());
   }, [doc]);
 
   const avgUnitPrice = useMemo(() => {
@@ -1157,14 +1157,14 @@ export const TeamSettlementPage: React.FC = () => {
       })
       .reduce((sum, r) => sum + safeNumber(r.manDay), 0);
 
-    const siteTotalAmount = siteSkkumiRows.reduce((sum, r) => sum + safeNumber(r.amount), 0);
-    const siteTotalManDay = siteSkkumiRows.reduce((sum, r) => sum + safeNumber(r.manDay), 0);
+    const siteTotalAmount = siteSkkumiTotals.reduce((sum, r) => sum + safeNumber(r.amount), 0);
+    const siteTotalManDay = siteSkkumiTotals.reduce((sum, r) => sum + safeNumber(r.manDay), 0);
 
     const teamAvgPerManDay = safeAverage(payrollAmountTotal, payrollManDayTotal);
     const siteAvgPerManDay = safeAverage(siteTotalAmount, siteTotalManDay);
 
     return { teamAvgPerManDay, siteAvgPerManDay };
-  }, [detailRows, doc, matchesTeam, siteSkkumiRows]);
+  }, [detailRows, doc, matchesTeam, siteSkkumiTotals]);
 
   const supportRateMissingRows = useMemo<SupportRateMissingRow[]>(() => {
     if (!supportRatesLoaded) return [];
@@ -2217,6 +2217,20 @@ export const TeamSettlementPage: React.FC = () => {
     const lines = salesLines.filter((x) => x.kind === '도급' || x.kind === '직영');
     return [...lines].sort((a, b) => a.kind.localeCompare(b.kind, 'ko'));
   }, [salesLines]);
+
+  const siteSkkumiRows = useMemo(() => {
+    // Follow the visible sales rows; a site spanning both work kinds appears once,
+    // at its first sales occurrence. Keep the existing aggregation unchanged.
+    const siteOrder = new Map<string, number>();
+    salesContractDirectLines.forEach((line, index) => {
+      const siteName = String(line.siteName ?? '').trim() || '현장 미지정';
+      if (!siteOrder.has(siteName)) siteOrder.set(siteName, index);
+    });
+    return [...siteSkkumiTotals].sort((a, b) =>
+      (siteOrder.get(a.siteName) ?? Number.MAX_SAFE_INTEGER) -
+      (siteOrder.get(b.siteName) ?? Number.MAX_SAFE_INTEGER)
+    );
+  }, [salesContractDirectLines, siteSkkumiTotals]);
 
   const settlementAmountMissingRows = useMemo<SettlementAmountMissingRow[]>(() => {
     return salesLines
@@ -3947,7 +3961,7 @@ export const TeamSettlementPage: React.FC = () => {
                     </button>
                   </div>
                   <div className="mt-2 overflow-auto">
-                    <table data-compact="transaction" className="w-full text-sm border-collapse">
+                    <table aria-label="도급/직영 매출" data-compact="transaction" className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-600">
                           <th scope="col" className="px-2 py-2 border text-center align-middle whitespace-nowrap">구분</th>
@@ -4290,7 +4304,7 @@ export const TeamSettlementPage: React.FC = () => {
               <div className="rounded-lg border bg-white px-3 py-3">
                 <div className="text-sm font-semibold text-slate-800">현장별 쓰꾸미</div>
                 <div className="mt-2 overflow-auto">
-                  <table className="w-full text-xs border-collapse">
+                  <table aria-label="현장별 쓰꾸미" className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-600">
                         <th scope="col" className="text-left px-2 py-2 border">현장</th>

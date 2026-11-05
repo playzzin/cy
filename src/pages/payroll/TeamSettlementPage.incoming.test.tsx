@@ -346,6 +346,59 @@ it('급여 세 종류를 매입 지원 아래에 표시하고 중복 차감 없�
   expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
 });
 
+it.each(['검증 1팀', '검증 2팀'])('현장별 쓰꾸미는 금액이 아닌 %s의 도급/직영 매출 현장 순서를 따른다', async teamName => {
+  const saved = document();
+  saved.teamName = teamName;
+  saved.sales = [
+    { id: 'direct-b', source: 'auto', origin: 'support_client_site', kind: '직영', siteName: '나 직영', manDay: 4, amount: 800000 },
+    { id: 'contract-b', source: 'auto', origin: 'daily_report', kind: '도급', siteName: '라 도급', manDay: 2, amount: 600000 },
+    { id: 'direct-a', source: 'auto', origin: 'daily_report', kind: '직영', siteName: '가 직영', manDay: 1, amount: 100000 },
+    { id: 'contract-a', source: 'auto', origin: 'daily_report', kind: '도급', siteName: '다 도급', manDay: 3, amount: 300000 }
+  ];
+  if (teamName === '검증 2팀') saved.sales.reverse();
+  const unchanged = JSON.parse(JSON.stringify(saved));
+  jest.mocked(teamService.getTeams).mockResolvedValue([{ id: 'own', name: teamName, companyId: 'company', type: '시공팀' } as any]);
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  render(<TeamSettlementPage />);
+  const sales = await screen.findByRole('table', { name: '도급/직영 매출' });
+  const skkumi = screen.getByRole('table', { name: '현장별 쓰꾸미' });
+  const salesOrder = within(sales).getAllByRole('row').slice(1).map(row => within(row).getAllByRole('cell')[1].textContent);
+  const skkumiRows = within(skkumi).getAllByRole('row').slice(1);
+  const skkumiOrder = skkumiRows.map(row => within(row).getAllByRole('cell')[0].textContent);
+  expect(salesOrder).toEqual(['다 도급', '라 도급', '가 직영', '나 직영']);
+  expect(skkumiOrder).toEqual(salesOrder);
+  expect(skkumiRows.map(row => within(row).getAllByRole('cell')[2].textContent))
+    .toEqual(['300,000', '600,000', '100,000', '800,000']);
+  expect(saved).toEqual(unchanged);
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+  expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
+});
+
+it('쓰꾸미의 중복 현장 합계와 집계 대상은 유지하고 매출에서 먼저 나오는 현장을 먼저 표시한다', async () => {
+  const saved = document();
+  saved.sales = [
+    { id: 'shared-direct', source: 'auto', origin: 'daily_report', kind: '직영', siteName: '공통 현장', manDay: 2, amount: 600000 },
+    { id: 'other', source: 'auto', origin: 'support_client_site', kind: '직영', siteName: '가 직영', manDay: 4, amount: 2000000 },
+    { id: 'shared-contract', source: 'auto', origin: 'daily_report', kind: '도급', siteName: '공통 현장', manDay: 1, amount: 300000 },
+    { id: 'empty', source: 'auto', origin: 'daily_report', kind: '도급', siteName: '공수 없는 현장', manDay: 0, amount: 0 },
+    { id: 'manual', source: 'manual', origin: 'manual', kind: '직영', siteName: '수기 현장', manDay: 1, amount: 5000000 },
+    { id: 'support', source: 'auto', origin: '내부지원간곳', kind: '지원', siteName: '지원 현장', manDay: 1, amount: 7000000 }
+  ];
+  const unchanged = JSON.parse(JSON.stringify(saved));
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  render(<TeamSettlementPage />);
+  const skkumi = await screen.findByRole('table', { name: '현장별 쓰꾸미' });
+  const rows = within(skkumi).getAllByRole('row').slice(1);
+  expect(rows.map(row => within(row).getAllByRole('cell').map(cell => cell.textContent))).toEqual([
+    ['공수 없는 현장', '0.0', '0', '-'],
+    ['공통 현장', '3.0', '900,000', '300,000원'],
+    ['가 직영', '4.0', '2,000,000', '500,000원']
+  ]);
+  expect(saved).toEqual(unchanged);
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+  expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
+});
+
 it('급여가 없는 정산도 매입에 빈 급여 영역을 유지한다', async () => {
   render(<TeamSettlementPage />);
   const purchases = await screen.findByRole('region', { name: '매입 내역' });
