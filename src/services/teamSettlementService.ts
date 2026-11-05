@@ -11,7 +11,6 @@ import { cardBillingService } from './cardBillingService';
 import { companyService } from './companyService';
 import { dailyReportService } from './dailyReportService';
 import { siteService, type Site } from './siteService';
-import { supportClientSiteAllocationService, type SupportClientAllocation } from './supportClientSiteAllocationService';
 import { supportRateService } from './supportRateService';
 import { teamExpenseLedgerService } from './teamExpenseLedgerService';
 import { teamService } from './teamService';
@@ -35,6 +34,7 @@ import {
   type SupportMonthlyRateOverrides
 } from '../utils/teamSettlementSupportRateOverrides';
 import { getTeamSettlementConfirmationIssues } from '../utils/teamSettlementDraft';
+import { prepareTeamSettlementManualSales, unlockTeamSettlementManualSales } from '../utils/teamSettlementManualSales';
 import { compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
 import { buildTeamSettlementExpenseEntries } from '../utils/teamSettlementExpenses';
 import { calculateTeamSettlementOfficeExpense, TEAM_SETTLEMENT_OFFICE_RATES } from '../utils/teamSettlementOfficeExpense';
@@ -808,11 +808,10 @@ export const teamSettlementService = {
     const savedParsed = savedUnknown ? TeamSettlementDocumentSchema.safeParse(savedUnknown) : null;
     const savedDoc = savedParsed && savedParsed.success ? savedParsed.data : null;
 
-    // 저장된 스냅샷은 명시적인 재집계 전까지 그대로 사용한다.
-    // 확정된 구 문서도 현재 마스터 데이터로 다시 계산하지 않아 과거 정산을 보호한다.
+    // 저장 원천은 재집계 전까지 유지한다. 미확정 도급·직영의 미입력 자동금액만
+    // 수기 입력 방식으로 전환하며, 확정 문서는 현재 데이터로 다시 계산하지 않는다.
     if (savedDoc?.sourceSnapshot || savedDoc?.confirmedAt) {
-      const stableDocument = stripSupportOriginalLines(savedDoc);
-      return stableDocument;
+      return prepareTeamSettlementManualSales(stripSupportOriginalLines(savedDoc));
     }
 
     const autoDoc = await this.calculateAutoSettlement({
@@ -851,7 +850,7 @@ export const teamSettlementService = {
 
     const merged = mergeAutoAndDraft({
       autoDoc,
-      savedDoc: savedDoc ? { ...savedDoc, confirmedAt: null } : null
+      savedDoc: savedDoc ? unlockTeamSettlementManualSales(savedDoc) : null
     });
 
     const keepConfirmed = Boolean(params.keepConfirmed);
@@ -866,7 +865,7 @@ export const teamSettlementService = {
 
   async saveTeamSettlement(doc: TeamSettlementDocument): Promise<void> {
     const parsed = TeamSettlementDocumentSchema.parse(doc);
-    const stripped = stripSupportOriginalLines(parsed);
+    const stripped = prepareTeamSettlementManualSales(stripSupportOriginalLines(parsed));
     const team = await buildTeamIdVariants(stripped.teamId);
 
     const next: TeamSettlementDocument = {
@@ -892,7 +891,7 @@ export const teamSettlementService = {
     });
     const refreshed = mergeAutoAndDraft({
       autoDoc,
-      savedDoc: { ...parsed, confirmedAt: null }
+      savedDoc: unlockTeamSettlementManualSales(parsed)
     });
     const confirmationIssues = getTeamSettlementConfirmationIssues(refreshed);
     if (confirmationIssues.length > 0) {
@@ -922,8 +921,7 @@ export const teamSettlementService = {
   async unconfirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementDocument> {
     const doc = await this.getTeamSettlement(params);
     const nextDoc: TeamSettlementDocument = {
-      ...doc,
-      confirmedAt: null,
+      ...unlockTeamSettlementManualSales(doc),
       updatedAt: new Date().toISOString()
     };
     await this.saveTeamSettlement(nextDoc);
@@ -952,7 +950,6 @@ export const teamSettlementService = {
       supportReports,
       supportRates,
       supportRateOverrides,
-      supportClientAllocations,
       accommodationDocs,
       vehicleDocs,
       cardDocs,
@@ -965,7 +962,6 @@ export const teamSettlementService = {
       dailyReportService.getReportsByRange(period.startDate, period.endDate),
       supportRateService.getAllSiteRates(),
       this.getSupportRateOverrides(params.yearMonth),
-      supportClientSiteAllocationService.getAllocationsByMonth(params.yearMonth).catch(() => [] as SupportClientAllocation[]),
       accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: params.yearMonth, strict: true }),
       vehicleBillingService.getBillingsByMonth(params.yearMonth, { throwOnError: true }),
       cardBillingService.getBillingsByMonth(params.yearMonth),
@@ -1116,44 +1112,6 @@ export const teamSettlementService = {
       return isCheongyeonCompany(companyId, companyName);
     };
 
-    const supportSettlementAmountBySiteId = new Map<string, number>();
-    const supportSettlementAmountBySiteName = new Map<string, number>();
-
-    const addSupportSettlementAmount = (map: Map<string, number>, key: string, amount: number) => {
-      if (!key || amount <= 0) return;
-      map.set(key, (map.get(key) ?? 0) + amount);
-    };
-
-    supportClientAllocations.forEach((allocation) => {
-      const amount = Math.round(toFiniteNumberOrZero(allocation.settlementAmount));
-      if (amount <= 0) return;
-
-      const siteId = String(allocation.siteId ?? '').trim();
-      const siteName = String(allocation.siteName ?? '').trim();
-      const resolvedSite = resolveSite(siteId, siteName);
-      const resolvedSiteId = String(resolvedSite?.id ?? siteId).trim();
-      const resolvedSiteName = String(resolvedSite?.name ?? siteName).trim();
-
-      if (resolvedSiteId && resolvedSiteId !== 'unknown-site') {
-        addSupportSettlementAmount(supportSettlementAmountBySiteId, resolvedSiteId, amount);
-      }
-      addSupportSettlementAmount(supportSettlementAmountBySiteName, normalizeLookupKey(resolvedSiteName), amount);
-    });
-
-    const getSupportClientSettlementAmount = (siteId?: string, siteName?: string): number => {
-      const idKey = String(siteId ?? '').trim();
-      if (idKey && idKey !== 'unknown-site' && supportSettlementAmountBySiteId.has(idKey)) {
-        return supportSettlementAmountBySiteId.get(idKey) ?? 0;
-      }
-
-      const nameKey = normalizeLookupKey(siteName);
-      if (nameKey && supportSettlementAmountBySiteName.has(nameKey)) {
-        return supportSettlementAmountBySiteName.get(nameKey) ?? 0;
-      }
-
-      return 0;
-    };
-
     const supportSalesGrouped = new Map<
       string,
       {
@@ -1211,7 +1169,6 @@ export const teamSettlementService = {
         siteName: string;
         kind: '도급' | '직영';
         manDay: number;
-        amount: number;
       }
     >();
 
@@ -1416,7 +1373,6 @@ export const teamSettlementService = {
       const rawSiteName = row.siteName ? String(row.siteName) : '현장 미지정';
 
       const rowManDay = toFiniteNumberOrZero(row.manDay);
-      const rowAmount = toFiniteNumberOrZero(row.amount);
 
       const responsibleTeamId = getWorkerRowResponsibleTeamId(row);
 
@@ -1434,32 +1390,27 @@ export const teamSettlementService = {
         siteId: rawSiteId || undefined,
         siteName: rawSiteName,
         kind: managedKind,
-        manDay: 0,
-        amount: 0
+        manDay: 0
       };
 
       managedSalesGrouped.set(key, {
         ...current,
-        manDay: current.manDay + rowManDay,
-        amount: current.amount + rowAmount
+        manDay: current.manDay + rowManDay
       });
     });
 
     const dailyReportSales: TeamSettlementSalesItem[] = Array.from(managedSalesGrouped.entries()).map(([key, value]) => {
-      const supportClientSettlementAmount = getSupportClientSettlementAmount(value.siteId, value.siteName);
-      const usesSupportClientSettlement = supportClientSettlementAmount > 0;
       return {
         id: `daily_report_sales:${params.yearMonth}:${key}`,
         source: 'auto',
-        origin: usesSupportClientSettlement ? 'support_client_site' : 'daily_report',
+        origin: 'daily_report',
         kind: value.kind,
         siteId: value.siteId,
         siteName: value.siteName,
         counterTeamId: undefined,
         counterTeamName: undefined,
         manDay: roundManDay(value.manDay),
-        amount: value.kind === '도급' ? 0 : (usesSupportClientSettlement ? supportClientSettlementAmount : value.amount),
-        memo: value.kind !== '도급' && usesSupportClientSettlement ? '지원정산 정산금액 기준' : undefined
+        amount: 0
       };
     });
 
@@ -1665,6 +1616,7 @@ export const teamSettlementService = {
       },
       sourceSnapshot: {
         version: 2,
+        manualContractDirectAmounts: true,
         capturedAt: nowIso,
         dailyReports: relevantReportSnapshots,
         supportDetails: supportDetailSnapshots,

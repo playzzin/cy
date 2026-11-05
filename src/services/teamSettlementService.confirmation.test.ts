@@ -91,21 +91,23 @@ describe('teamSettlementService confirmation freshness', () => {
     await expect(teamSettlementService.unconfirmTeamSettlement({ yearMonth: '2026-08', teamId: 'team-1' })).rejects.toThrow('save-failed');
   });
 
-  it('자동집계에서 도급·직영 단가를 분리하고 저장 합계에도 반영한다', async () => {
+  it('도급·직영은 공수만 가져오고 작업자 급여는 매입에만 반영하며 지원정산 금액을 가져오지 않는다', async () => {
     jest.spyOn(manpowerService, 'getWorkers').mockResolvedValue([]);
     jest.spyOn(siteService, 'getSites').mockResolvedValue([]);
     jest.spyOn(teamService, 'getTeams').mockResolvedValue([]);
     jest.spyOn(companyService, 'getCompanies').mockResolvedValue([]);
     jest.spyOn(dailyReportService, 'getReportWorkerRowsByRange').mockResolvedValue([
-      { siteId: 'contract', siteName: '도급 현장', siteType: '도급', responsibleTeamId: 'team-1', manDay: 10, amount: 0 },
-      { siteId: 'direct', siteName: '직영 현장', siteType: '직영', responsibleTeamId: 'team-1', manDay: 8, amount: 0 },
+      { siteId: 'contract', siteName: '도급 현장', siteType: '도급', responsibleTeamId: 'team-1', workerTeamId: 'team-1', manDay: 10, amount: 2000000 },
+      { siteId: 'direct', siteName: '직영 현장', siteType: '직영', responsibleTeamId: 'team-1', workerTeamId: 'team-1', manDay: 8, amount: 1200000 },
       { siteId: 'support', siteName: '지원 현장', siteType: '지원', responsibleTeamId: 'team-1', manDay: 20, amount: 0 },
       { siteId: 'other', siteName: '다른 팀 현장', siteType: '도급', responsibleTeamId: 'team-2', manDay: 50, amount: 0 }
     ] as never);
     jest.spyOn(dailyReportService, 'getReportsByRange').mockResolvedValue([]);
     jest.spyOn(supportRateService, 'getAllSiteRates').mockResolvedValue([]);
     jest.spyOn(teamSettlementService, 'getSupportRateOverrides').mockResolvedValue({ supportTeamRates: {}, supportAggregateRates: {}, supportSiteRates: {}, teamRates: {}, aggregateRates: {}, siteRates: {} });
-    jest.spyOn(supportClientSiteAllocationService, 'getAllocationsByMonth').mockResolvedValue([]);
+    const allocations = jest.spyOn(supportClientSiteAllocationService, 'getAllocationsByMonth').mockResolvedValue([
+      { siteId: 'direct', siteName: '직영 현장', settlementAmount: 5000000 }
+    ] as never);
     jest.spyOn(accommodationBillingService, 'getBillingDocuments').mockResolvedValue([]);
     jest.spyOn(accommodationAssignmentService, 'getAllAssignments').mockResolvedValue([]);
     jest.spyOn(accommodationService, 'getMonthlyLedger').mockResolvedValue([]);
@@ -113,8 +115,33 @@ describe('teamSettlementService confirmation freshness', () => {
     jest.spyOn(cardBillingService, 'getBillingsByMonth').mockResolvedValue([]);
     jest.spyOn(teamExpenseLedgerService, 'getClaimsByMonth').mockResolvedValue([]);
     const result = await teamSettlementService.calculateAutoSettlement({ yearMonth: '2026-09', teamId: 'team-1', teamName: '테스트팀', teamIdVariants: new Set(['team-1']) });
-    expect(result.deductions).toEqual([expect.objectContaining({ origin: 'office_expense', amount: 140000, officeExpenseRates: { contract: 10000, direct: 5000 } })]);
-    expect(result.sourceSnapshot?.totals).toEqual({ sales: 0, purchases: 0, deductions: 140000, additions: 0, net: -140000 });
+    expect(result.sales).toEqual([
+      expect.objectContaining({ kind: '도급', manDay: 10, amount: 0, origin: 'daily_report' }),
+      expect.objectContaining({ kind: '직영', manDay: 8, amount: 0, origin: 'daily_report' })
+    ]);
+    expect(result.deductions).toEqual([
+      expect.objectContaining({ origin: 'office_expense', amount: 140000, officeExpenseRates: { contract: 10000, direct: 5000 } }),
+      expect.objectContaining({ origin: 'daily_wage_payroll', amount: 3200000 })
+    ]);
+    expect(result.sourceSnapshot?.totals).toEqual({ sales: 0, purchases: 0, deductions: 3340000, additions: 0, net: -3340000 });
+    expect(result.sourceSnapshot?.manualContractDirectAmounts).toBe(true);
+    expect(allocations).not.toHaveBeenCalled();
+  });
+
+  it('직접 입력한 도급·직영 매출을 확정할 때 0원 원천과 비교해 막거나 덮어쓰지 않는다', async () => {
+    const fresh = buildDocument(0);
+    fresh.sales = [{ id: 'direct', source: 'auto', origin: 'daily_report', kind: '직영', siteName: '검증 현장', manDay: 3, amount: 0 }];
+    fresh.sourceSnapshot!.manualContractDirectAmounts = true;
+    const entered = { ...fresh, sales: [{ ...fresh.sales[0], amount: 900000, amountOverridden: true }] };
+    jest.spyOn(teamService, 'getTeams').mockResolvedValue([{ id: 'team-1', name: '테스트팀' }] as never);
+    jest.spyOn(teamSettlementService, 'calculateAutoSettlement').mockResolvedValue(fresh);
+    const save = jest.spyOn(teamSettlementService, 'saveTeamSettlement').mockResolvedValue(undefined);
+    const result = await teamSettlementService.saveAndConfirmTeamSettlement(entered);
+    expect(result.sales[0]).toMatchObject({ amount: 900000, amountOverridden: true, manDay: 3 });
+    expect(result.confirmedAt).toEqual(expect.any(String));
+    expect(save).toHaveBeenCalledWith(result);
+    await expect(teamSettlementService.saveAndConfirmTeamSettlement(fresh)).rejects.toThrow('sales-amount:direct');
+    expect(save).toHaveBeenCalledTimes(1);
   });
 
   it('recalculates automatic expenses immediately before confirmation while preserving manual items', async () => {

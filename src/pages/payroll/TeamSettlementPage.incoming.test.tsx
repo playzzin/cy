@@ -374,6 +374,33 @@ it.each(['검증 1팀', '검증 2팀'])('현장별 쓰꾸미는 금액이 아닌
   expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
 });
 
+it('도급·직영 금액은 빈칸으로 시작하고 직접 입력 후 저장해도 원천 금액 오류가 생기지 않는다', async () => {
+  const saved = document();
+  saved.confirmedAt = null;
+  saved.purchases = [];
+  saved.sales = [
+    { id: 'contract', source: 'auto', origin: 'daily_report', kind: '도급', siteName: '도급 입력 현장', manDay: 2, amount: 0 },
+    { id: 'direct', source: 'auto', origin: 'daily_report', kind: '직영', siteName: '직영 입력 현장', manDay: 3, amount: 0 }
+  ];
+  saved.sourceSnapshot!.manualContractDirectAmounts = true;
+  saved.sourceSnapshot!.totals = { sales: 0, purchases: 0, deductions: 0, additions: 0, net: 0 };
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  render(<TeamSettlementPage />);
+  const sales = await screen.findByRole('table', { name: '도급/직영 매출' });
+  const inputs = within(sales).getAllByRole('textbox', { name: '금액' });
+  expect(inputs).toHaveLength(2);
+  inputs.forEach(input => { expect(input).toHaveValue(''); expect(input).toHaveAttribute('placeholder', '금액 입력'); });
+  fireEvent.change(inputs[0], { target: { value: '600000' } });
+  fireEvent.change(inputs[1], { target: { value: '900000' } });
+  expect(screen.getByText('정산 검증 완료')).toBeVisible();
+  expect(screen.getByRole('table', { name: '현장별 쓰꾸미' })).toHaveTextContent('300,000원');
+  fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
+  await waitFor(() => expect(teamSettlementService.saveTeamSettlement).toHaveBeenCalledWith(expect.objectContaining({
+    sales: [expect.objectContaining({ amount: 600000, amountOverridden: true }), expect.objectContaining({ amount: 900000, amountOverridden: true })]
+  })));
+  expect(saved.sales.map(row => row.amount)).toEqual([0, 0]);
+});
+
 it('쓰꾸미의 중복 현장 합계와 집계 대상은 유지하고 매출에서 먼저 나오는 현장을 먼저 표시한다', async () => {
   const saved = document();
   saved.sales = [

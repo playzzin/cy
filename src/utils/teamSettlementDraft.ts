@@ -3,6 +3,7 @@ import type {
   TeamSettlementPurchaseItem,
   TeamSettlementSalesItem
 } from '../types/teamSettlement';
+import { isContractDirectAutoSale } from './teamSettlementManualSales';
 
 export type TeamSettlementConfirmationIssue = {
   code: string;
@@ -105,7 +106,9 @@ export const getTeamSettlementConfirmationIssues = (
   if (doc.sourceSnapshot) {
     const snapshotTotals = doc.sourceSnapshot.totals;
     const currentAutoTotals = {
-      sales: sumAutoAmounts(doc.sales),
+      sales: sumAutoAmounts(doc.sourceSnapshot.manualContractDirectAmounts
+        ? doc.sales.filter(item => !isContractDirectAutoSale(item))
+        : doc.sales),
       purchases: sumAutoAmounts(doc.purchases),
       deductions: sumAutoAmounts(doc.deductions),
       additions: sumAutoAmounts(doc.additions ?? [])
