@@ -1,5 +1,4 @@
-// Two-set Korean keyboard fallback for search fields when the OS IME is English.
-// Native IME composition and pasted text are handled by the input, not this helper.
+// Two-set Korean search fallback. Never rewrites the input or controls the OS IME.
 const keys = 'rRseEfaqQtTdwWczxvgkoiOjpuPhynbml';
 const letters = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎㅏㅐㅑㅒㅓㅔㅕㅖㅗㅛㅜㅠㅡㅣ';
 const initials = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
@@ -48,3 +47,20 @@ export const koreanKeyboardText = (text: string): string => {
     }
     return result;
 };
+
+// Prefer literal matches so English company names/codes keep their meaning.
+// Only when there are none, also try Korean key equivalents, token by token.
+export function filterKoreanSearch<T>(items: T[], query: string, getText: (item: T) => string): T[] {
+    const terms = query.trim().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return items;
+    const candidates = items.map(item => ({ item, text: getText(item).normalize('NFC').toLowerCase() }));
+    const literalTerms = terms.map(term => term.normalize('NFC').toLowerCase());
+    const literalMatches = candidates.filter(({ text }) => literalTerms.every(term => text.includes(term)));
+    if (literalMatches.length > 0) return literalMatches.map(({ item }) => item);
+    const alternatives = terms.map((term, index) => {
+        const korean = koreanKeyboardText(term).normalize('NFC').toLowerCase();
+        return /[가-힣]/.test(korean) ? [literalTerms[index], korean] : [literalTerms[index]];
+    });
+    return candidates.filter(({ text }) => alternatives.every(tokens => tokens.some(token => text.includes(token))))
+        .map(({ item }) => item);
+}

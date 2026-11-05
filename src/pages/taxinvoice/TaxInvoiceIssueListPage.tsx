@@ -27,6 +27,8 @@ import { applySavedIssueUpdates, getIssuePendingChanges, getNextIssueNo, IssueBa
 import { useIssueNavigationGuard } from './useIssueNavigationGuard';
 import PayrollIssueTopTabs from '../../components/payroll/PayrollIssueTopTabs';
 import TaxInvoiceSearchInput from './components/TaxInvoiceSearchInput';
+import { filterKoreanSearch, koreanKeyboardText } from './utils/koreanKeyboard';
+import { isChunkLoadError, recoverFromChunkLoadError } from '../../app/bootstrap/runtimeRecovery';
 import { showConfirmAlert, toast } from '../../utils/swal';
 import html2canvas from 'html2canvas';
 
@@ -358,22 +360,18 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
 
     const rowKey = getSiteImportKey;
 
-    const normalizedSearchTerm = searchTerm.trim().toLowerCase();
-
-    const filtered = sites.filter(s => {
+    const filtered = filterKoreanSearch(sites.filter(s => {
         const matchSiteType = filterSiteType === '전체' || s.siteType === filterSiteType;
         const matchPaymentType = filterPaymentType === '전체' || s.paymentType === filterPaymentType;
-        const searchableText = [
+        return matchSiteType && matchPaymentType;
+    }), searchTerm, s => [
             s.siteName,
             s.companyName,
             s.teamName,
             s.siteType,
             s.paymentType,
             s.siteId,
-        ].map(value => String(value ?? '').toLowerCase()).join(' ');
-        const matchSearch = !normalizedSearchTerm || searchableText.includes(normalizedSearchTerm);
-        return matchSiteType && matchPaymentType && matchSearch;
-    });
+        ].map(value => String(value ?? '')).join(' '));
 
     const toggle = (key: string) => {
         if (importing || blocked || completedKeys.has(key)) return;
@@ -852,8 +850,7 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
     const filteredOptions = useMemo(() => {
         if (!options) return [];
 
-        const term = searchTerm.trim().toLowerCase();
-        return options.filter(opt => !term || opt.toLowerCase().includes(term));
+        return filterKoreanSearch(options, searchTerm, option => option);
     }, [options, searchTerm]);
 
     useEffect(() => {
@@ -898,7 +895,8 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
         }
 
         const normalizedTerm = searchTerm.trim().toLowerCase();
-        const exactOption = filteredOptions.find(opt => opt.toLowerCase() === normalizedTerm);
+        const exactOption = filteredOptions.find(opt => opt.toLowerCase() === normalizedTerm)
+            ?? filteredOptions.find(opt => opt.toLowerCase() === koreanKeyboardText(searchTerm.trim()).toLowerCase());
         const optionToApply = exactOption ?? (filteredOptions.length === 1 ? filteredOptions[0] : undefined);
 
         if (optionToApply) {
@@ -1154,6 +1152,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     const [previousDeferredIssues, setPreviousDeferredIssues] = useState<TaxInvoiceIssue[]>([]);
     const [showImportModal, setShowImportModal] = useState(false);
     const [loadingSites, setLoadingSites] = useState(false);
+    const [siteLoadError, setSiteLoadError] = useState<{ message: string; reload: boolean } | null>(null);
     const [loadingDeferredSites, setLoadingDeferredSites] = useState(false);
     const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all');
 
@@ -1336,6 +1335,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         setCellDrafts({});
         setShowImportModal(false);
         setLoadingSites(false);
+        setSiteLoadError(null);
         setSiteData([]); 
         setPreviousDeferredIssues([]);
         loadIssues(); 
@@ -1755,6 +1755,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         const request = ++siteRequestRef.current;
         const current = () => mountedRef.current && request === siteRequestRef.current && yearMonthRef.current === yearMonth;
         setLoadingSites(true);
+        setSiteLoadError(null);
         try {
             const data = await taxInvoiceListService.fetchMonthlySiteData(yearMonth);
             if (!current()) return;
@@ -1763,7 +1764,12 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         } catch (e) {
             if (!current()) return;
             console.error(e);
-            toast.error('현장 데이터를 불러오지 못했습니다.');
+            const reload = isChunkLoadError(e);
+            const message = reload
+                ? '화면을 새로고침한 뒤 현장 데이터를 다시 불러와 주세요.'
+                : '현장 데이터를 불러오지 못했습니다. 다시 불러오기를 눌러 재시도해 주세요.';
+            setSiteLoadError({ message, reload });
+            toast.error(message);
         } finally {
             if (current()) setLoadingSites(false);
         }
@@ -1892,32 +1898,9 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // Filtered issues by all criteria
     const filteredIssues = useMemo(() => {
-        const searchTokens = globalSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
         const filtered = issues.filter(issue => {
             // 1. Sidebar Status Filter
             if (statusFilter !== 'all' && issue.issueStatus !== statusFilter) return false;
-
-            // 2. Global Search
-            if (searchTokens.length > 0) {
-                const searchableText = [
-                    issue.no,
-                    getIssueTypeLabel(issue.isNew),
-                    issue.issueDate,
-                    issue.recipient,
-                    issue.item,
-                    issue.supplyAmount,
-                    issue.note,
-                    issue.manDays,
-                    issue.teamName,
-                    issue.siteName,
-                    issue.siteType,
-                    issue.paymentType,
-                    STATUS_CONFIG[issue.issueStatus]?.label ?? issue.issueStatus,
-                    issue.remark,
-                ].map(value => String(value ?? '').toLowerCase()).join(' ');
-
-                if (!searchTokens.every(token => searchableText.includes(token))) return false;
-            }
 
             // 3. Column Header Filters
             for (const [field, val] of Object.entries(columnFilters)) {
@@ -1944,7 +1927,13 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             return true;
         });
 
-        return [...filtered].sort(sortMode === 'team' ? compareIssuesByTeam : compareIssuesByNo);
+        const searched = filterKoreanSearch(filtered, globalSearch, issue => [
+            issue.no, getIssueTypeLabel(issue.isNew), issue.issueDate, issue.recipient,
+            issue.item, issue.supplyAmount, issue.note, issue.manDays, issue.teamName,
+            issue.siteName, issue.siteType, issue.paymentType,
+            STATUS_CONFIG[issue.issueStatus]?.label ?? issue.issueStatus, issue.remark,
+        ].map(value => String(value ?? '')).join(' '));
+        return [...searched].sort(sortMode === 'team' ? compareIssuesByTeam : compareIssuesByNo);
     }, [columnFilters, globalSearch, issues, sortMode, statusFilter]);
 
     const filteredTotals = useMemo(() => filteredIssues.reduce(
@@ -2323,6 +2312,25 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             </section>
 
             {/* ── Main Layout (Sidebar + Table) ── */}
+            {siteLoadError && (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <div>
+                        <p>{siteLoadError.message}</p>
+                        {siteLoadError.reload && (hasPendingChanges || hasCellDrafts || hasSaveConflicts) && (
+                            <p className="mt-1 text-xs">입력 중인 내용이 있습니다. 먼저 저장하거나 되돌린 뒤 새 화면으로 열어주세요.</p>
+                        )}
+                    </div>
+                    {siteLoadError.reload ? (
+                        <button type="button" className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-bold disabled:opacity-50"
+                            disabled={hasPendingChanges || hasCellDrafts || hasSaveConflicts || mutation !== null}
+                            onClick={() => { recoverFromChunkLoadError({ manual: true }); }}>새 화면으로 다시 열기</button>
+                    ) : (
+                        <button type="button" className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-bold disabled:opacity-50"
+                            disabled={loadingSites || writeBlocked || mutation !== null || hasSaveConflicts}
+                            onClick={() => { void handleLoadSites(); }}>현장 데이터 다시 불러오기</button>
+                    )}
+                </div>
+            )}
             <div className="flex min-h-0 flex-1 flex-col gap-4 2xl:flex-row 2xl:gap-5">
                 {/* ── Sidebar ── */}
                 <aside className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:flex 2xl:w-[300px] 2xl:flex-shrink-0 2xl:flex-col" aria-label="발행리스트 요약 및 가져오기">
