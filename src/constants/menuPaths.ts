@@ -1,4 +1,8 @@
+import { INVESTMENT_LABEL, INVESTMENT_PATH } from './siteModes';
+
 export const MENU_PATHS: { [key: string]: string } = {
+    [INVESTMENT_LABEL]: INVESTMENT_PATH,
+    '모집공고': '/jeonkuk/recruitment',
     '활동 내역': '/activity',
     '팀별 가불내역': '/payroll/advance-summary',
     '국민은행 송금': '/payroll/bank-transfer',

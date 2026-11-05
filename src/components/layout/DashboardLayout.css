@@ -536,6 +536,28 @@ a {
     }
 }
 
+/* Sites with a single link can keep it on narrow desktops where the sidebar is hidden. */
+@media (min-width: 1025px) and (max-width: 1100px) {
+    .app.nation-mode .cheongyeon-top-nav, .app.alliance-mode .cheongyeon-top-nav { display: flex; }
+}
+
+/* Give the business plan its own row when the header's tools already fill the first row. */
+@media (max-width: 1024px) {
+    .app.alliance-mode:has(.cheongyeon-top-nav-item) { --header-height: 98px; }
+    .app.alliance-mode #main-header:has(.cheongyeon-top-nav-item) {
+        display: grid; grid-template: "logo tools" 54px "plan plan" 44px / auto minmax(0,1fr);
+    }
+    .app.alliance-mode .header-left-group { grid-area: logo; }
+    .app.alliance-mode .header-right-group { grid-area: tools; justify-self: end; }
+    .app.alliance-mode .cheongyeon-top-nav { grid-area: plan; display: flex; margin: 0; border-top: 1px solid #94a3b840; }
+    .app.alliance-mode .cheongyeon-top-nav-item::after { display: none; }
+}
+@media (max-width: 360px) {
+    .app.alliance-mode .header-tool-btn { width: 30px; }
+    .app.alliance-mode .header-right-group, .app.alliance-mode .header-quick-tool-group { gap: 1px; }
+    .app.alliance-mode .profile-menu-container { margin-left: 2px; }
+}
+
 /* =========================================
    ì²­ì° ë¼ì´í¸ ëª¨ë (cy-light)
    ========================================= */

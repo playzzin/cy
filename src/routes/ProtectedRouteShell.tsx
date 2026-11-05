@@ -16,6 +16,7 @@ import { db } from '../config/firebase';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { resolveAccountOnboardingMode } from '../utils/accountOnboardingState';
 import TeamWorkflowGate from './TeamWorkflowGate';
+import { INVESTMENT_PATH } from '../constants/siteModes';
 
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { status, result } = useWorkerTeamIdMigration();
@@ -177,6 +178,8 @@ const ProtectedRouteShell: React.FC = () => {
     '/manpower/team-worker-requests',
     '/manpower/team-account-approvals',
     '/support/team-expense-requests',
+    '/jeonkuk/recruitment',
+    INVESTMENT_PATH,
   ].includes(pathname.replace(/\/+$/, ''));
   return (
     <AccountOnboardingGate>

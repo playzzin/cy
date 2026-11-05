@@ -1,0 +1,57 @@
+.ai-coop-ring { --station: #ffc785; min-width: 0; padding: clamp(.85rem,1.8cqi,1.4rem); border: 1px solid #718e805c; border-radius: .9rem; background: radial-gradient(ellipse at 50% 42%,#ffc78509,transparent 70%),#153437; color: var(--station); }
+.ai-coop-ring.coop-rental { --station: #95dab0; background: radial-gradient(ellipse at 50% 42%,#95dab00c,transparent 70%),#143633; }
+.ai-coop-ring[data-focused="true"] { border-color: var(--station); box-shadow: inset 0 0 35px -28px var(--station); }
+.ai-coop-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.ai-coop-head > div > span { font: 600 .59rem/1.4 ui-monospace,monospace; letter-spacing: .12em; color: var(--station); }
+.ai-coop-head h3 { color: #eff7ee; font-size: clamp(1.05rem,1.6cqi,1.35rem); letter-spacing: -.04em; margin-top: .2rem; }
+.ai-coop-intro { color: #c9dbd0; font-size: .79rem; margin-top: .3rem !important; }
+.ai-coop-orbit { display: block; width: 100%; max-height: 23rem; overflow: visible; margin: .8rem auto .2rem; }
+.ai-coop-orbit text { font-family: inherit; text-anchor: middle; }
+.ai-coop-aura { fill: #b4ddc205; }
+.ai-coop-guide { fill: none; stroke: var(--station); stroke-width: .7; stroke-dasharray: 1 6; opacity: .3; }
+.ai-coop-track { fill: none; stroke: var(--station); stroke-width: 1.4; opacity: .46; }
+.ai-coop-track.track-return { stroke-dasharray: 3 5; stroke-width: 1; opacity: .3; }
+.ai-coop-spokes { fill: none; stroke: var(--station); stroke-width: .8; stroke-dasharray: 2 5; opacity: .24; }
+.ai-coop-center > circle { fill: #173b3b; stroke: var(--station); stroke-opacity: .45; }
+.ai-coop-center .ai-coop-center-rim { fill: none; stroke-dasharray: 9 41; stroke-width: 1.5; stroke-opacity: .9; }
+.ai-coop-center text { fill: #f2f8eb; font-size: 14px; font-weight: 780; letter-spacing: -.04em; }
+.ai-coop-center .ai-coop-center-note { fill: #c5d8c9; font-size: 10.5px; font-weight: 550; }
+.ai-coop-node { fill: #193c3c; stroke: var(--station); stroke-width: 1.1; }
+.ai-coop-node-halo { fill: none; stroke: var(--station); stroke-width: 1; opacity: .15; }
+.ai-coop-company > text { fill: #f3f8ed; font-size: 15px; font-weight: 750; }
+.ai-coop-company .ai-coop-company-note { fill: var(--station); font-size: 11px; font-weight: 550; }
+.ai-coop-direction { fill: none; stroke: var(--station); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ai-coop-carrier { transform-origin: var(--orbit-center); }
+.ai-coop-payload { transform-origin: 0 0; }
+.ai-coop-payload > circle { fill: var(--station); stroke: #fff4d9; stroke-width: .8; }
+.ai-coop-payload > svg { color: #163536; }
+.carrier-return .ai-coop-payload > circle { fill: #143633; stroke: var(--station); }
+.carrier-return .ai-coop-payload > svg { color: var(--station); }
+.ai-coop-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem 1.1rem; font-size: .73rem; }
+.ai-coop-legend > span { display: inline-flex; gap: .4rem; align-items: center; }
+.ai-coop-legend i { width: 1.1rem; border-top: 2px solid var(--station); }
+.ai-coop-legend > span + span { color: #c6d9cc; }
+.ai-coop-legend > span + span i { border-top-style: dashed; opacity: .6; }
+.ai-coop-steps { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); list-style: none; padding: .75rem 0 0; margin-top: .8rem !important; border-top: 1px solid #abc7b42b; gap: .4rem; }
+.ai-coop-steps li { color: #e0ece1; font-size: .74rem; }
+.ai-coop-steps small { display: block; color: var(--station); font: 600 .62rem/1.6 ui-monospace,monospace; }
+.ai-coop-note { color: #c3d5c9; font-size: .74rem; line-height: 1.65; margin-top: .65rem !important; }
+.ai-coop-note > span { display: block; margin-top: .25rem; color: #97b6a6; font-size: .64rem; }
+.ai-coop-orbit[data-portrait="true"] .ai-coop-company > text { font-size: 15.5px; }
+.ai-coop-orbit[data-portrait="true"] .ai-coop-company .ai-coop-company-note { font-size: 11px; }
+@keyframes ai-coop-orbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes ai-coop-return { from { transform: rotate(120deg); } to { transform: rotate(-240deg); } }
+@keyframes ai-coop-counter { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+@keyframes ai-coop-counter-return { from { transform: rotate(-120deg); } to { transform: rotate(240deg); } }
+@keyframes ai-coop-arrival { 0%,30%,100% { opacity: .12; stroke-width: 1; } 9%,16% { opacity: .8; stroke-width: 3; } }
+@keyframes ai-coop-core { to { stroke-dashoffset: -100; } }
+@media (prefers-reduced-motion: no-preference) {
+    .ai-coop-carrier { animation: ai-coop-orbit 12s linear infinite; animation-play-state: paused; }
+    .carrier-return { animation-name: ai-coop-return; }
+    .ai-coop-payload { animation: ai-coop-counter 12s linear infinite; animation-play-state: paused; }
+    .carrier-return .ai-coop-payload { animation-name: ai-coop-counter-return; }
+    .ai-coop-node-halo { animation: ai-coop-arrival 12s ease-in-out var(--arrival-delay) infinite; animation-play-state: paused; }
+    .ai-coop-center-rim { animation: ai-coop-core 14s linear infinite; animation-play-state: paused; }
+    .ai-network[data-running="true"] :is(.ai-coop-carrier,.ai-coop-payload,.ai-coop-node-halo,.ai-coop-center-rim) { animation-play-state: running; }
+}
+@media (prefers-reduced-motion: reduce) { .ai-coop-carrier { display: none; } }

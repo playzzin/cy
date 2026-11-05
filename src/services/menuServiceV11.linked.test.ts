@@ -26,6 +26,7 @@ it('기본 메뉴를 한 번만 등록하고 이름·경로·빈 폴더·직책 
     (runTransaction as jest.Mock).mockImplementation(async (_db, work) => work({ get: snapshot, set: write }));
     const initial = (await menuServiceV11.getMenuConfig())!;
     expect(menuServiceV11.isMenuRegistrationPending()).toBe(true);
+    expect(initial.nation.menu).toContainEqual(expect.objectContaining({ text: '모집공고', path: '/jeonkuk/recruitment' }));
     expect(write).not.toHaveBeenCalled();
     expect(initial.pos_ceo.menu.map(item => item.text)).toEqual(expect.arrayContaining(['로그관리', '활동 내역']));
     expect(initial.pos_leader.menu.map(item => item.text)).toContain('인원관리');
@@ -56,6 +57,91 @@ it('기본 메뉴를 한 번만 등록하고 이름·경로·빈 폴더·직책 
     const empty = { ...reloaded, pos_leader: { ...reloaded.pos_leader, menu: [] } };
     await menuServiceV11.saveMenuConfig(empty, reloaded);
     expect((await menuServiceV11.getMenuConfig())!.pos_leader.menu).toEqual([]);
+});
+
+it('기존 등록 메뉴 중 전국 모드만 모집공고를 받고 관리자 삭제·다른 모드의 빈 메뉴를 보존한다', async () => {
+    const site = { name: '기존 사이트', icon: 'fa-globe', menuRegistrationVersion: 1, menu: [] };
+    const home = { id: 'home', text: '내 홈', path: '/dashboard3' };
+    const custom = { id: 'custom', text: '기존 메뉴', path: '/custom', roles: ['사무'], hide: true };
+    let stored: SiteDataType = { nation: { ...site, menu: [home, custom] }, admin: site, test: site };
+    (getDoc as jest.Mock).mockImplementation(async () => ({ exists: () => true, data: () => stored }));
+    const upgraded = (await menuServiceV11.getMenuConfig())!;
+    expect(menuServiceV11.isMenuRegistrationPending()).toBe(true);
+    expect(upgraded.nation.menu).toEqual([home, expect.objectContaining({ text: '모집공고', path: '/jeonkuk/recruitment' }), custom]);
+    expect(upgraded.admin.menu).toEqual([]);
+    expect(upgraded.test.menu).toEqual([]);
+    expect(stored.nation.menu).toEqual([home, custom]);
+    expect(setDoc).not.toHaveBeenCalled();
+    expect(runTransaction).not.toHaveBeenCalled();
+    // An editor may remove a registered row without keeping it in the trash.
+    stored = { ...upgraded, nation: { ...upgraded.nation, menu: [home, custom] } };
+    expect((await menuServiceV11.getMenuConfig())!.nation.menu).toEqual([home, custom]);
+    expect(menuServiceV11.isMenuRegistrationPending()).toBe(false);
+});
+
+it('전국 모드에 이미 이동·숨김·삭제된 모집공고를 중복 등록하지 않는다', async () => {
+    const moved = { text: '사용자 지정 공고', path: '/jeonkuk/recruitment?view=compact', hide: true };
+    const group = { text: '자료', sub: [moved] };
+    for (const extra of [{ menu: [group] }, { menu: [], trash: [group] }, { menu: [], deletedItems: ['모집공고'] }]) {
+        (getDoc as jest.Mock).mockResolvedValue({ exists: () => true, data: () => ({
+            nation: { name: '전국시스템인력', icon: 'fa-globe', menuRegistrationVersion: 1, ...extra },
+        }) });
+        const result = (await menuServiceV11.getMenuConfig())!.nation;
+        expect(result.menu).toMatchObject(extra.menu);
+    }
+});
+
+it('청연CRM의 저장 키와 다른 사이트를 보존하면서 전국시스템연합으로 이름을 바꾸고 사업계획서를 한 번 등록한다', async () => {
+    const retained = { id: 'old-link', text: '기존 자료', path: '/custom', hide: true, roles: ['사무'] };
+    const site = { name: '청연ENG CRM', icon: 'fa-globe', menuRegistrationVersion: 1, menu: [retained] };
+    let stored: SiteDataType = {
+        청연CRM: site,
+        test: { ...site, name: '청연ENG CRA' },
+        nation: { ...site, name: '전국시스템인력', menuRegistrationVersion: 2 },
+    };
+    (getDoc as jest.Mock).mockImplementation(async () => ({ exists: () => true, data: () => stored }));
+    const result = (await menuServiceV11.getMenuConfig())!;
+    expect(Object.keys(result)).toEqual(Object.keys(stored));
+    expect(result.청연CRM.name).toBe('전국시스템연합');
+    expect(result.청연CRM.menu).toEqual([expect.objectContaining({ text: '사업계획서', path: '/alliance/investment' }), retained]);
+    expect(result.test).toMatchObject(stored.test);
+    expect(result.nation).toMatchObject(stored.nation);
+    expect(stored.청연CRM).toEqual(site);
+    expect(setDoc).not.toHaveBeenCalled();
+    expect(runTransaction).not.toHaveBeenCalled();
+    expect(menuServiceV11.isMenuRegistrationPending()).toBe(true);
+
+    stored = { ...result, 청연CRM: { ...result.청연CRM, menu: [retained] } };
+    expect((await menuServiceV11.getMenuConfig())!.청연CRM.menu).toEqual([retained]);
+    expect(menuServiceV11.isMenuRegistrationPending()).toBe(false);
+});
+
+it('이미 등록된 투자모집 이름만 바꾸고 이동·숨김·삭제 상태와 기존 주소를 보존한다', async () => {
+    const path = '/alliance/investment?from=partner';
+    const saved = { id: 'moved', text: '투자모집', path, hide: true };
+    const site = { name: '전국시스템연합', icon: 'fa-globe', menuRegistrationVersion: 2 };
+    for (const scenario of [
+        { menu: [{ text: '자료', sub: [saved] }], expected: [{ text: '자료', sub: [{ ...saved, text: '사업계획서' }] }] },
+        { menu: [], trash: [saved], expected: [] },
+        { menu: [], expected: [] },
+    ]) {
+        (getDoc as jest.Mock).mockResolvedValue({ exists: () => true, data: () => ({ 청연CRM: { ...site, ...scenario } }) });
+        const result = (await menuServiceV11.getMenuConfig())!.청연CRM;
+        expect(result.menu).toMatchObject(scenario.expected);
+        expect(result.menuRegistrationVersion).toBe(3);
+        expect(result.trash ?? []).toMatchObject(scenario.trash ? [{ ...saved, text: '사업계획서' }] : []);
+    }
+    expect(setDoc).not.toHaveBeenCalled();
+});
+
+it('다른 폴더에 넣었거나 휴지통으로 옮긴 사용자 지정 메뉴를 다시 추가하지 않는다', async () => {
+    const item = { text: '협력 제안', path: '/alliance/investment?from=partner', hide: true };
+    for (const extra of [{ menu: [{ text: '폴더', sub: [item] }] }, { menu: [], trash: [item] }]) {
+        (getDoc as jest.Mock).mockResolvedValue({ exists: () => true, data: () => ({
+            청연CRM: { name: '청연ENG CRM', icon: 'fa-globe', menuRegistrationVersion: 1, ...extra },
+        }) });
+        expect((await menuServiceV11.getMenuConfig())!.청연CRM.menu).toMatchObject(extra.menu);
+    }
 });
 
 it('이름이 같은 이전 메뉴를 각각 편집할 수 있도록 서로 다른 고정 ID를 등록한다', async () => {

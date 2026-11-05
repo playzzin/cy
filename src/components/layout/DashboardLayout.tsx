@@ -21,6 +21,7 @@ import { menuServiceV11 } from '../../services/menuServiceV11';
 import { SiteData, SiteDataType, MenuItem, PositionItem } from '../../types/menu';
 import { resolveUserMenuPositionId } from '../../utils/userMenuPosition';
 import { MENU_PATHS } from '../../constants/menuPaths';
+import { ALLIANCE_SITE_KEY, INVESTMENT_PATH, SITE_HOME_PATHS } from '../../constants/siteModes';
 import RuntimeErrorBoundary from '../../app/bootstrap/RuntimeErrorBoundary';
 import { SiteModeProvider } from '../../contexts/SiteModeContext';
 import {
@@ -92,11 +93,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     const navigate = useNavigate();
     const location = useLocation();
     useMobileShellScroll(location.pathname, location.hash, navigationType, isMobileOpen, isMobile);
-    const siteModeDashboards: Record<string, string> = {
-        test: '/dashboard2',
-        nation: '/dashboard3',
-    };
-    const siteModeDashboardPath = siteData?.[currentSite]?.menu ? siteModeDashboards[currentSite] : undefined;
+    const siteModeDashboardPath = siteData?.[currentSite]?.menu ? SITE_HOME_PATHS[currentSite] : undefined;
+    const onSiteHome = Object.values(SITE_HOME_PATHS).includes(location.pathname);
     const isSiteLayerMode = Boolean(siteModeDashboardPath);
     const usesSiteBranding = isSiteLayerMode;
     const navigateSync = useCallback((to: string, options?: NavigateOptions) => {
@@ -588,13 +586,11 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         localStorage.setItem(getMenuModeStorageKey('cy_current_site', currentUser?.uid), siteKey);
         localStorage.setItem(getMenuModeStorageKey('cy_site_manual', currentUser?.uid), 'true');
 
-        // 청연사이트(test)로 전환 시 /dashboard2로 이동
-        const nextDashboardPath = siteModeDashboards[siteKey];
+        const nextDashboardPath = SITE_HOME_PATHS[siteKey];
         if (nextDashboardPath) {
             setIsPositionPanelOpen(false);
             navigateSync(nextDashboardPath);
-        } else if (location.pathname === '/dashboard2' || location.pathname === '/dashboard3') {
-            // 다른 사이트로 전환 시 /dashboard2에 있으면 /dashboard로 이동
+        } else if (onSiteHome) {
             navigateSync('/dashboard');
         }
     };
@@ -618,7 +614,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
             setCurrentSite('admin');
             localStorage.setItem(getMenuModeStorageKey('cy_current_site', currentUser?.uid), 'admin');
 
-            if (location.pathname === '/dashboard2' || location.pathname === '/dashboard3') {
+            if (onSiteHome) {
                 navigateSync('/dashboard');
             }
         }
@@ -707,6 +703,8 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
     const mainContentClassName = [
         location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : '',
         isMemoFullBleedPage || isWorkbookLedgerFullBleedPage || isAdvancePaymentPage || location.pathname === '/tools/excel-converter' ? 'page-full-bleed' : '',
+        location.pathname === '/jeonkuk/recruitment' ? 'page-full-bleed page-nation-recruitment' : '',
+        location.pathname === INVESTMENT_PATH ? 'page-full-bleed page-alliance-investment' : '',
         isDailyReportListPage || isAdvancePaymentPage ? 'page-contained-scroll' : '',
         isSupportManagementHubPage ? 'page-support-management' : '',
     ].filter(Boolean).join(' ');
@@ -735,7 +733,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         const isNation = currentSite === 'nation';
         return (
             <SiteModeProvider {...siteModeValue}>
-                <div className={`app cheongyeon-mode ${isNation ? 'nation-mode' : ''} ${isDarkMode ? '' : 'cy-light'} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
+                <div className={`app cheongyeon-mode ${isNation ? 'nation-mode' : currentSite === ALLIANCE_SITE_KEY ? 'alliance-mode' : ''} ${isDarkMode ? '' : 'cy-light'} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
                     <div className="backdrop" id="backdrop" onClick={closeAll}></div>
 
                     {/* Same Header as Admin ERP */}

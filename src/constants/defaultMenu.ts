@@ -1,4 +1,5 @@
 import { SiteDataType } from '../types/menu';
+import { ALLIANCE_SITE_KEY, ALLIANCE_SITE_NAME, INVESTMENT_MENU } from './siteModes';
 import {
     BUSINESS_PARTNER_POSITION_CONFIGS,
     BUSINESS_PARTNER_POSITION_SITES,
@@ -205,6 +206,12 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             { text: "프로젝트", icon: "fa-project-diagram", path: "/gallery/projects" },
             { text: "조직도", icon: "fa-sitemap", path: "/cheongyeon/organization" }
         ]
+    },
+    [ALLIANCE_SITE_KEY]: {
+        name: ALLIANCE_SITE_NAME,
+        icon: 'fa-globe',
+        order: 3,
+        menu: [{ ...INVESTMENT_MENU }],
     },
     // === 직책별 메뉴 (Position Mode) ===
     pos_ceo: {

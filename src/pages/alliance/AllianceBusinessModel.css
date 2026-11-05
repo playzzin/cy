@@ -1,0 +1,50 @@
+.ai-business-motion { margin: 1.4rem 0 0; min-width: 0; border: 1px solid #627e7e; overflow: hidden; border-radius: 1rem; background: #152f35; color: #f4f8f0; }
+.ai-business-motion .ai-network-bar { min-height: 54px; }
+.ai-business-controls { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 1px; padding: 0; background: #68857d55; }
+.ai-business-controls button { position: relative; display: flex; align-items: center; justify-content: center; gap: .45rem; min-width: 0; min-height: 52px; padding: .4rem .23rem .5rem; border: 0; color: #ccdcd3; background: #193439; font: inherit; font-size: clamp(.78rem,1.1cqi,.95rem); font-weight: 720; cursor: pointer; }
+.ai-business-controls small { color: #a6c1b4; font: 600 .69rem/1 ui-monospace,monospace; }
+.ai-business-controls button[aria-pressed="true"] { color: var(--scene); background: #283f40; }
+.ai-business-controls button[aria-pressed="true"] small { color: var(--scene); }
+.ai-business-controls button:hover { background: #2b4645; }
+.ai-business-controls button:focus-visible { outline-offset: -4px; z-index: 1; }
+.ai-biz-timer { position: absolute; right: 0; bottom: 0; left: 0; height: 3px; background: var(--scene); transform-origin: left; }
+.ai-business-layout { display: grid; }
+.ai-biz-canvas { position: relative; min-width: 0; background-color: #123035;
+    background-image: radial-gradient(ellipse at 50% 42%,#355b574f,transparent 71%),linear-gradient(#b5dcca10 1px,transparent 1px),linear-gradient(90deg,#b5dcca10 1px,transparent 1px);
+    background-size: auto,22px 22px,22px 22px; }
+.ai-biz-canvas-label { display: flex; align-items: center; justify-content: space-between; padding: .7rem clamp(.7rem,1.9cqi,1.45rem) 0; color: #b9cdc0; font: 650 .72rem/1.4 ui-monospace,'Malgun Gothic',sans-serif; letter-spacing: .06em; }
+.ai-biz-canvas-label span:first-child::before { content: '+'; margin-right: .45rem; color: var(--scene); }
+.ai-biz-canvas > .ai-orbit { padding: clamp(.35rem,1.1cqi,1rem) .1rem; }
+.ai-business-story { padding: clamp(1rem,2.7cqi,2.3rem); align-self: center; }
+.ai-biz-tag { color: var(--scene); font-size: .78rem; font-weight: 730; letter-spacing: .04em; }
+.ai-business-story h3 { color: #f4f8ee; margin: .55rem 0 .7rem; font-size: clamp(1.35rem,2.45cqi,2rem); line-height: 1.32; letter-spacing: -.05em; }
+.ai-business-story p { color: #dce7df; line-height: 1.75; font-size: .96rem; }
+.ai-biz-outcome { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid #a5b9ac44; }
+.ai-biz-outcome b { color: var(--scene); font-size: .79rem; }
+.ai-biz-outcome p { margin-top: .16rem; color: #c9dbcf; font-size: .85rem; }
+.ai-business-motion figcaption { padding: 1rem clamp(.8rem,2.2cqi,1.75rem); border-top: 1px solid #a9bdb538; }
+.ai-biz-finance-title { display: flex; gap: .6rem; align-items: baseline; color: #ebf4e9; font-size: .93rem; }
+.ai-biz-finance-title span, .ai-business-motion figcaption p { color: #bfd2c7; font-size: .79rem; }
+.ai-biz-shares { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .6rem; list-style: none; margin: .6rem 0; padding: 0; }
+.ai-biz-shares li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .2rem .5rem; border-left: 2px solid var(--share-color); padding-inline: .65rem; font-size: .83rem; }
+.ai-biz-shares b { color: var(--share-color); font-size: 1.05rem; }
+@keyframes ai-biz-clock { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: no-preference) {
+    .ai-business-motion[data-running="true"] .ai-biz-timer { animation: ai-biz-clock var(--scene-ms) linear both; }
+}
+@container alliance (min-width: 48rem) {
+    .ai-business-layout { grid-template-columns: minmax(0,1.48fr) minmax(0,1fr); }
+    .ai-biz-canvas { display: grid; align-content: center; border-right: 1px solid #a0bbac38; }
+    .ai-business-story { min-height: 16.5rem; }
+}
+@container alliance (max-width: 39rem) {
+    .ai-business-controls button { flex-direction: column; gap: .12rem; font-size: .76rem; }
+    .ai-biz-shares { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@container alliance (max-width: 23rem) {
+    .ai-business-controls { grid-template-columns: repeat(6,minmax(0,1fr)); }
+    .ai-business-controls button { grid-column: span 2; min-height: 44px; gap: .04rem; }
+    .ai-business-controls button:nth-last-child(-n+2) { grid-column: span 3; }
+    .ai-biz-shares li { flex-direction: column; align-items: flex-start; }
+}
+.ai-business-motion:fullscreen .ai-orbit { max-height: 63vh; }
