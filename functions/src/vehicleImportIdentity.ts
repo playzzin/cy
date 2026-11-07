@@ -4,6 +4,12 @@ export type VehicleImportIdentityKind = 'fine' | 'toll';
 
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 
+// A cancelled expense remains in Firestore for audit, but no longer claims an import.
+export const isActiveVehicleImportExpense = (snapshot: {
+    exists: boolean;
+    data(): { status?: unknown; cancelledAt?: unknown } | undefined;
+}): boolean => snapshot.exists && snapshot.data()?.status !== 'CANCELLED' && !snapshot.data()?.cancelledAt;
+
 export const hashVehicleImportSource = (base64: string): string => (
     createHash('sha256').update(Buffer.from(base64, 'base64')).digest('hex')
 );

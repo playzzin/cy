@@ -2414,6 +2414,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const [selectedSupportTeamIds, setSelectedSupportTeamIds] = useState<string[]>([]);
     const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
     const [offDutyWorkerIds, setOffDutyWorkerIds] = useState<string[]>([]);
+    const [offDutyExcludedWorkerIds, setOffDutyExcludedWorkerIds] = useState<string[]>([]);
     const [offDutySelectionMode, setOffDutySelectionMode] = useState(false);
     const [offDutyDraftWorkerIds, setOffDutyDraftWorkerIds] = useState<string[]>([]);
     const [recentlyUpdatedSiteKey, setRecentlyUpdatedSiteKey] = useState('');
@@ -3475,9 +3476,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 return;
             }
 
+            const savedDispatch = isScheduleConfirmationInput
+                ? null
+                : await dispatchService.getDispatchByDate(date, { throwOnError: true });
             const savedAssignments = isScheduleConfirmationInput
                 ? (await scheduleConfirmationBoardService.getBoardByDate(date))?.assignments || []
-                : (await dispatchService.getDispatchByDate(date))?.assignments || [];
+                : savedDispatch?.assignments || [];
             const nextSchedules = savedAssignments.map((assignment, index) => {
                 const raw = assignment as DispatchAssignment & Partial<ScheduleItem> & { supportTeamIds?: string[] };
                 const rawWorkerIds = cleanIds(assignment.workerIds || []).filter((workerId) => {
@@ -3623,13 +3627,17 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     };
                 });
             if (!isScheduleConfirmationInput) {
+                const excludedIds = cleanIds(savedDispatch?.offDutyExcludedWorkerIds || []);
+                setOffDutyExcludedWorkerIds(excludedIds);
                 setOffDutyWorkerIds(cleanIds([
-                    ...requestRows.flatMap((request) => request.offDutyWorkerIds || []),
+                    ...(savedDispatch?.offDutyWorkerIds || []),
+                    ...requestRows.filter((request) => request.status !== 'cancelled')
+                        .flatMap((request) => request.offDutyWorkerIds || []),
                     ...savedAssignments.flatMap((assignment) => {
                         const raw = assignment as Partial<ScheduleItem>;
                         return raw.offDutyWorkerIds || [];
                     }),
-                ]));
+                ]).filter((workerId) => !excludedIds.includes(workerId)));
             }
             setSchedules(mergeSchedulesBySite([...nextSchedules, ...requestSchedules]));
             const defaultTeamId = teamRows[0]?.id || UNASSIGNED_TEAM_ID;
@@ -3655,6 +3663,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
     useEffect(() => {
         setOffDutyWorkerIds([]);
+        setOffDutyExcludedWorkerIds([]);
         setOffDutyDraftWorkerIds([]);
         setOffDutySelectionMode(false);
     }, [date, mode]);
@@ -3766,6 +3775,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         }
 
         setOffDutyWorkerIds((prev) => cleanIds([...prev, ...workerIds]));
+        setOffDutyExcludedWorkerIds((prev) => prev.filter((id) => !workerIds.includes(id)));
+        setDirty(true);
         setOffDutyDraftWorkerIds([]);
         setOffDutySelectionMode(false);
         setSelectedWorkerIds((prev) => prev.filter((workerId) => !workerIds.includes(workerId)));
@@ -3775,13 +3786,17 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const restoreOffDutyWorker = (workerId: string) => {
         const workerName = workersById.get(workerId)?.name || '작업자';
         setOffDutyWorkerIds((prev) => prev.filter((id) => id !== workerId));
+        setOffDutyExcludedWorkerIds((prev) => cleanIds([...prev, workerId]));
+        setDirty(true);
         setOffDutyDraftWorkerIds((prev) => prev.filter((id) => id !== workerId));
         setMessage(`${workerName}을 휴무자에서 제외했습니다.`);
     };
 
     const clearOffDutyWorkers = () => {
+        setOffDutyExcludedWorkerIds((prev) => cleanIds([...prev, ...offDutyWorkerIds]));
         setOffDutyWorkerIds([]);
         setOffDutyDraftWorkerIds([]);
+        setDirty(true);
         setMessage('휴무자 분리를 모두 해제했습니다.');
     };
 
@@ -4668,7 +4683,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 return;
             }
 
-            await dispatchService.saveDispatch(date, assignments);
+            await dispatchService.saveDispatch(date, assignments, { offDutyWorkerIds, offDutyExcludedWorkerIds });
             setSchedules(normalizedSchedules);
             setDirty(false);
             if (typeof window !== 'undefined') {
@@ -4844,6 +4859,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             savedAt: new Date().toISOString(),
             selectedSiteId,
             offDutyWorkerIds,
+            offDutyExcludedWorkerIds,
             schedules: normalizedSchedules,
         };
 
@@ -4867,14 +4883,17 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 schedules?: ScheduleItem[];
                 selectedSiteId?: string;
                 offDutyWorkerIds?: string[];
+                offDutyExcludedWorkerIds?: string[];
             };
             const draftSchedules = Array.isArray(parsed.schedules) ? parsed.schedules : [];
             setSchedules(mergeSchedulesBySite(draftSchedules));
             setSelectedSiteId(parsed.selectedSiteId || '');
+            const excludedIds = cleanIds(Array.isArray(parsed.offDutyExcludedWorkerIds) ? parsed.offDutyExcludedWorkerIds : []);
+            setOffDutyExcludedWorkerIds(excludedIds);
             setOffDutyWorkerIds(cleanIds([
                 ...(Array.isArray(parsed.offDutyWorkerIds) ? parsed.offDutyWorkerIds : []),
                 ...draftSchedules.flatMap((schedule) => schedule.offDutyWorkerIds || []),
-            ]));
+            ]).filter((workerId) => !excludedIds.includes(workerId)));
             setOffDutyDraftWorkerIds([]);
             setOffDutySelectionMode(false);
             setDirty(true);

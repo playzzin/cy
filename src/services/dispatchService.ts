@@ -34,8 +34,14 @@ export interface DailyDispatch {
     id?: string; // date string (YYYY-MM-DD)
     date: string;
     assignments: DispatchAssignment[];
+    offDutyWorkerIds?: string[];
+    offDutyExcludedWorkerIds?: string[];
     updatedAt: Timestamp;
 }
+
+const parseWorkerIds = (raw: unknown): string[] => Array.isArray(raw)
+    ? Array.from(new Set(raw.filter((id): id is string => typeof id === 'string').map(id => id.trim()).filter(Boolean)))
+    : [];
 
 const parseAssignments = (raw: unknown): DispatchAssignment[] => {
     if (!raw) return [];
@@ -71,6 +77,8 @@ export const dispatchService = {
                 id: String(row.id),
                 date: String(row.date),
                 assignments: parseAssignments(row.assignments),
+                offDutyWorkerIds: parseWorkerIds(row.offDutyWorkerIds),
+                offDutyExcludedWorkerIds: parseWorkerIds(row.offDutyExcludedWorkerIds),
                 updatedAt: toTimestamp(row.updatedAt)
             } as DailyDispatch));
             mapped.sort((a: DailyDispatch, b: DailyDispatch) => (b.date ?? '').localeCompare(a.date ?? '', 'en'));
@@ -91,6 +99,8 @@ export const dispatchService = {
                 id: String(row.id),
                 date: String(row.date),
                 assignments: parseAssignments(row.assignments),
+                offDutyWorkerIds: parseWorkerIds(row.offDutyWorkerIds),
+                offDutyExcludedWorkerIds: parseWorkerIds(row.offDutyExcludedWorkerIds),
                 updatedAt: toTimestamp(row.updatedAt)
             } as DailyDispatch;
         } catch (e) {
@@ -101,16 +111,26 @@ export const dispatchService = {
     },
 
     // Save dispatch plan
-    saveDispatch: async (date: string, assignments: DispatchAssignment[]): Promise<void> => {
+    saveDispatch: async (
+        date: string,
+        assignments: DispatchAssignment[],
+        offDuty?: Pick<DailyDispatch, 'offDutyWorkerIds' | 'offDutyExcludedWorkerIds'>
+    ): Promise<void> => {
         const assignmentsStr = JSON.stringify(assignments ?? []);
         const updatedAt = Timestamp.now().toDate().toISOString();
+        // Omitted metadata preserves this date's off-duty choices for other dispatch editors.
+        const offDutyFields = offDuty ? {
+            offDutyWorkerIds: parseWorkerIds(offDuty.offDutyWorkerIds),
+            offDutyExcludedWorkerIds: parseWorkerIds(offDuty.offDutyExcludedWorkerIds),
+        } : {};
 
-        const existing = await dispatchService.getDispatchByDate(date);
+        const existing = await dispatchService.getDispatchByDate(date, { throwOnError: true });
         if (existing) {
             await updateDailyDispatch({
                 id: date,
                 date,
                 assignments: assignmentsStr,
+                ...offDutyFields,
                 updatedAt
             } as any);
             return;
@@ -120,6 +140,7 @@ export const dispatchService = {
             id: date,
             date,
             assignments: assignmentsStr,
+            ...offDutyFields,
             updatedAt
         } as any);
     },
