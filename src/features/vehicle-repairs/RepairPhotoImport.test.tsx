@@ -217,8 +217,8 @@ test.each(REPAIR_COST_KEYS)('검수한 합계 전액을 %s 한 곳에 넣고 명
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
   expect(screen.getByLabelText('정비 조회 월')).toHaveValue('2026-10');
-  expect(screen.getByLabelText('1행 ' + REPAIR_COST_LABELS[category] + ' 금액')).toHaveValue(category === 'personal' ? '360,000' : '327,272.73');
-  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent(category === 'personal' ? '0' : '32,727.27');
+  expect(screen.getByLabelText('1행 ' + REPAIR_COST_LABELS[category] + ' 금액')).toHaveValue(category === 'personal' ? '360,000' : '327,273');
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent(category === 'personal' ? '0' : '32,727');
   expect(screen.getByLabelText('1행 합계')).toHaveTextContent('360,000');
   expect(screen.getByLabelText('1행 정비내용')).toHaveValue('오일·필터 교환 / 타이어 교환');
   expect(within(screen.getByTitle(team.name)).getByRole('img', { hidden: true })).toHaveAttribute('data-icon', 'truck-front');

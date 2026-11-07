@@ -19,6 +19,21 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
+test('법인·VAT를 원 단위로 표시하고 단순 포커스 이동은 원본 금액을 수정하지 않는다', async () => {
+  (vehicleRepairService.list as jest.Mock).mockResolvedValue([row('fraction', '2026-04-01', 100000)]);
+  renderLedger();
+  await screen.findByDisplayValue('테스트 수리 fraction');
+  const amount = screen.getByLabelText('1행 법인 금액');
+  expect(amount).toHaveValue('90,909');
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent(/^9,091$/);
+  fireEvent.focus(amount);
+  expect(amount).toHaveValue('90909');
+  fireEvent.blur(amount);
+  expect(screen.getByLabelText('1행 합계')).toHaveTextContent(/^100,000$/);
+  expect(screen.queryByText('수정사항 1건')).not.toBeInTheDocument();
+  expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
+});
+
 test('월별 목록과 합계를 보여 주며 전체 기간에서 과거 내역을 조회한다', async () => {
   renderLedger();
   await screen.findByDisplayValue('테스트 수리 two');
@@ -38,14 +53,14 @@ test('기존 행의 금액을 바로 수정하고 저장 전까지 서버에 쓰
   fireEvent.focus(amount);
   fireEvent.change(amount, { target: { value: '1234.70' } });
   fireEvent.blur(amount);
-  expect(amount).toHaveValue('1,234.7');
+  expect(amount).toHaveValue('1,235');
   expect(screen.getByText('수정사항 1건')).toBeInTheDocument();
   expect(vehicleRepairService.saveRows).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '저장' }));
   await screen.findByText('1건의 정비내역을 저장했습니다.');
   expect(vehicleRepairService.saveRows).toHaveBeenCalledWith([expect.objectContaining({ id: 'two', revision: 1, costs: { ...emptyCosts(), corporate: 1358.17 } })]);
-  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent('123.47');
-  expect(screen.getByLabelText('1행 합계')).toHaveTextContent('1,358.17');
+  expect(screen.getByLabelText('1행 VAT')).toHaveTextContent('123');
+  expect(screen.getByLabelText('1행 합계')).toHaveTextContent('1,358');
 });
 
 test('새 행과 기존 행을 한 번에 저장하고 0원과 빈 비용을 구분한다', async () => {

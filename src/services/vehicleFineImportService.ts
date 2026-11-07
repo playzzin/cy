@@ -93,6 +93,13 @@ const createOperationId = (): string => {
 };
 
 export const vehicleFineImportService = {
+    async getAttachment(expenseId: string): Promise<{ base64: string; mimeType: string; fileName: string }> {
+        const callable = httpsCallable<{ expenseId: string }, { base64: string; mimeType: string; fileName: string }>(
+            functions, 'getVehicleFineNoticeAttachment', { timeout: 60_000 },
+        );
+        return (await callable({ expenseId })).data;
+    },
+
     validateFiles(files: File[]): void {
         if (files.length === 0) throw new Error('분석할 과태료 고지서를 선택해 주세요.');
         if (files.length > MAX_FILE_COUNT) throw new Error(`한 번에 최대 ${MAX_FILE_COUNT}개까지 등록할 수 있습니다.`);

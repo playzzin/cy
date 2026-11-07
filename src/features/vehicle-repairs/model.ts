@@ -53,7 +53,7 @@ export function sumRepairAmounts(rows: Array<Pick<RepairRecord, 'costs'>>) {
   const sum = (key: keyof ReturnType<typeof repairAmounts>) => roundAmount(amounts.reduce((total, row) => total + (row[key] ?? 0), 0));
   return { personal: sum('personal'), corporate: sum('corporate'), vat: sum('vat'), total: sum('total') };
 }
-export const formatRepairAmount = (amount: number | null) => amount === null ? '—' : amount.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
+export const formatRepairAmount = (amount: number | null) => amount === null ? '—' : amount.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
 export const isValidRepairAmount = (amount: number) => Number.isFinite(amount) && amount >= 0
   && Number.isSafeInteger(Math.round(amount * 100)) && Math.round(amount * 100) / 100 === amount;
 export const repairReviewNotes = (row: Pick<RepairRecord, 'issues'>) => row.issues.filter(issue => issue.endsWith('비용란 메모 확인'));
