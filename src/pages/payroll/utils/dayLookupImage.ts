@@ -53,7 +53,7 @@ export const renderDayLookupCanvas = (
         width: cellWidth, lines: wrap(value, cellWidth - 2 * padding),
         align: isHeader ? 'center' : input ? 'right' : getComputedStyle(cell).textAlign,
         fill: isHeader ? cell.style.backgroundColor || header.style.backgroundColor : '',
-        color: isHeader ? cell.style.color || '#ffffff' : '#1E1C11',
+        color: getComputedStyle(input || cell).color || (isHeader ? '#ffffff' : '#1E1C11'),
       };
     });
     return { cells, isHeader, height: Math.max(...cells.map(cell => cell.lines.length)) * lineHeight + 16 };
