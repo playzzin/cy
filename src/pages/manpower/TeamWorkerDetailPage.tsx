@@ -808,9 +808,11 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
     };
 
     const selectedWorkerPhone = String(selectedWorker?.contact ?? '').replace(/[^0-9+]/g, '');
+    const showingWorkHistory = detailView === 'workHistory' || detailView === 'dailyReport'
+        || (!restrictedTeam && detailView === 'profile' && profileSection === 'work');
 
     return (
-        <div className="tw-page">
+        <div className={`tw-page${showingWorkHistory ? ' tw-page--work-history' : ''}`}>
             <header className="tw-page__header">
                 <div>
                     <div className="tw-page__eyebrow">

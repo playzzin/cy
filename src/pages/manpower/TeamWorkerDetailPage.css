@@ -2574,3 +2574,24 @@
     .tw-workspace--detail .mobile-list-return--worker svg { animation: none; }
     .tw-workspace--detail .tw-detail-panel { padding-bottom: 150px; }
 }
+
+@media screen and (max-width: 768px) {
+    .tw-page--work-history .tw-detail-panel { padding: 8px 6px 124px; }
+    .tw-page--work-history .tw-worker-hero { flex-direction: row; align-items: center; gap: 8px; margin-bottom: 6px; padding: 6px 8px; box-shadow: none; }
+    .tw-page--work-history .tw-worker-hero__avatar { flex: 0 0 30px; width: 30px; height: 30px; font-size: 15px; box-shadow: none; }
+    .tw-page--work-history .tw-worker-hero__title { gap: 6px; }
+    .tw-page--work-history .tw-worker-hero h2 { font-size: 16px; line-height: 20px; }
+    .tw-page--work-history .tw-status { height: 18px; padding: 0 5px; font-size: 10px; }
+    .tw-page--work-history .tw-worker-hero__meta { gap: 2px 8px; margin-top: 2px; font-size: 10px; line-height: 14px; }
+    .tw-page--work-history .tw-worker-hero__meta svg { width: 11px; height: 11px; }
+    .tw-page--work-history .tw-worker-stat-grid { grid-template-columns: 1fr 1.5fr .6fr; gap: 4px; margin-bottom: 6px; }
+    .tw-page--work-history .tw-worker-stat-grid > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; min-height: 0; padding: 5px; border-radius: 6px; }
+    .tw-page--work-history .tw-worker-stat-grid > div::before { display: none; }
+    .tw-page--work-history .tw-worker-stat-grid span { font-size: 10px; line-height: 13px; }
+    .tw-page--work-history .tw-worker-stat-grid strong { margin-top: 1px; font-size: 12px; line-height: 16px; }
+    /* The worker summary already contains the totals; keep the month beside the calendar. */
+    .tw-page--work-history .worker-history__header { display: none; }
+    .tw-page--work-history .worker-history__hint { display: none; }
+    .tw-page--work-history .mobile-list-return--worker { min-height: 44px; padding: 6px 10px; border-radius: 10px; font-size: 13px; }
+    .tw-page--work-history .mobile-list-return__arrow { flex-basis: 28px; height: 28px; border-radius: 8px; }
+}
