@@ -43,12 +43,12 @@ beforeEach(() => {
 async function mountBoard() {
     const view = render(<MemoryRouter initialEntries={['/?date=2026-11-08']}><FieldSchedulePlannerPage /></MemoryRouter>);
     await screen.findByText('아직 만든 일정이 없습니다.');
-    fireEvent.click(screen.getByRole('button', { name: '팀/작업자', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '팀/작업자' }));
     return view;
 }
 
 async function save() {
-    fireEvent.click(screen.getByRole('button', { name: '저장', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
     await screen.findByText('일정이 저장되었습니다.');
     expect(screen.getByRole('button', { name: '저장됨' })).toBeDisabled();
 }
@@ -56,7 +56,7 @@ async function save() {
 test('휴무자만 선택해도 저장할 수 있고 메뉴 재진입·새로고침 후 복원된다', async () => {
     const view = await mountBoard();
     fireEvent.click(screen.getByRole('button', { name: '휴무자 선택' }));
-    fireEvent.click(screen.getByRole('button', { name: '검증 작업자 A', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '검증 작업자 A' }));
     fireEvent.click(screen.getByRole('button', { name: '휴무자로 분리' }));
     expect(screen.getByText('휴무자 1명')).toBeInTheDocument();
     await save();
@@ -65,7 +65,7 @@ test('휴무자만 선택해도 저장할 수 있고 메뉴 재진입·새로고
     window.localStorage.clear();
     await mountBoard();
     expect(screen.getByText('휴무자 1명')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '검증 작업자 A', exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '검증 작업자 A' })).not.toBeInTheDocument();
     expect(screen.getByText('검증 작업자 A')).toBeInTheDocument();
 });
 
@@ -73,16 +73,16 @@ test('요청에서 가져온 휴무자 전체 해제를 저장하면 재등장�
     const requests = [{ status: 'requested', offDutyWorkerIds: ['worker-a'] }];
     (fieldScheduleRequestService.listByDate as jest.Mock).mockImplementation(async () => requests);
     const view = await mountBoard();
-    fireEvent.click(screen.getByRole('button', { name: '전체 해제', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '전체 해제' }));
     await save();
     view.unmount();
     requests.push({ status: 'requested', offDutyWorkerIds: ['worker-b'] });
     const next = await mountBoard();
     expect(screen.getByText('휴무자 1명')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '검증 작업자 A', exact: true })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '검증 작업자 B', exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '검증 작업자 A' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '검증 작업자 B' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /휴무자 선택/ }));
-    fireEvent.click(screen.getByRole('button', { name: '검증 작업자 A', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '검증 작업자 A' }));
     fireEvent.click(screen.getByRole('button', { name: '휴무자로 분리' }));
     await save();
     next.unmount();
@@ -106,13 +106,13 @@ test('개별 제외를 저장하고 날짜를 왕복해도 날짜별 휴무자�
 test('저장 실패 시 저장 완료로 바뀌지 않고 선택을 유지해 재시도한다', async () => {
     stored['2026-11-08'] = { assignments: [], offDutyWorkerIds: ['worker-a'] };
     await mountBoard();
-    fireEvent.click(screen.getByRole('button', { name: '전체 해제', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '전체 해제' }));
     (dispatchService.saveDispatch as jest.Mock).mockRejectedValueOnce(new Error('offline'));
     const error = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
-        fireEvent.click(screen.getByRole('button', { name: '저장', exact: true }));
+        fireEvent.click(screen.getByRole('button', { name: '저장' }));
         await screen.findByText('저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
-        expect(screen.getByRole('button', { name: '저장', exact: true })).toBeEnabled();
+        expect(screen.getByRole('button', { name: '저장' })).toBeEnabled();
         expect(screen.queryByText('휴무자 1명')).not.toBeInTheDocument();
         await save();
     } finally { error.mockRestore(); }
