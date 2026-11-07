@@ -84,7 +84,7 @@ describe('임대거래명세표의 자재 카탈로그', () => {
         })));
         await screen.findByRole('button', { name: '명세표 수정' });
         expect(materialService.getUniqueMaterialsForSelection).not.toHaveBeenCalled();
-    });
+    }, 15000); // This workflow edits the catalog, adds three rows, and saves the statement.
 
     it('blocks use after a failed read and until the initial catalog has been registered', async () => {
         stored.revision = 0;

@@ -474,11 +474,9 @@ it.each<[TeamSettlementDeductionItem['officeExpenseRates'], number, number]>([
   const deductions = await screen.findByRole('region', { name: '공제 내역' });
   const directRow = getAdjustmentRow('직영 사무실비');
   const contractRow = getAdjustmentRow('도급 사무실비');
-  await waitFor(() => {
-    expect(within(directRow).getByDisplayValue(directAmount.toLocaleString('ko-KR'))).toBeVisible();
-    expect(within(contractRow).getByDisplayValue('100,000')).toBeVisible();
-    expect(within(deductions).getByRole('group', { name: '사무실비 합계' })).toHaveTextContent(totalAmount.toLocaleString('ko-KR') + '원');
-  });
+  expect(await within(directRow).findByDisplayValue(directAmount.toLocaleString('ko-KR'))).toBeVisible();
+  expect(await within(contractRow).findByDisplayValue('100,000')).toBeVisible();
+  expect(within(deductions).getByRole('group', { name: '사무실비 합계' })).toHaveTextContent(totalAmount.toLocaleString('ko-KR') + '원');
   for (const [row, site, excludedSite] of [[directRow, '직영 검증 현장', '도급 검증 현장'], [contractRow, '도급 검증 현장', '직영 검증 현장']] as const) {
     fireEvent.click(within(row).getByRole('button', { name: '상세' }));
     const detail = within(deductions).getByRole('table', { name: '현장별 사무실비' });
