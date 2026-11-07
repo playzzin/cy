@@ -21,6 +21,7 @@ import { iconMap } from '../../constants/iconMap';
 import { Timestamp } from 'firebase/firestore';
 import SupportSaveFeedback, { SupportSaveFeedbackState } from '../support/SupportSaveFeedback';
 import VehicleFineImportModal from './VehicleFineImportModal';
+import VehicleFinePhotos from './VehicleFinePhotos';
 import VehicleTollImportModal from './VehicleTollImportModal';
 import { OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../../utils/supportBillingPeriod';
@@ -43,9 +44,10 @@ interface EditableCellProps {
     className?: string;
     placeholder?: string;
     tdClassName?: string;
+    children?: React.ReactNode;
 }
 
-const EditableCell = memo<EditableCellProps>(({ value, onCommit, className, placeholder = '0', tdClassName }) => {
+const EditableCell = memo<EditableCellProps>(({ value, onCommit, className, placeholder = '0', tdClassName, children }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const isFocusedRef = useRef(false);
 
@@ -94,6 +96,7 @@ const EditableCell = memo<EditableCellProps>(({ value, onCommit, className, plac
                 className={className}
                 placeholder={placeholder}
             />
+            {children}
         </td>
     );
 });
@@ -2363,7 +2366,9 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                                     text-slate-700 bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-100
                                                     ${row.amounts[type] > 500000 ? 'text-red-500 font-extrabold' : ''}
                                                 `}
-                                            />
+                                            >
+                                                {type === 'FINE' && <VehicleFinePhotos expenses={getFineExpensesForRow(row)} vehiclePlate={row.vehicle.licensePlate} />}
+                                            </EditableCell>
                                         ))}
 
                                         {/* 합계 */}

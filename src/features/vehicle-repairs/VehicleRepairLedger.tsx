@@ -33,7 +33,7 @@ function AmountInput({ value, raw, label, disabled, invalid: invalidValue = fals
   const inputRef = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => { if (focused) inputRef.current?.select(); }, [focused]);
   const invalid = invalidValue || (raw !== undefined && !parseRepairAmountInput(raw).valid);
-  const text = invalid ? raw : focused ? raw ?? (value === null ? '' : String(value)) : value === null ? '' : formatRepairAmount(value);
+  const text = invalid ? raw : focused ? raw ?? (value === null ? '' : String(Math.round(value))) : value === null ? '' : formatRepairAmount(value);
   return <input ref={inputRef} type="text" inputMode="decimal" aria-label={label} aria-invalid={invalid} disabled={disabled} value={text} placeholder="—"
     onFocus={() => setFocused(true)}
     onChange={event => onChange(event.target.value)} onBlur={() => setFocused(false)} />;
@@ -304,7 +304,7 @@ export default function VehicleRepairLedger({ vehicles, teams = [], workers = []
       </table>
     </div>
     <div className="repair-footer"><span>표에서 바로 입력 · Tab 키로 다음 칸 이동</span><div><button type="button" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>이전</button><span>{currentPage} / {pages}</span><button type="button" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}>다음</button></div></div>
-    <div className="repair-guide"><strong>입력 가이드</strong><p><b>개인</b>은 입력금액 그대로, <b>법인</b>은 공급가액을 입력하면 VAT 10%를 더합니다. 금액은 소수 둘째 자리까지 반올림합니다. 기존 법인 금액과 사진의 합계는 VAT 포함 금액에서 공급가액·VAT를 나눠 표시하므로 총액이 유지됩니다.</p><p><b>정비명세서 사진 인식</b>에서 사진을 선택하고 배정팀과 합계금액을 확인하세요. 비용 구분을 선택해 대장에 추가한 뒤 <b>저장</b>을 누르세요.</p><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>직접 등록한 정비비는 차량번호가 연결된 해당 월 경비대장의 수리비에 자동 반영됩니다. 엑셀로 가져온 과거 이력은 기존 월별 수리비와 중복 합산하지 않습니다. 청구·정산 반영은 월별 경비대장에서 확인 후 저장해 주세요. 삭제한 내역은 휴지통에서 복원할 수 있습니다.</p></div>
+    <div className="repair-guide"><strong>입력 가이드</strong><p><b>개인</b>은 입력금액 그대로, <b>법인</b>은 공급가액을 입력하면 VAT 10%를 더합니다. 화면 금액은 원 단위로 반올림해 표시합니다. 기존 법인 금액과 사진의 합계는 VAT 포함 금액에서 공급가액·VAT를 나눠 표시하므로 총액이 유지됩니다.</p><p><b>정비명세서 사진 인식</b>에서 사진을 선택하고 배정팀과 합계금액을 확인하세요. 비용 구분을 선택해 대장에 추가한 뒤 <b>저장</b>을 누르세요.</p><p><b>행 추가</b>로 정비일·차량번호·정비내용·비용을 입력한 뒤 상단 <b>저장</b>을 누르세요. 기존 내역도 표에서 바로 수정할 수 있습니다. 빈 비용은 미입력, 0은 0원으로 저장됩니다.</p><p>직접 등록한 정비비는 차량번호가 연결된 해당 월 경비대장의 수리비에 자동 반영됩니다. 엑셀로 가져온 과거 이력은 기존 월별 수리비와 중복 합산하지 않습니다. 청구·정산 반영은 월별 경비대장에서 확인 후 저장해 주세요. 삭제한 내역은 휴지통에서 복원할 수 있습니다.</p></div>
 
     {photoOpen && <RepairPhotoImport vehicles={vehicles} lookup={lookupVehicle} alreadyAdded={id => Boolean(drafts[id]) || records.some(row => row.id === id)} remaining={100 - draftCount} onAdd={addPhotos} onClose={() => setPhotoOpen(false)} />}
 

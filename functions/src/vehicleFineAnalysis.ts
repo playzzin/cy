@@ -12,9 +12,29 @@ import {
     hashVehicleImportSource,
     normalizeVehicleImportSourceSha256,
     resolveVehicleImportDuplicateExpenseId,
+    isActiveVehicleImportExpense,
 } from './vehicleImportIdentity';
+import { saveVehicleFineSource, readVehicleFineSource } from './vehicleFineSource';
 
 declare const fetch: any;
+
+export const getVehicleFineNoticeAttachment = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 5 })
+    .region('asia-northeast3')
+    .https.onCall(async (data: { expenseId?: unknown }, context) => {
+        await requireVehicleFineAccess(context);
+        const expenseId = asString(data?.expenseId);
+        if (!expenseId || expenseId.includes('/') || expenseId.length > 200) {
+            throw new functions.https.HttpsError('invalid-argument', '과태료 항목을 선택해 주세요.');
+        }
+        const snapshot = await admin.firestore().collection(VEHICLE_EXPENSE_COLLECTION).doc(expenseId).get();
+        const expense = snapshot.data();
+        if (!isActiveVehicleImportExpense(snapshot) || expense?.type !== 'FINE') {
+            throw new functions.https.HttpsError('not-found', '과태료 내역을 찾을 수 없습니다. 대장을 새로고침해 주세요.');
+        }
+        return { ...await readVehicleFineSource(expense.fineNotice?.sourceSha256),
+            fileName: asString(expense.fineNotice?.sourceFileName) || '과태료 고지서' };
+    });
 
 interface FineFileInput {
     fileIndex: number;
@@ -673,7 +693,7 @@ export const analyzeVehicleFineNotices = functions
             const existingIdentitySnaps = identityRefs.length > 0
                 ? await admin.firestore().getAll(...identityRefs)
                 : [];
-            const existingIds = new Set(existingSnaps.filter((snap) => snap.exists).map((snap) => snap.id));
+            const existingIds = new Set(existingSnaps.filter(isActiveVehicleImportExpense).map((snap) => snap.id));
             const identityExpenseRefs = Array.from(new Set(existingIdentitySnaps
                 .filter((snap) => snap.exists)
                 .map((snap) => asString(snap.data()?.expenseId))
@@ -683,7 +703,7 @@ export const analyzeVehicleFineNotices = functions
                 ? await admin.firestore().getAll(...identityExpenseRefs)
                 : [];
             const validIdentityExpenseIds = new Set(identityExpenseSnaps
-                .filter((snap) => snap.exists)
+                .filter(isActiveVehicleImportExpense)
                 .map((snap) => snap.id));
             const existingIdentityExpenseIds = new Map<string, string>(existingIdentitySnaps
                 .filter((snap) => snap.exists)
@@ -722,6 +742,9 @@ export const analyzeVehicleFineNotices = functions
                 if (existingSourceExpenseId) notice.warnings.push('동일한 원본 파일이 이미 차량 과태료 대장에 등록되었습니다.');
             });
 
+            // Retain originals even for duplicates: re-analysis also restores the
+            // photo for legacy records that already contain this source hash.
+            await Promise.all(files.map((file) => saveVehicleFineSource(file)));
             functions.logger.info('Vehicle fine analysis completed', {
                 model,
                 fileCount: files.length,
@@ -812,8 +835,8 @@ export const commitVehicleFineImports = functions
                 const operationSnap = await transaction.get(operationRef);
                 const vehicleById = new Map(vehicleSnaps.map((snap) => [snap.id, snap]));
                 const existingExpenseIds = new Set([
-                    ...expenseSnaps.filter((snap) => snap.exists).map((snap) => snap.id),
-                    ...identityTargetSnaps.filter((snap) => snap.exists).map((snap) => snap.id),
+                    ...expenseSnaps.filter(isActiveVehicleImportExpense).map((snap) => snap.id),
+                    ...identityTargetSnaps.filter(isActiveVehicleImportExpense).map((snap) => snap.id),
                 ]);
                 const identityRefById = new Map(identityRefs.map((ref) => [ref.id, ref]));
                 const existingIdentityExpenseIds = new Map<string, string>(identitySnaps

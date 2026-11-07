@@ -17,6 +17,7 @@ import { officeStaffService } from '../../services/officeStaffService';
 import { render, screen, fireEvent, waitFor, within, cleanup, act } from '@testing-library/react';
 import { VehicleMonthlyLedger } from './VehicleMonthlyLedger';
 import { vehicleService } from '../../services/vehicleService';
+import { vehicleFineImportService } from '../../services/vehicleFineImportService';
 import { vehicleBillingService, isPostedVehicleBillingStatus } from '../../services/vehicleBillingService';
 import { vehicleMonthlyLedgerMutationService } from '../../services/vehicleMonthlyLedgerMutationService';
 import { teamSettlementProtectionService } from '../../services/teamSettlementProtectionService';
@@ -68,6 +69,7 @@ jest.mock('@fortawesome/free-solid-svg-icons', () => ({
 }));
 jest.mock('lucide-react', () => ({ Route: () => null, Sparkles: () => null, TriangleAlert: () => null }));
 jest.mock('../../constants/iconMap', () => ({ iconMap: {} }));
+jest.mock('../../services/vehicleFineImportService', () => ({ vehicleFineImportService: { getAttachment: jest.fn() } }));
 jest.mock('./VehicleFineImportModal', () => ({ __esModule: true, default: () => null }));
 jest.mock('./VehicleTollImportModal', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../services/vehicleMonthlyLedgerSaveCoordinator', () => {
@@ -427,4 +429,15 @@ it('ledger rejection preserves the original error, failure feedback and zero pos
   expect(screen.queryByText('대장은 저장됐지만 팀 경비 확인이 필요합니다.')).toBeNull();
   expect(screen.queryByText('대장 금액은 저장되어 있습니다. 중복되지 않으니 저장을 다시 눌러 팀별 경비 반영을 재시도해 주세요.')).toBeNull();
   expect(screen.queryByText(/팀 경비 재시도/)).toBeNull();
+});
+
+it('저장된 과태료의 사진 버튼을 열고 기존 원본 안내를 보여 주며 대장은 수정하지 않는다', async () => {
+  stored = [{ id: 'fine-photo', vehicleId: 'A', vehiclePlate: 'TEST-A', date: '2026-09-03', type: 'FINE', amount: 32000, payer: 'COMPANY', status: 'ACTIVE' }];
+  jest.mocked(vehicleFineImportService.getAttachment).mockRejectedValueOnce(new Error('원본을 다시 분석해 주세요.'));
+  await ready();
+  expect(vehicleFineImportService.getAttachment).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'TEST-A 과태료 사진 보기' }));
+  expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('다시 분석');
+  expect(vehicleFineImportService.getAttachment).toHaveBeenCalledWith('fine-photo');
+  expect(ledger).not.toHaveBeenCalled();
 });

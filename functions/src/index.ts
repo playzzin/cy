@@ -68,6 +68,7 @@ export {
 export {
     analyzeVehicleFineNotices,
     commitVehicleFineImports,
+    getVehicleFineNoticeAttachment,
 } from './vehicleFineAnalysis';
 export {
     analyzeVehicleTollUsages,

@@ -6,7 +6,24 @@ import {
     hashVehicleImportSource,
     normalizeVehicleImportSourceSha256,
     resolveVehicleImportDuplicateExpenseId,
+    isActiveVehicleImportExpense,
 } from './vehicleImportIdentity';
+
+test('cancelled and removed expenses release both semantic and source identities', () => {
+    for (const data of [{ status: 'CANCELLED' }, { status: 'ACTIVE', cancelledAt: '2026-11-01' }]) {
+        const snap = { exists: true, data: () => data };
+        const activeIds = new Set(isActiveVehicleImportExpense(snap) ? ['old-expense'] : []);
+        for (const expenseId of ['old-expense', 'changed-ai-reading']) {
+            assert.equal(resolveVehicleImportDuplicateExpenseId({ expenseId, identityId: 'source',
+                existingExpenseIds: activeIds, createdExpenseIds: new Set(),
+                existingIdentityIds: activeIds.has('old-expense') ? new Set(['source']) : new Set(),
+                existingIdentityExpenseIds: new Map([['source', 'old-expense']]), claimedIdentityExpenseIds: new Map() }), '');
+        }
+    }
+    assert.equal(isActiveVehicleImportExpense({ exists: false, data: () => undefined }), false);
+    assert.equal(isActiveVehicleImportExpense({ exists: true, data: () => ({ status: 'ACTIVE', cancelledAt: null }) }), true);
+    assert.equal(isActiveVehicleImportExpense({ exists: true, data: () => ({}) }), true);
+});
 
 test('same source bytes retain one identity independently of filename or operation', () => {
     const sourceSha256 = hashVehicleImportSource(Buffer.from('same vehicle statement').toString('base64'));
