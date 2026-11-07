@@ -97,7 +97,7 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
     const selectedRows = grouped.get(selectedDate) || [];
     const today = new Date();
     const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    return <section className="worker-history" aria-label={isSite ? '현장 출력일보' : '작업자 근무내역'}>
+    return <section className={`worker-history${isSite ? '' : ' worker-history--personal'}`} aria-label={isSite ? '현장 출력일보' : '작업자 근무내역'}>
         <header className="worker-history__header"><h3>{title}</h3>
             {!loading && !error && <p>{grouped.size}일 · <strong>{days(totalDays)}공수</strong>
                 {mode === 'list' && supportDays > 0 && <span className="worker-history__support-total"> · 지원 {days(supportDays)}공수 포함</span>}

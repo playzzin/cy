@@ -195,3 +195,30 @@
 @media (prefers-reduced-motion: reduce) {
     .worker-history__chevron { transition: none; }
 }
+
+/* Personal calendars keep the whole month compact; site/team calendars retain their detail. */
+@media screen and (max-width: 768px) {
+    .worker-history--personal { margin-top: 6px; padding: 8px; border-radius: 8px; }
+    .worker-history--personal .worker-history__header { gap: 4px; }
+    .worker-history--personal .worker-history__header h3 { font-size: 13px; }
+    .worker-history--personal .worker-history__header p { margin: 2px 0; font-size: 11px; }
+    .worker-history--personal .worker-history__calendar-heading { flex-wrap: nowrap; gap: 6px; padding: 4px 0 6px; }
+    .worker-history--personal .worker-history__calendar-heading h4 { font-size: 15px; white-space: nowrap; }
+    .worker-history--personal .worker-history__hint { margin: 3px 0 0; font-size: 10px; line-height: 1.3; }
+    .worker-history--personal .worker-history__month-total { flex-shrink: 0; gap: 3px; padding: 4px 6px; font-size: 10px; border-radius: 6px; }
+    .worker-history--personal .worker-history__month-total strong { font-size: 16px; }
+    .worker-history--personal .worker-history__calendar { border-radius: 6px; }
+    .worker-history--personal .worker-history__weekday { padding: 3px 0; font-size: 10px; line-height: 16px; }
+    .worker-history--personal .worker-history__day {
+        min-height: 44px;
+        min-height: clamp(44px, calc((100svh - 400px) / 6), 64px);
+        padding: 2px;
+        gap: 0;
+    }
+    .worker-history--personal .worker-history__day-number { min-height: 0; font-size: 10px; line-height: 12px; }
+    .worker-history--personal .worker-history__today-label { display: none; }
+    .worker-history--personal .worker-history__day-total { flex-wrap: nowrap; gap: 1px; line-height: 17px; white-space: nowrap; }
+    .worker-history--personal .worker-history__day-total strong { font-size: 14px; line-height: 17px; }
+    .worker-history--personal .worker-history__day-total small { display: none; }
+    .worker-history--personal .worker-history__day-count { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; line-height: 11px; }
+}
