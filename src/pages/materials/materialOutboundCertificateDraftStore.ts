@@ -1,5 +1,6 @@
 import { MaterialPhotoSource } from './MaterialPhotoPicker';
 import { SelectedMaterial } from './MaterialSelectionActionBar';
+import type { MaterialPhotoReference } from './MaterialPhotoViewerModal';
 
 export interface OutboundCertificatePhotoDraft {
     id: string;
@@ -12,14 +13,18 @@ export interface OutboundCertificateDraft {
     transactionDate: string;
     siteId: string;
     siteName: string;
+    siteAddress?: string;
     vehicleNumber: string;
     recipient: string;
     rentalCompanyId: string;
     rentalCompanyName: string;
+    rentalCompanyAddress?: string;
     registeredByName: string;
     items: SelectedMaterial[];
     photos: OutboundCertificatePhotoDraft[];
     createdAt: number;
+    returnTo?: '/materials/transactions';
+    photoReferences?: MaterialPhotoReference[];
 }
 
 const draftStore = new Map<string, OutboundCertificateDraft>();

@@ -171,6 +171,32 @@ describe('menuServiceV11 canonical Firestore document', () => {
     expect(JSON.stringify(reloaded)).not.toContain('/payroll/workbook-ledger-upgrade');
   });
 
+  it.each([undefined, 1])('removes the inventory page from stored menus (registration %s) without writing or removing other destinations', async registration => {
+    const retained = [
+      { text: '입출고 내역', path: '/materials/transactions' },
+      { text: '현장별 재고', path: '/materials/inventory-by-site' },
+      { text: '재고 현황', path: '/custom-inventory' },
+    ];
+    const config = { custom: { name: '사용자 메뉴', icon: 'faFolder', menuRegistrationVersion: registration,
+      menu: [{ text: '자재', sub: [
+        ...retained, '재고 현황', '재고현황', '현장일자 입출고', '현장날짜 입출고', '현장별 날짜별 입출고',
+        { text: '이전 날짜 화면', path: '/materials/transactions-by-site-date/?site=sample' },
+        { text: '이전 재고 화면', path: '/materials/inventory/?date=2026-11-01#list', sub: [{ text: '보존할 메뉴', path: '/custom-child' }] },
+      ] }],
+      headerActions: [{ text: '재고', path: '/materials/inventory' }],
+      trash: [{ text: '재고', path: '/materials/inventory' }],
+    } };
+    const original = JSON.stringify(config);
+    mockedGetDoc.mockResolvedValue(existingDoc(config) as any);
+    const loaded = await menuServiceV11.getMenuConfig();
+    const materials = loaded!.custom.menu.find(item => item.text === '자재')!;
+    expect(materials.sub).toEqual([...retained.map(item => expect.objectContaining(item)), expect.objectContaining({ path: '/custom-child' })]);
+    expect(loaded!.custom.headerActions).toEqual([]);
+    expect(loaded!.custom.trash).toEqual([]);
+    expect(mockedSetDoc).not.toHaveBeenCalled();
+    expect(JSON.stringify(config)).toBe(original);
+  });
+
   it('registers Gemini usage in an existing CEO log folder without replacing custom items or duplicating it', async () => {
     const legacy = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG));
     legacy.pos_ceo.menu = [{ text: '설정', sub: [{ text: '로그관리', sub: [{ text: '기존 기록', path: '/custom-log' }] }] }];

@@ -1,9 +1,9 @@
 /* Force Re-build: 2025-12-26 11:45 - Fixed Split Layout */
 import React, { useState, useEffect } from 'react';
+import { createInboundCertificateImageFile, createInboundPhotosPdfFile, downloadInboundFile as downloadGeneratedFile, MAX_INBOUND_CERTIFICATE_PHOTOS } from './materialInboundCertificateExport';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faArrowDown,
     faSave,
     faRotateRight,
     faFloppyDisk,
@@ -13,11 +13,8 @@ import {
     faFileInvoice,
     faDownload,
     faShareNodes,
-    faCamera,
-    faSpinner,
 } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
-import { geminiService } from '../../services/geminiService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService } from '../../services/companyService';
 import { settlementTargetService } from '../../services/settlementTargetService';
@@ -26,15 +23,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { filterCheongyeonMaterialSites } from './materialSiteFilters';
 import { handleMaterialQuantityInputKeyDown } from './materialKeyboardNavigation';
 import { sortMaterialDisplayRows } from '../../utils/materialOrdering';
-import { getMaterialMasterGroupKey, MaterialMasterGroupKey } from './materialMasterGrouping';
-import {
-    applyAnalyzedMaterialItemsToQuantities,
-    buildMaterialAnalyzeContext,
-    describeAnalyzedItem,
-    findMatchingNamedOption,
-    findMatchingSite,
-    normalizeAnalyzedDate,
-} from './materialPhotoAnalysisUtils';
+import { getMaterialMasterCategory, getMaterialMasterDisplayGroupKey, MaterialMasterDisplayGroupKey } from './materialMasterGrouping';
 import MaterialPhotoPicker, {
     deleteUploadedMaterialPhotos,
     MaterialPhotoAttachment,
@@ -43,7 +32,8 @@ import MaterialPhotoPicker, {
     uploadMaterialPhotoAttachments,
 } from './MaterialPhotoPicker';
 import MaterialSelectionActionBar, { SelectedMaterial } from './MaterialSelectionActionBar';
-import MaterialMobileSitePicker from './MaterialMobileSitePicker';
+import MaterialSearchSelect from './MaterialSearchSelect';
+import MaterialRegistrationHeader from './MaterialRegistrationHeader';
 import {
     createInboundCertificateDraftId,
     saveInboundCertificateDraft,
@@ -68,11 +58,11 @@ type InboundTempData = {
     savedAt: number;
 };
 
-type MobileMaterialGroup = MaterialMasterGroupKey;
+type MobileMaterialGroup = MaterialMasterDisplayGroupKey;
 
 const ITEMS_PER_COLUMN = 10;
 const QUICK_QUANTITY_STEPS = [-1, -10, -100, 1, 10, 100];
-const MAX_INBOUND_PHOTOS = 40;
+
 
 const createMaterialPhotoBatchId = (transactionType: 'inbound' | 'outbound') =>
     `matphoto_${transactionType}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -105,281 +95,6 @@ const getQuantityAccentClasses = (colorClass: string) => {
     };
 };
 
-type InboundCertificateInput = {
-    transactionDate: string;
-    siteName: string;
-    vehicleNumber: string;
-    supplier: string;
-    registeredByName: string;
-    items: SelectedMaterial[];
-    photos: MaterialPhotoAttachment[];
-};
-
-const sanitizeCertificateFileName = (value: unknown): string =>
-    String(value ?? '')
-        .trim()
-        .replace(/[\\/:*?"<>|]/g, '-')
-        .replace(/\s+/g, '_')
-        .slice(0, 90) || '입고증';
-
-const formatCertificateQuantity = (value: unknown): string => {
-    const numeric = Number(value || 0);
-    return Number.isFinite(numeric) ? numeric.toLocaleString('ko-KR') : '0';
-};
-
-const fitCanvasText = (ctx: CanvasRenderingContext2D, value: unknown, maxWidth: number): string => {
-    const text = String(value ?? '').trim() || '-';
-    if (ctx.measureText(text).width <= maxWidth) return text;
-
-    let next = text;
-    while (next.length > 1 && ctx.measureText(`${next}...`).width > maxWidth) {
-        next = next.slice(0, -1);
-    }
-
-    return `${next}...`;
-};
-
-const canvasToJpegFile = (canvas: HTMLCanvasElement, fileName: string): Promise<File> =>
-    new Promise((resolve, reject) => {
-        canvas.toBlob((blob) => {
-            if (!blob) {
-                reject(new Error('입고증 이미지를 만들지 못했습니다.'));
-                return;
-            }
-            resolve(new File([blob], fileName, { type: 'image/jpeg' }));
-        }, 'image/jpeg', 0.92);
-    });
-
-const downloadGeneratedFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = file.name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
-
-const loadCertificatePhoto = (file: File): Promise<{ image: HTMLImageElement; url: string }> =>
-    new Promise((resolve, reject) => {
-        const url = URL.createObjectURL(file);
-        const image = new Image();
-        image.onload = () => resolve({ image, url });
-        image.onerror = () => {
-            URL.revokeObjectURL(url);
-            reject(new Error('첨부사진을 입고증에 불러오지 못했습니다.'));
-        };
-        image.src = url;
-    });
-
-const drawContainedImage = (
-    ctx: CanvasRenderingContext2D,
-    image: HTMLImageElement,
-    x: number,
-    y: number,
-    width: number,
-    height: number
-) => {
-    const sourceWidth = image.naturalWidth || image.width;
-    const sourceHeight = image.naturalHeight || image.height;
-    if (sourceWidth <= 0 || sourceHeight <= 0) return;
-
-    const scale = Math.min(width / sourceWidth, height / sourceHeight);
-    const drawWidth = sourceWidth * scale;
-    const drawHeight = sourceHeight * scale;
-    const drawX = x + ((width - drawWidth) / 2);
-    const drawY = y + ((height - drawHeight) / 2);
-    ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
-};
-
-const createInboundCertificateImageFile = async ({
-    transactionDate,
-    siteName,
-    vehicleNumber,
-    supplier,
-    registeredByName,
-    items,
-    photos,
-}: InboundCertificateInput): Promise<File> => {
-    const width = 1080;
-    const padding = 56;
-    const metaTop = 165;
-    const metaRowHeight = 46;
-    const tableTop = metaTop + (metaRowHeight * 4) + 42;
-    const tableHeaderHeight = 50;
-    const rowHeight = 44;
-    const footerHeight = 150;
-    const photoColumns = 3;
-    const photoGap = 18;
-    const photoCellHeight = 238;
-    const photoRows = photos.length > 0 ? Math.ceil(photos.length / photoColumns) : 0;
-    const photoSectionHeight = photos.length > 0
-        ? 72 + (photoRows * photoCellHeight) + (Math.max(0, photoRows - 1) * photoGap) + 34
-        : 0;
-    const height = tableTop + tableHeaderHeight + (items.length * rowHeight) + photoSectionHeight + footerHeight + 42;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('입고증 이미지를 만들 수 없습니다.');
-
-    const tableWidth = width - (padding * 2);
-    const certificatePhotos = await Promise.all(photos.map((photo) => loadCertificatePhoto(photo.file)));
-    const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    const fileName = `${sanitizeCertificateFileName(`입고증_${transactionDate}_${siteName || '현장'}_${vehicleNumber || ''}`)}.jpg`;
-
-    try {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, width, height);
-        ctx.strokeStyle = '#111827';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(28, 28, width - 56, height - 56);
-
-        ctx.fillStyle = '#111827';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'alphabetic';
-        ctx.font = '700 54px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-        ctx.fillText('자재 입고증', width / 2, 92);
-        ctx.font = '500 24px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-        ctx.fillStyle = '#64748b';
-        ctx.fillText(`발행일 ${new Date().toLocaleDateString('ko-KR')}`, width / 2, 130);
-
-        const metaRows = [
-            ['입고일자', transactionDate || '-', '현장명', siteName || '-'],
-            ['공급업체', supplier || '-', '차량번호', vehicleNumber || '-'],
-            ['등록자', registeredByName || '-', '첨부사진', `${photos.length}장`],
-            ['총 품목', `${items.length}개`, '총 수량', formatCertificateQuantity(totalQuantity)],
-        ];
-        const metaWidths = [150, 390, 150, tableWidth - 150 - 390 - 150];
-        let y = metaTop;
-        metaRows.forEach((row) => {
-            let x = padding;
-            row.forEach((cell, index) => {
-                const widthForCell = metaWidths[index];
-                ctx.fillStyle = index % 2 === 0 ? '#f1f5f9' : '#ffffff';
-                ctx.fillRect(x, y, widthForCell, metaRowHeight);
-                ctx.strokeStyle = '#cbd5e1';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(x, y, widthForCell, metaRowHeight);
-                ctx.fillStyle = index % 2 === 0 ? '#334155' : '#111827';
-                ctx.font = `${index % 2 === 0 ? '700' : '600'} 22px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif`;
-                ctx.textAlign = index % 2 === 0 ? 'center' : 'left';
-                const textX = index % 2 === 0 ? x + (widthForCell / 2) : x + 16;
-                ctx.fillText(fitCanvasText(ctx, cell, widthForCell - 24), textX, y + 31);
-                x += widthForCell;
-            });
-            y += metaRowHeight;
-        });
-
-        const columns = [
-            { label: 'No', width: 70, align: 'center' as const },
-            { label: '품명', width: 330, align: 'left' as const },
-            { label: '규격', width: 260, align: 'left' as const },
-            { label: '수량', width: 130, align: 'right' as const },
-            { label: '단위', width: tableWidth - 70 - 330 - 260 - 130, align: 'center' as const },
-        ];
-        let x = padding;
-        y = tableTop;
-        ctx.fillStyle = '#1e293b';
-        ctx.fillRect(padding, y, tableWidth, tableHeaderHeight);
-        ctx.font = '700 22px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-        ctx.fillStyle = '#ffffff';
-        columns.forEach((column) => {
-            const textX = column.align === 'left' ? x + 14 : column.align === 'right' ? x + column.width - 14 : x + (column.width / 2);
-            ctx.textAlign = column.align;
-            ctx.fillText(column.label, textX, y + 33);
-            x += column.width;
-        });
-
-        y += tableHeaderHeight;
-        items.forEach((item, index) => {
-            x = padding;
-            ctx.fillStyle = index % 2 === 0 ? '#ffffff' : '#f8fafc';
-            ctx.fillRect(padding, y, tableWidth, rowHeight);
-            ctx.strokeStyle = '#e2e8f0';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(padding, y + rowHeight);
-            ctx.lineTo(padding + tableWidth, y + rowHeight);
-            ctx.stroke();
-
-            const values = [
-                String(index + 1),
-                item.itemName || '-',
-                item.spec || '-',
-                formatCertificateQuantity(item.quantity),
-                item.unit || '-',
-            ];
-            ctx.font = '600 21px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-            ctx.fillStyle = '#111827';
-            columns.forEach((column, columnIndex) => {
-                const textX = column.align === 'left' ? x + 14 : column.align === 'right' ? x + column.width - 14 : x + (column.width / 2);
-                ctx.textAlign = column.align;
-                ctx.fillText(fitCanvasText(ctx, values[columnIndex], column.width - 24), textX, y + 30);
-                x += column.width;
-            });
-            y += rowHeight;
-        });
-
-        if (certificatePhotos.length > 0) {
-            const photoSectionTop = y + 34;
-            ctx.fillStyle = '#111827';
-            ctx.textAlign = 'left';
-            ctx.font = '700 30px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-            ctx.fillText('첨부 사진', padding, photoSectionTop + 30);
-            ctx.font = '600 18px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-            ctx.fillStyle = '#64748b';
-            ctx.fillText(`자재 입고 확인 사진 ${certificatePhotos.length}장`, padding + 150, photoSectionTop + 30);
-
-            const photoCellWidth = (tableWidth - (photoGap * (photoColumns - 1))) / photoColumns;
-            certificatePhotos.forEach(({ image }, index) => {
-                const col = index % photoColumns;
-                const row = Math.floor(index / photoColumns);
-                const photoX = padding + (col * (photoCellWidth + photoGap));
-                const photoY = photoSectionTop + 56 + (row * (photoCellHeight + photoGap));
-                ctx.fillStyle = '#f8fafc';
-                ctx.fillRect(photoX, photoY, photoCellWidth, photoCellHeight);
-                ctx.strokeStyle = '#cbd5e1';
-                ctx.strokeRect(photoX, photoY, photoCellWidth, photoCellHeight);
-                drawContainedImage(ctx, image, photoX + 10, photoY + 10, photoCellWidth - 20, photoCellHeight - 48);
-                ctx.fillStyle = '#334155';
-                ctx.font = '700 18px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(`사진 ${index + 1}`, photoX + (photoCellWidth / 2), photoY + photoCellHeight - 16);
-            });
-            y = photoSectionTop + 56 + (photoRows * photoCellHeight) + (Math.max(0, photoRows - 1) * photoGap);
-        }
-
-        y += 70;
-        ctx.fillStyle = '#334155';
-        ctx.textAlign = 'center';
-        ctx.font = '700 25px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-        ctx.fillText('위 자재를 입고함', width / 2, y);
-        y += 76;
-        ctx.strokeStyle = '#94a3b8';
-        ctx.lineWidth = 2;
-        const signatureWidth = 280;
-        const leftSignatureX = width / 2 - signatureWidth - 72;
-        const rightSignatureX = width / 2 + 72;
-        ctx.beginPath();
-        ctx.moveTo(leftSignatureX, y);
-        ctx.lineTo(leftSignatureX + signatureWidth, y);
-        ctx.moveTo(rightSignatureX, y);
-        ctx.lineTo(rightSignatureX + signatureWidth, y);
-        ctx.stroke();
-        ctx.fillStyle = '#475569';
-        ctx.font = '700 20px "Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
-        ctx.fillText('입고 확인', leftSignatureX + signatureWidth / 2, y + 31);
-        ctx.fillText('담당 확인', rightSignatureX + signatureWidth / 2, y + 31);
-
-        return canvasToJpegFile(canvas, fileName);
-    } finally {
-        certificatePhotos.forEach((photo) => URL.revokeObjectURL(photo.url));
-    }
-};
-
 const MaterialInboundPage: React.FC = () => {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
@@ -400,13 +115,11 @@ const MaterialInboundPage: React.FC = () => {
     const [materials, setMaterials] = useState<Material[]>([]);
     const [quantities, setQuantities] = useState<Record<string, number>>({});
     const [hasTempData, setHasTempData] = useState(false);
-    const [mobileMaterialGroup, setMobileMaterialGroup] = useState<MobileMaterialGroup>('scaffolding');
+    const [mobileMaterialGroup, setMobileMaterialGroup] = useState<MobileMaterialGroup>('dongbari');
     const [mobileSelectedItemName, setMobileSelectedItemName] = useState('');
     const [photoAttachments, setPhotoAttachments] = useState<MaterialPhotoAttachment[]>([]);
     const [photoUploadProgress, setPhotoUploadProgress] = useState<number | null>(null);
     const [sharingCertificate, setSharingCertificate] = useState(false);
-    const [analyzingPhoto, setAnalyzingPhoto] = useState(false);
-    const photoAnalysisInputRef = React.useRef<HTMLInputElement | null>(null);
     const savingRef = React.useRef(false);
 
     // 임시저장 데이터 로드
@@ -606,87 +319,6 @@ const MaterialInboundPage: React.FC = () => {
         }));
     };
 
-    const handlePhotoAnalysisClick = () => {
-        photoAnalysisInputRef.current?.click();
-    };
-
-    const handlePhotoAnalysisFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const files = Array.from(event.target.files || []).filter((file) =>
-            file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(file.name)
-        );
-        event.target.value = '';
-        if (files.length === 0) {
-            alert('분석할 이미지 파일을 선택해주세요.');
-            return;
-        }
-        
-
-        setAnalyzingPhoto(true);
-        try {
-            const analysis = await geminiService.analyzeMaterialTransactionImages(
-                files,
-                buildMaterialAnalyzeContext({
-                    transactionType: 'inbound',
-                    sites,
-                    materials,
-                    rentalCompanies: rentalCompanies.map((company) => company.name).filter(Boolean),
-                })
-            );
-
-            const analyzedDate = normalizeAnalyzedDate(analysis.transactionDate);
-            if (analyzedDate) setTransactionDate(analyzedDate);
-
-            const matchedSite = findMatchingSite(sites, analysis.siteName);
-            if (matchedSite?.id) {
-                setSiteId(matchedSite.id);
-                setSiteName(matchedSite.name || '');
-            }
-
-            if (analysis.vehicleNumber?.trim()) setVehicleNumber(analysis.vehicleNumber.trim());
-            const analyzedRentalCompanyName = analysis.rentalCompanyName || analysis.supplier;
-            if (analysis.supplier?.trim()) setSupplier(analysis.supplier.trim());
-            if (analyzedRentalCompanyName?.trim()) {
-                const matchedRentalCompany = findMatchingNamedOption(
-                    rentalCompanies,
-                    (company) => company.name,
-                    analyzedRentalCompanyName
-                );
-                if (matchedRentalCompany) {
-                    setRentalCompanyId(getMaterialRentalCompanyOptionId(matchedRentalCompany));
-                    setRentalCompanyName(matchedRentalCompany.name);
-                }
-            }
-            if (analysis.notes?.trim()) {
-                setNotes((prev) => prev.trim() ? prev : analysis.notes!.trim());
-            }
-
-            const applied = applyAnalyzedMaterialItemsToQuantities({
-                analysis,
-                materials,
-                currentQuantities: quantities,
-            });
-            setQuantities(applied.nextQuantities);
-            if (applied.matchedCount > 0) setSearchFilter('');
-
-            const unmatchedPreview = applied.unmatchedItems
-                .slice(0, 5)
-                .map(describeAnalyzedItem)
-                .join(', ');
-            const messages = [
-                `사진분석 완료: ${applied.matchedCount}개 품목 적용`,
-                applied.unmatchedItems.length > 0 ? `미매칭 ${applied.unmatchedItems.length}개${unmatchedPreview ? ` (${unmatchedPreview})` : ''}` : '',
-                analysis.siteName && !matchedSite ? `현장명 "${analysis.siteName}"은 현장 목록에서 찾지 못했습니다.` : '',
-                '저장 전 수량과 현장을 확인해주세요.',
-            ].filter(Boolean);
-            alert(messages.join('\n'));
-        } catch (error: any) {
-            console.error('Failed to analyze inbound material photo:', error);
-            alert(error?.message || '사진분석에 실패했습니다.');
-        } finally {
-            setAnalyzingPhoto(false);
-        }
-    };
-
     const handleSave = async () => {
         if (!siteId) {
             alert('현장을 선택하세요.');
@@ -805,11 +437,10 @@ const MaterialInboundPage: React.FC = () => {
     // 1. Consolidate into Dongbari vs Scaffolding vs Others
     const dongbariList: Material[] = [];
     const scaffoldingList: Material[] = [];
-    const systemList: Material[] = [];
     const otherList: Material[] = [];
 
     materials.forEach(m => {
-        const cat = (m.category || '').trim();
+        const cat = [getMaterialMasterCategory(m), m.category || ''].join(' ').trim();
         const itemName = (m.itemName || '').trim();
         const spec = (m.spec || '').trim();
 
@@ -822,7 +453,7 @@ const MaterialInboundPage: React.FC = () => {
 
         if (!hasQty && !matchesSearch) return;
 
-        const groupKey = getMaterialMasterGroupKey(m);
+        const groupKey = getMaterialMasterDisplayGroupKey(m);
 
         // 1. Right Column: SCAFFOLDING (비계)
         if (groupKey === 'scaffolding') {
@@ -831,10 +462,6 @@ const MaterialInboundPage: React.FC = () => {
         // Dongbari (동바리) and Support (서포트)
         else if (groupKey === 'dongbari') {
             dongbariList.push(m);
-        }
-        // Match the standalone 시스템 group shown in the material master.
-        else if (groupKey === 'system') {
-            systemList.push(m);
         }
         // 3. Others
         else {
@@ -859,7 +486,7 @@ const MaterialInboundPage: React.FC = () => {
         { label: '입고일자', value: transactionDate },
         { label: '현장', value: siteName },
         { label: '차량번호', value: vehicleNumber },
-        { label: '공급업체', value: supplier },
+        { label: '임대사', value: rentalCompanyName },
     ];
 
     const createCurrentInboundCertificateFile = async (): Promise<File | null> => {
@@ -875,11 +502,12 @@ const MaterialInboundPage: React.FC = () => {
         return createInboundCertificateImageFile({
             transactionDate,
             siteName: siteName || sites.find((site) => site.id === siteId)?.name || '',
+            siteAddress: sites.find(site => site.id === siteId)?.address || '',
+            rentalCompanyAddress: rentalCompanies.find(company => getMaterialRentalCompanyOptionId(company) === rentalCompanyId)?.address || '',
             vehicleNumber,
-            supplier,
+            rentalCompanyName,
             registeredByName: currentUser?.displayName || currentUser?.email || '관리자',
             items: selectedMaterials,
-            photos: photoAttachments,
         });
     };
 
@@ -899,8 +527,11 @@ const MaterialInboundPage: React.FC = () => {
             transactionDate,
             siteId,
             siteName: siteName || sites.find((site) => site.id === siteId)?.name || '',
+            siteAddress: sites.find(site => site.id === siteId)?.address || '',
+            rentalCompanyAddress: rentalCompanies.find(company => getMaterialRentalCompanyOptionId(company) === rentalCompanyId)?.address || '',
             vehicleNumber,
             supplier,
+            rentalCompanyName,
             registeredByName: currentUser?.displayName || currentUser?.email || '관리자',
             items: selectedMaterials,
             photos: photoAttachments.map((photo) => ({
@@ -926,6 +557,16 @@ const MaterialInboundPage: React.FC = () => {
         } finally {
             setSharingCertificate(false);
         }
+    };
+
+    const handleDownloadInboundPhotos = async () => {
+        setSharingCertificate(true);
+        try {
+            downloadGeneratedFile(await createInboundPhotosPdfFile({ transactionDate, siteName, vehicleNumber, photos: photoAttachments }));
+        } catch (error) {
+            console.error('Failed to download inbound photos:', error);
+            alert(error instanceof Error ? error.message : '첨부사진을 저장하지 못했습니다.');
+        } finally { setSharingCertificate(false); }
     };
 
     const handleShareInboundCertificate = async () => {
@@ -962,10 +603,9 @@ const MaterialInboundPage: React.FC = () => {
     };
 
     const mobileGroupOptions = [
-        { key: 'scaffolding' as const, title: '시스템 비계', items: scaffoldingList, colorClass: 'blue' },
-        { key: 'dongbari' as const, title: '시스템 동바리', items: dongbariList, colorClass: 'blue' },
-        ...(systemList.length > 0 ? [{ key: 'system' as const, title: '시스템', items: systemList, colorClass: 'blue' }] : []),
-        ...(otherList.length > 0 ? [{ key: 'other' as const, title: '기타', items: otherList, colorClass: 'slate' }] : []),
+        { key: 'dongbari' as const, title: '동바리', items: dongbariList, colorClass: 'blue' },
+        { key: 'scaffolding' as const, title: '비계', items: scaffoldingList, colorClass: 'blue' },
+        { key: 'other' as const, title: '기타', items: otherList, colorClass: 'slate' },
     ];
     const activeMobileGroup = mobileGroupOptions.find((option) => option.key === mobileMaterialGroup && option.items.length > 0)
         || mobileGroupOptions.find((option) => option.items.length > 0);
@@ -1182,228 +822,79 @@ const MaterialInboundPage: React.FC = () => {
     if (initialLoading) return <div className="p-8 text-center">데이터 로딩 중...</div>;
 
     return (
-        <div className="mx-auto w-full max-w-[calc(100vw-30px)] space-y-4 overflow-x-hidden p-3 sm:max-w-[2100px] sm:space-y-6 sm:p-4">
-            <input
-                ref={photoAnalysisInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={handlePhotoAnalysisFileChange}
-            />
-            <div className="flex items-center justify-between sm:hidden">
-                <div className="flex items-center gap-2 text-base font-bold text-slate-800">
-                    <FontAwesomeIcon icon={faArrowDown} className="text-blue-600" />
-                    입고 등록
-                </div>
-                <div className="rounded-lg bg-blue-50 px-3 py-1.5 text-sm font-extrabold text-blue-700">
-                    선택 {selectedItemCount}개 · 총 {selectedQuantityTotal}
-                </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2 sm:hidden">
-                <button
-                    onClick={() => navigate('/materials/transactions')}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
-                >
-                    <FontAwesomeIcon icon={faEdit} />
-                    수정
-                </button>
-                <MaterialSelectionActionBar
-                    materials={selectedMaterials}
-                    tone="blue"
-                    title="입고 등록 품목"
-                    details={selectionActionDetails}
-                />
-                <button
-                    type="button"
-                    onClick={handlePhotoAnalysisClick}
-                    disabled={saving || analyzingPhoto || materials.length === 0}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm font-bold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                    <FontAwesomeIcon icon={analyzingPhoto ? faSpinner : faCamera} spin={analyzingPhoto} />
-                    {analyzingPhoto ? '분석 중' : '사진분석'}
-                </button>
-            </div>
-            <div className="hidden gap-4 sm:flex sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                        <FontAwesomeIcon icon={faArrowDown} className="text-blue-600" />
-                        입고 등록 (Inbound)
-                    </h1>
-                    <p className="text-slate-500 mt-1">시스템 비계(좌) / 시스템 동바리(우) 고정 배치</p>
-                </div>
-                <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
-                    <button
-                        onClick={() => navigate('/materials/transactions')}
-                        className="justify-center px-3 py-2.5 rounded-xl border border-slate-300 text-slate-600 font-bold hover:bg-slate-50 transition flex items-center gap-2 sm:px-4"
-                    >
-                        <FontAwesomeIcon icon={faEdit} />
-                        수정
-                    </button>
-                    <MaterialSelectionActionBar
-                        materials={selectedMaterials}
-                        tone="blue"
-                        title="입고 등록 품목"
-                        details={selectionActionDetails}
-                    />
-                    <button
-                        type="button"
-                        onClick={handlePhotoAnalysisClick}
-                        disabled={saving || analyzingPhoto || materials.length === 0}
-                        className="justify-center px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-bold hover:bg-blue-100 transition flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
-                    >
-                        <FontAwesomeIcon icon={analyzingPhoto ? faSpinner : faCamera} spin={analyzingPhoto} />
-                        {analyzingPhoto ? '분석 중...' : '사진분석'}
-                    </button>
-                    <button
-                        onClick={handleReset}
-                        disabled={saving}
-                        className="justify-center px-3 py-2.5 rounded-xl bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 transition flex items-center gap-2 disabled:opacity-50 sm:px-4"
-                    >
-                        <FontAwesomeIcon icon={faRotateRight} />
-                        초기화
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="justify-center px-3 py-2.5 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition flex items-center gap-2 disabled:opacity-50 sm:px-6"
-                    >
-                        <FontAwesomeIcon icon={faSave} />
-                        {saving ? '저장 중...' : '입고 완료'}
-                    </button>
-                </div>
-            </div>
-
-            <div className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-6">
-                {/* 1. 기본 정보 입력 (날짜, 현장, 차량번호, 공급업체) */}
-                <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl border border-blue-100 bg-blue-50/30 p-2 md:grid-cols-2 xl:grid-cols-4 sm:mb-8 sm:gap-6 sm:bg-transparent sm:p-0 sm:border-0">
-                    <div className="space-y-1 sm:space-y-2">
-                        <label className="text-xs font-bold text-slate-600 sm:text-sm">입고 일자</label>
-                        <input
-                            type="date"
-                            value={transactionDate}
-                            onChange={(e) => setTransactionDate(e.target.value)}
-                            className="h-10 w-full border border-slate-300 rounded-lg px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm sm:h-auto sm:px-4 sm:py-3"
-                        />
-                    </div>
-                    <div className="hidden space-y-1 md:block md:space-y-2">
-                        <label className="text-xs font-bold text-slate-600 sm:text-sm">현장 선택</label>
-                        <select
-                            value={siteId}
-                            onChange={(e) => handleSiteChange(e.target.value)}
-                            className="h-10 w-full border border-slate-300 rounded-lg bg-white px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm sm:h-auto sm:px-4 sm:py-3"
-                        >
-                            <option value="">현장을 선택하세요</option>
-                            {sites.map(site => (
-                                <option key={site.id} value={site.id}>{site.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <MaterialMobileSitePicker
-                        sites={sites}
-                        value={siteId}
-                        onChange={handleSiteChange}
-                        tone="blue"
-                    />
-                    <div className="space-y-1 sm:space-y-2">
-                        <label className="text-xs font-bold text-slate-600 sm:text-sm">차량번호</label>
-                        <input
-                            type="text"
-                            value={vehicleNumber}
-                            onChange={(e) => setVehicleNumber(e.target.value)}
-                            placeholder="12가3456"
-                            className="h-10 w-full border border-slate-300 rounded-lg px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm sm:h-auto sm:px-4 sm:py-3"
-                        />
-                    </div>
-                    <div className="space-y-1 sm:space-y-2">
-                        <label className="block text-xs font-bold text-slate-600 sm:text-sm">공급업체</label>
-                        <input
-                            type="text"
-                            value={supplier}
-                            onChange={(e) => setSupplier(e.target.value)}
-                            placeholder="공급업체명"
-                            className="h-10 w-full border border-slate-300 rounded-lg px-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all shadow-sm sm:h-auto sm:px-4 sm:py-3"
-                        />
-                    </div>
-                </div>
-
-                <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 sm:mb-5">
-                    <label className="mb-1 block text-xs font-bold text-indigo-800 sm:text-sm">
-                        임대사 연결 (임대사 포털 조회 기준)
-                    </label>
-                    <select
-                        value={rentalCompanyId}
-                        onChange={(event) => handleRentalCompanyChange(event.target.value)}
-                        className="h-10 w-full rounded-lg border border-indigo-200 bg-white px-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:h-auto sm:px-3 sm:py-2"
-                    >
-                        <option value="">임대사 미지정</option>
-                        {rentalCompanyId && rentalCompanyName && !rentalCompanies.some((company) =>
-                            getMaterialRentalCompanyOptionId(company) === rentalCompanyId
-                        ) && (
-                            <option value={rentalCompanyId}>{rentalCompanyName}</option>
-                        )}
-                        {rentalCompanies.map((company) => {
-                            const optionId = getMaterialRentalCompanyOptionId(company);
-                            return optionId ? <option key={optionId} value={optionId}>{company.name}</option> : null;
-                        })}
-                    </select>
-                    <p className="mt-1 text-xs font-medium text-indigo-700">
-                        지정한 임대사 계정에서는 이 거래와 연결된 현장만 조회됩니다.
-                    </p>
-                </div>
-
-                <MaterialPhotoPicker
+        <div className="mx-auto w-full max-w-[calc(100vw-30px)] space-y-3 overflow-x-hidden p-3 sm:max-w-[2100px] sm:p-4">
+            <MaterialRegistrationHeader
+                kind="inbound"
+                saving={saving}
+                onSave={handleSave}
+                additionalControls={<MaterialPhotoPicker
                     photos={photoAttachments}
                     onPhotosChange={setPhotoAttachments}
                     tone="blue"
-                    maxPhotos={MAX_INBOUND_PHOTOS}
+                    maxPhotos={MAX_INBOUND_CERTIFICATE_PHOTOS}
                     disabled={saving}
                     uploadProgress={photoUploadProgress}
-                />
-
-                <div className="mb-5 flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-sm font-extrabold text-slate-800">
-                            <FontAwesomeIcon icon={faFileInvoice} className="text-blue-600" />
-                            입고증
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
-                            <span>공급업체 {supplier || '미입력'}</span>
-                            <span>품목 {selectedItemCount}개</span>
-                            <span>사진 {photoAttachments.length}장</span>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center">
-                        <button
-                            type="button"
-                            onClick={handleOpenInboundCertificatePage}
-                            disabled={sharingCertificate || selectedMaterials.length === 0}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs font-extrabold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3 sm:text-sm"
-                        >
-                            <FontAwesomeIcon icon={faFileInvoice} />
-                            입고증 페이지
+                    compact
+                    leadingActions={<>
+                        <button type="button" onClick={() => navigate('/materials/transactions')}
+                            className="border border-slate-300 text-slate-600 hover:bg-slate-50">
+                            <FontAwesomeIcon icon={faEdit} /> 수정
                         </button>
-                        <button
-                            type="button"
-                            onClick={handleDownloadInboundCertificate}
-                            disabled={sharingCertificate || selectedMaterials.length === 0}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2.5 py-2 text-xs font-extrabold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3 sm:text-sm"
-                        >
-                            <FontAwesomeIcon icon={faDownload} />
-                            입고증 저장
+                        <MaterialSelectionActionBar materials={selectedMaterials} tone="blue"
+                            title="입고 등록 품목" details={selectionActionDetails} />
+                        <button type="button" onClick={handleReset} disabled={saving}
+                            className="bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50">
+                            <FontAwesomeIcon icon={faRotateRight} /> 초기화
                         </button>
-                        <button
-                            type="button"
-                            onClick={handleShareInboundCertificate}
+                    </>}
+                    trailingActions={<>
+                        <button type="button" onClick={handleOpenInboundCertificatePage}
                             disabled={sharingCertificate || selectedMaterials.length === 0}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-2 text-xs font-extrabold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3 sm:text-sm"
-                        >
+                            className="border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-50">
+                            <FontAwesomeIcon icon={faFileInvoice} /> 입고증 페이지
+                        </button>
+                        <button type="button" onClick={handleDownloadInboundCertificate}
+                            disabled={sharingCertificate || selectedMaterials.length === 0}
+                            className="border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                            <FontAwesomeIcon icon={faDownload} /> 입고증 저장
+                        </button>
+                        <button type="button" onClick={handleDownloadInboundPhotos}
+                            disabled={sharingCertificate || photoAttachments.length === 0}
+                            title="첨부사진 최대 40장을 A4 최대 2장으로 저장"
+                            className="border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                            <FontAwesomeIcon icon={faDownload} /> 사진 PDF 저장
+                        </button>
+                        <button type="button" onClick={handleShareInboundCertificate}
+                            disabled={sharingCertificate || selectedMaterials.length === 0}
+                            className="bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
                             <FontAwesomeIcon icon={faShareNodes} />
                             {sharingCertificate ? '준비 중...' : '카카오톡 공유'}
                         </button>
-                    </div>
+                    </>}
+                />}
+            >
+                <div className="material-registration-header__field">
+                    <label htmlFor="inbound-date">입고일자 *</label>
+                    <input id="inbound-date" type="date" value={transactionDate} onChange={event => setTransactionDate(event.target.value)} />
                 </div>
+                <div className="material-registration-header__field">
+                    <label htmlFor="inbound-site">현장 선택</label>
+                    <MaterialSearchSelect id="inbound-site" label="현장 선택" value={siteId} selectedName={siteName}
+                        options={sites.map(site => ({ id: site.id, name: site.name, description: site.address || site.code, keywords: site.code }))}
+                        placeholder="현장명 검색" onChange={handleSiteChange} disabled={saving} />
+                </div>
+                <div className="material-registration-header__field material-registration-header__vehicle">
+                    <label htmlFor="inbound-vehicle">차량번호</label>
+                    <input id="inbound-vehicle" value={vehicleNumber} onChange={event => setVehicleNumber(event.target.value)} placeholder="12가3456" />
+                </div>
+                <div className="material-registration-header__field material-registration-header__rental">
+                    <label htmlFor="inbound-rental">임대사</label>
+                    <MaterialSearchSelect id="inbound-rental" label="임대사" value={rentalCompanyId} selectedName={rentalCompanyName}
+                        options={rentalCompanies} placeholder="임대사명 검색" onChange={handleRentalCompanyChange} disabled={saving} />
+                </div>
+            </MaterialRegistrationHeader>
 
+            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                         <div className="mb-5 hidden flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between md:flex">
                             <div className="relative flex-1">
                                 <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -1440,7 +931,7 @@ const MaterialInboundPage: React.FC = () => {
                             </div>
                             <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
                                 <div className="mb-2 text-[11px] font-bold text-slate-500">1단계: 분류 선택</div>
-                                <div className="grid grid-cols-2 gap-2">
+                                <div role="group" aria-label="자재 분류" className="grid grid-cols-3 gap-2">
                                     {mobileGroupOptions.map((option) => {
                                         const active = activeMobileGroup?.key === option.key;
                                         return (
@@ -1448,7 +939,9 @@ const MaterialInboundPage: React.FC = () => {
                                                 key={option.key}
                                                 type="button"
                                                 onClick={() => setMobileMaterialGroup(option.key)}
-                                                className={`rounded-lg border px-3 py-2 text-left transition ${active
+                                                aria-pressed={active}
+                                                disabled={option.items.length === 0}
+                                                className={`rounded-lg border px-3 py-2 text-left transition disabled:opacity-40 ${active
                                                     ? 'border-blue-500 bg-white text-blue-700 shadow-sm'
                                                     : 'border-slate-200 bg-white text-slate-600'
                                                     }`}
@@ -1465,8 +958,7 @@ const MaterialInboundPage: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* 2. Side-by-Side Layout: Scaffolding (Left) | Dongbari (Right) */}
-                        {/* 2. Vertical Layout: Scaffolding (Row 1) -> Dongbari (Row 2) */}
+                        {/* 동바리 → 비계 → 기타 순서로 표시 */}
                         <div className="mb-6 md:hidden">
                             {activeMobileGroup
                                 ? renderSection(activeMobileGroup.title, activeMobileGroup.items, activeMobileGroup.colorClass, mobileGroupOptions.findIndex((option) => option.key === activeMobileGroup.key))
@@ -1477,26 +969,18 @@ const MaterialInboundPage: React.FC = () => {
                                 )}
                         </div>
                         <div className="mb-6 hidden flex-col gap-6 md:flex">
-                            {/* Row 1: System Scaffolding */}
                             <div className="w-full">
-                                {renderSection('시스템 비계', scaffoldingList, 'blue', 0)}
+                                {renderSection('동바리', dongbariList, 'blue', 0)}
                             </div>
 
-                            {/* Row 2: System Dongbari */}
                             <div className="w-full">
-                                {renderSection('시스템 동바리', dongbariList, 'blue', 1)}
+                                {renderSection('비계', scaffoldingList, 'blue', 1)}
                             </div>
-
-                            {systemList.length > 0 && (
-                                <div className="w-full">
-                                    {renderSection('시스템', systemList, 'blue', 2)}
-                                </div>
-                            )}
 
                             {/* Others */}
                             {otherList.length > 0 && (
                                 <div className="w-full">
-                                    {renderSection('기타 및 소모품', otherList, 'slate', 3)}
+                                    {renderSection('기타', otherList, 'slate', 2)}
                                 </div>
                             )}
                         </div>

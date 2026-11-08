@@ -7,10 +7,8 @@ import { matchesMenuPosition } from '../../utils/menuPosition';
 import {
     faArrowDown,
     faArrowUp,
-    faBoxes,
     faBoxesStacked,
     faBuilding,
-    faCalendar,
     faClipboardList,
     faHistory,
 } from '@fortawesome/free-solid-svg-icons';
@@ -39,21 +37,6 @@ const materialTabs = [
         label: '입출고 내역',
         icon: faClipboardList,
         description: '조회/수정',
-        officeOnly: true,
-    },
-    {
-        to: '/materials/transactions-by-site-date',
-        label: '현장·일자',
-        icon: faCalendar,
-        description: '입출고 묶음',
-        officeOnly: true,
-    },
-    {
-        to: '/materials/inventory',
-        label: '재고 현황',
-        icon: faBoxes,
-        description: '전체 재고',
-        officeOnly: true,
     },
     {
         to: '/materials/inventory-by-site',
@@ -78,8 +61,7 @@ const MaterialManagementPage: React.FC = () => {
     const showOfficeTabs = currentPosition === 'full'
         || matchesMenuPosition('office', '사무실', currentPosition)
         || matchesMenuPosition('office', '사무실', currentPositionData?.name);
-    const visibleTabs = materialTabs.filter((tab) => (showOfficeTabs || !tab.officeOnly)
-        && (canManage || ['/materials/master', '/materials/inbound', '/materials/outbound'].includes(tab.to)));
+    const visibleTabs = materialTabs.filter((tab) => !tab.officeOnly || (showOfficeTabs && canManage));
     const normalizedPath = location.pathname.replace(/\/+$/, '');
     const isFieldGoodsPage = normalizedPath === '/materials/field-goods';
 
@@ -92,7 +74,7 @@ const MaterialManagementPage: React.FC = () => {
             <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
                 <div className="mx-auto max-w-[2100px] px-2 py-1.5 sm:px-4 sm:py-3">
                     <div className="flex flex-col gap-1.5 xl:flex-row xl:items-center xl:justify-between">
-                        <div className="hidden min-w-0 sm:block">
+                        <div className="hidden min-w-0 shrink-0 sm:block">
                             <div className="text-xs font-bold uppercase tracking-wide text-indigo-600">
                                 Materials
                             </div>
@@ -101,7 +83,7 @@ const MaterialManagementPage: React.FC = () => {
                             </h1>
                         </div>
 
-                        <nav className={`grid ${showOfficeTabs && canManage ? 'grid-cols-4' : 'grid-cols-3'} gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0`} aria-label="자재관리 메뉴">
+                        <nav className="grid min-w-0 max-w-full grid-cols-4 gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0" aria-label="자재관리 메뉴">
                             {visibleTabs.map((tab, index) => (
                                 <NavLink
                                     key={tab.to}
@@ -110,8 +92,8 @@ const MaterialManagementPage: React.FC = () => {
                                     className={({ isActive }) =>
                                         [
                                             index > 3 ? 'hidden sm:flex' : 'flex',
-                                            showOfficeTabs ? 'px-2' : 'flex-col px-1 sm:flex-row',
-                                            'group min-w-0 items-center justify-center gap-1.5 rounded-lg border py-1.5 text-center transition sm:min-w-[132px] sm:justify-start sm:gap-3 sm:px-3 sm:py-2 sm:text-left',
+                                            'flex-col px-0.5 sm:flex-row',
+                                            'group min-w-0 items-center justify-center gap-1.5 rounded-lg border py-1.5 text-center transition sm:min-w-[132px] sm:shrink-0 sm:justify-start sm:gap-3 sm:px-3 sm:py-2 sm:text-left',
                                             isActive
                                                 ? 'active border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
                                                 : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
@@ -122,7 +104,7 @@ const MaterialManagementPage: React.FC = () => {
                                         <FontAwesomeIcon icon={tab.icon} />
                                     </span>
                                     <span className="min-w-0">
-                                        <span className="block whitespace-nowrap text-xs font-bold sm:text-sm">
+                                        <span className="block whitespace-nowrap text-[10px] font-bold sm:text-sm">
                                             {tab.label}
                                         </span>
                                         <span className="hidden whitespace-nowrap text-xs text-slate-400 sm:block">

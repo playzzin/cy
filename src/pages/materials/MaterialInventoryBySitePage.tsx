@@ -11,6 +11,7 @@ import {
     MaterialSiteStatusFilter
 } from './materialSiteFilters';
 import { compareMaterialDisplayRows } from '../../utils/materialOrdering';
+import MaterialInventoryTable from './MaterialInventoryTable';
 
 const MaterialInventoryBySitePage: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -76,7 +77,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
         .sort(([categoryA], [categoryB]) => compareMaterialDisplayRows({ category: categoryA }, { category: categoryB }));
 
     return (
-        <div className="p-6 max-w-[2200px] mx-auto bg-slate-50 min-h-screen">
+        <div data-inventory-page className="p-3 sm:p-6 max-w-[2200px] mx-auto bg-slate-50 min-h-screen">
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
@@ -89,7 +90,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
 
             {/* 현장 선택 */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                         <label className="block text-sm font-bold text-slate-700 mb-2">현장구분</label>
                         <select
@@ -180,23 +181,22 @@ const MaterialInventoryBySitePage: React.FC = () => {
                                 <h3 className="text-lg font-bold text-slate-800 mb-3 bg-indigo-50 px-4 py-2 rounded-lg">
                                     🏗️ {category}
                                 </h3>
-                                <div className="overflow-auto min-h-[720px] max-h-[calc(100vh-240px)]">
-                                    <table className="w-full min-w-[1080px] text-sm">
-                                        <thead className="bg-slate-100 border-b border-slate-300 sticky top-0 z-10">
+                                <MaterialInventoryTable variant="site" label={`${category} 재고 목록`}>
+                                        <thead className="bg-slate-100">
                                             <tr>
-                                                <th className="px-3 py-1.5 text-left font-bold text-slate-700 sticky left-0 z-10 bg-slate-100 min-w-[220px]">품명</th>
-                                                <th className="px-3 py-1.5 text-left font-bold text-slate-700 sticky left-[220px] z-10 bg-slate-100 min-w-[180px]">규격</th>
+                                                <th data-frozen-column="1" className="px-3 py-1.5 text-left font-bold text-slate-700 bg-slate-100">품명</th>
+                                                <th data-frozen-column="2" className="px-3 py-1.5 text-left font-bold text-slate-700 bg-slate-100">규격</th>
                                                 <th className="px-3 py-1.5 text-right font-bold text-slate-700">입고</th>
                                                 <th className="px-3 py-1.5 text-right font-bold text-slate-700">출고</th>
                                                 <th className="px-3 py-1.5 text-right font-bold text-slate-700 bg-green-50">현재고</th>
                                                 <th className="px-3 py-1.5 text-center font-bold text-slate-700">단위</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-slate-200">
+                                        <tbody>
                                             {categoryInventories.map(inv => (
-                                                <tr key={`${inv.materialKey || inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
-                                                    <td className="px-3 py-1 sticky left-0 z-10 bg-white font-semibold">{inv.itemName}</td>
-                                                    <td className="px-3 py-1 sticky left-[220px] z-10 bg-white">{inv.spec}</td>
+                                                <tr key={`${inv.materialKey || inv.materialId}-${inv.siteId}`} className="inventory-data-row hover:bg-slate-50">
+                                                    <td data-frozen-column="1" className="px-3 py-1 bg-white font-semibold">{inv.itemName}</td>
+                                                    <td data-frozen-column="2" className="px-3 py-1 bg-white">{inv.spec}</td>
                                                     <td className="px-3 py-1 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
                                                     <td className="px-3 py-1 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
                                                     <td className="px-3 py-1 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
@@ -204,8 +204,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
                                                 </tr>
                                             ))}
                                         </tbody>
-                                    </table>
-                                </div>
+                                </MaterialInventoryTable>
                             </div>
                         ))}
                     </div>

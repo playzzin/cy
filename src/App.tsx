@@ -41,8 +41,6 @@ const MaterialOutboundPage = React.lazy(() => import('./pages/materials/Material
 const MaterialInboundCertificatePage = React.lazy(() => import('./pages/materials/MaterialInboundCertificatePage'));
 const MaterialOutboundCertificatePage = React.lazy(() => import('./pages/materials/MaterialOutboundCertificatePage'));
 const MaterialTransactionsPage = React.lazy(() => import('./pages/materials/MaterialTransactionsPage'));
-const MaterialTransactionsBySiteDatePage = React.lazy(() => import('./pages/materials/MaterialTransactionsBySiteDatePage'));
-const MaterialInventoryPage = React.lazy(() => import('./pages/materials/MaterialInventoryPage'));
 const MaterialInventoryBySitePage = React.lazy(() => import('./pages/materials/MaterialInventoryBySitePage'));
 const ActivityCenterPage = React.lazy(() => import('./features/activity-center/ActivityCenterPage'));
 const FieldGoodsProgramPage = React.lazy(() => import('./pages/materials/FieldGoodsProgramPage'));
@@ -686,8 +684,8 @@ const App: React.FC = () => {
               <Route path="inbound-certificate" element={<MaterialInboundCertificatePage />} />
               <Route path="outbound-certificate" element={<MaterialOutboundCertificatePage />} />
               <Route path="transactions" element={<MaterialTransactionsPage />} />
-              <Route path="transactions-by-site-date" element={<MaterialTransactionsBySiteDatePage />} />
-              <Route path="inventory" element={<MaterialInventoryPage />} />
+              <Route path="transactions-by-site-date" element={<Navigate to="/materials/transactions" replace />} />
+              <Route path="inventory" element={<Navigate to="/materials/transactions" replace />} />
               <Route path="inventory-by-site" element={<MaterialInventoryBySitePage />} />
               <Route path="logs" element={<ActivityCenterPage />} />
               <Route path="field-goods" element={<FieldGoodsProgramPage />} />

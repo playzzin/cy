@@ -1,0 +1,15 @@
+.material-search-select { position: relative; min-width: 0; }
+.material-search-select__input { display: block; box-sizing: border-box; width: 100%; min-width: 0; height: 38px; padding: 0 28px 0 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: white; color: #0f172a; font-size: 13px; outline: none; }
+.material-search-select__input:focus { border-color: #6366f1; box-shadow: 0 0 0 2px #e0e7ff; }
+.material-registration-header__field .material-search-select__input { padding-right: 28px; }
+.material-search-select__icon { pointer-events: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
+.material-search-select__menu { position: fixed; z-index: 1000; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; border: 1px solid #cbd5e1; border-radius: 8px; padding: 4px; background: white; box-shadow: 0 8px 24px #0f172a26; font-size: 13px; color: #0f172a; }
+.material-search-select__option { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 9px 10px; border-radius: 5px; cursor: pointer; }
+.material-search-select__option.is-active { background: #eef2ff; color: #3730a3; }
+.material-search-select__option[aria-selected=true] { font-weight: 700; }
+.material-search-select__option svg { flex-shrink: 0; }
+.material-search-select__name { min-width: 0; overflow-wrap: anywhere; }
+.material-search-select__description { display: block; margin-top: 2px; color: #64748b; font-size: 11px; font-weight: 400; }
+.material-search-select__clear { display: block; width: 100%; min-height: 36px; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; color: #64748b; text-align: left; font-size: 12px; }
+.material-search-select__clear:hover { background: #f8fafc; }
+.material-search-select__empty { margin: 0; padding: 18px 10px; text-align: center; color: #64748b; }

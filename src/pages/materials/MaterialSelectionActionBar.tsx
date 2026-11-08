@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCopy, faPaperPlane, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { Material } from '../../types/materials';
-import { getMaterialGroupKey, MaterialGroupKey, sortMaterialDisplayRows } from '../../utils/materialOrdering';
+import { sortMaterialDisplayRows } from '../../utils/materialOrdering';
+import { getMaterialMasterDisplayGroupKey, MATERIAL_MASTER_CATEGORIES, MaterialMasterDisplayGroupKey } from './materialMasterGrouping';
 
 export type SelectedMaterial = Material & { quantity: number };
 
@@ -15,13 +16,7 @@ type MaterialSelectionActionBarProps = {
 
 const NUMBER_FORMATTER = new Intl.NumberFormat('ko-KR');
 
-const GROUP_LABELS: Record<MaterialGroupKey, string> = {
-    scaffolding: '시스템 비계',
-    dongbari: '시스템 동바리',
-    other: '기타 및 소모품',
-};
-
-const GROUP_ORDER: MaterialGroupKey[] = ['scaffolding', 'dongbari', 'other'];
+const GROUP_ORDER: MaterialMasterDisplayGroupKey[] = ['dongbari', 'scaffolding', 'other'];
 
 const TONE_STYLES = {
     blue: {
@@ -72,10 +67,10 @@ const MaterialSelectionActionBar: React.FC<MaterialSelectionActionBarProps> = ({
     const totalQuantity = sortedMaterials.reduce((sum, material) => sum + material.quantity, 0);
     const disabled = sortedMaterials.length === 0 || busyAction !== null;
     const groupedMaterials = useMemo(() => GROUP_ORDER.map((groupKey) => {
-        const rows = sortedMaterials.filter((material) => getMaterialGroupKey(material) === groupKey);
+        const rows = sortedMaterials.filter((material) => getMaterialMasterDisplayGroupKey(material) === groupKey);
 
         return {
-            title: GROUP_LABELS[groupKey],
+            title: MATERIAL_MASTER_CATEGORIES[groupKey],
             rows,
         };
     }).filter((group) => group.rows.length > 0), [sortedMaterials]);

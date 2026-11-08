@@ -223,7 +223,7 @@ it('직접 링크를 복원하고 사업 내용 전체를 모션 소개 영역 �
     const view = open('?module=material-rental');
     const detail = screen.getByRole('region', { name: '시스템 자재임대' });
     expect(within(screen.getByRole('region', { name: /^현장의 시작부터/ })).getByRole('region', { name: '시스템 자재임대' })).toBe(detail);
-    expect(screen.getByRole('link', { name: '자재 재고 보기' })).toHaveAttribute('href', '/materials/inventory');
+    expect(screen.getByRole('link', { name: '자재 재고 보기' })).toHaveAttribute('href', '/materials/inventory-by-site');
     view.unmount();
     open('?module=unknown');
     expect(screen.getByRole('region', { name: '시스템 동바리비계 시공' })).toBeInTheDocument();

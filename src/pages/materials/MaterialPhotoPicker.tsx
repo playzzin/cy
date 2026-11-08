@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, Images, Paperclip, X } from 'lucide-react';
 import { storageService } from '../../services/storageService';
+import './MaterialPhotoPicker.css';
 
 export type MaterialPhotoSource = 'camera' | 'gallery';
 
@@ -290,6 +291,9 @@ interface MaterialPhotoPickerProps {
     disabled?: boolean;
     uploadProgress?: number | null;
     maxPhotos?: number;
+    compact?: boolean;
+    leadingActions?: React.ReactNode;
+    trailingActions?: React.ReactNode;
 }
 
 const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
@@ -299,6 +303,9 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
     disabled = false,
     uploadProgress = null,
     maxPhotos = DEFAULT_MAX_MATERIAL_PHOTOS,
+    compact = false,
+    leadingActions,
+    trailingActions,
 }) => {
     const cameraInputRef = useRef<HTMLInputElement | null>(null);
     const galleryInputRef = useRef<HTMLInputElement | null>(null);
@@ -362,7 +369,7 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
     };
 
     return (
-        <section className={`mb-5 rounded-xl border ${classes.border} ${classes.bg} p-3`}>
+        <section className={compact ? 'material-photo-picker material-photo-picker--compact' : `material-photo-picker mb-5 rounded-xl border ${classes.border} ${classes.bg} p-3`}>
             <input
                 ref={cameraInputRef}
                 type="file"
@@ -380,47 +387,51 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
                 onChange={(event) => handleInputChange(event, 'gallery')}
             />
 
-            <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                    <div className={`flex items-center gap-1.5 text-sm font-black ${classes.text}`}>
-                        <Paperclip size={16} />
-                        사진 첨부
+            <div className={compact ? 'material-photo-picker__toolbar' : ''}>
+                {leadingActions}
+                <div className={compact ? 'material-photo-picker__summary' : 'flex items-center justify-between gap-3'}>
+                    <div className="min-w-0">
+                        <div className={`flex items-center gap-1.5 text-sm font-black ${classes.text}`}>
+                            <Paperclip size={16} />
+                            {compact ? `사진 ${photos.length}/${photoLimit}` : '사진 첨부'}
+                        </div>
+                        {!compact && <div className="mt-0.5 text-xs font-semibold text-slate-500">
+                            촬영 또는 갤러리 선택, 최대 {photoLimit}장
+                        </div>}
                     </div>
-                    <div className="mt-0.5 text-xs font-semibold text-slate-500">
-                        촬영 또는 갤러리 선택, 최대 {photoLimit}장
-                    </div>
+                    {photos.length > 0 ? (
+                        <button
+                            type="button"
+                            onClick={clearPhotos}
+                            disabled={disabled}
+                            className="shrink-0 text-xs font-black text-slate-500 hover:text-slate-800 disabled:text-slate-300"
+                        >
+                            {compact ? '사진 전체삭제' : '전체삭제'}
+                        </button>
+                    ) : null}
                 </div>
-                {photos.length > 0 ? (
+
+                <div className={compact ? 'material-photo-picker__buttons' : 'mt-3 grid grid-cols-2 gap-2'}>
                     <button
                         type="button"
-                        onClick={clearPhotos}
-                        disabled={disabled}
-                        className="shrink-0 text-xs font-black text-slate-500 hover:text-slate-800 disabled:text-slate-300"
+                        onClick={() => cameraInputRef.current?.click()}
+                        disabled={disabled || photos.length >= photoLimit}
+                        className={`flex h-11 items-center justify-center gap-2 rounded-lg text-sm font-black transition disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 ${classes.primary}`}
                     >
-                        전체삭제
+                        <Camera size={17} />
+                        사진 촬영
                     </button>
-                ) : null}
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                    type="button"
-                    onClick={() => cameraInputRef.current?.click()}
-                    disabled={disabled || photos.length >= photoLimit}
-                    className={`flex h-11 items-center justify-center gap-2 rounded-lg text-sm font-black transition disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 ${classes.primary}`}
-                >
-                    <Camera size={17} />
-                    사진 촬영
-                </button>
-                <button
-                    type="button"
-                    onClick={() => galleryInputRef.current?.click()}
-                    disabled={disabled || photos.length >= photoLimit}
-                    className={`flex h-11 items-center justify-center gap-2 rounded-lg border text-sm font-black transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 ${classes.button}`}
-                >
-                    <Images size={17} />
-                    갤러리 선택
-                </button>
+                    <button
+                        type="button"
+                        onClick={() => galleryInputRef.current?.click()}
+                        disabled={disabled || photos.length >= photoLimit}
+                        className={`flex h-11 items-center justify-center gap-2 rounded-lg border text-sm font-black transition disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 ${classes.button}`}
+                    >
+                        <Images size={17} />
+                        갤러리 선택
+                    </button>
+                </div>
+                {trailingActions}
             </div>
 
             {limitMessage ? (

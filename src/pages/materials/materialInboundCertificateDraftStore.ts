@@ -12,8 +12,11 @@ export interface InboundCertificateDraft {
     transactionDate: string;
     siteId: string;
     siteName: string;
+    siteAddress?: string;
     vehicleNumber: string;
     supplier: string;
+    rentalCompanyName?: string;
+    rentalCompanyAddress?: string;
     registeredByName: string;
     items: SelectedMaterial[];
     photos: InboundCertificatePhotoDraft[];

@@ -5,6 +5,7 @@ export interface MaterialRentalCompanyOption {
     id: string;
     name: string;
     source: 'company' | 'settlementTarget';
+    address?: string;
 }
 
 const trimText = (value: unknown): string => String(value ?? '').trim();
@@ -42,6 +43,7 @@ export const buildMaterialRentalCompanyOptions = (
                 id: trimText(company.id || company.legacyId || name),
                 name,
                 source: 'company',
+                ...(trimText(company.address) ? { address: trimText(company.address) } : {}),
             });
         });
 
@@ -49,10 +51,13 @@ export const buildMaterialRentalCompanyOptions = (
         .filter((target) => target.targetType === 'rental_company' && target.status !== 'inactive')
         .forEach((target) => {
             const name = trimText(target.companyName || target.name);
+            const linkedCompany = (target.companyId ? companies.find(company => company.id === target.companyId) : undefined)
+                || companies.find(company => normalizeOptionKey(company.name) === normalizeOptionKey(name));
             addOption({
                 id: `settlementTarget:${trimText(target.id || target.companyId || name)}`,
                 name,
                 source: 'settlementTarget',
+                ...(trimText(linkedCompany?.address) ? { address: trimText(linkedCompany?.address) } : {}),
             });
         });
 

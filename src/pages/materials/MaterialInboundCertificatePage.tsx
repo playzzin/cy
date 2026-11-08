@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import html2canvas from 'html2canvas';
+import { createInboundCertificateImageFile, createInboundPhotosPdfFile, downloadInboundFile, getInboundCertificateDetails, getInboundPhotoPageLayouts } from './materialInboundCertificateExport';
+import './MaterialCertificatePage.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowLeft,
@@ -16,39 +17,9 @@ import {
 
 const numberFormatter = new Intl.NumberFormat('ko-KR');
 
-const sanitizeFileName = (value: unknown): string =>
-    String(value ?? '')
-        .trim()
-        .replace(/[\\/:*?"<>|]/g, '-')
-        .replace(/\s+/g, '_')
-        .slice(0, 90) || '입고증';
-
-const canvasToJpegFile = (canvas: HTMLCanvasElement, fileName: string): Promise<File> =>
-    new Promise((resolve, reject) => {
-        canvas.toBlob((blob) => {
-            if (!blob) {
-                reject(new Error('입고증 이미지를 만들지 못했습니다.'));
-                return;
-            }
-            resolve(new File([blob], fileName, { type: 'image/jpeg' }));
-        }, 'image/jpeg', 0.92);
-    });
-
-const downloadFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = file.name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
-
 const MaterialInboundCertificatePage: React.FC = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const certificateRef = useRef<HTMLDivElement | null>(null);
     const [draft, setDraft] = useState<InboundCertificateDraft | null>(null);
     const [photoUrls, setPhotoUrls] = useState<Array<{ id: string; url: string; name: string }>>([]);
     const [exporting, setExporting] = useState(false);
@@ -76,30 +47,26 @@ const MaterialInboundCertificatePage: React.FC = () => {
         };
     }, [draft]);
 
-    const totalQuantity = useMemo(
-        () => draft?.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || 0,
-        [draft]
-    );
-
     const createCertificateFile = async (): Promise<File> => {
-        if (!certificateRef.current || !draft) {
-            throw new Error('입고증 페이지가 준비되지 않았습니다.');
-        }
+        if (!draft) throw new Error('입고증 페이지가 준비되지 않았습니다.');
+        return createInboundCertificateImageFile(draft);
+    };
 
-        const canvas = await html2canvas(certificateRef.current, {
-            backgroundColor: '#ffffff',
-            scale: 2,
-            useCORS: true,
-        } as unknown as Parameters<typeof html2canvas>[1]);
-        const fileName = `${sanitizeFileName(`입고증_${draft.transactionDate}_${draft.siteName}_${draft.vehicleNumber}`)}.jpg`;
-        return canvasToJpegFile(canvas, fileName);
+    const handleDownloadPhotos = async () => {
+        if (!draft) return;
+        setExporting(true);
+        try { downloadInboundFile(await createInboundPhotosPdfFile(draft)); }
+        catch (error) {
+            console.error('Failed to download inbound photos:', error);
+            alert(error instanceof Error ? error.message : '첨부사진을 저장하지 못했습니다.');
+        } finally { setExporting(false); }
     };
 
     const handleDownload = async () => {
         setExporting(true);
         try {
             const file = await createCertificateFile();
-            downloadFile(file);
+            downloadInboundFile(file);
         } catch (error) {
             console.error('Failed to download inbound certificate page:', error);
             alert('입고증 이미지를 저장하지 못했습니다.');
@@ -122,7 +89,7 @@ const MaterialInboundCertificatePage: React.FC = () => {
                 return;
             }
 
-            downloadFile(file);
+            downloadInboundFile(file);
             alert('이 브라우저에서는 파일 공유를 지원하지 않아 입고증 이미지를 저장했습니다.');
         } catch (error: any) {
             if (error?.name !== 'AbortError') {
@@ -188,7 +155,7 @@ const MaterialInboundCertificatePage: React.FC = () => {
                     <FontAwesomeIcon icon={faArrowLeft} />
                     입고 등록으로
                 </button>
-                <div className="grid grid-cols-3 gap-2 sm:flex">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                     <button
                         type="button"
                         onClick={() => window.print()}
@@ -204,7 +171,11 @@ const MaterialInboundCertificatePage: React.FC = () => {
                         className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
                     >
                         <FontAwesomeIcon icon={faDownload} />
-                        이미지 저장
+                        입고증 저장
+                    </button>
+                    <button type="button" onClick={handleDownloadPhotos} disabled={exporting || draft.photos.length === 0}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                        <FontAwesomeIcon icon={faDownload} /> 사진 PDF 저장
                     </button>
                     <button
                         type="button"
@@ -220,38 +191,18 @@ const MaterialInboundCertificatePage: React.FC = () => {
 
             <div
                 id="inbound-certificate-print"
-                ref={certificateRef}
                 className="mx-auto max-w-5xl bg-white p-5 text-slate-900 shadow-xl ring-1 ring-slate-200 sm:p-8"
             >
                 <div className="border-[3px] border-slate-900 p-5 sm:p-7">
                     <div className="text-center">
                         <h1 className="text-3xl font-black tracking-normal text-slate-950 sm:text-5xl">자재 입고증</h1>
-                        <div className="mt-2 text-sm font-semibold text-slate-500">
-                            발행일 {new Date().toLocaleDateString('ko-KR')}
-                        </div>
                     </div>
 
-                    <div className="mt-7 grid grid-cols-1 overflow-hidden border border-slate-300 text-sm sm:grid-cols-4">
-                        {[
-                            ['입고일자', draft.transactionDate || '-'],
-                            ['현장명', draft.siteName || '-'],
-                            ['공급업체', draft.supplier || '-'],
-                            ['차량번호', draft.vehicleNumber || '-'],
-                            ['등록자', draft.registeredByName || '-'],
-                            ['총 품목', `${draft.items.length}개`],
-                            ['총 수량', numberFormatter.format(totalQuantity)],
-                            ['첨부사진', `${photoUrls.length}장`],
-                        ].map(([label, value]) => (
-                            <React.Fragment key={label}>
-                                <div className="border-b border-r border-slate-300 bg-slate-100 px-3 py-2 text-center font-black text-slate-700">
-                                    {label}
-                                </div>
-                                <div className="border-b border-r border-slate-300 px-3 py-2 font-bold text-slate-950">
-                                    {value}
-                                </div>
-                            </React.Fragment>
-                        ))}
-                    </div>
+                    <dl className="material-certificate-details">
+                        {getInboundCertificateDetails(draft).map(field => <div key={field.label} className={field.wide ? 'material-certificate-details__wide' : ''}>
+                            <dt>{field.label}</dt><dd>{field.value || '-'}</dd>
+                        </div>)}
+                    </dl>
 
                     <div className="mt-7 overflow-hidden border border-slate-300">
                         <table className="w-full table-fixed text-sm">
@@ -278,50 +229,30 @@ const MaterialInboundCertificatePage: React.FC = () => {
                         </table>
                     </div>
 
-                    <div className="mt-8">
-                        <div className="flex items-end justify-between border-b-2 border-slate-900 pb-2">
-                            <div>
-                                <h2 className="text-2xl font-black text-slate-950">첨부 사진</h2>
-                                <p className="mt-1 text-sm font-semibold text-slate-500">자재 입고 및 현장 반입 확인 사진</p>
-                            </div>
-                            <div className="text-sm font-black text-slate-700">{photoUrls.length}장</div>
-                        </div>
-
-                        {photoUrls.length > 0 ? (
-                            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                                {photoUrls.map((photo, index) => (
-                                    <figure key={photo.id} className="break-inside-avoid overflow-hidden border border-slate-300 bg-white">
-                                        <div className="flex aspect-[4/3] items-center justify-center bg-slate-100">
-                                            <img
-                                                src={photo.url}
-                                                alt={`입고 사진 ${index + 1}`}
-                                                className="h-full w-full object-contain"
-                                            />
-                                        </div>
-                                        <figcaption className="border-t border-slate-200 px-3 py-2 text-center text-sm font-black text-slate-700">
-                                            사진 {index + 1}
-                                        </figcaption>
-                                    </figure>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="mt-4 border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm font-bold text-slate-500">
-                                첨부된 사진이 없습니다.
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="mt-10 text-center text-lg font-bold text-slate-700">위 자재를 입고함</div>
+                    <div className="mt-10 text-center text-lg font-bold text-slate-700">위 자재를 입고함.</div>
                     <div className="mt-12 grid grid-cols-2 gap-16 px-10 text-center text-sm font-black text-slate-600">
                         <div>
                             <div className="border-t-2 border-slate-400 pt-3">입고 확인</div>
                         </div>
                         <div>
-                            <div className="border-t-2 border-slate-400 pt-3">담당 확인</div>
+                            <div className="border-t-2 border-slate-400 pt-3">담당자 확인</div>
                         </div>
                     </div>
                 </div>
             </div>
+            <section className="no-print material-certificate-photo-preview mx-auto mt-6 max-w-5xl" aria-label="첨부사진 미리보기">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div><h2 className="text-xl font-bold">첨부사진 {photoUrls.length}장</h2><p className="mt-1 text-sm text-slate-500">입고증과 별도 파일로 저장됩니다. 최대 40장 · A4 최대 2페이지</p></div>
+                    <button type="button" onClick={handleDownloadPhotos} disabled={exporting || !draft.photos.length} className="rounded-lg bg-blue-600 px-4 py-2 font-bold text-white disabled:opacity-50">첨부사진 PDF 다운로드</button>
+                </div>
+                {photoUrls.length ? getInboundPhotoPageLayouts(photoUrls.length).map((layout, pageIndex, pages) => <div key={pageIndex} className="material-certificate-photo-sheet">
+                    <header><strong>자재 입고 첨부사진</strong><span>{draft.transactionDate} · {draft.siteName} · {draft.vehicleNumber}</span></header>
+                    <div className="material-certificate-photo-sheet__grid" style={{ gridTemplateColumns: 'repeat(' + layout.columns + ', minmax(0, 1fr))', gridTemplateRows: 'repeat(' + layout.rows + ', minmax(0, 1fr))' }}>
+                        {photoUrls.slice(layout.start, layout.start + layout.count).map((photo, index) => <figure key={photo.id}><img src={photo.url} alt={'입고 사진 ' + (layout.start + index + 1)} /><figcaption>사진 {layout.start + index + 1}</figcaption></figure>)}
+                    </div>
+                    <footer>{pageIndex + 1} / {pages.length} · 전체 {photoUrls.length}장</footer>
+                </div>) : <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-slate-500">첨부된 사진이 없습니다.</p>}
+            </section>
         </div>
     );
 };
