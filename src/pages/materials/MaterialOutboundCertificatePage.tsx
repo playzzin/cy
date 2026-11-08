@@ -46,7 +46,7 @@ const MaterialOutboundCertificatePage: React.FC = () => {
                 const urls = [...new Set((await Promise.all(references.map(reference => resolver.resolve(reference)))).flat())];
                 if (!urls.length) throw new Error('등록된 첨부사진을 찾을 수 없습니다.');
                 if (urls.length > 40) throw new Error('이 날짜·현장·임대사·차량의 사진이 40장을 초과합니다. 입출고 내역의 사진 보기에서 확인해 주세요.');
-                const photos = [];
+                const photos: OutboundCertificateDraft['photos'] = [];
                 for (let index = 0; index < urls.length; index += 4) {
                     const batch = await Promise.all(urls.slice(index, index + 4).map(async (url, offset) => {
                         const response = await fetch(url, { signal: controller.signal });
