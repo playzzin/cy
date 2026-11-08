@@ -1,4 +1,5 @@
 import type { SelectedMaterial } from './MaterialSelectionActionBar';
+import { loadMaterialCertificateLogo } from './materialCertificateBrand';
 
 export const MAX_MATERIAL_CERTIFICATE_PHOTOS = 40;
 const PAGE_WIDTH = 1240;
@@ -54,6 +55,7 @@ const jpegBlob = (canvas: HTMLCanvasElement): Promise<Blob> => new Promise((reso
 
 export const createMaterialCertificateImageFile = async (data: MaterialCertificateDocument, presentation: CertificatePresentation): Promise<File> => {
     await document.fonts?.ready;
+    const logo = await loadMaterialCertificateLogo();
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (!context) throw new Error('증명서 이미지를 만들 수 없습니다.');
@@ -71,26 +73,34 @@ export const createMaterialCertificateImageFile = async (data: MaterialCertifica
     const itemLines = data.items.map((item, index) => [String(index + 1), item.itemName, item.spec, formatQuantity(item.quantity), item.unit]
         .map((value, column) => wrapText(context, value || '-', columns[column] - 24)));
     const rowHeights = itemLines.map(row => Math.max(...row.map(lines => lines.length)) * 32 + 20);
-    const tableTop = 160 + metaHeights.reduce((a, b) => a + b, 0) + 36;
+    const metaTop = 246;
+    const tableTop = metaTop + metaHeights.reduce((a, b) => a + b, 0) + 36;
     const tableBottom = tableTop + 54 + rowHeights.reduce((a, b) => a + b, 0);
     canvas.width = PAGE_WIDTH;
     canvas.height = Math.max(PAGE_HEIGHT, tableBottom + 240);
     context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height);
-    context.strokeStyle = '#0f172a'; context.lineWidth = 3; context.strokeRect(30, 30, canvas.width - 60, canvas.height - 60);
-    context.textAlign = 'center'; context.fillStyle = '#0f172a'; context.font = `700 52px ${FONT}`;
-    context.fillText(presentation.title, PAGE_WIDTH / 2, 110);
+    context.fillStyle = '#183955'; context.fillRect(padding, 36, tableWidth, 8);
+    context.textAlign = 'left'; context.fillStyle = '#58778f'; context.font = `700 17px ${FONT}`;
+    context.fillText('CHEONGYEON · MATERIALS', padding, 88);
+    context.fillStyle = '#183955'; context.font = `700 52px ${FONT}`;
+    context.fillText(presentation.title, padding, 153);
+    context.fillStyle = '#8294a6'; context.font = `500 16px ${FONT}`;
+    context.fillText(presentation.title.includes('입고') ? 'MATERIAL RECEIPT' : 'MATERIAL RELEASE', padding, 188);
+    const logoRect = getContainedPhotoRect(logo.naturalWidth, logo.naturalHeight, 350, 80);
+    context.drawImage(logo, PAGE_WIDTH - padding - 350 + logoRect.x, 73 + logoRect.y, logoRect.width, logoRect.height);
+    context.fillStyle = '#a6bacb'; context.fillRect(padding, 216, tableWidth, 1);
     const cell = (x: number, y: number, width: number, height: number, lines: string[], background = '#ffffff', color = '#0f172a', bold = false) => {
         context.fillStyle = background; context.fillRect(x, y, width, height);
         context.strokeStyle = '#cbd5e1'; context.lineWidth = 1; context.strokeRect(x, y, width, height);
         context.fillStyle = color; context.font = `${bold ? 700 : 500} 23px ${FONT}`; context.textAlign = 'left';
         lines.forEach((line, index) => context.fillText(line, x + 12, y + (height - lines.length * 32) / 2 + 25 + index * 32));
     };
-    let y = 160;
+    let y = metaTop;
     metaRows.forEach((row, index) => {
         let x = padding;
         row.forEach(field => {
             const width = field.wide ? tableWidth : tableWidth / 2;
-            cell(x, y, 154, metaHeights[index], [field.label], '#f1f5f9', '#334155', true);
+            cell(x, y, 154, metaHeights[index], [field.label], '#edf3f8', '#46627a', true);
             context.font = `600 23px ${FONT}`;
             cell(x + 154, y, width - 154, metaHeights[index], wrapText(context, field.value, width - 178));
             x += width;
@@ -98,7 +108,7 @@ export const createMaterialCertificateImageFile = async (data: MaterialCertifica
         y += metaHeights[index];
     });
     let x = padding;
-    ['No', '품명', '규격', '수량', '단위'].forEach((title, index) => { cell(x, tableTop, columns[index], 54, [title], '#1e293b', '#ffffff', true); x += columns[index]; });
+    ['No', '품명', '규격', '수량', '단위'].forEach((title, index) => { cell(x, tableTop, columns[index], 54, [title], '#183955', '#ffffff', true); x += columns[index]; });
     y = tableTop + 54;
     itemLines.forEach((row, index) => {
         x = padding;

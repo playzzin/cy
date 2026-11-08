@@ -35,6 +35,7 @@ afterEach(() => { deleteOutboundCertificateDraft(draft.id); URL.createObjectURL 
 it('발행일 없이 모든 정보를 표시하고 반출증과 40장 사진을 별도 다운로드한다', async () => {
     render(<MemoryRouter initialEntries={['/materials/outbound-certificate?draftId=certificate-test']}><MaterialOutboundCertificatePage /></MemoryRouter>);
     await screen.findByRole('heading', { name: '자재 반출증' });
+    expect(screen.getByRole('img', { name: '청연이엔지 로고' })).toHaveAttribute('src', '/assets/estimate/cheongyeon-logo.png');
     expect(screen.queryByText(/발행일/)).not.toBeInTheDocument();
     for (const label of ['출고일자', '현장명', '현장주소', '임대사', '임대사 주소', '차량번호', '총품목', '총수량']) expect(screen.getByText(label, { exact: true })).toBeInTheDocument();
     expect(screen.getByText('서울시 검증로 12, 101동')).toBeInTheDocument();
@@ -70,7 +71,7 @@ it('기존 출고 사진 조회에 실패해도 반출증을 표시하고 재시
     expect(screen.getByRole('button', { name: '반출증 저장' })).not.toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '다시 시도' }));
     expect(await screen.findByRole('img', { name: '반출 사진 1' })).toBeInTheDocument();
-    expect(screen.getAllByRole('img')).toHaveLength(1);
+    expect(within(screen.getByRole('region', { name: '첨부사진 미리보기' })).getAllByRole('img')).toHaveLength(1);
     expect(materialService.getMaterialPhotoDownloadUrls).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole('button', { name: '사진 PDF 저장' }));
     await waitFor(() => expect(createOutboundPhotosPdfFile).toHaveBeenCalledWith(expect.objectContaining({ photos: [expect.objectContaining({ file: expect.any(File) })] })));

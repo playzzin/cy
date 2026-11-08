@@ -1,5 +1,5 @@
 .material-registration-header {
-    --registration-color: #2563eb;
+    --registration-color: #0f766e;
     container-type: inline-size;
     padding: 12px;
     border: 1px solid #e2e8f0;
@@ -8,7 +8,7 @@
 }
 
 .material-registration-header--outbound {
-    --registration-color: #dc2626;
+    --registration-color: #c05621;
 }
 
 .material-registration-header__row {

@@ -1,3 +1,4 @@
+import './MaterialWorkspace.css';
 /* Force Re-build: 2025-12-26 11:45 - Fixed Split Layout */
 import React, { useState, useEffect } from 'react';
 import { createOutboundCertificateImageFile, createOutboundPhotosPdfFile, downloadOutboundFile as downloadGeneratedFile, MAX_OUTBOUND_CERTIFICATE_PHOTOS } from './materialOutboundCertificateExport';
@@ -87,9 +88,9 @@ const getQuantityAccentClasses = (colorClass: string) => {
     }
 
     return {
-        cardActive: 'border-red-200 bg-red-50',
-        inputActive: 'border-red-500 text-red-700 bg-white',
-        positiveButton: 'border-red-200 bg-white text-red-700 hover:border-red-300 hover:bg-red-50 active:bg-red-100',
+        cardActive: 'border-orange-200 bg-orange-50',
+        inputActive: 'border-orange-500 text-orange-700 bg-white',
+        positiveButton: 'border-orange-200 bg-white text-orange-700 hover:border-orange-300 hover:bg-orange-50 active:bg-orange-100',
         negativeButton: 'border-rose-100 bg-white text-rose-600 hover:border-rose-200 hover:bg-rose-50 active:bg-rose-100',
     };
 };
@@ -600,15 +601,15 @@ const MaterialOutboundPage: React.FC = () => {
     };
 
     const mobileGroupOptions = [
-        { key: 'dongbari' as const, title: '동바리', items: dongbariList, colorClass: 'red' },
-        { key: 'scaffolding' as const, title: '비계', items: scaffoldingList, colorClass: 'red' },
+        { key: 'dongbari' as const, title: '동바리', items: dongbariList, colorClass: 'orange' },
+        { key: 'scaffolding' as const, title: '비계', items: scaffoldingList, colorClass: 'orange' },
         { key: 'other' as const, title: '기타', items: otherList, colorClass: 'slate' },
     ];
     const activeMobileGroup = mobileGroupOptions.find((option) => option.key === mobileMaterialGroup && option.items.length > 0)
         || mobileGroupOptions.find((option) => option.items.length > 0);
 
     // Helper to render a "Section" (Card)
-    const renderSection = (title: string, items: Material[], colorClass = 'red', sectionIndex = 0) => {
+    const renderSection = (title: string, items: Material[], colorClass = 'orange', sectionIndex = 0) => {
         if (items.length === 0) return null;
 
         const sortedItems = sortMaterialDisplayRows(items);
@@ -622,13 +623,13 @@ const MaterialOutboundPage: React.FC = () => {
 
         return (
             <div
-                className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden mb-6"
+                className="material-catalog-group bg-slate-50 rounded-xl border border-slate-200 overflow-hidden mb-6"
                 data-material-nav-section="true"
                 data-section-index={sectionIndex}
                 role="region"
                 aria-label={`${title} 자재`}
             >
-                <div className={`bg-${colorClass}-50/50 px-4 py-3 border-b border-${colorClass}-100 flex justify-between items-center`}>
+                <header className={`bg-${colorClass}-50/50 px-4 py-3 border-b border-${colorClass}-100 flex justify-between items-center`}>
                     <h3 className="font-bold text-slate-700 flex items-center gap-2">
                         <span className={`bg-${colorClass}-500 w-2 h-6 rounded-sm`}></span>
                         {title}
@@ -636,7 +637,7 @@ const MaterialOutboundPage: React.FC = () => {
                     <div className={`text-xs text-${colorClass}-600 font-medium bg-white px-2 py-1 rounded border border-${colorClass}-100`}>
                         {items.length} 품목
                     </div>
-                </div>
+                </header>
 
                 <div className="space-y-2 p-2 md:hidden">
                     {(() => {
@@ -659,10 +660,10 @@ const MaterialOutboundPage: React.FC = () => {
 
                         return (
                             <>
-                                <div className="rounded-lg border border-red-100 bg-white p-1.5 shadow-sm">
+                                <div className="rounded-lg border border-orange-100 bg-white p-1.5 shadow-sm">
                                     <div className="mb-1 flex items-center justify-between px-0.5">
                                         <div className="text-[10px] font-bold text-slate-500">품목 선택</div>
-                                        <div className="text-[10px] font-bold text-red-700">{itemGroups.length}개 품목</div>
+                                        <div className="text-[10px] font-bold text-orange-700">{itemGroups.length}개 품목</div>
                                     </div>
                                     <div className="grid max-h-40 grid-cols-2 gap-1.5 overflow-y-auto pr-0.5">
                                         {itemGroups.map((group) => {
@@ -673,16 +674,16 @@ const MaterialOutboundPage: React.FC = () => {
                                                     type="button"
                                                     onClick={() => setMobileSelectedItemName(group.itemName)}
                                                     className={`rounded-md border px-2 py-1.5 text-left transition ${active
-                                                        ? 'border-red-500 bg-red-50 text-red-800 shadow-sm'
+                                                        ? 'border-orange-500 bg-orange-50 text-orange-800 shadow-sm'
                                                         : group.quantityTotal > 0
-                                                            ? 'border-red-200 bg-red-50/60 text-red-800'
+                                                            ? 'border-orange-200 bg-orange-50/60 text-orange-800'
                                                             : 'border-slate-200 bg-white text-slate-700'
                                                         }`}
                                                 >
                                                     <div className="flex items-center justify-between gap-2">
                                                         <span className="truncate text-sm font-bold">{group.itemName}</span>
                                                         {group.quantityTotal > 0 && (
-                                                            <span className="shrink-0 rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
+                                                            <span className="shrink-0 rounded bg-orange-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
                                                                 {group.quantityTotal}
                                                             </span>
                                                         )}
@@ -695,8 +696,8 @@ const MaterialOutboundPage: React.FC = () => {
                                 </div>
 
                                 {activeItemGroup && (
-                                    <div className={`rounded-lg border p-2.5 shadow-sm ${activeItemGroup.quantityTotal > 0 ? accentClasses.cardActive : 'border-red-200 bg-white'}`}>
-                                        <div className="mb-2 flex items-center justify-between rounded-md bg-red-50 px-2 py-2 text-red-900">
+                                    <div className={`rounded-lg border p-2.5 shadow-sm ${activeItemGroup.quantityTotal > 0 ? accentClasses.cardActive : 'border-orange-200 bg-white'}`}>
+                                        <div className="mb-2 flex items-center justify-between rounded-md bg-orange-50 px-2 py-2 text-orange-900">
                                             <div className="truncate text-base font-bold">{activeItemGroup.itemName}</div>
                                             <div className="shrink-0 text-xs font-bold">{activeItemGroup.materials.length} 규격 / {activeItemGroup.quantityTotal}</div>
                                         </div>
@@ -710,7 +711,7 @@ const MaterialOutboundPage: React.FC = () => {
                                                 {activeItemGroup.materials.map((material) => {
                                                     const qty = quantities[material.id] || 0;
                                                     return (
-                                                        <div key={material.id} className={`p-2 ${qty > 0 ? 'bg-red-50/70' : 'bg-white'}`}>
+                                                        <div key={material.id} className={`p-2 ${qty > 0 ? 'bg-orange-50/70' : 'bg-white'}`}>
                                                             <div className="grid grid-cols-[1fr_0.45fr_0.7fr] items-center gap-2">
                                                                 <div className="truncate text-base font-bold text-slate-800">{material.spec}</div>
                                                                 <div className="text-center text-base font-bold text-slate-700">{material.unit}</div>
@@ -723,7 +724,7 @@ const MaterialOutboundPage: React.FC = () => {
                                                                     placeholder="0"
                                                                     className={`h-11 w-full rounded-lg border px-1 text-center text-lg font-bold outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${qty > 0
                                                                         ? accentClasses.inputActive
-                                                                        : 'border-slate-200 bg-slate-50 text-slate-500 focus:border-red-500 focus:bg-white focus:text-slate-800'
+                                                                        : 'border-slate-200 bg-slate-50 text-slate-500 focus:border-orange-500 focus:bg-white focus:text-slate-800'
                                                                         }`}
                                                                     onFocus={(e) => e.target.select()}
                                                                 />
@@ -819,7 +820,7 @@ const MaterialOutboundPage: React.FC = () => {
     if (initialLoading) return <div className="p-8 text-center">데이터 로딩 중...</div>;
 
     return (
-        <div className="mx-auto min-h-screen w-full max-w-[calc(100vw-30px)] space-y-3 overflow-x-hidden bg-slate-50 p-3 sm:max-w-[2100px] sm:p-4">
+        <div className="material-page material-page--outbound mx-auto min-h-screen w-full max-w-[calc(100vw-30px)] space-y-3 overflow-x-hidden bg-slate-50 p-3 sm:max-w-[2100px] sm:p-4">
             <MaterialRegistrationHeader
                 kind="outbound"
                 saving={saving}
@@ -827,7 +828,7 @@ const MaterialOutboundPage: React.FC = () => {
                 additionalControls={<MaterialPhotoPicker
                     photos={photoAttachments}
                     onPhotosChange={setPhotoAttachments}
-                    tone="red"
+                    tone="orange"
                     maxPhotos={MAX_OUTBOUND_CERTIFICATE_PHOTOS}
                     disabled={saving}
                     uploadProgress={photoUploadProgress}
@@ -837,7 +838,7 @@ const MaterialOutboundPage: React.FC = () => {
                             className="border border-slate-300 text-slate-600 hover:bg-slate-50">
                             <FontAwesomeIcon icon={faEdit} /> 수정
                         </button>
-                        <MaterialSelectionActionBar materials={selectedMaterials} tone="red"
+                        <MaterialSelectionActionBar materials={selectedMaterials} tone="orange"
                             title="출고 등록 품목" details={selectionActionDetails} />
                         <button type="button" onClick={handleReset} disabled={saving}
                             className="bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50">
@@ -852,18 +853,18 @@ const MaterialOutboundPage: React.FC = () => {
                         </button>
                         <button type="button" onClick={handleDownloadOutboundCertificate}
                             disabled={sharingCertificate || selectedMaterials.length === 0}
-                            className="border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50">
+                            className="border border-orange-200 bg-white text-orange-700 hover:bg-orange-50 disabled:opacity-50">
                             <FontAwesomeIcon icon={faDownload} /> 반출증 저장
                         </button>
                         <button type="button" onClick={handleDownloadOutboundPhotos}
                             disabled={sharingCertificate || photoAttachments.length === 0}
                             title="첨부사진 최대 40장을 A4 최대 2장으로 저장"
-                            className="border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50">
+                            className="border border-orange-200 bg-white text-orange-700 hover:bg-orange-50 disabled:opacity-50">
                             <FontAwesomeIcon icon={faDownload} /> 사진 PDF 저장
                         </button>
                         <button type="button" onClick={handleShareOutboundCertificate}
                             disabled={sharingCertificate || selectedMaterials.length === 0}
-                            className="bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+                            className="bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50">
                             <FontAwesomeIcon icon={faShareNodes} />
                             {sharingCertificate ? '준비 중...' : '카카오톡 공유'}
                         </button>
@@ -895,8 +896,8 @@ const MaterialOutboundPage: React.FC = () => {
                 </div>
             </MaterialRegistrationHeader>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-                        <div className="mb-5 hidden flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between md:flex">
+            <section className="material-panel rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4" aria-label="자재 선택">
+                        <div className="material-catalog-search mb-5 hidden flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between md:flex">
                             <div className="relative flex-1">
                                 <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                 <input
@@ -904,17 +905,17 @@ const MaterialOutboundPage: React.FC = () => {
                                     value={searchFilter}
                                     onChange={(e) => setSearchFilter(e.target.value)}
                                     placeholder="품명, 규격, 분류 검색"
-                                    className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm outline-none focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                                    className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                                 />
                             </div>
                             <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-                                <div className="rounded-lg border border-red-100 bg-white px-3 py-2 text-center">
+                                <div className="material-selection-stat rounded-lg border border-orange-100 bg-white px-3 py-2 text-center">
                                     <div className="text-[11px] font-bold text-slate-400">선택 품목</div>
-                                    <div className="text-sm font-bold text-red-700">{selectedItemCount}개</div>
+                                    <strong>{selectedItemCount}개</strong>
                                 </div>
-                                <div className="rounded-lg border border-red-100 bg-white px-3 py-2 text-center">
+                                <div className="material-selection-stat rounded-lg border border-orange-100 bg-white px-3 py-2 text-center">
                                     <div className="text-[11px] font-bold text-slate-400">총 수량</div>
-                                    <div className="text-sm font-bold text-red-700">{selectedQuantityTotal}</div>
+                                    <strong>{selectedQuantityTotal}</strong>
                                 </div>
                             </div>
                         </div>
@@ -927,7 +928,7 @@ const MaterialOutboundPage: React.FC = () => {
                                     value={searchFilter}
                                     onChange={(e) => setSearchFilter(e.target.value)}
                                     placeholder="품명, 규격 검색"
-                                    className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                                    className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                                 />
                             </div>
                             <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
@@ -943,7 +944,7 @@ const MaterialOutboundPage: React.FC = () => {
                                                 aria-pressed={active}
                                                 disabled={option.items.length === 0}
                                                 className={`rounded-lg border px-3 py-2 text-left transition disabled:opacity-40 ${active
-                                                    ? 'border-red-500 bg-white text-red-700 shadow-sm'
+                                                    ? 'border-orange-500 bg-white text-orange-700 shadow-sm'
                                                     : 'border-slate-200 bg-white text-slate-600'
                                                     }`}
                                             >
@@ -971,11 +972,11 @@ const MaterialOutboundPage: React.FC = () => {
                         </div>
                         <div className="mb-6 hidden flex-col gap-6 md:flex">
                             <div className="w-full">
-                                {renderSection('동바리', dongbariList, 'red', 0)}
+                                {renderSection('동바리', dongbariList, 'orange', 0)}
                             </div>
 
                             <div className="w-full">
-                                {renderSection('비계', scaffoldingList, 'red', 1)}
+                                {renderSection('비계', scaffoldingList, 'orange', 1)}
                             </div>
 
                             {/* Others */}
@@ -985,7 +986,7 @@ const MaterialOutboundPage: React.FC = () => {
                                 </div>
                             )}
                         </div>
-                <div className="mb-6 mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="material-notes mb-6 mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <label htmlFor="outbound-notes" className="block text-sm font-bold text-slate-700">
                         비고
                     </label>
@@ -995,7 +996,7 @@ const MaterialOutboundPage: React.FC = () => {
                         onChange={(event) => setNotes(event.target.value)}
                         rows={3}
                         placeholder="출고 등록에 남길 비고를 입력하세요"
-                        className="mt-2 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-red-500 focus:ring-2 focus:ring-red-100"
+                        className="mt-2 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-orange-500 focus:ring-2 focus:ring-orange-100"
                     />
                 </div>
                 {/* 임시저장 안내 */}
@@ -1027,7 +1028,7 @@ const MaterialOutboundPage: React.FC = () => {
 
                 {/* 액션 버튼 */}
                 <div className="sticky bottom-0 z-20 -mx-3 -mb-3 mt-6 border-t border-slate-200 bg-white/95 p-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:flex sm:justify-end sm:gap-3 sm:bg-transparent sm:p-0 sm:pt-6 sm:backdrop-blur-0">
-                    <div className="mb-2 flex items-center justify-between rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-800 sm:hidden" aria-live="polite">
+                    <div className="mb-2 flex items-center justify-between rounded-lg bg-orange-50 px-3 py-2 text-xs font-bold text-orange-800 sm:hidden" aria-live="polite">
                         <span className="truncate">{siteName || '현장을 선택하세요'}</span>
                         <span className="shrink-0">{selectedItemCount}개 · 총 {selectedQuantityTotal}</span>
                     </div>
@@ -1049,14 +1050,14 @@ const MaterialOutboundPage: React.FC = () => {
                     <button
                         onClick={handleSave}
                         disabled={saving}
-                        className="flex flex-[1.4] items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 font-bold text-white shadow-md transition hover:bg-red-700 disabled:opacity-50 sm:flex-none sm:px-6"
+                        className="flex flex-[1.4] items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 font-bold text-white shadow-md transition hover:bg-orange-700 disabled:opacity-50 sm:flex-none sm:px-6"
                     >
                         <FontAwesomeIcon icon={faSave} />
                         {saving ? '저장 중...' : '출고 완료'}
                     </button>
                     </div>
                 </div>
-            </div>
+            </section>
         </div>
     );
 };

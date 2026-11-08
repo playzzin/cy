@@ -1,3 +1,4 @@
+import './MaterialWorkspace.css';
 import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -338,7 +339,7 @@ const MaterialMasterPage: React.FC = () => {
 
     const renderInlineActions = () => <>
         <div className="flex flex-wrap justify-end gap-1">
-            <button type="button" onClick={() => void handleSave()} disabled={saving} className="rounded-md bg-indigo-600 px-2 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50">
+            <button type="button" onClick={() => void handleSave()} disabled={saving} className="material-primary-button rounded-md bg-indigo-600 px-2 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-50">
                 {saving ? '저장 중...' : '저장'}
             </button>
             <button type="button" onClick={handleCancelEdit} disabled={saving} className="rounded-md border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50">취소</button>
@@ -457,8 +458,8 @@ const MaterialMasterPage: React.FC = () => {
         accentClass: string,
         emptyText: string
     ) => (
-        <section aria-label={`${title} 자재`} className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <section aria-label={`${title} 자재`} className="material-master-group flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
                 <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800">
                     <span className={`h-5 w-1.5 rounded-full ${accentClass}`} />
                     {title}
@@ -466,14 +467,14 @@ const MaterialMasterPage: React.FC = () => {
                 <span className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500">
                     {rows.length} 품목
                 </span>
-            </div>
+            </header>
             {renderMaterialTable(rows, emptyText)}
         </section>
     );
 
     return (
-        <div className="flex min-h-0 w-full max-w-[calc(100vw-30px)] flex-1 flex-col overflow-auto bg-slate-50 p-2 sm:max-w-none sm:p-6 lg:overflow-hidden">
-            <div className="mb-3 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between flex-shrink-0">
+        <div className="material-page material-page--master flex min-h-0 w-full max-w-[calc(100vw-30px)] flex-1 flex-col overflow-auto bg-slate-50 p-2 sm:max-w-none sm:p-6 lg:overflow-hidden">
+            <div className="material-page__heading mb-3 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between flex-shrink-0">
                 <div>
                     <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-2xl">
                         <FontAwesomeIcon icon={faBoxesStacked} className="text-indigo-600" />
@@ -484,7 +485,7 @@ const MaterialMasterPage: React.FC = () => {
                 {canManageCatalog && (<button
                     onClick={handleAdd}
                     disabled={saving || Boolean(editingItem)}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 font-bold text-white shadow-sm transition hover:bg-indigo-700 sm:w-auto sm:py-2"
+                    className="material-primary-button flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 font-bold text-white shadow-sm transition hover:bg-indigo-700 sm:w-auto sm:py-2"
                 >
                     <FontAwesomeIcon icon={faPlus} />
                     자재 등록
@@ -495,7 +496,7 @@ const MaterialMasterPage: React.FC = () => {
 
             {/* 등록/수정 폼 */}
             {showForm && (
-                <form aria-labelledby="material-form-title" noValidate onSubmit={(event) => { event.preventDefault(); void handleSave(); }} className="mb-4 flex-shrink-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:mb-6 sm:p-6">
+                <form aria-labelledby="material-form-title" noValidate onSubmit={(event) => { event.preventDefault(); void handleSave(); }} className="material-panel mb-4 flex-shrink-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:mb-6 sm:p-6">
                     <h2 id="material-form-title" className="text-lg font-bold text-slate-800 mb-1">
                         {editingItem ? '자재 수정' : '자재 등록'}
                     </h2>
@@ -584,7 +585,7 @@ const MaterialMasterPage: React.FC = () => {
                         <button
                             type="submit"
                             disabled={saving}
-                            className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50 sm:py-2"
+                            className="material-primary-button flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50 sm:py-2"
                         >
                             <FontAwesomeIcon icon={faSave} />
                             {saving ? '저장 중...' : '저장'}
@@ -594,9 +595,9 @@ const MaterialMasterPage: React.FC = () => {
             )}
 
             {/* 필터 및 목록 */}
-            <div className="flex min-h-0 flex-1 flex-col overflow-visible rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-6 lg:overflow-hidden">
+            <div className="material-panel flex min-h-0 flex-1 flex-col overflow-visible rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-6 lg:overflow-hidden">
                 {canManageCatalog && <p className="mb-3 text-xs text-slate-500">{editingItem ? '분류·품명은 목록에서 선택하세요. 새 품명은 직접 입력할 수 있습니다. Enter 저장 · Esc 취소' : '목록의 분류·품명·규격·단위를 누르면 바로 수정할 수 있습니다.'}</p>}
-                <div role="group" aria-label="자재 대분류" className="mb-4 flex flex-shrink-0 flex-wrap gap-2">
+                <div role="group" aria-label="자재 대분류" className="material-master-tabs mb-4 flex flex-shrink-0 flex-wrap gap-2">
                     {[{ key: '' as const, title: '전체' }, ...MATERIAL_GROUPS].map(group => {
                         const count = group.key
                             ? materials.filter(material => getMaterialMasterDisplayGroupKey(material) === group.key).length
@@ -623,7 +624,7 @@ const MaterialMasterPage: React.FC = () => {
                         value={itemNameFilter}
                         disabled={Boolean(editingItem) || saving}
                         onChange={(e) => setItemNameFilter(e.target.value)}
-                        placeholder="품명 검색..."
+                        aria-label="품명 검색" placeholder="품명 검색..."
                         className="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:py-2"
                     />
                     <input
@@ -631,7 +632,7 @@ const MaterialMasterPage: React.FC = () => {
                         value={specFilter}
                         disabled={Boolean(editingItem) || saving}
                         onChange={(e) => setSpecFilter(e.target.value)}
-                        placeholder="규격 검색..."
+                        aria-label="규격 검색" placeholder="규격 검색..."
                         className="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:py-2"
                     />
                 </div>

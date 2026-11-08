@@ -23,7 +23,7 @@ export interface MaterialPhotoUpload {
     source: MaterialPhotoSource;
 }
 
-export type MaterialPhotoTone = 'blue' | 'red';
+export type MaterialPhotoTone = 'blue' | 'red' | 'teal' | 'orange';
 
 const DEFAULT_MAX_MATERIAL_PHOTOS = 20;
 const MAX_MATERIAL_PHOTO_DIMENSION = 1600;
@@ -53,12 +53,26 @@ const toneClasses = {
         button: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100',
         primary: 'bg-blue-600 text-white hover:bg-blue-700',
     },
+    teal: {
+        border: 'border-teal-100',
+        bg: 'bg-teal-50',
+        text: 'text-teal-700',
+        button: 'border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100',
+        primary: 'bg-teal-600 text-white hover:bg-teal-700',
+    },
     red: {
         border: 'border-red-100',
         bg: 'bg-red-50',
         text: 'text-red-700',
         button: 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100',
         primary: 'bg-red-600 text-white hover:bg-red-700',
+    },
+    orange: {
+        border: 'border-orange-100',
+        bg: 'bg-orange-50',
+        text: 'text-orange-700',
+        button: 'border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100',
+        primary: 'bg-orange-600 text-white hover:bg-orange-700',
     },
 };
 

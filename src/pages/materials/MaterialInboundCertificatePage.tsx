@@ -1,3 +1,4 @@
+import MaterialCertificateHeading from './MaterialCertificateHeading';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createInboundCertificateImageFile, createInboundPhotosPdfFile, downloadInboundFile, getInboundCertificateDetails, getInboundPhotoPageLayouts } from './materialInboundCertificateExport';
@@ -191,12 +192,10 @@ const MaterialInboundCertificatePage: React.FC = () => {
 
             <div
                 id="inbound-certificate-print"
-                className="mx-auto max-w-5xl bg-white p-5 text-slate-900 shadow-xl ring-1 ring-slate-200 sm:p-8"
+                className="material-certificate-paper"
             >
-                <div className="border-[3px] border-slate-900 p-5 sm:p-7">
-                    <div className="text-center">
-                        <h1 className="text-3xl font-black tracking-normal text-slate-950 sm:text-5xl">자재 입고증</h1>
-                    </div>
+                <div className="material-certificate-frame">
+                    <MaterialCertificateHeading kind="inbound" />
 
                     <dl className="material-certificate-details">
                         {getInboundCertificateDetails(draft).map(field => <div key={field.label} className={field.wide ? 'material-certificate-details__wide' : ''}>
@@ -204,7 +203,7 @@ const MaterialInboundCertificatePage: React.FC = () => {
                         </div>)}
                     </dl>
 
-                    <div className="mt-7 overflow-hidden border border-slate-300">
+                    <div className="material-certificate-table">
                         <table className="w-full table-fixed text-sm">
                             <thead className="bg-slate-800 text-white">
                                 <tr>
@@ -229,8 +228,8 @@ const MaterialInboundCertificatePage: React.FC = () => {
                         </table>
                     </div>
 
-                    <div className="mt-10 text-center text-lg font-bold text-slate-700">위 자재를 입고함.</div>
-                    <div className="mt-12 grid grid-cols-2 gap-16 px-10 text-center text-sm font-black text-slate-600">
+                    <div className="material-certificate-confirmation">위 자재를 입고함.</div>
+                    <div className="material-certificate-signatures">
                         <div>
                             <div className="border-t-2 border-slate-400 pt-3">입고 확인</div>
                         </div>

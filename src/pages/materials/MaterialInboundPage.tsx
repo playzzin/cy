@@ -1,3 +1,4 @@
+import './MaterialWorkspace.css';
 /* Force Re-build: 2025-12-26 11:45 - Fixed Split Layout */
 import React, { useState, useEffect } from 'react';
 import { createInboundCertificateImageFile, createInboundPhotosPdfFile, downloadInboundFile as downloadGeneratedFile, MAX_INBOUND_CERTIFICATE_PHOTOS } from './materialInboundCertificateExport';
@@ -88,9 +89,9 @@ const getQuantityAccentClasses = (colorClass: string) => {
     }
 
     return {
-        cardActive: 'border-blue-200 bg-blue-50',
-        inputActive: 'border-blue-500 text-blue-700 bg-white',
-        positiveButton: 'border-blue-200 bg-white text-blue-700 hover:border-blue-300 hover:bg-blue-50 active:bg-blue-100',
+        cardActive: 'border-teal-200 bg-teal-50',
+        inputActive: 'border-teal-500 text-teal-700 bg-white',
+        positiveButton: 'border-teal-200 bg-white text-teal-700 hover:border-teal-300 hover:bg-teal-50 active:bg-teal-100',
         negativeButton: 'border-rose-100 bg-white text-rose-600 hover:border-rose-200 hover:bg-rose-50 active:bg-rose-100',
     };
 };
@@ -603,15 +604,15 @@ const MaterialInboundPage: React.FC = () => {
     };
 
     const mobileGroupOptions = [
-        { key: 'dongbari' as const, title: '동바리', items: dongbariList, colorClass: 'blue' },
-        { key: 'scaffolding' as const, title: '비계', items: scaffoldingList, colorClass: 'blue' },
+        { key: 'dongbari' as const, title: '동바리', items: dongbariList, colorClass: 'teal' },
+        { key: 'scaffolding' as const, title: '비계', items: scaffoldingList, colorClass: 'teal' },
         { key: 'other' as const, title: '기타', items: otherList, colorClass: 'slate' },
     ];
     const activeMobileGroup = mobileGroupOptions.find((option) => option.key === mobileMaterialGroup && option.items.length > 0)
         || mobileGroupOptions.find((option) => option.items.length > 0);
 
     // Helper to render a "Section" (Card)
-    const renderSection = (title: string, items: Material[], colorClass = 'blue', sectionIndex = 0) => {
+    const renderSection = (title: string, items: Material[], colorClass = 'teal', sectionIndex = 0) => {
         if (items.length === 0) return null;
 
         const sortedItems = sortMaterialDisplayRows(items);
@@ -625,13 +626,13 @@ const MaterialInboundPage: React.FC = () => {
 
         return (
             <div
-                className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden mb-6 h-full"
+                className="material-catalog-group bg-slate-50 rounded-xl border border-slate-200 overflow-hidden mb-6 h-full"
                 data-material-nav-section="true"
                 data-section-index={sectionIndex}
                 role="region"
                 aria-label={`${title} 자재`}
             >
-                <div className={`bg-${colorClass}-50/50 px-4 py-3 border-b border-${colorClass}-100 flex justify-between items-center`}>
+                <header className={`bg-${colorClass}-50/50 px-4 py-3 border-b border-${colorClass}-100 flex justify-between items-center`}>
                     <h3 className="font-bold text-slate-700 flex items-center gap-2">
                         <span className={`bg-${colorClass}-500 w-2 h-6 rounded-sm`}></span>
                         {title}
@@ -639,7 +640,7 @@ const MaterialInboundPage: React.FC = () => {
                     <div className={`text-xs text-${colorClass}-600 font-medium bg-white px-2 py-1 rounded border border-${colorClass}-100`}>
                         {items.length} 품목
                     </div>
-                </div>
+                </header>
 
                 <div className="space-y-2 p-2 md:hidden">
                     {(() => {
@@ -662,10 +663,10 @@ const MaterialInboundPage: React.FC = () => {
 
                         return (
                             <>
-                                <div className="rounded-lg border border-blue-100 bg-white p-1.5 shadow-sm">
+                                <div className="rounded-lg border border-teal-100 bg-white p-1.5 shadow-sm">
                                     <div className="mb-1 flex items-center justify-between px-0.5">
                                         <div className="text-[10px] font-bold text-slate-500">품목 선택</div>
-                                        <div className="text-[10px] font-bold text-blue-700">{itemGroups.length}개 품목</div>
+                                        <div className="text-[10px] font-bold text-teal-700">{itemGroups.length}개 품목</div>
                                     </div>
                                     <div className="grid max-h-40 grid-cols-2 gap-1.5 overflow-y-auto pr-0.5">
                                         {itemGroups.map((group) => {
@@ -676,16 +677,16 @@ const MaterialInboundPage: React.FC = () => {
                                                     type="button"
                                                     onClick={() => setMobileSelectedItemName(group.itemName)}
                                                     className={`rounded-md border px-2 py-1.5 text-left transition ${active
-                                                        ? 'border-blue-500 bg-blue-50 text-blue-800 shadow-sm'
+                                                        ? 'border-teal-500 bg-teal-50 text-teal-800 shadow-sm'
                                                         : group.quantityTotal > 0
-                                                            ? 'border-blue-200 bg-blue-50/60 text-blue-800'
+                                                            ? 'border-teal-200 bg-teal-50/60 text-teal-800'
                                                             : 'border-slate-200 bg-white text-slate-700'
                                                         }`}
                                                 >
                                                     <div className="flex items-center justify-between gap-2">
                                                         <span className="truncate text-sm font-bold">{group.itemName}</span>
                                                         {group.quantityTotal > 0 && (
-                                                            <span className="shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
+                                                            <span className="shrink-0 rounded bg-teal-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
                                                                 {group.quantityTotal}
                                                             </span>
                                                         )}
@@ -698,8 +699,8 @@ const MaterialInboundPage: React.FC = () => {
                                 </div>
 
                                 {activeItemGroup && (
-                                    <div className={`rounded-lg border p-2.5 shadow-sm ${activeItemGroup.quantityTotal > 0 ? accentClasses.cardActive : 'border-blue-200 bg-white'}`}>
-                                        <div className="mb-2 flex items-center justify-between rounded-md bg-blue-50 px-2 py-2 text-blue-900">
+                                    <div className={`rounded-lg border p-2.5 shadow-sm ${activeItemGroup.quantityTotal > 0 ? accentClasses.cardActive : 'border-teal-200 bg-white'}`}>
+                                        <div className="mb-2 flex items-center justify-between rounded-md bg-teal-50 px-2 py-2 text-teal-900">
                                             <div className="truncate text-base font-bold">{activeItemGroup.itemName}</div>
                                             <div className="shrink-0 text-xs font-bold">{activeItemGroup.materials.length} 규격 / {activeItemGroup.quantityTotal}</div>
                                         </div>
@@ -713,7 +714,7 @@ const MaterialInboundPage: React.FC = () => {
                                                 {activeItemGroup.materials.map((material) => {
                                                     const qty = quantities[material.id] || 0;
                                                     return (
-                                                        <div key={material.id} className={`p-2 ${qty > 0 ? 'bg-blue-50/70' : 'bg-white'}`}>
+                                                        <div key={material.id} className={`p-2 ${qty > 0 ? 'bg-teal-50/70' : 'bg-white'}`}>
                                                             <div className="grid grid-cols-[1fr_0.45fr_0.7fr] items-center gap-2">
                                                                 <div className="truncate text-base font-bold text-slate-800">{material.spec}</div>
                                                                 <div className="text-center text-base font-bold text-slate-700">{material.unit}</div>
@@ -726,7 +727,7 @@ const MaterialInboundPage: React.FC = () => {
                                                                     placeholder="0"
                                                                     className={`h-11 w-full rounded-lg border px-1 text-center text-lg font-bold outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${qty > 0
                                                                         ? accentClasses.inputActive
-                                                                        : 'border-slate-200 bg-slate-50 text-slate-500 focus:border-blue-500 focus:bg-white focus:text-slate-800'
+                                                                        : 'border-slate-200 bg-slate-50 text-slate-500 focus:border-teal-500 focus:bg-white focus:text-slate-800'
                                                                         }`}
                                                                     onFocus={(e) => e.target.select()}
                                                                 />
@@ -822,7 +823,7 @@ const MaterialInboundPage: React.FC = () => {
     if (initialLoading) return <div className="p-8 text-center">데이터 로딩 중...</div>;
 
     return (
-        <div className="mx-auto w-full max-w-[calc(100vw-30px)] space-y-3 overflow-x-hidden p-3 sm:max-w-[2100px] sm:p-4">
+        <div className="material-page material-page--inbound mx-auto w-full max-w-[calc(100vw-30px)] space-y-3 overflow-x-hidden p-3 sm:max-w-[2100px] sm:p-4">
             <MaterialRegistrationHeader
                 kind="inbound"
                 saving={saving}
@@ -830,7 +831,7 @@ const MaterialInboundPage: React.FC = () => {
                 additionalControls={<MaterialPhotoPicker
                     photos={photoAttachments}
                     onPhotosChange={setPhotoAttachments}
-                    tone="blue"
+                    tone="teal"
                     maxPhotos={MAX_INBOUND_CERTIFICATE_PHOTOS}
                     disabled={saving}
                     uploadProgress={photoUploadProgress}
@@ -840,7 +841,7 @@ const MaterialInboundPage: React.FC = () => {
                             className="border border-slate-300 text-slate-600 hover:bg-slate-50">
                             <FontAwesomeIcon icon={faEdit} /> 수정
                         </button>
-                        <MaterialSelectionActionBar materials={selectedMaterials} tone="blue"
+                        <MaterialSelectionActionBar materials={selectedMaterials} tone="teal"
                             title="입고 등록 품목" details={selectionActionDetails} />
                         <button type="button" onClick={handleReset} disabled={saving}
                             className="bg-slate-200 text-slate-700 hover:bg-slate-300 disabled:opacity-50">
@@ -855,18 +856,18 @@ const MaterialInboundPage: React.FC = () => {
                         </button>
                         <button type="button" onClick={handleDownloadInboundCertificate}
                             disabled={sharingCertificate || selectedMaterials.length === 0}
-                            className="border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                            className="border border-teal-200 bg-white text-teal-700 hover:bg-teal-50 disabled:opacity-50">
                             <FontAwesomeIcon icon={faDownload} /> 입고증 저장
                         </button>
                         <button type="button" onClick={handleDownloadInboundPhotos}
                             disabled={sharingCertificate || photoAttachments.length === 0}
                             title="첨부사진 최대 40장을 A4 최대 2장으로 저장"
-                            className="border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                            className="border border-teal-200 bg-white text-teal-700 hover:bg-teal-50 disabled:opacity-50">
                             <FontAwesomeIcon icon={faDownload} /> 사진 PDF 저장
                         </button>
                         <button type="button" onClick={handleShareInboundCertificate}
                             disabled={sharingCertificate || selectedMaterials.length === 0}
-                            className="bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                            className="bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50">
                             <FontAwesomeIcon icon={faShareNodes} />
                             {sharingCertificate ? '준비 중...' : '카카오톡 공유'}
                         </button>
@@ -894,8 +895,8 @@ const MaterialInboundPage: React.FC = () => {
                 </div>
             </MaterialRegistrationHeader>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-                        <div className="mb-5 hidden flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between md:flex">
+            <section className="material-panel rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4" aria-label="자재 선택">
+                        <div className="material-catalog-search mb-5 hidden flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between md:flex">
                             <div className="relative flex-1">
                                 <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                 <input
@@ -903,17 +904,17 @@ const MaterialInboundPage: React.FC = () => {
                                     value={searchFilter}
                                     onChange={(e) => setSearchFilter(e.target.value)}
                                     placeholder="품명, 규격, 분류 검색"
-                                    className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                    className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                                 />
                             </div>
                             <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-                                <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-center">
+                                <div className="material-selection-stat rounded-lg border border-teal-100 bg-white px-3 py-2 text-center">
                                     <div className="text-[11px] font-bold text-slate-400">선택 품목</div>
-                                    <div className="text-sm font-bold text-blue-700">{selectedItemCount}개</div>
+                                    <strong>{selectedItemCount}개</strong>
                                 </div>
-                                <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-center">
+                                <div className="material-selection-stat rounded-lg border border-teal-100 bg-white px-3 py-2 text-center">
                                     <div className="text-[11px] font-bold text-slate-400">총 수량</div>
-                                    <div className="text-sm font-bold text-blue-700">{selectedQuantityTotal}</div>
+                                    <strong>{selectedQuantityTotal}</strong>
                                 </div>
                             </div>
                         </div>
@@ -926,7 +927,7 @@ const MaterialInboundPage: React.FC = () => {
                                     value={searchFilter}
                                     onChange={(e) => setSearchFilter(e.target.value)}
                                     placeholder="품명, 규격 검색"
-                                    className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                    className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                                 />
                             </div>
                             <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
@@ -942,7 +943,7 @@ const MaterialInboundPage: React.FC = () => {
                                                 aria-pressed={active}
                                                 disabled={option.items.length === 0}
                                                 className={`rounded-lg border px-3 py-2 text-left transition disabled:opacity-40 ${active
-                                                    ? 'border-blue-500 bg-white text-blue-700 shadow-sm'
+                                                    ? 'border-teal-500 bg-white text-teal-700 shadow-sm'
                                                     : 'border-slate-200 bg-white text-slate-600'
                                                     }`}
                                             >
@@ -970,11 +971,11 @@ const MaterialInboundPage: React.FC = () => {
                         </div>
                         <div className="mb-6 hidden flex-col gap-6 md:flex">
                             <div className="w-full">
-                                {renderSection('동바리', dongbariList, 'blue', 0)}
+                                {renderSection('동바리', dongbariList, 'teal', 0)}
                             </div>
 
                             <div className="w-full">
-                                {renderSection('비계', scaffoldingList, 'blue', 1)}
+                                {renderSection('비계', scaffoldingList, 'teal', 1)}
                             </div>
 
                             {/* Others */}
@@ -984,7 +985,7 @@ const MaterialInboundPage: React.FC = () => {
                                 </div>
                             )}
                         </div>
-                <div className="mb-6 mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="material-notes mb-6 mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <label htmlFor="inbound-notes" className="block text-sm font-bold text-slate-700">
                         비고
                     </label>
@@ -994,16 +995,16 @@ const MaterialInboundPage: React.FC = () => {
                         onChange={(event) => setNotes(event.target.value)}
                         rows={3}
                         placeholder="입고 등록에 남길 비고를 입력하세요"
-                        className="mt-2 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        className="mt-2 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                     />
                 </div>
                 {/* 임시저장 안내 */}
                 {hasTempData && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                    <div className="bg-teal-50 border border-teal-200 rounded-lg p-4 mb-6">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="flex items-start gap-2 sm:items-center">
-                                <FontAwesomeIcon icon={faFloppyDisk} className="text-blue-600" />
-                                <span className="text-blue-800 font-medium">
+                                <FontAwesomeIcon icon={faFloppyDisk} className="text-teal-600" />
+                                <span className="text-teal-800 font-medium">
                                     임시저장된 데이터가 있습니다. 마지막 저장: {new Date(
                                         JSON.parse(localStorage.getItem('inbound_temp') || '{}').savedAt || Date.now()
                                     ).toLocaleString('ko-KR')}
@@ -1016,7 +1017,7 @@ const MaterialInboundPage: React.FC = () => {
                                         handleReset();
                                     }
                                 }}
-                                className="self-end text-blue-600 hover:text-blue-800 transition-colors sm:self-auto"
+                                className="self-end text-teal-600 hover:text-teal-800 transition-colors sm:self-auto"
                             >
                                 <FontAwesomeIcon icon={faTrash} />
                             </button>
@@ -1026,7 +1027,7 @@ const MaterialInboundPage: React.FC = () => {
 
                 {/* 액션 버튼 */}
                 <div className="sticky bottom-0 z-20 -mx-3 -mb-3 mt-6 border-t border-slate-200 bg-white/95 p-3 backdrop-blur sm:static sm:mx-0 sm:mb-0 sm:mt-8 sm:flex sm:justify-end sm:gap-3 sm:bg-transparent sm:p-0 sm:pt-6 sm:backdrop-blur-0">
-                    <div className="mb-2 flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800 sm:hidden" aria-live="polite">
+                    <div className="mb-2 flex items-center justify-between rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-800 sm:hidden" aria-live="polite">
                         <span className="truncate">{siteName || '현장을 선택하세요'}</span>
                         <span className="shrink-0">{selectedItemCount}개 · 총 {selectedQuantityTotal}</span>
                     </div>
@@ -1048,13 +1049,13 @@ const MaterialInboundPage: React.FC = () => {
                     <button
                         onClick={handleSave}
                         disabled={saving}
-                        className="flex flex-[1.4] items-center justify-center rounded-xl bg-blue-600 px-4 py-3 font-bold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700 hover:shadow-blue-300 active:translate-y-0 disabled:opacity-50 sm:flex-none sm:px-8"
+                        className="flex flex-[1.4] items-center justify-center rounded-xl bg-teal-600 px-4 py-3 font-bold text-white shadow-lg shadow-teal-200 transition hover:bg-teal-700 hover:shadow-teal-300 active:translate-y-0 disabled:opacity-50 sm:flex-none sm:px-8"
                     >
                         {saving ? '저장 중...' : '입고 완료'}
                     </button>
                     </div>
                 </div>
-            </div>
+            </section>
         </div>
     );
 };

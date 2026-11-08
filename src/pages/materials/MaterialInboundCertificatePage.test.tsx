@@ -31,6 +31,7 @@ afterEach(() => { deleteInboundCertificateDraft(draft.id); URL.createObjectURL =
 it('발행일 없이 모든 정보를 표시하고 입고증과 40장 사진을 별도 다운로드한다', async () => {
     render(<MemoryRouter initialEntries={['/materials/inbound-certificate?draftId=certificate-test']}><MaterialInboundCertificatePage /></MemoryRouter>);
     await screen.findByRole('heading', { name: '자재 입고증' });
+    expect(screen.getByRole('img', { name: '청연이엔지 로고' })).toHaveAttribute('src', '/assets/estimate/cheongyeon-logo.png');
     expect(screen.queryByText(/발행일/)).not.toBeInTheDocument();
     for (const label of ['입고일자', '현장명', '현장주소', '임대사', '임대사 주소', '차량번호', '총품목', '총수량']) expect(screen.getByText(label, { exact: true })).toBeInTheDocument();
     expect(screen.getByText('서울시 검증로 12, 101동')).toBeInTheDocument();

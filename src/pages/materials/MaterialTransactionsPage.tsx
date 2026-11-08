@@ -1,3 +1,4 @@
+import './MaterialWorkspace.css';
 import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -543,8 +544,8 @@ const MaterialTransactionsPage: React.FC = () => {
     const selectedVisibleCount = visibleTransactionKeys.filter((key) => selectedTransactionKeys.has(key)).length;
 
     return (
-        <div className="flex-1 min-h-0 flex flex-col p-3 sm:p-6 max-w-[2200px] w-full mx-auto bg-slate-50 overflow-x-hidden font-sans">
-            <div className="flex flex-col gap-3 xl:flex-row xl:justify-between xl:items-center mb-4 flex-shrink-0">
+        <div className="material-page material-page--transactions flex-1 min-h-0 flex flex-col p-3 sm:p-6 max-w-[2200px] w-full mx-auto bg-slate-50 overflow-x-hidden font-sans">
+            <div className="material-page__heading flex flex-col gap-3 xl:flex-row xl:justify-between xl:items-center mb-4 flex-shrink-0">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faClipboardList} className="text-indigo-600" />
@@ -576,7 +577,7 @@ const MaterialTransactionsPage: React.FC = () => {
             </div>
 
             {/* Filter Section */}
-            <section aria-label="입출고 조회 조건" className="material-transactions-filters bg-white rounded-xl shadow-sm border border-slate-200 p-3 sm:p-4 mb-4 flex-shrink-0">
+            <section aria-label="입출고 조회 조건" className="material-panel material-transactions-filters bg-white rounded-xl shadow-sm border border-slate-200 p-3 sm:p-4 mb-4 flex-shrink-0">
                 <div className="material-transactions-filters__grid">
                     <div className="material-transactions-filters__dates">
                         <div className="mb-1 flex items-center justify-between gap-2">
@@ -652,7 +653,7 @@ const MaterialTransactionsPage: React.FC = () => {
                         <button
                             onClick={() => handleSearch()}
                             disabled={loading}
-                            className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2 shadow-sm shadow-indigo-200 disabled:opacity-50"
+                            className="material-primary-button flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2 shadow-sm shadow-indigo-200 disabled:opacity-50"
                         >
                             <FontAwesomeIcon icon={faSearch} />
                             조회

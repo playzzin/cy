@@ -9,7 +9,7 @@ export type SelectedMaterial = Material & { quantity: number };
 
 type MaterialSelectionActionBarProps = {
     materials: SelectedMaterial[];
-    tone: 'blue' | 'red';
+    tone: 'blue' | 'red' | 'teal' | 'orange';
     title: string;
     details?: Array<{ label: string; value?: string }>;
 };
@@ -24,10 +24,20 @@ const TONE_STYLES = {
         secondaryButton: 'border-blue-200 bg-white text-blue-700 hover:bg-blue-50',
         message: 'border-blue-100 bg-blue-50 text-blue-700 shadow-blue-100',
     },
+    teal: {
+        primaryButton: 'bg-teal-600 text-white hover:bg-teal-700 shadow-teal-100',
+        secondaryButton: 'border-teal-200 bg-white text-teal-700 hover:bg-teal-50',
+        message: 'border-teal-100 bg-teal-50 text-teal-700 shadow-teal-100',
+    },
     red: {
         primaryButton: 'bg-red-600 text-white hover:bg-red-700 shadow-red-100',
         secondaryButton: 'border-red-200 bg-white text-red-700 hover:bg-red-50',
         message: 'border-red-100 bg-red-50 text-red-700 shadow-red-100',
+    },
+    orange: {
+        primaryButton: 'bg-orange-600 text-white hover:bg-orange-700 shadow-orange-100',
+        secondaryButton: 'border-orange-200 bg-white text-orange-700 hover:bg-orange-50',
+        message: 'border-orange-100 bg-orange-50 text-orange-700 shadow-orange-100',
     },
 };
 
