@@ -174,17 +174,19 @@ describe('menuServiceV11 canonical Firestore document', () => {
   it.each([undefined, 1])('removes the inventory page from stored menus (registration %s) without writing or removing other destinations', async registration => {
     const retained = [
       { text: '입출고 내역', path: '/materials/transactions' },
-      { text: '현장별 재고', path: '/materials/inventory-by-site' },
+      { text: '현장별 재고', path: '/custom-site-inventory' },
       { text: '재고 현황', path: '/custom-inventory' },
     ];
     const config = { custom: { name: '사용자 메뉴', icon: 'faFolder', menuRegistrationVersion: registration,
       menu: [{ text: '자재', sub: [
-        ...retained, '재고 현황', '재고현황', '현장일자 입출고', '현장날짜 입출고', '현장별 날짜별 입출고',
+        ...retained, '현장별 재고', '자재로그', '자재관리 로그', '자재변경로그', '재고 현황', '재고현황', '현장일자 입출고', '현장날짜 입출고', '현장별 날짜별 입출고',
+        { text: '현장 재고', path: '/materials/inventory-by-site/?site=sample#rows' },
+        { text: '변경 기록', path: '/materials/logs/?type=outbound' },
         { text: '이전 날짜 화면', path: '/materials/transactions-by-site-date/?site=sample' },
         { text: '이전 재고 화면', path: '/materials/inventory/?date=2026-11-01#list', sub: [{ text: '보존할 메뉴', path: '/custom-child' }] },
       ] }],
-      headerActions: [{ text: '재고', path: '/materials/inventory' }],
-      trash: [{ text: '재고', path: '/materials/inventory' }],
+      headerActions: [{ text: '재고', path: '/materials/inventory' }, { text: '현장', path: '/materials/inventory-by-site' }, { text: '기록', path: '/materials/logs' }],
+      trash: [{ text: '재고', path: '/materials/inventory' }, { text: '현장', path: '/materials/inventory-by-site' }, { text: '기록', path: '/materials/logs' }],
     } };
     const original = JSON.stringify(config);
     mockedGetDoc.mockResolvedValue(existingDoc(config) as any);

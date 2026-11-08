@@ -1,16 +1,11 @@
-import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { useSiteMode } from '../../contexts/SiteModeContext';
-import { matchesMenuPosition } from '../../utils/menuPosition';
 import {
     faArrowDown,
     faArrowUp,
     faBoxesStacked,
-    faBuilding,
     faClipboardList,
-    faHistory,
 } from '@fortawesome/free-solid-svg-icons';
 
 const materialTabs = [
@@ -38,30 +33,10 @@ const materialTabs = [
         icon: faClipboardList,
         description: '조회/수정',
     },
-    {
-        to: '/materials/inventory-by-site',
-        label: '현장별 재고',
-        icon: faBuilding,
-        description: '현장 집계',
-        officeOnly: true,
-    },
-    {
-        to: '/materials/logs',
-        label: '자재 로그',
-        icon: faHistory,
-        description: '변경 이력',
-        officeOnly: true,
-    },
 ];
 
 const MaterialManagementPage: React.FC = () => {
     const location = useLocation();
-    const canManage = useMaterialAdministration();
-    const { currentPosition, currentPositionData } = useSiteMode();
-    const showOfficeTabs = currentPosition === 'full'
-        || matchesMenuPosition('office', '사무실', currentPosition)
-        || matchesMenuPosition('office', '사무실', currentPositionData?.name);
-    const visibleTabs = materialTabs.filter((tab) => !tab.officeOnly || (showOfficeTabs && canManage));
     const normalizedPath = location.pathname.replace(/\/+$/, '');
     const isFieldGoodsPage = normalizedPath === '/materials/field-goods';
 
@@ -84,14 +59,14 @@ const MaterialManagementPage: React.FC = () => {
                         </div>
 
                         <nav className="grid min-w-0 max-w-full grid-cols-4 gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0" aria-label="자재관리 메뉴">
-                            {visibleTabs.map((tab, index) => (
+                            {materialTabs.map((tab) => (
                                 <NavLink
                                     key={tab.to}
                                     to={tab.to}
                                     end
                                     className={({ isActive }) =>
                                         [
-                                            index > 3 ? 'hidden sm:flex' : 'flex',
+                                            'flex',
                                             'flex-col px-0.5 sm:flex-row',
                                             'group min-w-0 items-center justify-center gap-1.5 rounded-lg border py-1.5 text-center transition sm:min-w-[132px] sm:shrink-0 sm:justify-start sm:gap-3 sm:px-3 sm:py-2 sm:text-left',
                                             isActive

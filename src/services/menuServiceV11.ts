@@ -1119,6 +1119,8 @@ const removeRetiredPageMenus = (config: SiteDataType, legacy: boolean): void => 
                 ? filterItems(item.sub)
                 : undefined;
             if (pathname === '/materials/inventory'
+                || ['/materials/inventory-by-site', '/materials/logs'].includes(pathname)
+                || (!path && ['현장별재고', '자재로그', '자재관리로그', '자재변경로그'].includes(text.replace(/\s+/g, '')))
                 || (!path && text.replace(/\s+/g, '') === '재고현황')
                 || pathname === '/materials/transactions-by-site-date'
                 || (!path && ['현장일자입출고', '현장날짜입출고', '현장별날짜별입출고'].includes(text.replace(/\s+/g, '')))

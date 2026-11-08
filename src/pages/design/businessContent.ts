@@ -263,7 +263,7 @@ export const MODULES: BusinessModule[] = [
 
 export const MODULE_LINKS: Record<BusinessModule['id'], { to: string; label: string }> = {
     'system-dongbari-scaffolding': { to: '/site/management', label: '프로젝트 보기' },
-    'material-rental': { to: '/materials/inventory-by-site', label: '자재 재고 보기' },
+    'material-rental': { to: '/materials/transactions', label: '자재 입출고 보기' },
     'manpower-supply': { to: '/assignment/daily-dispatch', label: '인력 배치 보기' },
     'erp-site-management': { to: '/reports/daily', label: '출력일보 보기' },
     'partner-network': { to: '/company/management', label: '협력사 관리 보기' }

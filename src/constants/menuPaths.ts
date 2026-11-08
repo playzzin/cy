@@ -206,10 +206,6 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ud604\uc7a5\ubb3c\ud488 \uccad\uad6c": "/materials/field-goods",
     "\uc790\uc7ac \uccad\uad6c \ubaa8\ub378": "/materials/field-goods",
     "\ud604\uc7a5\ubb3c\ud488 \uccad\uad6c \uc124\uacc4": "/materials/field-goods",
-    "\ud604\uc7a5\ubcc4 \uc7ac\uace0": "/materials/inventory-by-site",
-    "자재관리 로그": "/materials/logs",
-    "자재 로그": "/materials/logs",
-    "자재변경로그": "/materials/logs",
 
 
 

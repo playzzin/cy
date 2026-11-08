@@ -96,7 +96,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "현장별 재고", "자재관리 로그"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품"]
             },
             {
                 text: "지원 관리",
@@ -182,7 +182,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "현장별 재고", "자재관리 로그"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품"]
             },
             {
                 text: "지원 관리",
@@ -245,7 +245,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "현장별 재고", "자재관리 로그"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품"]
             },
             {
                 text: "지원 관리",
