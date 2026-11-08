@@ -1,10 +1,12 @@
 import {
+    addMaterial,
     buildMaterialBusinessKey,
     deleteMaterial,
     getAllMaterials,
     getUniqueMaterialsForSelection,
     updateMaterial,
 } from './materialService';
+import { MaterialSchema } from '../types/zod/materialSchema';
 import { materialFirestoreService } from './materialFirestoreService';
 import { materialLogService } from './materialLogService';
 import type { Material } from '../types/materials';
@@ -42,6 +44,14 @@ beforeEach(() => {
 });
 afterEach(() => {
     jest.useRealTimers();
+});
+
+it('품명 없이 규격만 등록한 자재도 저장 스키마와 선택 목록에서 유지된다', async () => {
+    const id = await addMaterial({ category: '동바리', itemName: '', spec: 'QA-SPEC-ONLY', unit: '', isActive: true });
+    expect(MaterialSchema.parse(stored.get(id))).toMatchObject({ itemName: '', spec: 'QA-SPEC-ONLY', unit: 'EA' });
+    expect(await getUniqueMaterialsForSelection()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id, itemName: '', spec: 'QA-SPEC-ONLY', unit: 'EA' }),
+    ]));
 });
 
 it('기본 여부가 누락된 구형 행보다 최신 수정 행을 선택하고 빈 설명도 유지한다', async () => {

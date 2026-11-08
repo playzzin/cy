@@ -14,6 +14,7 @@ interface MaterialMobileSitePickerProps {
     onChange: (siteId: string) => void;
     tone: 'blue' | 'red';
     label?: string;
+    compact?: boolean;
 }
 
 const toneClasses = {
@@ -39,6 +40,7 @@ const MaterialMobileSitePicker: React.FC<MaterialMobileSitePickerProps> = ({
     onChange,
     tone,
     label = '현장 선택',
+    compact = false,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -65,7 +67,7 @@ const MaterialMobileSitePicker: React.FC<MaterialMobileSitePickerProps> = ({
     };
 
     return (
-        <div className="relative col-span-2 space-y-1 md:hidden">
+        <div className={`relative min-w-0 space-y-1 md:hidden ${compact ? '' : 'col-span-2'}`}>
             <label className="text-xs font-bold text-slate-600">{label}</label>
             <button
                 type="button"
@@ -73,7 +75,7 @@ const MaterialMobileSitePicker: React.FC<MaterialMobileSitePickerProps> = ({
                 aria-haspopup="listbox"
                 aria-expanded={isOpen}
                 aria-label={selectedSite ? `${label}: ${selectedSite.name}` : label}
-                className={`flex min-h-11 w-full items-center gap-2 rounded-lg border bg-white px-3 text-left text-sm font-bold shadow-sm transition focus:outline-none focus:ring-2 ${classes.border} ${classes.ring}`}
+                className={`flex w-full items-center rounded-lg border bg-white text-left font-bold shadow-sm transition focus:outline-none focus:ring-2 ${compact ? 'h-[38px] gap-1 px-2 text-xs' : 'min-h-11 gap-2 px-3 text-sm'} ${classes.border} ${classes.ring}`}
             >
                 <MapPin size={17} className={`shrink-0 ${classes.icon}`} aria-hidden="true" />
                 <span className={`min-w-0 flex-1 truncate ${selectedSite ? 'text-slate-800' : 'text-slate-500'}`}>
@@ -87,7 +89,7 @@ const MaterialMobileSitePicker: React.FC<MaterialMobileSitePickerProps> = ({
             </button>
 
             {isOpen ? (
-                <div className="absolute inset-x-0 z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                <div className={`absolute right-0 z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white p-2 shadow-xl ${compact ? 'w-[min(280px,calc(100vw-64px))]' : 'left-0'}`}>
                     <div className="relative">
                         <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
                         <input

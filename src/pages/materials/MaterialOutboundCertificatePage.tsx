@@ -1,6 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import MaterialCertificateDocument from './MaterialCertificateDocument';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import html2canvas from 'html2canvas';
+import { createOutboundCertificateImageFile, createOutboundPhotosPdfFile, downloadOutboundFile, getOutboundCertificateDetails, getOutboundPhotoPageLayouts } from './materialOutboundCertificateExport';
+import './MaterialCertificatePage.css';
+import { createMaterialPhotoUrlResolver, hasMaterialPhotoReference } from './MaterialPhotoViewerModal';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowLeft,
@@ -14,49 +17,55 @@ import {
     OutboundCertificateDraft,
 } from './materialOutboundCertificateDraftStore';
 
-const numberFormatter = new Intl.NumberFormat('ko-KR');
-
-const sanitizeFileName = (value: unknown): string =>
-    String(value ?? '')
-        .trim()
-        .replace(/[\\/:*?"<>|]/g, '-')
-        .replace(/\s+/g, '_')
-        .slice(0, 90) || '반출증';
-
-const canvasToJpegFile = (canvas: HTMLCanvasElement, fileName: string): Promise<File> =>
-    new Promise((resolve, reject) => {
-        canvas.toBlob((blob) => {
-            if (!blob) {
-                reject(new Error('반출증 이미지를 만들지 못했습니다.'));
-                return;
-            }
-            resolve(new File([blob], fileName, { type: 'image/jpeg' }));
-        }, 'image/jpeg', 0.92);
-    });
-
-const downloadFile = (file: File) => {
-    const url = URL.createObjectURL(file);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = file.name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
 
 const MaterialOutboundCertificatePage: React.FC = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
-    const certificateRef = useRef<HTMLDivElement | null>(null);
     const [draft, setDraft] = useState<OutboundCertificateDraft | null>(null);
     const [photoUrls, setPhotoUrls] = useState<Array<{ id: string; url: string; name: string }>>([]);
     const [exporting, setExporting] = useState(false);
+    const [loadingPhotos, setLoadingPhotos] = useState(false);
+    const [photoError, setPhotoError] = useState('');
+    const [photoRetry, setPhotoRetry] = useState(0);
 
     useEffect(() => {
         const draftId = searchParams.get('draftId') || '';
         setDraft(draftId ? getOutboundCertificateDraft(draftId) : null);
     }, [searchParams]);
+
+    useEffect(() => {
+        const references = draft?.photoReferences?.filter(hasMaterialPhotoReference);
+        if (!draft || !references?.length) return;
+        const controller = new AbortController();
+        setLoadingPhotos(true);
+        setPhotoError('');
+        void (async () => {
+            try {
+                const { default: service } = await import('../../services/materialService');
+                const resolver = createMaterialPhotoUrlResolver(id => service.getMaterialPhotoDownloadUrls(id));
+                const urls = [...new Set((await Promise.all(references.map(reference => resolver.resolve(reference)))).flat())];
+                if (!urls.length) throw new Error('등록된 첨부사진을 찾을 수 없습니다.');
+                if (urls.length > 40) throw new Error('이 날짜·현장·임대사·차량의 사진이 40장을 초과합니다. 입출고 내역의 사진 보기에서 확인해 주세요.');
+                const photos: OutboundCertificateDraft['photos'] = [];
+                for (let index = 0; index < urls.length; index += 4) {
+                    const batch = await Promise.all(urls.slice(index, index + 4).map(async (url, offset) => {
+                        const response = await fetch(url, { signal: controller.signal });
+                        if (!response.ok) throw new Error('첨부사진을 불러오지 못했습니다.');
+                        const blob = await response.blob();
+                        return { id: `saved-${index + offset}`, source: 'gallery' as const,
+                            file: new File([blob], `사진_${index + offset + 1}`, { type: blob.type || 'image/jpeg' }) };
+                    }));
+                    photos.push(...batch);
+                }
+                if (!controller.signal.aborted) setDraft(current => current?.id === draft.id ? { ...current, photos, photoReferences: undefined } : current);
+            } catch (error) {
+                if (!controller.signal.aborted) setPhotoError(error instanceof Error ? error.message : '첨부사진을 불러오지 못했습니다.');
+            } finally {
+                if (!controller.signal.aborted) setLoadingPhotos(false);
+            }
+        })();
+        return () => controller.abort();
+    }, [draft?.id, draft?.photoReferences, photoRetry]);
 
     useEffect(() => {
         if (!draft) {
@@ -76,30 +85,26 @@ const MaterialOutboundCertificatePage: React.FC = () => {
         };
     }, [draft]);
 
-    const totalQuantity = useMemo(
-        () => draft?.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || 0,
-        [draft]
-    );
-
     const createCertificateFile = async (): Promise<File> => {
-        if (!certificateRef.current || !draft) {
-            throw new Error('반출증 페이지가 준비되지 않았습니다.');
-        }
+        if (!draft) throw new Error('반출증 페이지가 준비되지 않았습니다.');
+        return createOutboundCertificateImageFile(draft);
+    };
 
-        const canvas = await html2canvas(certificateRef.current, {
-            backgroundColor: '#ffffff',
-            scale: 2,
-            useCORS: true,
-        } as unknown as Parameters<typeof html2canvas>[1]);
-        const fileName = `${sanitizeFileName(`반출증_${draft.transactionDate}_${draft.siteName}_${draft.vehicleNumber}`)}.jpg`;
-        return canvasToJpegFile(canvas, fileName);
+    const handleDownloadPhotos = async () => {
+        if (!draft) return;
+        setExporting(true);
+        try { downloadOutboundFile(await createOutboundPhotosPdfFile(draft)); }
+        catch (error) {
+            console.error('Failed to download outbound photos:', error);
+            alert(error instanceof Error ? error.message : '첨부사진을 저장하지 못했습니다.');
+        } finally { setExporting(false); }
     };
 
     const handleDownload = async () => {
         setExporting(true);
         try {
             const file = await createCertificateFile();
-            downloadFile(file);
+            downloadOutboundFile(file);
         } catch (error) {
             console.error('Failed to download outbound certificate page:', error);
             alert('반출증 이미지를 저장하지 못했습니다.');
@@ -122,7 +127,7 @@ const MaterialOutboundCertificatePage: React.FC = () => {
                 return;
             }
 
-            downloadFile(file);
+            downloadOutboundFile(file);
             alert('이 브라우저에서는 파일 공유를 지원하지 않아 반출증 이미지를 저장했습니다.');
         } catch (error: any) {
             if (error?.name !== 'AbortError') {
@@ -160,35 +165,18 @@ const MaterialOutboundCertificatePage: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-slate-100 p-3 sm:p-6">
-            <style>
-                {`
-                @media print {
-                    body * { visibility: hidden; }
-                    #outbound-certificate-print, #outbound-certificate-print * { visibility: visible; }
-                    #outbound-certificate-print {
-                        position: absolute;
-                        left: 0;
-                        top: 0;
-                        width: 100%;
-                        box-shadow: none !important;
-                        border: 0 !important;
-                    }
-                    .no-print { display: none !important; }
-                    @page { size: A4; margin: 12mm; }
-                }
-                `}
-            </style>
+            <style>{`@media print { @page { size: A4; margin: 0; } }`}</style>
 
             <div className="no-print mx-auto mb-4 flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <button
                     type="button"
-                    onClick={() => navigate('/materials/outbound')}
+                    onClick={() => draft.returnTo ? navigate(-1) : navigate('/materials/outbound')}
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
                 >
                     <FontAwesomeIcon icon={faArrowLeft} />
-                    출고 등록으로
+                    {draft.returnTo ? '입출고 내역으로 돌아가기' : '출고 등록으로'}
                 </button>
-                <div className="grid grid-cols-3 gap-2 sm:flex">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                     <button
                         type="button"
                         onClick={() => window.print()}
@@ -204,7 +192,11 @@ const MaterialOutboundCertificatePage: React.FC = () => {
                         className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
                     >
                         <FontAwesomeIcon icon={faDownload} />
-                        이미지 저장
+                        반출증 저장
+                    </button>
+                    <button type="button" onClick={handleDownloadPhotos} disabled={exporting || draft.photos.length === 0}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50">
+                        <FontAwesomeIcon icon={faDownload} /> 사진 PDF 저장
                     </button>
                     <button
                         type="button"
@@ -218,110 +210,22 @@ const MaterialOutboundCertificatePage: React.FC = () => {
                 </div>
             </div>
 
-            <div
-                id="outbound-certificate-print"
-                ref={certificateRef}
-                className="mx-auto max-w-5xl bg-white p-5 text-slate-900 shadow-xl ring-1 ring-slate-200 sm:p-8"
-            >
-                <div className="border-[3px] border-slate-900 p-5 sm:p-7">
-                    <div className="text-center">
-                        <h1 className="text-3xl font-black tracking-normal text-slate-950 sm:text-5xl">자재 반출증</h1>
-                        <div className="mt-2 text-sm font-semibold text-slate-500">
-                            발행일 {new Date().toLocaleDateString('ko-KR')}
-                        </div>
-                    </div>
-
-                    <div className="mt-7 grid grid-cols-1 overflow-hidden border border-slate-300 text-sm sm:grid-cols-4">
-                        {[
-                            ['출고일자', draft.transactionDate || '-'],
-                            ['현장명', draft.siteName || '-'],
-                            ['임대사', draft.rentalCompanyName || '-'],
-                            ['차량번호', draft.vehicleNumber || '-'],
-                            ['반출자', draft.recipient || '-'],
-                            ['등록자', draft.registeredByName || '-'],
-                            ['총 품목', `${draft.items.length}개`],
-                            ['총 수량', numberFormatter.format(totalQuantity)],
-                        ].map(([label, value]) => (
-                            <React.Fragment key={label}>
-                                <div className="border-b border-r border-slate-300 bg-slate-100 px-3 py-2 text-center font-black text-slate-700">
-                                    {label}
-                                </div>
-                                <div className="border-b border-r border-slate-300 px-3 py-2 font-bold text-slate-950">
-                                    {value}
-                                </div>
-                            </React.Fragment>
-                        ))}
-                    </div>
-
-                    <div className="mt-7 overflow-hidden border border-slate-300">
-                        <table className="w-full table-fixed text-sm">
-                            <thead className="bg-slate-800 text-white">
-                                <tr>
-                                    <th className="w-14 px-2 py-3 text-center font-black">No</th>
-                                    <th className="px-3 py-3 text-left font-black">품명</th>
-                                    <th className="px-3 py-3 text-left font-black">규격</th>
-                                    <th className="w-24 px-3 py-3 text-right font-black">수량</th>
-                                    <th className="w-20 px-3 py-3 text-center font-black">단위</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-200">
-                                {draft.items.map((item, index) => (
-                                    <tr key={`${item.id}-${index}`} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                                        <td className="px-2 py-2 text-center font-bold">{index + 1}</td>
-                                        <td className="px-3 py-2 font-bold">{item.itemName}</td>
-                                        <td className="px-3 py-2 font-semibold text-slate-600">{item.spec || '-'}</td>
-                                        <td className="px-3 py-2 text-right font-black">{numberFormatter.format(item.quantity || 0)}</td>
-                                        <td className="px-3 py-2 text-center font-semibold text-slate-600">{item.unit}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div className="mt-8">
-                        <div className="flex items-end justify-between border-b-2 border-slate-900 pb-2">
-                            <div>
-                                <h2 className="text-2xl font-black text-slate-950">첨부사진</h2>
-                                <p className="mt-1 text-sm font-semibold text-slate-500">자재 상차 및 반출 확인 사진</p>
-                            </div>
-                            <div className="text-sm font-black text-slate-700">{photoUrls.length}장</div>
-                        </div>
-
-                        {photoUrls.length > 0 ? (
-                            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                                {photoUrls.map((photo, index) => (
-                                    <figure key={photo.id} className="break-inside-avoid overflow-hidden border border-slate-300 bg-white">
-                                        <div className="flex aspect-[4/3] items-center justify-center bg-slate-100">
-                                            <img
-                                                src={photo.url}
-                                                alt={`반출 사진 ${index + 1}`}
-                                                className="h-full w-full object-contain"
-                                            />
-                                        </div>
-                                        <figcaption className="border-t border-slate-200 px-3 py-2 text-center text-sm font-black text-slate-700">
-                                            사진 {index + 1}
-                                        </figcaption>
-                                    </figure>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="mt-4 border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm font-bold text-slate-500">
-                                첨부된 사진이 없습니다.
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="mt-10 text-center text-lg font-bold text-slate-700">위 자재를 반출함.</div>
-                    <div className="mt-12 grid grid-cols-2 gap-16 px-10 text-center text-sm font-black text-slate-600">
-                        <div>
-                            <div className="border-t-2 border-slate-400 pt-3">인수자 확인</div>
-                        </div>
-                        <div>
-                            <div className="border-t-2 border-slate-400 pt-3">담당자 확인</div>
-                        </div>
-                    </div>
+            <MaterialCertificateDocument kind="outbound" items={draft.items} details={getOutboundCertificateDetails(draft)} />
+            <section className="no-print material-certificate-photo-preview mx-auto mt-6 max-w-5xl" aria-label="첨부사진 미리보기">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div><h2 className="text-xl font-bold">첨부사진 {photoUrls.length}장</h2><p className="mt-1 text-sm text-slate-500">반출증과 별도 파일로 저장됩니다. 최대 40장 · A4 최대 2페이지</p></div>
+                    <button type="button" onClick={handleDownloadPhotos} disabled={exporting || !draft.photos.length} className="rounded-lg bg-red-600 px-4 py-2 font-bold text-white disabled:opacity-50">첨부사진 PDF 다운로드</button>
                 </div>
-            </div>
+                {loadingPhotos && <p role="status">첨부사진을 불러오는 중입니다...</p>}
+                {photoError && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">{photoError} <button type="button" onClick={() => setPhotoRetry(value => value + 1)} disabled={loadingPhotos} className="font-bold underline">다시 시도</button></div>}
+                {photoUrls.length ? getOutboundPhotoPageLayouts(photoUrls.length).map((layout, pageIndex, pages) => <div key={pageIndex} className="material-certificate-photo-sheet">
+                    <header><strong>자재 반출 첨부사진</strong><span>{draft.transactionDate} · {draft.siteName} · {draft.vehicleNumber}</span></header>
+                    <div className="material-certificate-photo-sheet__grid" style={{ gridTemplateColumns: 'repeat(' + layout.columns + ', minmax(0, 1fr))', gridTemplateRows: 'repeat(' + layout.rows + ', minmax(0, 1fr))' }}>
+                        {photoUrls.slice(layout.start, layout.start + layout.count).map((photo, index) => <figure key={photo.id}><img src={photo.url} alt={'반출 사진 ' + (layout.start + index + 1)} /><figcaption>사진 {layout.start + index + 1}</figcaption></figure>)}
+                    </div>
+                    <footer>{pageIndex + 1} / {pages.length} · 전체 {photoUrls.length}장</footer>
+                </div>) : !loadingPhotos && !photoError && <p className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-slate-500">첨부된 사진이 없습니다.</p>}
+            </section>
         </div>
     );
 };

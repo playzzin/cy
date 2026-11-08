@@ -368,7 +368,7 @@ const ManualPage: React.FC = () => {
                                 <h3 className="font-bold text-slate-800">자재/사무실</h3>
                                 <ul className="list-disc pl-5 text-sm text-slate-600 mt-3 space-y-1">
                                     <li>자재 마스터/입출고: `/materials/master`, `/materials/inbound`, `/materials/outbound`</li>
-                                    <li>재고 조회: `/materials/inventory`, `/materials/inventory-by-site`</li>
+                                    <li>입출고 내역: `/materials/transactions`</li>
                                     <li>사무실 관리: `/office/management`</li>
                                     <li>현장 관리 시스템: `/site/management`</li>
                                 </ul>
@@ -379,8 +379,7 @@ const ManualPage: React.FC = () => {
                             items={[
                                 { label: '지원 현황판', path: '/support/status', description: '지원비 흐름 모니터링' },
                                 { label: '숙소 관리', path: '/support/accommodation', description: '현장 숙소 운영 관리' },
-                                { label: '재고 현황', path: '/materials/inventory', description: '자재 재고 실시간 확인' },
-                                { label: '현장별 재고', path: '/materials/inventory-by-site', description: '현장 단위 재고 비교' }
+                                { label: '입출고 내역', path: '/materials/transactions', description: '날짜별 자재 입출고와 반출증 확인' }
                             ]}
                         />
                     </div>

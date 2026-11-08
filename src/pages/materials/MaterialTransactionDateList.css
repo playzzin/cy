@@ -1,0 +1,48 @@
+.material-date-list { min-width: 0; container-type: inline-size; }
+.material-date-list__toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; color: #64748b; font-size: 13px; }
+.material-date-list__toolbar label { display: flex; align-items: center; gap: 8px; color: #334155; }
+.material-date-list input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; accent-color: #315778; }
+.material-date-list__expand-actions { display: flex; gap: 12px; margin-left: auto; color: #315778; }
+.material-date-group { border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 12px; background: white; overflow: hidden; }
+.material-date-group__heading { display: flex; align-items: center; padding-left: 16px; }
+.material-date-group__toggle { display: grid; grid-template-columns: 125px 100px repeat(3, minmax(0, 1fr)) 16px; align-items: center; gap: 16px; min-width: 0; width: 100%; padding: 16px; text-align: left; color: #334155; font-size: 14px; }
+.material-date-group__toggle:hover { background: #f8fafc; }
+.material-date-group__toggle:focus-visible, .material-date-list__action:focus-visible { outline: 2px solid #315778; outline-offset: -2px; }
+.material-date-group__date, .material-date-group__counts, .material-date-group__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.material-date-group__date strong { color: #0f172a; font-size: 16px; }
+.material-date-group__date > span, .material-date-group__field small { color: #64748b; font-size: 12px; }
+.material-date-group__details { overflow: auto; max-height: min(60dvh, 640px); isolation: isolate; border-top: 1px solid #e2e8f0; }
+.material-date-group table { width: 100%; min-width: 1764px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.material-date-group thead { position: sticky; top: 0; z-index: 30; background: #f1f5f9; }
+.material-date-group th, .material-date-group td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; overflow-wrap: anywhere; }
+.material-date-group th { text-align: left; color: #475569; }
+.material-date-group th:first-child, .material-date-group td:first-child { position: sticky; left: 0; background: white; z-index: 1; }
+.material-date-group th:first-child { background: #f1f5f9; }
+.material-date-group tr.is-selected > td { background: #edf3f8; }
+.material-date-list__action { padding: 6px; border-radius: 6px; background: #edf3f8; color: #315778; white-space: nowrap; }
+.material-date-group__certificates { border-top: 1px solid #e2e8f0; padding: 12px 16px; background: #fff7ed; font-size: 13px; }
+.material-date-group__certificates > p { margin-bottom: 8px; color: #9a3412; font-weight: 700; }
+.material-date-group__certificates > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 0; }
+.material-date-group__certificates > div > span { min-width: 0; overflow-wrap: anywhere; }
+.material-date-list__empty { padding: 64px 16px; text-align: center; color: #64748b; border: 1px solid #e2e8f0; border-radius: 12px; background: white; }
+@container (max-width: 900px) {
+    .material-date-group__toggle { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 16px; gap: 12px; }
+    .material-date-group__date { grid-column: 1; grid-row: 1; }
+    .material-date-group__counts { grid-column: 2; grid-row: 1; }
+    .material-date-group__toggle > svg { grid-column: 3; grid-row: 1; }
+    .material-date-group__field { grid-column: 1 / -1; flex-direction: row; gap: 8px; }
+    .material-date-group__field small { min-width: 48px; padding-top: 2px; }
+    .material-date-group__field > span { min-width: 0; }
+}
+
+.material-date-group { border-color: #dce5ee; border-radius: 14px; box-shadow: 0 2px 8px #18395504; }
+.material-date-group__heading { border-left: 3px solid #315778; padding-left: 14px; }
+.material-date-group__toggle { padding-block: 20px; }
+.material-date-group__toggle[aria-expanded=true] { background: #f5f8fb; }
+.material-date-group__date strong { color: #183955; font-size: 18px; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.material-date-group__counts { font-size: 12px; font-weight: 700; }
+.material-date-group__counts > span { width: fit-content; border-radius: 5px; padding: 3px 7px; background: #f3f6fa; }
+.material-date-group__certificates { background: #f5f8fb; }
+.material-date-group__certificates > p { color: #46627a; font-size: 12px; }
+.material-date-list__action { border: 1px solid #d5e2ed; padding: 7px 10px; font-weight: 700; }
+.material-date-list__action:hover { background: #dfeaf3; }

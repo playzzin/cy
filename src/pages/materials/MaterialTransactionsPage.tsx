@@ -1,26 +1,28 @@
+import './MaterialWorkspace.css';
 import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { buildTransactionOutboundCertificate, getOutboundCertificateGroupKey } from './materialTransactionCertificate';
+import { createOutboundCertificateDraftId, saveOutboundCertificateDraft } from './materialOutboundCertificateDraftStore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faClipboardList,
     faSearch,
     faDownload,
     faTruck,
-    faArrowRight,
-    faArrowLeft,
-    faFilter,
     faEdit,
     faTrash,
     faTimes,
     faSave,
-    faImages,
 } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService } from '../../services/companyService';
 import { settlementTargetService } from '../../services/settlementTargetService';
 import { InboundTransaction, Material, OutboundTransaction } from '../../types/materials';
+import MaterialSearchSelect from './MaterialSearchSelect';
+import MaterialTransactionDateList, { getMaterialTransactionRowKey as getTransactionKey, MaterialTransactionRow } from './MaterialTransactionDateList';
+import './MaterialTransactionsPage.css';
 import * as XLSX from 'xlsx-js-style';
 import {
     createSiteIdSet,
@@ -37,7 +39,6 @@ import {
 import MaterialPhotoViewerModal, {
     createMaterialPhotoUrlResolver,
     getMaterialPhotoDisplayCount,
-    hasMaterialPhotoReference,
 } from './MaterialPhotoViewerModal';
 import {
     getMaterialTransactionRentalCompanyLink,
@@ -49,11 +50,7 @@ import {
     MaterialTransactionExcelCellValue,
 } from './materialTransactionExcel';
 
-type Transaction = (InboundTransaction | OutboundTransaction) & {
-    type: 'inbound' | 'outbound';
-    siteStatus?: Site['status'];
-    siteStatusLabel?: string;
-};
+type Transaction = MaterialTransactionRow;
 
 interface PhotoViewerState {
     isOpen: boolean;
@@ -101,14 +98,17 @@ const MaterialTransactionsPage: React.FC = () => {
     const canDelete = useMaterialAdministration();
     const [loading, setLoading] = useState(false);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [certificateTransactions, setCertificateTransactions] = useState<Transaction[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
     const [materials, setMaterials] = useState<Material[]>([]);
     const [rentalCompanies, setRentalCompanies] = useState<MaterialRentalCompanyOption[]>([]);
 
     // Filters
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+    const [filterError, setFilterError] = useState('');
     const [siteStatusFilter, setSiteStatusFilter] = useState<MaterialSiteStatusFilter>('active');
     const [siteId, setSiteId] = useState('');
-    const [siteKeyword, setSiteKeyword] = useState('');
     const [transactionType, setTransactionType] = useState<'all' | 'inbound' | 'outbound'>('all');
     const [vehicleNumber, setVehicleNumber] = useState('');
     const [materialName, setMaterialName] = useState('');
@@ -148,23 +148,9 @@ const MaterialTransactionsPage: React.FC = () => {
     };
 
     const trimText = (value: unknown): string => String(value ?? '').trim();
-    const normalizeSearchText = (value: unknown): string => trimText(value).replace(/\s+/g, '').toLowerCase();
-    const getTransactionKey = (tx: Transaction): string => `${tx.type}:${tx.id}`;
 
     useEffect(() => {
         loadMasterData();
-    }, []);
-
-    // Lock main content scroll
-    useEffect(() => {
-        const mainContent = document.getElementById('main-content');
-        if (mainContent) {
-            const originalOverflow = mainContent.style.overflow;
-            mainContent.style.overflow = 'hidden';
-            return () => {
-                mainContent.style.overflow = originalOverflow;
-            };
-        }
     }, []);
 
     const loadMasterData = async () => {
@@ -186,23 +172,29 @@ const MaterialTransactionsPage: React.FC = () => {
     };
 
     const statusFilteredSites = filterSitesByMaterialStatus(sites, siteStatusFilter);
-    const filteredSites = sites.filter((site) => {
-        if (!statusFilteredSites.some((row) => row.id === site.id)) return false;
-        if (!siteKeyword.trim()) return true;
-        return normalizeSearchText(site.name).includes(normalizeSearchText(siteKeyword));
-    });
 
     const handleSearch = async (
         siteRows: Site[] = sites,
         materialRows: Material[] = materials,
         statusFilter: MaterialSiteStatusFilter = siteStatusFilter
     ) => {
+        if ((startDate && !isValidDateText(startDate)) || (endDate && !isValidDateText(endDate))) {
+            setFilterError('날짜를 YYYY-MM-DD 형식으로 입력해 주세요.');
+            return;
+        }
+        if (startDate && endDate && startDate > endDate) {
+            setFilterError('시작일은 종료일보다 늦을 수 없습니다.');
+            return;
+        }
+        setFilterError('');
         setLoading(true);
         try {
             let fetchedInbound: InboundTransaction[] = [];
             let fetchedOutbound: OutboundTransaction[] = [];
 
             const filters = {
+                startDate: startDate || undefined,
+                endDate: endDate || undefined,
                 siteId: siteId || undefined,
                 vehicleNumber: vehicleNumber || undefined,
             };
@@ -222,11 +214,6 @@ const MaterialTransactionsPage: React.FC = () => {
             const allowedSiteIds = createSiteIdSet(allowedSites);
             const siteById = new Map(allowedSites.map((site) => [site.id, site]));
             let all = [...labeledInbound, ...labeledOutbound].filter((tx) => allowedSiteIds.has(tx.siteId));
-
-            // Client-side filtering for Material Name
-            if (materialName) {
-                all = all.filter(t => t.itemName.includes(materialName) || t.spec?.includes(materialName));
-            }
 
             // Sort by Date DESC
             all.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime());
@@ -252,7 +239,8 @@ const MaterialTransactionsPage: React.FC = () => {
                 };
             });
 
-            setTransactions(normalized);
+            setCertificateTransactions(normalized);
+            setTransactions(materialName ? normalized.filter(t => t.itemName.includes(materialName) || t.spec?.includes(materialName)) : normalized);
             setSelectedTransactionKeys(new Set());
         } catch (error) {
             console.error('Failed to search transactions:', error);
@@ -262,28 +250,22 @@ const MaterialTransactionsPage: React.FC = () => {
         }
     };
 
-    const toggleTransactionSelection = (tx: Transaction) => {
-        const key = getTransactionKey(tx);
-        setSelectedTransactionKeys((prev) => {
-            const next = new Set(prev);
-            if (next.has(key)) next.delete(key);
-            else next.add(key);
+    const toggleTransactionRows = (rows: Transaction[]) => {
+        const keys = rows.map(getTransactionKey);
+        setSelectedTransactionKeys(previous => {
+            const next = new Set(previous);
+            const allSelected = keys.length > 0 && keys.every(key => previous.has(key));
+            keys.forEach(key => { if (allSelected) next.delete(key); else next.add(key); });
             return next;
         });
     };
 
-    const toggleAllVisibleTransactions = () => {
-        const visibleKeys = visibleTransactions.map(getTransactionKey);
-        const allSelected = visibleKeys.length > 0 && visibleKeys.every((key) => selectedTransactionKeys.has(key));
-        setSelectedTransactionKeys((prev) => {
-            const next = new Set(prev);
-            if (allSelected) {
-                visibleKeys.forEach((key) => next.delete(key));
-            } else {
-                visibleKeys.forEach((key) => next.add(key));
-            }
-            return next;
-        });
+    const handleOpenOutboundCertificate = (row: Transaction) => {
+        const key = getOutboundCertificateGroupKey(row);
+        const rows = certificateTransactions.filter(item => item.type === 'outbound' && getOutboundCertificateGroupKey(item) === key);
+        const draft = buildTransactionOutboundCertificate(createOutboundCertificateDraftId(), rows, sites, rentalCompanies);
+        saveOutboundCertificateDraft(draft);
+        navigate(`/materials/outbound-certificate?draftId=${encodeURIComponent(draft.id)}`);
     };
 
     const handleDelete = async (tx: Transaction) => {
@@ -541,10 +523,6 @@ const MaterialTransactionsPage: React.FC = () => {
     };
 
     const visibleTransactions = transactions.filter((t) => {
-        if (siteKeyword.trim() && !normalizeSearchText(t.siteName).includes(normalizeSearchText(siteKeyword))) {
-            return false;
-        }
-
         if (!rentalCompanyFilter) return true;
 
         const selectedCompany = rentalCompanies.find((company) => getMaterialRentalCompanyOptionId(company) === rentalCompanyFilter);
@@ -564,27 +542,18 @@ const MaterialTransactionsPage: React.FC = () => {
     );
     const visibleTransactionKeys = visibleTransactions.map(getTransactionKey);
     const selectedVisibleCount = visibleTransactionKeys.filter((key) => selectedTransactionKeys.has(key)).length;
-    const allVisibleSelected = visibleTransactionKeys.length > 0 && selectedVisibleCount === visibleTransactionKeys.length;
 
     return (
-        <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[2200px] w-full mx-auto bg-slate-50 overflow-hidden font-sans">
-            <div className="flex justify-between items-center mb-6 flex-shrink-0">
+        <div className="material-page material-page--transactions flex-1 min-h-0 flex flex-col p-3 sm:p-6 max-w-[2200px] w-full mx-auto bg-slate-50 overflow-x-hidden font-sans">
+            <div className="material-page__heading flex flex-col gap-3 xl:flex-row xl:justify-between xl:items-center mb-4 flex-shrink-0">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faClipboardList} className="text-indigo-600" />
                         자재 입출고 내역
                     </h1>
-                    <p className="text-slate-500 mt-1 text-sm">차량별, 현장별 자재 이동 내역을 조회합니다.</p>
+                    <p className="text-slate-500 mt-1 text-sm">날짜별 임대사·차량번호를 확인하고 펼쳐서 자재 상세 내역을 조회합니다.</p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => navigate('/materials/transactions-by-site-date')}
-                        className="bg-white text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-50 transition flex items-center gap-2 shadow-sm font-medium border border-slate-200"
-                    >
-                        <FontAwesomeIcon icon={faClipboardList} />
-                        현장·날짜별 보기
-                    </button>
+                <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-bold text-slate-500">
                         선택 {selectedVisibleCount.toLocaleString('ko-KR')}건
                     </span>
@@ -608,11 +577,27 @@ const MaterialTransactionsPage: React.FC = () => {
             </div>
 
             {/* Filter Section */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6 flex-shrink-0">
-                <div className="grid grid-cols-1 md:grid-cols-7 gap-4 items-end">
-                    <div className="md:col-span-1">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">현장구분</label>
+            <section aria-label="입출고 조회 조건" className="material-panel material-transactions-filters bg-white rounded-xl shadow-sm border border-slate-200 p-3 sm:p-4 mb-4 flex-shrink-0">
+                <div className="material-transactions-filters__grid">
+                    <div className="material-transactions-filters__dates">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-500">날짜</span>
+                            <button type="button" className="text-xs font-semibold text-indigo-600" onClick={() => { setStartDate(''); setEndDate(''); setFilterError(''); }}>전체 기간</button>
+                        </div>
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
+                            <input type="date" aria-label="시작일" value={startDate} max={endDate || undefined}
+                                onChange={event => { setStartDate(event.target.value); setFilterError(''); }}
+                                className="h-[38px] min-w-0 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+                            <span className="text-slate-400">~</span>
+                            <input type="date" aria-label="종료일" value={endDate} min={startDate || undefined}
+                                onChange={event => { setEndDate(event.target.value); setFilterError(''); }}
+                                className="h-[38px] min-w-0 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+                        </div>
+                    </div>
+                    <div className="min-w-0">
+                        <label htmlFor="transaction-site-status" className="block text-xs font-bold text-slate-500 mb-1">현장구분</label>
                         <select
+                            id="transaction-site-status"
                             value={siteStatusFilter}
                             onChange={(e) => {
                                 setSiteStatusFilter(e.target.value as MaterialSiteStatusFilter);
@@ -625,32 +610,16 @@ const MaterialTransactionsPage: React.FC = () => {
                             <option value="all">전체현장</option>
                         </select>
                     </div>
-                    <div className="md:col-span-1">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">현장</label>
-                        <select
-                            value={siteId}
-                            onChange={(e) => setSiteId(e.target.value)}
-                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
-                        >
-                            <option value="">전체 현장</option>
-                            {filteredSites.map(site => (
-                                <option key={site.id} value={site.id}>[{getSiteStatusLabel(site.status)}] {site.name}</option>
-                            ))}
-                        </select>
+                    <div className="min-w-0">
+                        <label htmlFor="transaction-site" className="block text-xs font-bold text-slate-500 mb-1">현장</label>
+                        <MaterialSearchSelect id="transaction-site" label="현장" value={siteId} onChange={setSiteId}
+                            options={statusFilteredSites.map(site => ({ id: site.id, name: site.name, description: [getSiteStatusLabel(site.status), site.address || site.code].filter(Boolean).join(' · '), keywords: site.code }))}
+                            placeholder="전체 현장 · 검색" emptyOptionLabel="전체 현장" />
                     </div>
                     <div className="md:col-span-1">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">현장명 검색</label>
-                        <input
-                            type="text"
-                            value={siteKeyword}
-                            onChange={(e) => setSiteKeyword(e.target.value)}
-                            placeholder="현장명 포함 검색"
-                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
-                        />
-                    </div>
-                    <div className="md:col-span-1">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">구분</label>
+                        <label htmlFor="transaction-type" className="block text-xs font-bold text-slate-500 mb-1">구분</label>
                         <select
+                            id="transaction-type"
                             value={transactionType}
                             onChange={(e) => setTransactionType(e.target.value as any)}
                             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
@@ -661,9 +630,10 @@ const MaterialTransactionsPage: React.FC = () => {
                         </select>
                     </div>
                     <div className="md:col-span-1">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">차량번호</label>
+                        <label htmlFor="transaction-vehicle" className="block text-xs font-bold text-slate-500 mb-1">차량번호</label>
                         <div className="relative">
                             <input
+                                id="transaction-vehicle"
                                 type="text"
                                 value={vehicleNumber}
                                 onChange={(e) => setVehicleNumber(e.target.value)}
@@ -673,183 +643,37 @@ const MaterialTransactionsPage: React.FC = () => {
                             <FontAwesomeIcon icon={faTruck} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
                         </div>
                     </div>
-                    <div className="md:col-span-1">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">임대사</label>
-                        <select
-                            value={rentalCompanyFilter}
-                            onChange={(e) => setRentalCompanyFilter(e.target.value)}
-                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
-                        >
-                            <option value="">전체 임대사</option>
-                            {rentalCompanies.map((company) => {
-                                const optionId = getMaterialRentalCompanyOptionId(company);
-                                if (!optionId) return null;
-                                return (
-                                    <option key={optionId} value={optionId}>{company.name}</option>
-                                );
-                            })}
-                            <option value={RENTAL_UNASSIGNED_FILTER}>임대사 미지정</option>
-                        </select>
+                    <div className="min-w-0">
+                        <label htmlFor="transaction-rental" className="block text-xs font-bold text-slate-500 mb-1">임대사</label>
+                        <MaterialSearchSelect id="transaction-rental" label="임대사" value={rentalCompanyFilter} onChange={setRentalCompanyFilter}
+                            options={[...rentalCompanies, { id: RENTAL_UNASSIGNED_FILTER, name: '임대사 미지정' }]}
+                            placeholder="전체 임대사 · 검색" emptyOptionLabel="전체 임대사" />
                     </div>
                     <div className="md:col-span-1 flex gap-2">
                         <button
                             onClick={() => handleSearch()}
-                            className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2 shadow-sm shadow-indigo-200"
+                            disabled={loading}
+                            className="material-primary-button flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2 shadow-sm shadow-indigo-200 disabled:opacity-50"
                         >
                             <FontAwesomeIcon icon={faSearch} />
                             조회
                         </button>
                     </div>
                 </div>
-            </div>
+                {filterError && <p role="alert" className="mt-2 text-sm font-semibold text-red-600">{filterError}</p>}
+            </section>
 
-            {/* Data Table */}
-            <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                <div className="flex-1 overflow-auto min-h-[780px] max-h-[calc(100vh-220px)]">
-                    <table className="w-full text-sm" style={{ minWidth: 2110 }}>
-                        <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
-                            <tr>
-                                <th className="px-3 py-2 text-center font-bold text-slate-600 w-12 sticky left-0 z-30 bg-slate-50">
-                                    <input
-                                        type="checkbox"
-                                        checked={allVisibleSelected}
-                                        onChange={toggleAllVisibleTransactions}
-                                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                    />
-                                </th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 w-32 sticky left-[48px] z-20 bg-slate-50">일자</th>
-                                <th className="px-4 py-2 text-center font-bold text-slate-600 w-24 sticky left-[176px] z-20 bg-slate-50">구분</th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[220px] sticky left-[272px] z-20 bg-slate-50">현장</th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[220px] sticky left-[492px] z-20 bg-slate-50">품명</th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[160px]">규격</th>
-                                <th className="px-4 py-2 text-right font-bold text-slate-600 w-24">수량</th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 w-20">단위</th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[150px]">차량번호</th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[160px]">입고처/출고자</th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[160px]">임대사</th>
-                                <th className="px-4 py-2 text-center font-bold text-slate-600 min-w-[140px]">사진</th>
-                                <th className="px-4 py-2 text-left font-bold text-slate-600 min-w-[220px]">비고</th>
-                                <th className="px-4 py-2 text-center font-bold text-slate-600 w-24">관리</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {loading ? (
-                                <tr>
-                                    <td colSpan={14} className="p-20 text-center text-slate-400">
-                                        <div className="animate-spin inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full mb-4"></div>
-                                        <p>데이터를 불러오는 중입니다...</p>
-                                    </td>
-                                </tr>
-                            ) : visibleTransactions.length > 0 ? (
-                                visibleTransactions.map((t, index) => {
-                                    const isSelected = selectedTransactionKeys.has(getTransactionKey(t));
-                                    const stickyBgClass = isSelected ? 'bg-indigo-50' : 'bg-white';
-                                    const hasPhotos = hasMaterialPhotoReference(t);
-                                    const photoCount = getMaterialPhotoDisplayCount(t);
-                                    return (
-                                    <tr key={`${getTransactionKey(t)}-${index}`} className={`hover:bg-slate-50 transition-colors ${isSelected ? 'bg-indigo-50' : ''}`}>
-                                        <td className={`px-3 py-1.5 text-center sticky left-0 z-20 ${stickyBgClass}`}>
-                                            <input
-                                                type="checkbox"
-                                                checked={isSelected}
-                                                onChange={() => toggleTransactionSelection(t)}
-                                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                            />
-                                        </td>
-                                        <td className={`px-4 py-1.5 text-slate-600 sticky left-[48px] z-10 ${stickyBgClass}`}>{t.transactionDate}</td>
-                                        <td className={`px-4 py-1.5 text-center sticky left-[176px] z-10 ${stickyBgClass}`}>
-                                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5
-                                                ${t.type === 'inbound'
-                                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                                                    : 'bg-orange-50 text-orange-700 border border-orange-100'
-                                                }`}
-                                            >
-                                                <FontAwesomeIcon icon={t.type === 'inbound' ? faArrowRight : faArrowLeft} />
-                                                {t.type === 'inbound' ? '입고' : '출고'}
-                                            </span>
-                                        </td>
-                                        <td className={`px-4 py-1.5 font-medium text-slate-800 sticky left-[272px] z-10 ${stickyBgClass}`}>
-                                            <div>{t.siteName}</div>
-                                            <div className="text-[11px] font-semibold text-slate-400">{t.siteStatusLabel}</div>
-                                        </td>
-                                        <td className={`px-4 py-1.5 font-medium text-slate-800 sticky left-[492px] z-10 ${stickyBgClass}`}>{t.itemName}</td>
-                                        <td className="px-4 py-1.5 text-slate-500">{t.spec}</td>
-                                        <td className={`px-4 py-1.5 text-right font-bold ${t.type === 'inbound' ? 'text-emerald-600' : 'text-orange-600'}`}>
-                                            {t.quantity.toLocaleString()}
-                                        </td>
-                                        <td className="px-4 py-1.5 text-slate-500">{t.unit}</td>
-                                        <td className="px-4 py-1.5 text-slate-600">
-                                            {(t.vehicleNumber != null && String(t.vehicleNumber).trim()) ? (
-                                                <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-mono">
-                                                    {String(t.vehicleNumber).trim()}
-                                                </span>
-                                            ) : (
-                                                <span className="text-slate-300">-</span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-1.5 text-slate-600 text-xs">
-                                            {t.type === 'inbound'
-                                                ? ((t as InboundTransaction).supplier || '-')
-                                                : ((t as OutboundTransaction).recipient || '-')}
-                                        </td>
-                                        <td className="px-4 py-1.5 text-slate-600 text-xs">
-                                            {getMaterialTransactionRentalCompanyLink(t).name || '-'}
-                                        </td>
-                                        <td className="px-4 py-1.5 text-center">
-                                            {hasPhotos ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => openPhotoViewer(t)}
-                                                    className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-black text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1"
-                                                    title="첨부사진 보기"
-                                                >
-                                                    <FontAwesomeIcon icon={faImages} />
-                                                    {photoCount === null ? '사진 확인' : `사진 ${photoCount}장`}
-                                                </button>
-                                            ) : (
-                                                <span className="text-slate-300">-</span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-1.5 text-slate-500 whitespace-pre-wrap break-words">{t.notes || '-'}</td>
-                                        <td className="px-4 py-1.5 text-center">
-                                            <div className="flex justify-center gap-2">
-                                                <button
-                                                    onClick={() => openEditModal(t)}
-                                                    className="w-8 h-8 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 flex items-center justify-center transition"
-                                                    title="수정"
-                                                >
-                                                    <FontAwesomeIcon icon={faEdit} />
-                                                </button>
-                                                {canDelete && (<button
-                                                    onClick={() => handleDelete(t)}
-                                                    className="w-8 h-8 rounded-full bg-red-50 text-red-600 hover:bg-red-100 flex items-center justify-center transition"
-                                                    title="삭제"
-                                                >
-                                                    <FontAwesomeIcon icon={faTrash} />
-                                                </button>)}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    );
-                                })
-                            ) : (
-                                <tr>
-                                    <td colSpan={14} className="p-24 text-center text-slate-400">
-                                        <div className="bg-slate-50 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-                                            <FontAwesomeIcon icon={faFilter} className="text-3xl text-slate-300" />
-                                        </div>
-                                        <p className="text-lg font-medium text-slate-600 mb-1">조회된 내역이 없습니다</p>
-                                        <p className="text-sm">검색 조건을 변경하여 다시 조회해보세요.</p>
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-                <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 text-xs text-slate-400 flex justify-end">
-                    Total {visibleTransactions.length} records found
-                </div>
-            </div>
+            <MaterialTransactionDateList
+                rows={visibleTransactions}
+                loading={loading}
+                selectedKeys={selectedTransactionKeys}
+                canDelete={canDelete}
+                onToggleRows={toggleTransactionRows}
+                onEdit={openEditModal}
+                onDelete={handleDelete}
+                onOutboundCertificate={handleOpenOutboundCertificate}
+                onPhotos={openPhotoViewer}
+            />
 
             <MaterialPhotoViewerModal
                 isOpen={photoViewer.isOpen}

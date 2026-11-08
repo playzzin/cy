@@ -1109,7 +1109,7 @@ const RETIRED_WORKBOOK_LEDGER_MENU_TEXTS = new Set([
 
 // Saved menu configurations may still contain the removed page, including
 // renamed links and legacy text-only entries. Do not write on read.
-const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType, legacy: boolean): void => {
+const removeRetiredPageMenus = (config: SiteDataType, legacy: boolean): void => {
     const filterItems = (items: (MenuItem | string)[]): (MenuItem | string)[] =>
         items.flatMap((item): (MenuItem | string)[] => {
             const text = (typeof item === 'string' ? item : item.text).trim();
@@ -1118,7 +1118,13 @@ const removeWorkbookLedgerUpgradeMenus = (config: SiteDataType, legacy: boolean)
             const children = typeof item !== 'string' && Array.isArray(item.sub)
                 ? filterItems(item.sub)
                 : undefined;
-            if (pathname === '/payroll/workbook-ledger-upgrade'
+            if (pathname === '/materials/inventory'
+                || ['/materials/inventory-by-site', '/materials/logs'].includes(pathname)
+                || (!path && ['현장별재고', '자재로그', '자재관리로그', '자재변경로그'].includes(text.replace(/\s+/g, '')))
+                || (!path && text.replace(/\s+/g, '') === '재고현황')
+                || pathname === '/materials/transactions-by-site-date'
+                || (!path && ['현장일자입출고', '현장날짜입출고', '현장별날짜별입출고'].includes(text.replace(/\s+/g, '')))
+                || pathname === '/payroll/workbook-ledger-upgrade'
                 || (legacy && !path && RETIRED_WORKBOOK_LEDGER_MENU_TEXTS.has(text))) {
                 return children || [];
             }
@@ -1187,7 +1193,7 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
     if (legacy) registerLegacyMenus(final);
     registerNationRecruitmentMenu(final);
     registerAllianceInvestmentMenu(final);
-    removeWorkbookLedgerUpgradeMenus(final, legacy);
+    removeRetiredPageMenus(final, legacy);
     Object.entries(final).forEach(([key, site]) => {
         site.menuRegistrationVersion = Math.max(site.menuRegistrationVersion || 0, MENU_REGISTRATION_VERSION);
         if (site.linkedPositionGroups) site.linkedPositionGroups = site.linkedPositionGroups.filter(group => final[group.sourceSite]);

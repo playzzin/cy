@@ -1,18 +1,12 @@
-import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React from 'react';
+import './MaterialWorkspace.css';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { useSiteMode } from '../../contexts/SiteModeContext';
-import { matchesMenuPosition } from '../../utils/menuPosition';
 import {
     faArrowDown,
     faArrowUp,
-    faBoxes,
     faBoxesStacked,
-    faBuilding,
-    faCalendar,
     faClipboardList,
-    faHistory,
 } from '@fortawesome/free-solid-svg-icons';
 
 const materialTabs = [
@@ -39,47 +33,11 @@ const materialTabs = [
         label: '입출고 내역',
         icon: faClipboardList,
         description: '조회/수정',
-        officeOnly: true,
-    },
-    {
-        to: '/materials/transactions-by-site-date',
-        label: '현장·일자',
-        icon: faCalendar,
-        description: '입출고 묶음',
-        officeOnly: true,
-    },
-    {
-        to: '/materials/inventory',
-        label: '재고 현황',
-        icon: faBoxes,
-        description: '전체 재고',
-        officeOnly: true,
-    },
-    {
-        to: '/materials/inventory-by-site',
-        label: '현장별 재고',
-        icon: faBuilding,
-        description: '현장 집계',
-        officeOnly: true,
-    },
-    {
-        to: '/materials/logs',
-        label: '자재 로그',
-        icon: faHistory,
-        description: '변경 이력',
-        officeOnly: true,
     },
 ];
 
 const MaterialManagementPage: React.FC = () => {
     const location = useLocation();
-    const canManage = useMaterialAdministration();
-    const { currentPosition, currentPositionData } = useSiteMode();
-    const showOfficeTabs = currentPosition === 'full'
-        || matchesMenuPosition('office', '사무실', currentPosition)
-        || matchesMenuPosition('office', '사무실', currentPositionData?.name);
-    const visibleTabs = materialTabs.filter((tab) => (showOfficeTabs || !tab.officeOnly)
-        && (canManage || ['/materials/master', '/materials/inbound', '/materials/outbound'].includes(tab.to)));
     const normalizedPath = location.pathname.replace(/\/+$/, '');
     const isFieldGoodsPage = normalizedPath === '/materials/field-goods';
 
@@ -88,51 +46,21 @@ const MaterialManagementPage: React.FC = () => {
     }
 
     return (
-        <div className="min-h-full w-full max-w-[calc(100vw-30px)] overflow-x-hidden bg-slate-50/50 sm:max-w-none">
-            <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-                <div className="mx-auto max-w-[2100px] px-2 py-1.5 sm:px-4 sm:py-3">
-                    <div className="flex flex-col gap-1.5 xl:flex-row xl:items-center xl:justify-between">
-                        <div className="hidden min-w-0 sm:block">
-                            <div className="text-xs font-bold uppercase tracking-wide text-indigo-600">
-                                Materials
-                            </div>
-                            <h1 className="text-lg font-bold text-slate-900 sm:text-xl">
-                                자재 통합관리
-                            </h1>
-                        </div>
-
-                        <nav className={`grid ${showOfficeTabs && canManage ? 'grid-cols-4' : 'grid-cols-3'} gap-1 sm:-mx-1 sm:flex sm:gap-2 sm:overflow-x-auto sm:px-1 sm:pb-1 xl:mx-0 xl:pb-0`} aria-label="자재관리 메뉴">
-                            {visibleTabs.map((tab, index) => (
-                                <NavLink
-                                    key={tab.to}
-                                    to={tab.to}
-                                    end
-                                    className={({ isActive }) =>
-                                        [
-                                            index > 3 ? 'hidden sm:flex' : 'flex',
-                                            showOfficeTabs ? 'px-2' : 'flex-col px-1 sm:flex-row',
-                                            'group min-w-0 items-center justify-center gap-1.5 rounded-lg border py-1.5 text-center transition sm:min-w-[132px] sm:justify-start sm:gap-3 sm:px-3 sm:py-2 sm:text-left',
-                                            isActive
-                                                ? 'active border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
-                                                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
-                                        ].join(' ')
-                                    }
-                                >
-                                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500 group-[.active]:bg-white group-[.active]:text-indigo-600 sm:h-9 sm:w-9">
-                                        <FontAwesomeIcon icon={tab.icon} />
-                                    </span>
-                                    <span className="min-w-0">
-                                        <span className="block whitespace-nowrap text-xs font-bold sm:text-sm">
-                                            {tab.label}
-                                        </span>
-                                        <span className="hidden whitespace-nowrap text-xs text-slate-400 sm:block">
-                                            {tab.description}
-                                        </span>
-                                    </span>
-                                </NavLink>
-                            ))}
-                        </nav>
+        <div className="materials-workspace">
+            <div className="materials-navigation">
+                <div className="materials-navigation__inner">
+                    <div className="materials-navigation__brand">
+                        <span className="materials-navigation__mark"><FontAwesomeIcon icon={faBoxesStacked} /></span>
+                        <div><small>MATERIALS</small><h1>자재 통합관리</h1></div>
                     </div>
+                    <nav aria-label="자재관리 메뉴">
+                        {materialTabs.map(tab => (
+                            <NavLink key={tab.to} to={tab.to} end className={({ isActive }) => `materials-navigation__tab${isActive ? ' active' : ''}`}>
+                                <FontAwesomeIcon icon={tab.icon} />
+                                <span><strong>{tab.label}</strong><small>{tab.description}</small></span>
+                            </NavLink>
+                        ))}
+                    </nav>
                 </div>
             </div>
 

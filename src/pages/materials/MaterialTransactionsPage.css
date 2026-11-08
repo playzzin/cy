@@ -1,0 +1,11 @@
+.material-transactions-filters { container-type: inline-size; }
+.material-transactions-filters__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.material-transactions-filters__dates { min-width: 0; grid-column: 1 / -1; }
+@container (min-width: 700px) {
+    .material-transactions-filters__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .material-transactions-filters__dates { grid-column: span 2; }
+}
+@container (min-width: 1150px) {
+    .material-transactions-filters__grid { grid-template-columns: minmax(280px, 1.7fr) minmax(105px, .7fr) minmax(160px, 1fr) minmax(85px, .55fr) minmax(140px, .9fr) minmax(160px, 1fr) 76px; }
+    .material-transactions-filters__dates { grid-column: auto; }
+}
