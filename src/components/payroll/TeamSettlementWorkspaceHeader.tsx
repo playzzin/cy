@@ -63,12 +63,14 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
 
   return (
     <>
-      <header className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5">
+      <header className="team-settlement-page__heading">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-black tracking-tight text-slate-950 sm:text-2xl">팀정산 관리</h1>
-            <p className="mt-1 text-sm text-slate-600">원천 검증부터 수기 조정, 최종 확정까지 한 흐름으로 처리합니다.</p>
-            {!canWrite && <p className="mt-2 text-sm text-amber-800" role="status">조회 전용입니다. CEO, DEV, 매니저 직책만 수정할 수 있습니다.</p>}
+            <div className="team-settlement-page__heading-title">
+              <span className="team-settlement-page__heading-label">팀정산 관리</span>
+              <h1>{year}년 {month}월{teamName && teamName !== '팀 선택' ? ` ${teamName}` : ''}</h1>
+            </div>
+            {!canWrite && <p className="team-settlement-page__read-only mt-2 text-sm text-amber-800" role="status">조회 전용입니다. CEO, DEV, 매니저 직책만 수정할 수 있습니다.</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
             {isDirty ? (
@@ -105,10 +107,10 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+        <div className="team-settlement-page__workspace-actions grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
           <button
             type="button"
-            className={`${baseButtonClassName} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}
+            className={`${baseButtonClassName} team-settlement-page__refresh border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}
             onClick={onRefresh}
             disabled={loading || isSaving}
           >

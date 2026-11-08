@@ -86,7 +86,7 @@ const buildYearMonthValue = (year: number, month: number): string => {
   return `${safeYear}-${String(safeMonth).padStart(2, '0')}`;
 };
 
-const DEFAULT_TEAM_BUTTON_COLOR = '#4f46e5';
+const DEFAULT_TEAM_BUTTON_COLOR = '#a62332';
 
 const normalizeHexColor = (value?: string | null): string | null => {
   const trimmed = String(value ?? '').trim();
@@ -1714,7 +1714,7 @@ export const TeamSettlementPage: React.FC = () => {
   const ghostButtonClassName =
     'inline-flex items-center justify-center px-3 py-2 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100 transition disabled:opacity-50 disabled:cursor-not-allowed';
   const addButtonClassName =
-    'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold border bg-slate-900 text-white hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed';
+    'team-settlement-page__add-button inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold border bg-slate-900 text-white hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed';
   const selectedYearMonth = useMemo(() => parseYearMonthValue(yearMonth), [yearMonth]);
 
   const handleSettlementYearChange = useCallback((delta: number) => {
@@ -2990,7 +2990,7 @@ export const TeamSettlementPage: React.FC = () => {
   };
 
   const renderAdjustmentGroup = (group: DeductionGroup) => (
-    <div key={group.key} className="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
+    <div key={group.key} className="team-settlement-page__adjustment-group border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
       <div role="group" aria-label={`${group.title} 합계`} className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-bold text-slate-800">{group.title}</h3>
@@ -3502,89 +3502,7 @@ export const TeamSettlementPage: React.FC = () => {
   );
 
   return (
-    <div className="team-settlement-page min-w-0 w-full p-3 sm:p-4 lg:p-6" style={teamSettlementAccentStyle}>
-      <style>{`
-        .team-settlement-page {
-          color: #0f172a;
-        }
-
-        .team-settlement-page .overflow-auto > table > thead {
-          position: sticky;
-          top: 0;
-          z-index: 20;
-          background: var(--team-settlement-accent-soft-strong);
-          box-shadow: 0 1px 0 var(--team-settlement-accent-border);
-        }
-
-        .team-settlement-page .overflow-auto > table > thead > tr {
-          background-color: var(--team-settlement-accent-soft-strong) !important;
-          color: #334155;
-        }
-
-        .team-settlement-page .overflow-auto > table > thead > tr > th {
-          border-color: var(--team-settlement-accent-border) !important;
-        }
-
-        .team-settlement-page__workspace-bar {
-          border-color: var(--team-settlement-accent-border);
-          background: linear-gradient(90deg, var(--team-settlement-accent-soft-strong), rgba(255, 255, 255, 0.96)), #ffffff;
-        }
-
-        .team-settlement-page__current-team {
-          border-color: var(--team-settlement-accent);
-          background: var(--team-settlement-accent);
-          color: var(--team-settlement-accent-contrast);
-        }
-
-        .team-settlement-page__summary-card,
-        .team-settlement-page__transaction-card,
-        #settlement-deductions {
-          border-color: var(--team-settlement-accent-border);
-          background: linear-gradient(145deg, var(--team-settlement-accent-soft), #ffffff 48%);
-        }
-
-        .team-settlement-page__final-card {
-          border-color: var(--team-settlement-accent);
-          background: var(--team-settlement-accent);
-          color: var(--team-settlement-accent-contrast);
-        }
-
-        .team-settlement-page__expense-expanded-detail .text-xs,
-        .team-settlement-page__expense-expanded-detail table.text-xs {
-          font-size: 0.875rem;
-          line-height: 1.25rem;
-        }
-
-        .team-settlement-page__expense-expanded-detail .text-sm {
-          font-size: 1rem;
-          line-height: 1.5rem;
-        }
-
-        .team-settlement-page .overflow-auto {
-          -webkit-overflow-scrolling: touch;
-          overscroll-behavior-inline: contain;
-        }
-
-        @media (max-width: 767px) {
-          .team-settlement-page__workspace-bar {
-            position: sticky;
-            top: var(--header-height, 60px);
-            backdrop-filter: none;
-            box-shadow: none;
-          }
-
-          .team-settlement-page {
-            padding-bottom: calc(1rem + env(safe-area-inset-bottom));
-          }
-
-          .team-settlement-page__action-grid > button {
-            min-height: 44px;
-            padding-inline: 8px;
-            word-break: keep-all;
-          }
-
-        }
-      `}</style>
+    <div className="team-settlement-page min-w-0 w-full" style={teamSettlementAccentStyle}>
       <TeamSettlementWorkspaceHeader
         teamName={doc?.teamName || selectedTeamName || '팀 선택'}
         year={selectedYearMonth.year}
@@ -3611,7 +3529,7 @@ export const TeamSettlementPage: React.FC = () => {
         }}
       />
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4">
+      <div className="team-settlement-page__selectors mt-4 grid grid-cols-1 gap-3 sm:mt-6 sm:gap-4">
         <div className="team-settlement-page__selector-card rounded-xl border bg-white p-3 sm:p-2.5">
           <div className="text-sm font-semibold text-slate-700">정산월</div>
           <div className="mt-2 flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -3667,11 +3585,12 @@ export const TeamSettlementPage: React.FC = () => {
           onChange={handleTeamSelect}
           allowAllTeams={false}
           ariaLabel="정산 팀 선택"
+          compact
         />
       </div>
 
       {doc && (
-        <div className="mt-4 space-y-4">
+        <div className="team-settlement-page__overview mt-4 space-y-4">
           <section className="grid grid-cols-2 gap-2 lg:grid-cols-5" aria-label="정산 요약">
             <div className="team-settlement-page__final-card col-span-2 flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-md lg:col-span-1">
               <div className="flex items-center justify-between gap-2">
@@ -3879,8 +3798,8 @@ export const TeamSettlementPage: React.FC = () => {
       )}
 
       {doc && (
-        <div className="mt-6 grid grid-cols-1 2xl:grid-cols-3 gap-4">
-          <section id="settlement-transactions" className="team-settlement-page__transaction-card scroll-mt-36 min-w-0 rounded-2xl border bg-white p-3 shadow-sm sm:p-5 2xl:col-span-2">
+        <div className="team-settlement-page__ledger-grid">
+          <section id="settlement-transactions" className="team-settlement-page__transaction-card scroll-mt-36 min-w-0 rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <h2 className="team-settlement-page__transaction-title font-bold text-slate-900">
@@ -3914,7 +3833,7 @@ export const TeamSettlementPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-8">
+            <div className="team-settlement-page__transaction-columns">
               <div>
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div className="team-settlement-page__transaction-section-title font-semibold text-slate-800">매출</div>
@@ -3946,7 +3865,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-purple-50 px-3 py-2 text-sm">
+                  <div className="team-settlement-page__subtotal mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-purple-50 px-3 py-2 text-sm">
                     <span className="font-semibold text-purple-700">총금액</span>
                     <span className="font-extrabold text-purple-900">{formatCurrency(transactionSectionTotals.salesSupport.amount)}원</span>
                     <span className="font-semibold text-purple-700">공수</span>
@@ -3981,20 +3900,23 @@ export const TeamSettlementPage: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                    <span className="font-bold text-indigo-700">도급</span>
-                    <span className="font-semibold text-slate-700">총금액</span>
-                    <span className="font-extrabold text-slate-900">{formatCurrency(transactionSectionTotals.salesContract.amount)}원</span>
-                    <span className="font-semibold text-slate-700">공수</span>
-                    <span className="font-extrabold text-slate-900">{formatManDay1(transactionSectionTotals.salesContract.manDay)}공</span>
-                    <span className="mx-1 h-4 w-px bg-slate-300" aria-hidden="true" />
-                    <span className="font-bold text-emerald-700">직영</span>
-                    <span className="font-semibold text-slate-700">총금액</span>
-                    <span className="font-extrabold text-slate-900">{formatCurrency(transactionSectionTotals.salesDirect.amount)}원</span>
-                    <span className="font-semibold text-slate-700">공수</span>
-                    <span className="font-extrabold text-slate-900">{formatManDay1(transactionSectionTotals.salesDirect.manDay)}공</span>
+                  <div className="team-settlement-page__subtotal mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                    <span className="team-settlement-page__subtotal-group">
+                      <span className="font-bold">도급</span>
+                      <span className="font-semibold">총금액</span>
+                      <span className="font-extrabold">{formatCurrency(transactionSectionTotals.salesContract.amount)}원</span>
+                      <span className="font-semibold">공수</span>
+                      <span className="font-extrabold">{formatManDay1(transactionSectionTotals.salesContract.manDay)}공</span>
+                    </span>
+                    <span className="team-settlement-page__subtotal-group">
+                      <span className="font-bold">직영</span>
+                      <span className="font-semibold">총금액</span>
+                      <span className="font-extrabold">{formatCurrency(transactionSectionTotals.salesDirect.amount)}원</span>
+                      <span className="font-semibold">공수</span>
+                      <span className="font-extrabold">{formatManDay1(transactionSectionTotals.salesDirect.manDay)}공</span>
+                    </span>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-blue-50 px-3 py-2 text-sm" role="group" aria-label="도급 + 직영 총금액">
+                  <div className="team-settlement-page__subtotal mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-blue-50 px-3 py-2 text-sm" role="group" aria-label="도급 + 직영 총금액">
                     <span className="font-semibold text-blue-700">도급 + 직영 총금액</span>
                     <span className="whitespace-nowrap font-extrabold text-blue-900">
                       {formatCurrency(transactionSectionTotals.salesContract.amount + transactionSectionTotals.salesDirect.amount)}원
@@ -4036,7 +3958,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-orange-50 px-3 py-2 text-sm">
+                  <div className="team-settlement-page__subtotal mt-2 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-lg bg-orange-50 px-3 py-2 text-sm">
                     <span className="font-semibold text-orange-700">총금액</span>
                     <span className="font-extrabold text-orange-900">{formatCurrency(transactionSectionTotals.purchaseSupport.amount)}원</span>
                     <span className="font-semibold text-orange-700">공수</span>
@@ -4053,7 +3975,7 @@ export const TeamSettlementPage: React.FC = () => {
               <div className="team-settlement-page__transaction-total-label mb-2 text-xs font-black tracking-wide text-slate-600">
                 거래내역 합계
               </div>
-              <div className="grid gap-3 sm:grid-cols-2" aria-label="매출·매입 거래내역 합계">
+              <div className="team-settlement-page__transaction-totals grid gap-3 sm:grid-cols-2" aria-label="매출·매입 거래내역 합계">
                 <div
                   className="flex min-h-[68px] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3 shadow-sm"
                   aria-label={buildTeamSettlementTransactionSummary(
@@ -4093,7 +4015,7 @@ export const TeamSettlementPage: React.FC = () => {
               <div className="mt-2 text-right text-xs font-medium text-slate-500">
                 전체 변경사항은 상단 작업 표시줄에서 한 번에 저장됩니다.
               </div>
-              <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-amber-50/50 shadow-sm">
+              <div className="team-settlement-page__memo mt-4 overflow-hidden rounded-xl border border-amber-200 bg-amber-50/50 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 px-4 py-3">
                   <label htmlFor="team-settlement-transaction-memo" className="text-sm font-bold text-slate-800">
                     정산 메모
@@ -4119,13 +4041,6 @@ export const TeamSettlementPage: React.FC = () => {
                   placeholder="정산하면서 확인할 내용이나 전달사항을 자유롭게 적어 주세요."
                   rows={6}
                   className="block w-full resize-none overflow-hidden border-0 bg-transparent px-6 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-amber-400 read-only:cursor-default"
-                  style={{
-                    minHeight: '208px',
-                    lineHeight: '32px',
-                    backgroundImage: 'linear-gradient(to right, transparent 15px, #f3c9c4 15px, #f3c9c4 16px, transparent 16px), repeating-linear-gradient(to bottom, transparent 0px, transparent 31px, #e2e8f0 31px, #e2e8f0 32px)',
-                    backgroundPosition: '0 0, 0 8px',
-                    backgroundAttachment: 'local'
-                  }}
                 />
               </div>
             </div>
@@ -4142,7 +4057,7 @@ export const TeamSettlementPage: React.FC = () => {
               </button>
             </div>
 
-            <div role="status" aria-label="경비 원본 검증" className="mt-4 rounded-lg border p-3 text-xs">
+            <div role="status" aria-label="경비 원본 검증" className="team-settlement-page__expense-status mt-4 rounded-lg border p-3 text-xs">
               {expenseValidationMessages.length ? (
                 <>
                   <div className="font-bold text-rose-700">경비 확인 필요</div>
