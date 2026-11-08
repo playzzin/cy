@@ -1,4 +1,4 @@
-import MaterialCertificateHeading from './MaterialCertificateHeading';
+import MaterialCertificateDocument from './MaterialCertificateDocument';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createInboundCertificateImageFile, createInboundPhotosPdfFile, downloadInboundFile, getInboundCertificateDetails, getInboundPhotoPageLayouts } from './materialInboundCertificateExport';
@@ -16,7 +16,6 @@ import {
     InboundCertificateDraft,
 } from './materialInboundCertificateDraftStore';
 
-const numberFormatter = new Intl.NumberFormat('ko-KR');
 
 const MaterialInboundCertificatePage: React.FC = () => {
     const navigate = useNavigate();
@@ -128,24 +127,7 @@ const MaterialInboundCertificatePage: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-slate-100 p-3 sm:p-6">
-            <style>
-                {`
-                @media print {
-                    body * { visibility: hidden; }
-                    #inbound-certificate-print, #inbound-certificate-print * { visibility: visible; }
-                    #inbound-certificate-print {
-                        position: absolute;
-                        left: 0;
-                        top: 0;
-                        width: 100%;
-                        box-shadow: none !important;
-                        border: 0 !important;
-                    }
-                    .no-print { display: none !important; }
-                    @page { size: A4; margin: 12mm; }
-                }
-                `}
-            </style>
+            <style>{`@media print { @page { size: A4; margin: 0; } }`}</style>
 
             <div className="no-print mx-auto mb-4 flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <button
@@ -190,55 +172,7 @@ const MaterialInboundCertificatePage: React.FC = () => {
                 </div>
             </div>
 
-            <div
-                id="inbound-certificate-print"
-                className="material-certificate-paper"
-            >
-                <div className="material-certificate-frame">
-                    <MaterialCertificateHeading kind="inbound" />
-
-                    <dl className="material-certificate-details">
-                        {getInboundCertificateDetails(draft).map(field => <div key={field.label} className={field.wide ? 'material-certificate-details__wide' : ''}>
-                            <dt>{field.label}</dt><dd>{field.value || '-'}</dd>
-                        </div>)}
-                    </dl>
-
-                    <div className="material-certificate-table">
-                        <table className="w-full table-fixed text-sm">
-                            <thead className="bg-slate-800 text-white">
-                                <tr>
-                                    <th className="w-14 px-2 py-3 text-center font-black">No</th>
-                                    <th className="px-3 py-3 text-left font-black">품명</th>
-                                    <th className="px-3 py-3 text-left font-black">규격</th>
-                                    <th className="w-24 px-3 py-3 text-right font-black">수량</th>
-                                    <th className="w-20 px-3 py-3 text-center font-black">단위</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-200">
-                                {draft.items.map((item, index) => (
-                                    <tr key={`${item.id}-${index}`} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                                        <td className="px-2 py-2 text-center font-bold">{index + 1}</td>
-                                        <td className="px-3 py-2 font-bold">{item.itemName}</td>
-                                        <td className="px-3 py-2 font-semibold text-slate-600">{item.spec || '-'}</td>
-                                        <td className="px-3 py-2 text-right font-black">{numberFormatter.format(item.quantity || 0)}</td>
-                                        <td className="px-3 py-2 text-center font-semibold text-slate-600">{item.unit}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div className="material-certificate-confirmation">위 자재를 입고함.</div>
-                    <div className="material-certificate-signatures">
-                        <div>
-                            <div className="border-t-2 border-slate-400 pt-3">입고 확인</div>
-                        </div>
-                        <div>
-                            <div className="border-t-2 border-slate-400 pt-3">담당자 확인</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <MaterialCertificateDocument kind="inbound" items={draft.items} details={getInboundCertificateDetails(draft)} />
             <section className="no-print material-certificate-photo-preview mx-auto mt-6 max-w-5xl" aria-label="첨부사진 미리보기">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div><h2 className="text-xl font-bold">첨부사진 {photoUrls.length}장</h2><p className="mt-1 text-sm text-slate-500">입고증과 별도 파일로 저장됩니다. 최대 40장 · A4 최대 2페이지</p></div>

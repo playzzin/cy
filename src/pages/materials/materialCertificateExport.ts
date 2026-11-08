@@ -1,17 +1,22 @@
 import type { SelectedMaterial } from './MaterialSelectionActionBar';
 import { loadMaterialCertificateLogo } from './materialCertificateBrand';
+import {
+    CERTIFICATE_COLUMN_LABELS, CERTIFICATE_HEIGHT, CERTIFICATE_WIDTH,
+    CERTIFICATE_FONT, CERTIFICATE_PADDING, CERTIFICATE_META_TOP, CERTIFICATE_META_LABEL_WIDTH,
+    CERTIFICATE_TABLE_HEADER_HEIGHT, getMaterialCertificateLayout, MaterialCertificateField,
+} from './materialCertificateLayout';
+export type { MaterialCertificateField } from './materialCertificateLayout';
 
 export const MAX_MATERIAL_CERTIFICATE_PHOTOS = 40;
-const PAGE_WIDTH = 1240;
-const PAGE_HEIGHT = 1754;
-const FONT = '"Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+const PAGE_WIDTH = CERTIFICATE_WIDTH;
+const PAGE_HEIGHT = CERTIFICATE_HEIGHT;
+const FONT = CERTIFICATE_FONT;
 export interface MaterialCertificateDocument {
     transactionDate: string;
     siteName: string;
     vehicleNumber: string;
     items: SelectedMaterial[];
 }
-export interface MaterialCertificateField { label: string; value: string; wide?: boolean; }
 interface CertificatePresentation {
     title: string;
     filePrefix: string;
@@ -21,7 +26,6 @@ interface CertificatePresentation {
 }
 export type MaterialPhotoDocument = Pick<MaterialCertificateDocument, 'transactionDate' | 'siteName' | 'vehicleNumber'> & { photos: Array<{ file: File }> };
 
-const formatQuantity = (value: number) => value.toLocaleString('ko-KR');
 const fileName = (prefix: string, data: Pick<MaterialCertificateDocument, 'transactionDate' | 'siteName' | 'vehicleNumber'>) =>
     `${prefix}_${data.transactionDate}_${data.siteName}_${data.vehicleNumber}`.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '_').slice(0, 150);
 
@@ -59,67 +63,70 @@ export const createMaterialCertificateImageFile = async (data: MaterialCertifica
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (!context) throw new Error('증명서 이미지를 만들 수 없습니다.');
-    context.font = `600 23px ${FONT}`;
-    const padding = 64, tableWidth = PAGE_WIDTH - padding * 2;
-    const details = presentation.details;
-    const metaRows: typeof details[] = [];
-    details.forEach(detail => {
-        const last = metaRows[metaRows.length - 1];
-        if (detail.wide || !last || last[0].wide || last.length === 2) metaRows.push([detail]);
-        else last.push(detail);
+    const layout = getMaterialCertificateLayout(data.items, presentation.details, (text, fontSize) => {
+        context.font = `500 ${fontSize}px ${FONT}`;
+        return context.measureText(text).width;
     });
-    const metaHeights = metaRows.map(row => Math.max(...row.map(field => wrapText(context, field.value, (field.wide ? tableWidth : tableWidth / 2) - 178).length)) * 32 + 24);
-    const columns = [64, 350, 330, 170, tableWidth - 914];
-    const itemLines = data.items.map((item, index) => [String(index + 1), item.itemName, item.spec, formatQuantity(item.quantity), item.unit]
-        .map((value, column) => wrapText(context, value || '-', columns[column] - 24)));
-    const rowHeights = itemLines.map(row => Math.max(...row.map(lines => lines.length)) * 32 + 20);
-    const metaTop = 246;
-    const tableTop = metaTop + metaHeights.reduce((a, b) => a + b, 0) + 36;
-    const tableBottom = tableTop + 54 + rowHeights.reduce((a, b) => a + b, 0);
+    const padding = CERTIFICATE_PADDING, tableWidth = PAGE_WIDTH - padding * 2;
     canvas.width = PAGE_WIDTH;
-    canvas.height = Math.max(PAGE_HEIGHT, tableBottom + 240);
+    canvas.height = PAGE_HEIGHT * layout.pages.length;
     context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = '#183955'; context.fillRect(padding, 36, tableWidth, 8);
-    context.textAlign = 'left'; context.fillStyle = '#58778f'; context.font = `700 17px ${FONT}`;
-    context.fillText('CHEONGYEON · MATERIALS', padding, 88);
-    context.fillStyle = '#183955'; context.font = `700 52px ${FONT}`;
-    context.fillText(presentation.title, padding, 153);
-    context.fillStyle = '#8294a6'; context.font = `500 16px ${FONT}`;
-    context.fillText(presentation.title.includes('입고') ? 'MATERIAL RECEIPT' : 'MATERIAL RELEASE', padding, 188);
-    const logoRect = getContainedPhotoRect(logo.naturalWidth, logo.naturalHeight, 350, 80);
-    context.drawImage(logo, PAGE_WIDTH - padding - 350 + logoRect.x, 73 + logoRect.y, logoRect.width, logoRect.height);
-    context.fillStyle = '#a6bacb'; context.fillRect(padding, 216, tableWidth, 1);
-    const cell = (x: number, y: number, width: number, height: number, lines: string[], background = '#ffffff', color = '#0f172a', bold = false) => {
+    const cell = (x: number, y: number, width: number, height: number, lines: string[], fontSize: number, lineHeight: number,
+        background = '#ffffff', color = '#172b45', bold = false, align: CanvasTextAlign = 'left') => {
         context.fillStyle = background; context.fillRect(x, y, width, height);
         context.strokeStyle = '#cbd5e1'; context.lineWidth = 1; context.strokeRect(x, y, width, height);
-        context.fillStyle = color; context.font = `${bold ? 700 : 500} 23px ${FONT}`; context.textAlign = 'left';
-        lines.forEach((line, index) => context.fillText(line, x + 12, y + (height - lines.length * 32) / 2 + 25 + index * 32));
+        context.fillStyle = color; context.font = `${bold ? 700 : 500} ${fontSize}px ${FONT}`; context.textAlign = align; context.textBaseline = 'middle';
+        const textX = align === 'center' ? x + width / 2 : align === 'right' ? x + width - 10 : x + 10;
+        lines.forEach((line, index) => context.fillText(line, textX, y + height / 2 + (index - (lines.length - 1) / 2) * lineHeight));
     };
-    let y = metaTop;
-    metaRows.forEach((row, index) => {
-        let x = padding;
-        row.forEach(field => {
-            const width = field.wide ? tableWidth : tableWidth / 2;
-            cell(x, y, 154, metaHeights[index], [field.label], '#edf3f8', '#46627a', true);
-            context.font = `600 23px ${FONT}`;
-            cell(x + 154, y, width - 154, metaHeights[index], wrapText(context, field.value, width - 178));
-            x += width;
+    layout.pages.forEach((page, pageIndex) => {
+        context.save(); context.translate(0, pageIndex * PAGE_HEIGHT);
+        context.fillStyle = '#183955'; context.fillRect(padding, 32, tableWidth, 5);
+        context.textAlign = 'center'; context.textBaseline = 'alphabetic'; context.font = `700 44px ${FONT}`;
+        context.fillText(presentation.title, PAGE_WIDTH / 2, 97);
+        const rect = getContainedPhotoRect(logo.naturalWidth, logo.naturalHeight, 300, 50);
+        context.drawImage(logo, PAGE_WIDTH - padding - 300 + rect.x, 60 + rect.y, rect.width, rect.height);
+        let y = CERTIFICATE_META_TOP;
+        layout.metadata.forEach(row => {
+            let x = padding;
+            row.cells.forEach(field => {
+                const width = field.wide ? tableWidth : tableWidth / 2;
+                cell(x, y, CERTIFICATE_META_LABEL_WIDTH, row.height, [field.label], 20, 25, '#edf3f8', '#46627a', true);
+                cell(x + CERTIFICATE_META_LABEL_WIDTH, y, width - CERTIFICATE_META_LABEL_WIDTH, row.height, field.lines, 20, 25);
+                x += width;
+            });
+            y += row.height;
         });
-        y += metaHeights[index];
+        page.tables.forEach(table => {
+            let x = padding + table.offset;
+            CERTIFICATE_COLUMN_LABELS.forEach((title, column) => {
+                cell(x, layout.tableTop, table.columns[column], CERTIFICATE_TABLE_HEADER_HEIGHT, [title], page.tables.length > 1 ? 18 : 20, 25, '#183955', '#ffffff', true,
+                    column === 0 || column === 4 ? 'center' : column === 3 ? 'right' : 'left');
+                x += table.columns[column];
+            });
+            y = layout.tableTop + CERTIFICATE_TABLE_HEADER_HEIGHT;
+            table.rows.forEach((row, index) => {
+                x = padding + table.offset;
+                row.cells.forEach((lines, column) => {
+                    cell(x, y, table.columns[column], row.height, lines, page.fontSize, page.lineHeight, index % 2 ? '#f8fafc' : '#ffffff', '#172b45', false,
+                        column === 0 || column === 4 ? 'center' : column === 3 ? 'right' : 'left');
+                    x += table.columns[column];
+                });
+                y += row.height;
+            });
+        });
+        context.textAlign = 'center'; context.textBaseline = 'alphabetic'; context.fillStyle = '#46627a'; context.font = `700 22px ${FONT}`;
+        context.fillText(presentation.confirmation, PAGE_WIDTH / 2, 1645);
+        context.fillStyle = '#a6bacb'; context.fillRect(223, 1680, 318, 1); context.fillRect(699, 1680, 318, 1);
+        context.fillStyle = '#60788d'; context.font = `500 19px ${FONT}`;
+        context.fillText(presentation.signature.replace(/_+/g, '').trim(), 382, 1710);
+        context.fillText('담당자 확인', 858, 1710);
+        if (layout.pages.length > 1) {
+            context.font = `500 15px ${FONT}`;
+            context.fillText(`${pageIndex + 1} / ${layout.pages.length}`, PAGE_WIDTH / 2, 1738);
+        }
+        context.restore();
     });
-    let x = padding;
-    ['No', '품명', '규격', '수량', '단위'].forEach((title, index) => { cell(x, tableTop, columns[index], 54, [title], '#183955', '#ffffff', true); x += columns[index]; });
-    y = tableTop + 54;
-    itemLines.forEach((row, index) => {
-        x = padding;
-        row.forEach((lines, column) => { cell(x, y, columns[column], rowHeights[index], lines, index % 2 ? '#f8fafc' : '#ffffff'); x += columns[column]; });
-        y += rowHeights[index];
-    });
-    context.textAlign = 'center'; context.fillStyle = '#334155'; context.font = `600 26px ${FONT}`;
-    const footer = Math.max(tableBottom + 70, canvas.height - 190);
-    context.fillText(presentation.confirmation, PAGE_WIDTH / 2, footer);
-    context.fillText(presentation.signature, PAGE_WIDTH * 0.28, footer + 85);
-    context.fillText('담당자 확인 __________________', PAGE_WIDTH * 0.72, footer + 85);
     return new File([await jpegBlob(canvas)], `${fileName(presentation.filePrefix, data)}.jpg`, { type: 'image/jpeg' });
 };
 
