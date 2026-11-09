@@ -18,6 +18,7 @@ import type {
   CardStatementImportUploadProgress,
 } from '../../types/cardStatementImport';
 import { cardStatementImportService } from '../../services/cardStatementImportService';
+import { isInactiveCardStatus } from '../../services/cardLifecyclePolicy';
 
 interface CardStatementImportModalProps {
   isOpen: boolean;
@@ -37,6 +38,13 @@ const getCardLabel = (card: Card): string => {
   const last4 = card.last4 || String(card.maskedNumber || '').replace(/\D/g, '').slice(-4);
   return last4 ? `${card.name} (${last4})` : card.name;
 };
+
+const getCardOptionLabel = (card: Card): string => [
+  { ASSIGNED: '사용중', AVAILABLE: '보관중', SUSPENDED: '분실/정지', CLOSED: '해지' }[card.status],
+  getCardLabel(card),
+  card.currentAssigneeName || card.billingTargetName,
+  card.issuer,
+].filter(Boolean).join(' · ');
 
 const getBlockingWarning = (result: CardStatementImportResult): string => (
   (result.warnings ?? []).find((warning) => (
@@ -80,6 +88,37 @@ const getFileStatusLabel = (status: string): string => {
   if (status === 'analyzing') return '분석 중';
   if (status === 'uploaded') return '대기';
   return status || '-';
+};
+
+const getFileErrorGuidance = (message: string): { title: string; nextStep: string } => {
+  if (message.includes('선택 카드번호와 거래 카드번호')) {
+    return {
+      title: 'PDF 카드번호 확인 필요',
+      nextStep: 'PDF 상단의 선택 카드번호와 거래내역의 카드번호가 다르면 재발급 전 내역일 수 있습니다. 하단의 ‘재분석’ 후 실제 사용 카드를 수동 매칭해 주세요.',
+    };
+  }
+  if (message.includes('정상·취소 건수 또는 금액') || message.includes('요약 금액이 서로 다릅니다')) {
+    return {
+      title: 'PDF 거래 건수·합계 확인 필요',
+      nextStep: '정상 거래와 취소 거래의 건수 또는 합계가 PDF 요약과 맞지 않습니다. 빠진 페이지나 잘린 내역이 없는지 확인하고 전체 PDF를 다시 등록해 주세요.',
+    };
+  }
+  if (message.includes('거래 행의 날짜·금액·상태')) {
+    return {
+      title: 'PDF 거래내역 판독 확인 필요',
+      nextStep: '일부 거래의 날짜·금액·취소 여부를 읽지 못했습니다. 잘리지 않은 카드사 원본 PDF인지 확인하고 하단의 ‘재분석’으로 다시 시도해 주세요.',
+    };
+  }
+  if (message.includes('KB 승인내역 원본 대사 실패')) {
+    return {
+      title: 'PDF 내용 확인 필요',
+      nextStep: 'PDF의 요약과 상세내역을 비교하는 과정에서 확인이 필요합니다. 아래 오류 원문을 확인하고 전체 페이지가 포함된 원본 PDF를 다시 등록해 주세요.',
+    };
+  }
+  return {
+    title: 'PDF 분석 실패',
+    nextStep: '아래 오류 원문을 확인해 주세요. 일시적인 연결 오류라면 하단의 ‘재분석’으로 다시 시도할 수 있습니다.',
+  };
 };
 
 const getSaveResultMessage = (saved: CardStatementImportJobPayload, fallbackMonth: string): string => {
@@ -127,6 +166,11 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
   const [errorMessage, setErrorMessage] = useState('');
   const recoveryAttemptedJobIdsRef = useRef<Set<string>>(new Set());
   const commitInFlightRef = useRef(false);
+
+  const cardOptions = useMemo(() => ({
+    usable: cards.filter(card => !isInactiveCardStatus(card.status)),
+    inactive: cards.filter(card => isInactiveCardStatus(card.status)),
+  }), [cards]);
 
   const activeResults = useMemo(
     () => (payload?.results ?? []).filter((result) => result.status !== 'excluded'),
@@ -623,7 +667,18 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
                         <span>{formatAmount(file.grandTotalAmount)}</span>
                       </div>
                       {file.errorMessage && (
-                        <div className="mt-1 truncate text-xs font-bold text-rose-600">{file.errorMessage}</div>
+                        <div
+                          role="alert"
+                          aria-label={`${file.originalFileName || `PDF ${file.fileIndex + 1}`} 분석 오류`}
+                          className="mt-2 space-y-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs leading-relaxed"
+                        >
+                          <div className="font-extrabold text-rose-700">{getFileErrorGuidance(file.errorMessage).title}</div>
+                          <p className="whitespace-normal break-words text-slate-700">{getFileErrorGuidance(file.errorMessage).nextStep}</p>
+                          <div className="border-t border-rose-200 pt-2">
+                            <div className="font-bold text-slate-500">오류 원문</div>
+                            <p className="whitespace-pre-wrap break-words text-rose-700">{file.errorMessage}</p>
+                          </div>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -664,6 +719,7 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
                       const transactionTotal = getTransactionTotal(result);
                       const amountDelta = transactionTotal - Number(result.subtotalAmount || 0);
                       const transactionRows = result.transactions ?? [];
+                      const matchedCard = cards.find(card => card.id === result.matchedCardId);
                       return (
                       <React.Fragment key={result.id}>
                       <tr className={result.status === 'excluded' ? 'bg-slate-50 opacity-70' : amountReviewRequired ? 'bg-rose-50/40' : 'bg-white'}>
@@ -701,16 +757,32 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
                         </td>
                         <td className="px-4 py-3">
                           <select
+                            aria-label={`수동 매칭 카드 ${result.cardLast4 || result.resultIndex + 1}`}
+                            title={matchedCard ? getCardOptionLabel(matchedCard) : '명세서에 해당하는 카드를 선택해 주세요.'}
                             value={result.matchedCardId || ''}
                             disabled={actionBusy || isReviewing || result.status === 'excluded' || result.status === 'committed'}
                             onChange={(event) => void handleMatchCard(result, event.target.value)}
                             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700"
                           >
                             <option value="">카드 선택</option>
-                            {cards.map((card) => (
-                              <option key={card.id} value={card.id}>{getCardLabel(card)}</option>
-                            ))}
+                            <optgroup label="사용 가능 카드">
+                              {cardOptions.usable.map((card) => (
+                                <option key={card.id} value={card.id}>{getCardOptionLabel(card)}</option>
+                              ))}
+                            </optgroup>
+                            {cardOptions.inactive.length > 0 && (
+                              <optgroup label="분실·정지/해지 카드 (과거 사용내역)">
+                                {cardOptions.inactive.map((card) => (
+                                  <option key={card.id} value={card.id}>{getCardOptionLabel(card)}</option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
+                          {matchedCard && isInactiveCardStatus(matchedCard.status) && (
+                            <p className="mt-1 text-xs font-bold text-amber-700">
+                              분실·정지/해지 카드입니다. 사용 중단 전 내역인지 확인해 주세요.
+                            </p>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           {result.status === 'excluded' && (
@@ -756,7 +828,7 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
                                 </div>
                               )}
                               {result.warnings.filter((warning) => warning !== blockingWarning).slice(0, 3).map((warning, index) => (
-                                <div key={`${result.id}-warning-${index}`} className={`truncate text-xs font-bold ${blockingWarning ? 'text-slate-500' : 'text-amber-700'}`}>
+                                <div key={`${result.id}-warning-${index}`} className={`whitespace-normal break-words text-xs font-bold ${blockingWarning ? 'text-slate-500' : 'text-amber-700'}`}>
                                   {warning}
                                 </div>
                               ))}

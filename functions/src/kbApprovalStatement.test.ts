@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { PDFDocument } from 'pdf-lib';
 import { analyzeKbApprovalPdf, KbApprovalReconciliationError, parseKbApprovalStatement } from './kbApprovalStatement';
+import { matchStatementCard } from './cardStatementMatching';
 
 // Synthetic text follows PDFParse's date/time/main-row/detail-row reading order.
 const header = (normal = 25000, cancelled = 11000, count = '2/1') => `
@@ -76,9 +77,41 @@ test('invalid date, negative normal amount, unsupported status and malformed row
     }
 });
 
-test('mismatched selected card and headline totals fail closed', () => {
-    assert.throws(() => parseKbApprovalStatement([header(11000, 0, '1/0') + row(11000, '정상', '5678')]), KbApprovalReconciliationError);
+test('a reissued selection preserves the transaction card and requires a manual identity review', () => {
+    const parsed = parseKbApprovalStatement([header(11000, 0, '1/0') + row(11000, '정상', '5678')]);
+    assert.ok(parsed);
+    assert.equal(parsed.cards[0].cardLast4, '5678');
+    assert.equal(parsed.grandTotalAmount, 11000);
+    assert.equal(parsed.cards[0].cardNumberReviewRequired, true);
+    assert.ok(parsed.cards[0].warnings.some(warning => warning.includes('재발급')));
+    const match = matchStatementCard(parsed.cards[0], [
+        { id: 'original', last4: '5678', name: 'KB국민카드', status: 'ASSIGNED' },
+        { id: 'replacement', last4: '1234', name: 'KB국민카드', status: 'ASSIGNED' },
+    ]);
+    assert.equal(match.matchedCardId, undefined, 'Neither the old nor new card may be assigned without review');
+    assert.ok(match.matchCandidates.some(candidate => candidate.cardId === 'original'));
+});
+
+test('mixed original and reissued transaction cards stay separate and all require identity review', () => {
+    const parsed = parseKbApprovalStatement([header(25000, 0, '2/0') + row(11000) + row(14000, '정상', '5678')]);
+    assert.deepEqual(parsed?.cards.map(card => [card.cardLast4, card.subtotalAmount, card.cardNumberReviewRequired]), [
+        ['1234', 11000, true], ['5678', 14000, true],
+    ]);
+});
+
+test('reissued card review never bypasses missing rows or mismatched financial totals', () => {
+    assert.throws(() => parseKbApprovalStatement([header() + row(11000, '정상', '5678')]), KbApprovalReconciliationError);
+    assert.throws(() => parseKbApprovalStatement([header(11000, 0, '1/0') + row(12000, '정상', '5678')]), KbApprovalReconciliationError);
     assert.throws(() => parseKbApprovalStatement([header(11000, 0, '1/0').replace('[11,000원', '[12,000원') + row(11000)]), KbApprovalReconciliationError);
+});
+
+test('multiword FALL BAC and FALL BACK approval methods preserve amounts and cancellation signs', () => {
+    for (const method of ['FALL BAC', 'FALL BACK']) {
+        const parsed = parseKbApprovalStatement([header() + row(11000).replace(' IC ', ` ${method} `)
+            + row(14000) + row(11000, '승인취소').replace(' IC ', ` ${method} `)]);
+        assert.equal(parsed?.grandTotalAmount, 14000);
+        assert.deepEqual(parsed?.cards[0].transactions.map(transaction => transaction.amount), [11000, 14000, -11000]);
+    }
 });
 
 test('multiple cards are grouped using visible transaction card numbers', () => {

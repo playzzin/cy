@@ -1,3 +1,4 @@
+import { getCardLabel, matchStatementCard, type FirestoreCardRecord } from './cardStatementMatching';
 import { trackedGeminiFetch, withGeminiActor, withGeminiUsageContext } from './geminiUsageLogging';
 import { geminiTextGenerationOptions } from './geminiModelPolicy';
 import { DEFAULT_GEMINI_TEXT_MODEL } from './geminiModelPolicy';
@@ -111,6 +112,7 @@ interface GeminiCardStatementCard {
     holderName?: string;
     subtotalAmount: number;
     statementTotalAvailable?: boolean;
+    cardNumberReviewRequired?: boolean;
     transactions: GeminiCardStatementTransaction[];
     warnings: string[];
     confidence: number;
@@ -154,22 +156,6 @@ interface CardStatementAnalysisResult {
     rawText: string;
     parsed: CompatibleBillingStatementOutput;
     source: CardStatementAnalysisSource;
-}
-
-interface FirestoreCardRecord {
-    id: string;
-    name?: string;
-    issuer?: string;
-    last4?: string;
-    maskedNumber?: string;
-    currentAssigneeId?: string | null;
-    currentAssigneeType?: string | null;
-    currentAssigneeName?: string | null;
-    billingTargetId?: string | null;
-    billingTargetType?: string | null;
-    billingTargetName?: string | null;
-    memo?: string | null;
-    status?: string;
 }
 
 interface ResolvedBillingTarget {
@@ -216,22 +202,6 @@ interface CommitCardStatementBillingGroupResult {
     committedBillingDocumentCount: number;
     protectedBillingIds: string[];
     affectedDocumentIds: string[];
-}
-
-interface CardMatchCandidate {
-    cardId: string;
-    cardLabel: string;
-    cardLast4: string;
-    score: number;
-    reasons: string[];
-}
-
-interface CardMatchResult {
-    matchedCardId?: string;
-    matchedCardLabel?: string;
-    matchConfidence: number;
-    matchCandidates: CardMatchCandidate[];
-    warnings: string[];
 }
 
 const MAX_INLINE_FILE_SIZE_BYTES = 18 * 1024 * 1024;
@@ -967,127 +937,6 @@ const sanitizeGeminiOutput = (value: unknown): GeminiKbCardStatementOutput => {
         grandTotalAvailable: sourceGrandTotalAmount !== null,
         cards,
         warnings: asStringArray(raw.warnings),
-    };
-};
-
-const getCardLabel = (card: Pick<FirestoreCardRecord, 'name' | 'last4' | 'maskedNumber'>): string => {
-    const name = asString(card.name) || '카드';
-    const last4 = asString(card.last4) || asString(card.maskedNumber).replace(/\D/g, '').slice(-4);
-    return last4 ? `${name} (${last4})` : name;
-};
-
-const normalizeMatchText = (value: unknown): string =>
-    asString(value).replace(/\s+/g, '').toLowerCase();
-
-const textIncludes = (source: unknown, needle: unknown): boolean => {
-    const sourceText = normalizeMatchText(source);
-    const needleText = normalizeMatchText(needle);
-    return Boolean(sourceText && needleText && sourceText.includes(needleText));
-};
-
-const buildCardMatchCandidate = (
-    statementCard: GeminiCardStatementCard,
-    card: FirestoreCardRecord
-): CardMatchCandidate | null => {
-    const statementLast4 = asString(statementCard.cardLast4).replace(/\D/g, '').slice(-4);
-    const cardLast4 = asString(card.last4).replace(/\D/g, '').slice(-4)
-        || asString(card.maskedNumber).replace(/\D/g, '').slice(-4);
-    const reasons: string[] = [];
-    let score = 0;
-
-    if (statementLast4 && cardLast4 && statementLast4 === cardLast4) {
-        score += 0.72;
-        reasons.push('last4_exact');
-    } else if (statementLast4 && asString(card.maskedNumber).replace(/\D/g, '').endsWith(statementLast4)) {
-        score += 0.68;
-        reasons.push('masked_number_last4');
-    }
-
-    if (statementCard.cardName && (
-        textIncludes(card.name, statementCard.cardName) ||
-        textIncludes(statementCard.cardName, card.name) ||
-        textIncludes(card.issuer, statementCard.cardName)
-    )) {
-        score += 0.14;
-        reasons.push('card_name');
-    }
-
-    if (statementCard.holderName && (
-        textIncludes(card.currentAssigneeName, statementCard.holderName) ||
-        textIncludes(card.billingTargetName, statementCard.holderName) ||
-        textIncludes(card.memo, statementCard.holderName)
-    )) {
-        score += 0.1;
-        reasons.push('holder_name');
-    }
-
-    if (normalizeKey(card.status) === 'closed') {
-        score -= 0.2;
-        reasons.push('closed_card_penalty');
-    }
-
-    if (score <= 0) return null;
-
-    return {
-        cardId: card.id,
-        cardLabel: getCardLabel(card),
-        cardLast4,
-        score: Number(Math.max(0, Math.min(score, 1)).toFixed(3)),
-        reasons,
-    };
-};
-
-const matchStatementCard = (
-    statementCard: GeminiCardStatementCard,
-    cards: FirestoreCardRecord[]
-): CardMatchResult => {
-    const statementLast4 = asString(statementCard.cardLast4).replace(/\D/g, '').slice(-4);
-    const warnings: string[] = [];
-    const candidates = cards
-        .map((card) => buildCardMatchCandidate(statementCard, card))
-        .filter((candidate): candidate is CardMatchCandidate => Boolean(candidate))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5);
-
-    if (!statementLast4) {
-        warnings.push('카드번호 뒤 4자리를 읽지 못했습니다.');
-    }
-
-    if (candidates.length === 0) {
-        return {
-            matchConfidence: 0,
-            matchCandidates: [],
-            warnings: [...warnings, '등록된 카드와 자동 매칭되지 않았습니다.'],
-        };
-    }
-
-    const best = candidates[0];
-    const second = candidates[1];
-    const exactLast4Count = candidates.filter((candidate) => (
-        statementLast4 && candidate.cardLast4 === statementLast4
-    )).length;
-    const hasClearWinner = best.score >= 0.72 && (!second || best.score - second.score >= 0.15);
-    const hasUniqueLast4 = exactLast4Count === 1 && best.cardLast4 === statementLast4 && best.score >= 0.72;
-
-    if (hasUniqueLast4 || hasClearWinner) {
-        return {
-            matchedCardId: best.cardId,
-            matchedCardLabel: best.cardLabel,
-            matchConfidence: best.score,
-            matchCandidates: candidates,
-            warnings,
-        };
-    }
-
-    return {
-        matchConfidence: best.score,
-        matchCandidates: candidates,
-        warnings: [
-            ...warnings,
-            exactLast4Count > 1
-                ? '같은 뒤 4자리 카드 후보가 여러 개입니다.'
-                : '자동 매칭 신뢰도가 낮아 확인이 필요합니다.',
-        ],
     };
 };
 
