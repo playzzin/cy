@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createInboundCertificateImageFile, createInboundPhotosPdfFile, downloadInboundFile, getInboundCertificateDetails, getInboundPhotoPageLayouts } from './materialInboundCertificateExport';
 import './MaterialCertificatePage.css';
+import { createMaterialPhotoUrlResolver, hasMaterialPhotoReference } from './MaterialPhotoViewerModal';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowLeft,
@@ -23,11 +24,48 @@ const MaterialInboundCertificatePage: React.FC = () => {
     const [draft, setDraft] = useState<InboundCertificateDraft | null>(null);
     const [photoUrls, setPhotoUrls] = useState<Array<{ id: string; url: string; name: string }>>([]);
     const [exporting, setExporting] = useState(false);
+    const [loadingPhotos, setLoadingPhotos] = useState(false);
+    const [photoError, setPhotoError] = useState('');
+    const [photoRetry, setPhotoRetry] = useState(0);
 
     useEffect(() => {
         const draftId = searchParams.get('draftId') || '';
         setDraft(draftId ? getInboundCertificateDraft(draftId) : null);
     }, [searchParams]);
+
+    useEffect(() => {
+        const references = draft?.photoReferences?.filter(hasMaterialPhotoReference);
+        if (!draft || !references?.length) return;
+        const controller = new AbortController();
+        setLoadingPhotos(true);
+        setPhotoError('');
+        void (async () => {
+            try {
+                const { default: service } = await import('../../services/materialService');
+                const resolver = createMaterialPhotoUrlResolver(id => service.getMaterialPhotoDownloadUrls(id));
+                const urls = [...new Set((await Promise.all(references.map(reference => resolver.resolve(reference)))).flat())];
+                if (!urls.length) throw new Error('등록된 첨부사진을 찾을 수 없습니다.');
+                if (urls.length > 40) throw new Error('이 날짜·현장·임대사·차량의 사진이 40장을 초과합니다. 입출고 내역의 사진 보기에서 확인해 주세요.');
+                const photos: InboundCertificateDraft['photos'] = [];
+                for (let index = 0; index < urls.length; index += 4) {
+                    const batch = await Promise.all(urls.slice(index, index + 4).map(async (url, offset) => {
+                        const response = await fetch(url, { signal: controller.signal });
+                        if (!response.ok) throw new Error('첨부사진을 불러오지 못했습니다.');
+                        const blob = await response.blob();
+                        return { id: `saved-${index + offset}`, source: 'gallery' as const,
+                            file: new File([blob], `사진_${index + offset + 1}`, { type: blob.type || 'image/jpeg' }) };
+                    }));
+                    photos.push(...batch);
+                }
+                if (!controller.signal.aborted) setDraft(current => current?.id === draft.id ? { ...current, photos, photoReferences: undefined } : current);
+            } catch (error) {
+                if (!controller.signal.aborted) setPhotoError(error instanceof Error ? error.message : '첨부사진을 불러오지 못했습니다.');
+            } finally {
+                if (!controller.signal.aborted) setLoadingPhotos(false);
+            }
+        })();
+        return () => controller.abort();
+    }, [draft?.id, draft?.photoReferences, photoRetry]);
 
     useEffect(() => {
         if (!draft) {
@@ -132,11 +170,11 @@ const MaterialInboundCertificatePage: React.FC = () => {
             <div className="no-print mx-auto mb-4 flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <button
                     type="button"
-                    onClick={() => navigate('/materials/inbound')}
+                    onClick={() => draft.returnTo ? navigate(-1) : navigate('/materials/inbound')}
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
                 >
                     <FontAwesomeIcon icon={faArrowLeft} />
-                    입고 등록으로
+                    {draft.returnTo ? '입출고 내역으로 돌아가기' : '입고 등록으로'}
                 </button>
                 <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                     <button
@@ -178,6 +216,8 @@ const MaterialInboundCertificatePage: React.FC = () => {
                     <div><h2 className="text-xl font-bold">첨부사진 {photoUrls.length}장</h2><p className="mt-1 text-sm text-slate-500">입고증과 별도 파일로 저장됩니다. 최대 40장 · A4 최대 2페이지</p></div>
                     <button type="button" onClick={handleDownloadPhotos} disabled={exporting || !draft.photos.length} className="rounded-lg bg-blue-600 px-4 py-2 font-bold text-white disabled:opacity-50">첨부사진 PDF 다운로드</button>
                 </div>
+                {loadingPhotos && <p role="status">첨부사진을 불러오는 중입니다...</p>}
+                {photoError && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4">{photoError} <button type="button" onClick={() => setPhotoRetry(value => value + 1)} disabled={loadingPhotos} className="font-bold underline">다시 시도</button></div>}
                 {photoUrls.length ? getInboundPhotoPageLayouts(photoUrls.length).map((layout, pageIndex, pages) => <div key={pageIndex} className="material-certificate-photo-sheet">
                     <header><strong>자재 입고 첨부사진</strong><span>{draft.transactionDate} · {draft.siteName} · {draft.vehicleNumber}</span></header>
                     <div className="material-certificate-photo-sheet__grid" style={{ gridTemplateColumns: 'repeat(' + layout.columns + ', minmax(0, 1fr))', gridTemplateRows: 'repeat(' + layout.rows + ', minmax(0, 1fr))' }}>

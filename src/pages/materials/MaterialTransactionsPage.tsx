@@ -2,8 +2,9 @@ import './MaterialWorkspace.css';
 import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { buildTransactionOutboundCertificate, getOutboundCertificateGroupKey } from './materialTransactionCertificate';
+import { buildTransactionInboundCertificate, buildTransactionOutboundCertificate, getTransactionCertificateGroupKey } from './materialTransactionCertificate';
 import { createOutboundCertificateDraftId, saveOutboundCertificateDraft } from './materialOutboundCertificateDraftStore';
+import { createInboundCertificateDraftId, saveInboundCertificateDraft } from './materialInboundCertificateDraftStore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faClipboardList,
@@ -21,6 +22,7 @@ import { companyService } from '../../services/companyService';
 import { settlementTargetService } from '../../services/settlementTargetService';
 import { InboundTransaction, Material, OutboundTransaction } from '../../types/materials';
 import MaterialSearchSelect from './MaterialSearchSelect';
+import MaterialSiteBalanceView from './MaterialSiteBalanceView';
 import MaterialTransactionDateList, { getMaterialTransactionRowKey as getTransactionKey, MaterialTransactionRow } from './MaterialTransactionDateList';
 import './MaterialTransactionsPage.css';
 import * as XLSX from 'xlsx-js-style';
@@ -102,6 +104,8 @@ const MaterialTransactionsPage: React.FC = () => {
     const [sites, setSites] = useState<Site[]>([]);
     const [materials, setMaterials] = useState<Material[]>([]);
     const [rentalCompanies, setRentalCompanies] = useState<MaterialRentalCompanyOption[]>([]);
+    const [view, setView] = useState<'history' | 'site' | 'rental'>('history');
+    const [balancesOpened, setBalancesOpened] = useState(false);
 
     // Filters
     const [startDate, setStartDate] = useState('');
@@ -161,7 +165,14 @@ const MaterialTransactionsPage: React.FC = () => {
                 companyService.getCompanies(),
                 settlementTargetService.getTargets().catch(() => []),
             ]);
-            const cheongyeonSites = filterCheongyeonMaterialSites(siteRows, 'all');
+            const companiesById = new Map(companyRows.flatMap(company => [
+                [company.id, company] as const,
+                ...(company.legacyId ? [[company.legacyId, company] as const] : []),
+            ]));
+            const cheongyeonSites = filterCheongyeonMaterialSites(siteRows, 'all').map(site => {
+                const client = companiesById.get(site.clientCompanyId || '');
+                return { ...site, clientCompanyId: client?.id || site.clientCompanyId, clientCompanyName: client?.name || site.clientCompanyName };
+            });
             setSites(cheongyeonSites);
             setMaterials(materialRows);
             setRentalCompanies(buildMaterialRentalCompanyOptions(companyRows, settlementTargetRows));
@@ -260,12 +271,18 @@ const MaterialTransactionsPage: React.FC = () => {
         });
     };
 
-    const handleOpenOutboundCertificate = (row: Transaction) => {
-        const key = getOutboundCertificateGroupKey(row);
-        const rows = certificateTransactions.filter(item => item.type === 'outbound' && getOutboundCertificateGroupKey(item) === key);
-        const draft = buildTransactionOutboundCertificate(createOutboundCertificateDraftId(), rows, sites, rentalCompanies);
-        saveOutboundCertificateDraft(draft);
-        navigate(`/materials/outbound-certificate?draftId=${encodeURIComponent(draft.id)}`);
+    const handleOpenCertificate = (row: Transaction, sourceRows: Transaction[] = certificateTransactions) => {
+        const key = getTransactionCertificateGroupKey(row, rentalCompanies);
+        const rows = sourceRows.filter(item => getTransactionCertificateGroupKey(item, rentalCompanies) === key);
+        if (row.type === 'inbound') {
+            const draft = buildTransactionInboundCertificate(createInboundCertificateDraftId(), rows, sites, rentalCompanies);
+            saveInboundCertificateDraft(draft);
+            navigate(`/materials/inbound-certificate?draftId=${encodeURIComponent(draft.id)}`);
+        } else {
+            const draft = buildTransactionOutboundCertificate(createOutboundCertificateDraftId(), rows, sites, rentalCompanies);
+            saveOutboundCertificateDraft(draft);
+            navigate(`/materials/outbound-certificate?draftId=${encodeURIComponent(draft.id)}`);
+        }
     };
 
     const handleDelete = async (tx: Transaction) => {
@@ -551,9 +568,11 @@ const MaterialTransactionsPage: React.FC = () => {
                         <FontAwesomeIcon icon={faClipboardList} className="text-indigo-600" />
                         자재 입출고 내역
                     </h1>
-                    <p className="text-slate-500 mt-1 text-sm">날짜별 임대사·차량번호를 확인하고 펼쳐서 자재 상세 내역을 조회합니다.</p>
+                    <p className="text-slate-500 mt-1 text-sm">{view === 'history'
+                        ? '일자를 펼쳐 현장을 선택하고, 해당 현장의 입출고 내역을 확인하세요.'
+                        : '건설사·현장·임대사별로 날짜별 입출고와 자재 잔량을 확인하세요.'}</p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                {view === 'history' && <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-bold text-slate-500">
                         선택 {selectedVisibleCount.toLocaleString('ko-KR')}건
                     </span>
@@ -573,9 +592,21 @@ const MaterialTransactionsPage: React.FC = () => {
                         <FontAwesomeIcon icon={faDownload} />
                         Excel 다운로드
                     </button>
-                </div>
+                </div>}
             </div>
 
+            <div className="material-transactions-view" role="group" aria-label="보기 방식">
+                <button type="button" aria-pressed={view === 'history'} onClick={() => setView('history')}>일자별</button>
+                <button type="button" aria-pressed={view === 'site'} onClick={() => { setBalancesOpened(true); setView('site'); }}>건설사별</button>
+                <button type="button" aria-pressed={view === 'rental'} onClick={() => { setBalancesOpened(true); setView('rental'); }}>임대사별</button>
+            </div>
+            {balancesOpened && <div hidden={view === 'history'}>
+                <MaterialSiteBalanceView active={view !== 'history'} grouping={view === 'rental' ? 'rental' : 'site'} sites={sites} rentalCompanies={rentalCompanies}
+                    initialSiteId={siteId} initialSiteStatus={siteStatusFilter} initialRentalCompany={rentalCompanyFilter}
+                    onPhotos={openPhotoViewer} onCertificate={handleOpenCertificate} />
+            </div>}
+
+            <div style={{ display: view === 'history' ? 'contents' : 'none' }}>
             {/* Filter Section */}
             <section aria-label="입출고 조회 조건" className="material-panel material-transactions-filters bg-white rounded-xl shadow-sm border border-slate-200 p-3 sm:p-4 mb-4 flex-shrink-0">
                 <div className="material-transactions-filters__grid">
@@ -665,15 +696,18 @@ const MaterialTransactionsPage: React.FC = () => {
 
             <MaterialTransactionDateList
                 rows={visibleTransactions}
+                sourceRows={certificateTransactions}
+                rentalCompanies={rentalCompanies}
                 loading={loading}
                 selectedKeys={selectedTransactionKeys}
                 canDelete={canDelete}
                 onToggleRows={toggleTransactionRows}
                 onEdit={openEditModal}
                 onDelete={handleDelete}
-                onOutboundCertificate={handleOpenOutboundCertificate}
+                onCertificate={handleOpenCertificate}
                 onPhotos={openPhotoViewer}
             />
+            </div>
 
             <MaterialPhotoViewerModal
                 isOpen={photoViewer.isOpen}

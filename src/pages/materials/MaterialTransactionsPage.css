@@ -1,4 +1,12 @@
 .material-transactions-filters { container-type: inline-size; }
+.material-transactions-view { display: inline-grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-self: flex-start; max-width: 100%; gap: 4px; padding: 4px; margin-bottom: 16px; border: 1px solid #dce5ee; border-radius: 11px; background: #eaf0f6; }
+.material-transactions-view button { padding: 9px 20px; border-radius: 8px; color: #5b7086; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.material-transactions-view button[aria-pressed=true] { background: #183955; color: white; box-shadow: 0 2px 4px #18395520; }
+.material-transactions-view button:focus-visible { outline: 2px solid #315778; outline-offset: 2px; }
+@media (max-width: 480px) {
+    .material-transactions-view { display: grid; width: 100%; }
+    .material-transactions-view button { padding: 9px 6px; font-size: 12px; }
+}
 .material-transactions-filters__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .material-transactions-filters__dates { min-width: 0; grid-column: 1 / -1; }
 @container (min-width: 700px) {
