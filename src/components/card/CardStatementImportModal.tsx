@@ -94,7 +94,7 @@ const getFileErrorGuidance = (message: string): { title: string; nextStep: strin
   if (message.includes('선택 카드번호와 거래 카드번호')) {
     return {
       title: 'PDF 카드번호 확인 필요',
-      nextStep: 'PDF 상단의 선택 카드번호와 거래내역의 카드번호를 확인해 주세요. 카드사에서 해당 카드의 전체 페이지를 다시 내려받아 등록해 주세요.',
+      nextStep: 'PDF 상단의 선택 카드번호와 거래내역의 카드번호가 다르면 재발급 전 내역일 수 있습니다. 하단의 ‘재분석’ 후 실제 사용 카드를 수동 매칭해 주세요.',
     };
   }
   if (message.includes('정상·취소 건수 또는 금액') || message.includes('요약 금액이 서로 다릅니다')) {
@@ -106,7 +106,7 @@ const getFileErrorGuidance = (message: string): { title: string; nextStep: strin
   if (message.includes('거래 행의 날짜·금액·상태')) {
     return {
       title: 'PDF 거래내역 판독 확인 필요',
-      nextStep: '일부 거래의 날짜·금액·취소 여부를 읽지 못했습니다. 잘리지 않은 카드사 원본 PDF인지 확인해 주세요.',
+      nextStep: '일부 거래의 날짜·금액·취소 여부를 읽지 못했습니다. 잘리지 않은 카드사 원본 PDF인지 확인하고 하단의 ‘재분석’으로 다시 시도해 주세요.',
     };
   }
   if (message.includes('KB 승인내역 원본 대사 실패')) {
@@ -828,7 +828,7 @@ export const CardStatementImportModal: React.FC<CardStatementImportModalProps> =
                                 </div>
                               )}
                               {result.warnings.filter((warning) => warning !== blockingWarning).slice(0, 3).map((warning, index) => (
-                                <div key={`${result.id}-warning-${index}`} className={`truncate text-xs font-bold ${blockingWarning ? 'text-slate-500' : 'text-amber-700'}`}>
+                                <div key={`${result.id}-warning-${index}`} className={`whitespace-normal break-words text-xs font-bold ${blockingWarning ? 'text-slate-500' : 'text-amber-700'}`}>
                                   {warning}
                                 </div>
                               ))}

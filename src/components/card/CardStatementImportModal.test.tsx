@@ -61,6 +61,27 @@ test('same-number cards show their status and holder, and a lost card can be sel
   expect(await screen.findByText('분실·정지/해지 카드입니다. 사용 중단 전 내역인지 확인해 주세요.')).toBeInTheDocument();
 });
 
+test('reissued-card warnings stay readable and require choosing the actual transaction card before saving', async () => {
+  const warning = 'PDF 상단의 선택 카드번호와 거래내역 카드번호가 다릅니다. 재발급 전 내역일 수 있으므로 수동 매칭에서 실제 사용 카드를 확인해 주세요.';
+  const pending = makePayload(['needs_review']);
+  Object.assign(pending.results[0], { matchedCardId: null, matchedCardLabel: null, cardLast4: '5678', warnings: [warning] });
+  const cards: Card[] = [
+    { id: 'original', name: '기존 카드', issuer: '테스트발급사', last4: '5678', maskedNumber: '**** 5678', cardType: 'CREDIT', status: 'ASSIGNED' },
+    { id: 'replacement', name: '재발급 카드', issuer: '테스트발급사', last4: '1234', maskedNumber: '**** 1234', cardType: 'CREDIT', status: 'ASSIGNED' },
+  ];
+  service.analyzeJob.mockResolvedValue(pending);
+  service.updateResultReview.mockResolvedValue({ ...pending, results: [{ ...pending.results[0], matchedCardId: 'original', status: 'matched' }] });
+  const saveButton = await openReview(cards);
+  const select = screen.getByRole('combobox', { name: '수동 매칭 카드 5678' });
+  expect(select).toHaveValue('');
+  expect(saveButton).toBeDisabled();
+  expect(screen.getByText(warning)).not.toHaveClass('truncate');
+  fireEvent.change(select, { target: { value: 'original' } });
+  await waitFor(() => expect(saveButton).toBeEnabled());
+  expect(service.updateResultReview).toHaveBeenCalledWith('result-0', { matchedCardId: 'original' });
+  expect(select).toHaveValue('original');
+});
+
 test('shows the server-confirmed month, saved amount and count, then disables repeat saving', async () => {
   fireEvent.click(await openReview());
   await waitFor(() => expect(alertSpy).toHaveBeenCalledTimes(1));

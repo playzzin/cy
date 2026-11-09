@@ -112,6 +112,7 @@ interface GeminiCardStatementCard {
     holderName?: string;
     subtotalAmount: number;
     statementTotalAvailable?: boolean;
+    cardNumberReviewRequired?: boolean;
     transactions: GeminiCardStatementTransaction[];
     warnings: string[];
     confidence: number;

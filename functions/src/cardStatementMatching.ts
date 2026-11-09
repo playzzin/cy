@@ -18,6 +18,7 @@ interface StatementCardIdentity {
     cardLast4?: string;
     cardName?: string;
     holderName?: string;
+    cardNumberReviewRequired?: boolean;
 }
 
 interface CardMatchCandidate {
@@ -134,6 +135,14 @@ export const matchStatementCard = (
 
     if (!statementLast4) {
         warnings.push('카드번호 뒤 4자리를 읽지 못했습니다.');
+    }
+
+    if (statementCard.cardNumberReviewRequired) {
+        return {
+            matchConfidence: 0,
+            matchCandidates: candidates,
+            warnings: [...warnings, 'PDF의 선택 카드번호와 거래내역 번호가 달라 수동 매칭이 필요합니다.'],
+        };
     }
 
     if (candidates.length === 0) {

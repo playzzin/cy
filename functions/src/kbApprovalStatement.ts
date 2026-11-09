@@ -22,6 +22,7 @@ export interface KbApprovalStatement {
         subtotalAmount: number;
         transactions: ApprovalTransaction[];
         warnings: string[];
+        cardNumberReviewRequired?: boolean;
         confidence: number;
     }>;
     warnings: string[];
@@ -88,7 +89,9 @@ export const parseKbApprovalStatement = (pages: readonly string[]): KbApprovalSt
         if (!/^\d{5}\s+KM\d{4}\s+/.test(lines[i])) continue;
         const row = /^\d{5}\s+KM(\d{4})\s+(.+?)\s+일시불\s+(-?[\d,]+)\s+국내\s+\d+\s+\S+$/.exec(lines[i]);
         const date = (lines[i - 2] || '').replace(/\./g, '-');
-        const detail = /\s(\d+)\s+(-?[\d,]+)\s+\S+\s+(정상|승인취소)\s+\S+$/.exec(lines[i + 1] || '');
+        // KB exports may truncate the multiword approval method "FALL BACK"
+        // to "FALL BAC". Both are one method field, followed by the same status.
+        const detail = /\s(\d+)\s+(-?[\d,]+)\s+(?:FALL\s+BAC(?:K)?|\S+)\s+(정상|승인취소)\s+\S+$/.exec(lines[i + 1] || '');
         if (!row || !detail || detail[1] !== '0' || !validDate(date) || date < start || date > end
             || !/^\d{2}:\d{2}:\d{2}$/.test(lines[i - 1] || '')) {
             throw new KbApprovalReconciliationError('거래 행의 날짜·금액·상태를 확인할 수 없습니다.');
@@ -121,7 +124,13 @@ export const parseKbApprovalStatement = (pages: readonly string[]): KbApprovalSt
     }
     const selectedCard = /카드번호\s+\d{4}-[\d*]{4}-[\d*]{4}-(\d{4})/.exec(text);
     if (selectedCard && (cards.size !== 1 || !cards.has(selectedCard[1]))) {
-        throw new KbApprovalReconciliationError('선택 카드번호와 거래 카드번호가 일치하지 않습니다.');
+        // A replacement card can be selected while the reconciled rows still
+        // show the original card. Preserve row identities and require manual
+        // matching; never transfer old charges to the selected replacement.
+        for (const card of cards.values()) {
+            card.cardNumberReviewRequired = true;
+            card.warnings.push('PDF 상단의 선택 카드번호와 거래내역 카드번호가 다릅니다. 재발급 전 내역일 수 있으므로 수동 매칭에서 실제 사용 카드를 확인해 주세요.');
+        }
     }
     return { bankName: 'KB국민카드', statementMonth: start.slice(0, 7),
         grandTotalAmount: normalTotal - cancelTotal, cards: [...cards.values()], warnings: [] };
