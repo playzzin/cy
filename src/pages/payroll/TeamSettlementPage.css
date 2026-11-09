@@ -125,6 +125,8 @@
 .team-settlement-page table[data-compact] { border-top: 3px solid var(--team-settlement-accent, var(--settlement-accent)); }
 .team-settlement-page .overflow-auto > table > thead { position: sticky; top: 0; z-index: 20; background: #edf0f3; }
 .team-settlement-page .overflow-auto > table > thead > tr { background: #edf0f3; color: #414750; }
+.team-settlement-page .overflow-auto > table > tbody > tr,
+.team-settlement-page .overflow-auto > table > tbody > tr > td { background: #fff; }
 .team-settlement-page .overflow-auto > table :is(th, td) { border-color: var(--settlement-line); }
 .team-settlement-page .overflow-auto > table th { font-size: 11px; font-weight: 700; }
 .team-settlement-page .overflow-auto > table td { font-size: 12px; }
