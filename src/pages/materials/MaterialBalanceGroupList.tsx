@@ -24,6 +24,7 @@ const MaterialBalanceGroupList: React.FC<Props> = ({ groups, grouping, sourceRow
     const GroupIcon = Building2;
     const SectionIcon = isSite ? MapPin : Building2;
     const ChildIcon = isSite ? Building2 : MapPin;
+    const groupRows = Array.from({ length: Math.ceil(groups.length / 3) }, (_, index) => groups.slice(index * 3, index * 3 + 3));
     // One selected path keeps siblings mutually exclusive. Selecting an ancestor
     // closes its descendants; transposing the hierarchy keeps the same selection.
     const toggleLevel = (level: number, value: string) => setSelection(previous => {
@@ -38,7 +39,9 @@ const MaterialBalanceGroupList: React.FC<Props> = ({ groups, grouping, sourceRow
             <span>{isSite ? '건설사 → 현장 → 임대사 → 날짜별 입출고' : '임대사 → 건설사 → 현장 → 날짜별 입출고'}</span>
             <button type="button" onClick={() => setSelection(closedSelection)} disabled={!selection[fields[0]]}>모두 접기</button>
         </div>
-        {groups.map((group, groupIndex) => {
+        {groupRows.map((groupRow, rowIndex) => <div key={rowIndex} className="material-balances__group-row">
+        {groupRow.map((group, columnIndex) => {
+            const groupIndex = rowIndex * 3 + columnIndex;
             const groupValue = group.children[0].children[0].rows[0][fields[0]];
             const open = selection[fields[0]] === groupValue;
             const contentId = `balance-group-${grouping}-${groupIndex}`;
@@ -119,6 +122,7 @@ const MaterialBalanceGroupList: React.FC<Props> = ({ groups, grouping, sourceRow
                 </div>}
             </section>;
         })}
+        </div>)}
     </div>;
 };
 
