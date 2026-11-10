@@ -35,6 +35,7 @@ const CardStatementReconciliation: React.FC<CardStatementReconciliationProps> = 
       <div><dt className="text-xs opacity-75">전체 사용내역 합계</dt><dd className="mt-1 text-lg font-extrabold tabular-nums">{won(summary.transactionTotal)}</dd><div className="mt-1 text-xs opacity-75">{summary.transactionCount.toLocaleString('ko-KR')}건 · 취소 금액 포함</div></div>
       <div><dt className="text-xs opacity-75">명세서 − 사용내역 차액</dt><dd className="mt-1 text-lg font-extrabold tabular-nums">{!conclusive || summary.difference === null ? '미확인' : won(summary.difference)}</dd></div>
     </dl>
+    {summary.transactionsAvailable && <p className="mt-3 text-xs leading-6">정상 이용 {summary.normalCount}건 {won(summary.normalTotal)} − 취소 {summary.cancelledCount}건 {won(summary.cancelledTotal)} = 순이용 {won(summary.transactionTotal)}. PDF 상단의 정상 이용금액에는 취소가 차감되지 않을 수 있습니다.</p>}
     {ledgerTotal !== undefined && <p className="mt-3 text-xs">대장 − 사용내역 차액: <strong>{ledgerDifference === null ? '미확인' : won(ledgerDifference)}</strong>{ledgerDifference !== null && <span className="ml-2 font-bold">대장 대비 {ledgerDifference === 0 ? '일치' : '불일치'}</span>}</p>}
     <p className="mt-2 text-xs leading-5">{reason}</p>
     <p className="mt-1 text-xs opacity-75">검색·분류 필터와 무관하게 전체 사용내역을 대조합니다. 금액 일치만으로 분석 내용의 정확성을 보장하지는 않습니다.</p>

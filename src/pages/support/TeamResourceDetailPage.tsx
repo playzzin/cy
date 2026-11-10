@@ -1752,6 +1752,7 @@ const TeamResourceDetailPage: React.FC = () => {
                     key={`${statementScope}:${statementResource.key}:original`}
                     paths={statementResource.statementPaths}
                     title={`${statementResource.card?.name || statementResource.cardLabel} 사용내역서 원본`}
+                    onRemoved={() => { setStatementRevision(value => value + 1); void loadResourceData(); }}
                     onClose={() => setStatementSelection(null)}
                 />
             ) : (
@@ -1761,6 +1762,7 @@ const TeamResourceDetailPage: React.FC = () => {
                     cardId={statementResource.cardId}
                     cardLast4={statementResource.card?.last4 || ''}
                     cardName={statementResource.card?.name || statementResource.cardLabel}
+                    onAttachmentsChanged={() => { setStatementRevision(value => value + 1); void loadResourceData(); }}
                     paths={statementResource.statementPaths}
                     onClose={() => setStatementSelection(null)}
                 />

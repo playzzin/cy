@@ -508,6 +508,11 @@ const AccommodationUtilityBillImportModal: React.FC<AccommodationUtilityBillImpo
                                         <div className="min-w-0">
                                             <div className="flex items-start justify-between gap-2">
                                                 <div className="min-w-0 truncate text-sm font-extrabold text-slate-800" title={row.analysis.originalFileName}>{row.analysis.originalFileName}</div>
+                                                <button type="button" aria-label={`${row.analysis.originalFileName} 분석 파일 삭제`} onClick={() => {
+                                                        const removedIndex = row.analysis.fileIndex;
+                                                        setSelectedFiles(current => current.filter((_, index) => index !== removedIndex));
+                                                        setRows(current => current.filter(item => item.analysis.fileIndex !== removedIndex).map(item => ({ ...item, analysis: { ...item.analysis, fileIndex: item.analysis.fileIndex > removedIndex ? item.analysis.fileIndex - 1 : item.analysis.fileIndex } })));
+                                                    }} className="mt-1 text-xs font-bold text-rose-700 hover:underline">파일 삭제</button>
                                                 <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-extrabold ${getConfidenceStyle(row.analysis.confidence)}`}>{Math.round(row.analysis.confidence * 100)}%</span>
                                             </div>
                                             <div className="mt-2 text-xs font-bold text-slate-700">{row.analysis.housingName || '동·호 미인식'}</div>

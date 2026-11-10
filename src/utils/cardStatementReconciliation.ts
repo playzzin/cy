@@ -17,6 +17,10 @@ export const reconcileCardStatement = (
 ) => {
   const rows = results.flatMap(result => result.transactions || []);
   const transactionTotal = rows.reduce((sum, row) => sum + (Number.isFinite(row.amount) ? row.amount : 0), 0);
+  const normalRows = rows.filter(row => row.amount >= 0);
+  const cancelledRows = rows.filter(row => row.amount < 0);
+  const normalTotal = normalRows.reduce((sum, row) => sum + row.amount, 0);
+  const cancelledTotal = -cancelledRows.reduce((sum, row) => sum + row.amount, 0);
   const totalAvailable = results.length > 0 && results.every(result => result.statementTotalAvailable === true && Number.isFinite(result.subtotalAmount));
   const statementTotal = totalAvailable ? results.reduce((sum, result) => sum + result.subtotalAmount, 0) : null;
   const difference = statementTotal === null ? null : Math.round((statementTotal - transactionTotal) * 100) / 100;
@@ -29,5 +33,6 @@ export const reconcileCardStatement = (
   else if (!totalAvailable || rows.some(row => !Number.isFinite(row.amount))) status = 'missing_total';
   else if (difference !== 0 || results.some(result => Math.round((result.subtotalAmount - result.transactions.reduce((sum, row) => sum + row.amount, 0)) * 100) !== 0)) status = 'mismatch';
   else status = 'matched';
-  return { status, statementTotal, transactionTotal, difference, transactionCount: rows.length, transactionsAvailable };
+  return { status, statementTotal, transactionTotal, difference, transactionCount: rows.length, transactionsAvailable,
+    normalTotal, cancelledTotal, normalCount: normalRows.length, cancelledCount: cancelledRows.length };
 };

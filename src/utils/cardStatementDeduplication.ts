@@ -57,6 +57,9 @@ const getImportedLineFingerprint = (transaction: CardTransaction): string => [
 
 const getImportedLinePositionIdentity = (transaction: CardTransaction): string => {
   const id = normalizeText(transaction.id);
+  // Current server IDs hash the source, card block, row fingerprint AND its
+  // occurrence. Two identical purchases are distinct documents, not duplicates.
+  if (/^card-statement__\d{4}-\d{2}__.+__[a-f0-9]{40}$/i.test(id)) return `document:${id}`;
   const idParts = id.split('__');
   if (/^card-statement__/i.test(id) && idParts.length >= 6) {
     return [
@@ -230,6 +233,9 @@ export const dedupeImportedStatementTransactions = (
   bridgeCandidates.forEach(({ legacy, hashed }) => {
     if (legacy.length === 0 || hashed.size !== 1) return;
     const hashedIndexes = Array.from(hashed.values())[0] ?? [];
+    // A legacy row has no occurrence information with which to choose among
+    // several identical modern purchases. Never join those distinct rows.
+    if (new Set(hashedIndexes.map(findRoot)).size !== 1 || new Set(legacy.map(findRoot)).size !== 1) return;
     legacy.forEach((legacyIndex) => {
       hashedIndexes.forEach((hashedIndex) => union(legacyIndex, hashedIndex));
     });

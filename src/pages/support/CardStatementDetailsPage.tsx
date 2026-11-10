@@ -315,7 +315,7 @@ export const CardStatementDetailsPage: React.FC = () => {
           </>}
         </section>
       </div>
-      {viewingOriginal && detail?.file.storagePath && <CardStatementFilesDialog paths={[detail.file.storagePath]} fileNames={{ [detail.file.storagePath]: selectedName }} title="카드 명세서 원본" onClose={() => setViewingOriginal(false)} />}
+      {viewingOriginal && detail?.file.storagePath && <CardStatementFilesDialog paths={[detail.file.storagePath]} fileNames={{ [detail.file.storagePath]: selectedName }} title="카드 명세서 원본" removalDisabled={analyzing || bulkBusy} onRemoved={path => { setFiles(current => current.filter(file => file.storagePath !== path)); setLoaded(null); setViewingOriginal(false); setSearchParams({ month: yearMonth }); }} onClose={() => setViewingOriginal(false)} />}
     </main>
       </div>
     </div>

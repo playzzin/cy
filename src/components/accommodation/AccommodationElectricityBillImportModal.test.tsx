@@ -191,6 +191,18 @@ describe('AccommodationElectricityBillImportModal', () => {
         jest.clearAllMocks();
     });
 
+    test('분석된 두 PDF 중 하나를 삭제하면 다른 파일의 금액과 선택 파일 목록을 유지한다', async () => {
+        mockedAnalyze.mockResolvedValue([{ ...analysis, originalFileName: 'first.pdf' }, { ...analysis, fileIndex: 1, originalFileName: 'second.pdf', sourceFileSha256: 'b'.repeat(64), electricityAmount: 12000 }]);
+        render(<AccommodationElectricityBillImportModal yearMonth="2026-06" files={[new File(['a'], 'first.pdf', { type: 'application/pdf' }), new File(['b'], 'second.pdf', { type: 'application/pdf' })]} accommodations={[accommodation]} records={[record]} blockedAccommodationIds={new Set()} onClose={jest.fn()} onApply={jest.fn()} />);
+        fireEvent.click(await screen.findByRole('button', { name: 'first.pdf 분석 파일 삭제' }));
+        expect(screen.queryByRole('button', { name: 'first.pdf 분석 파일 삭제' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'second.pdf 분석 파일 삭제' })).toBeInTheDocument();
+        expect(screen.getByDisplayValue('12,000')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '파일 다시 선택' }));
+        expect(screen.queryByText('first.pdf')).not.toBeInTheDocument();
+        expect(screen.getByText('second.pdf')).toBeInTheDocument();
+    });
+
     test('빈 모달에서 청구서를 드롭한 뒤 분석을 시작한다', async () => {
         render(
             <AccommodationElectricityBillImportModal
@@ -209,7 +221,7 @@ describe('AccommodationElectricityBillImportModal', () => {
         fireEvent.click(screen.getByRole('button', { name: '1건 업로드 후 분석' }));
 
         await waitFor(() => expect(mockedAnalyze).toHaveBeenCalledWith('2026-06', [file], expect.any(Function)));
-        await waitFor(() => expect(screen.getByText('등록 가능')).toBeInTheDocument());
+        await screen.findByText('등록 가능');
     });
 
     test('청구금액과 숙소 자동 매칭을 검수한 뒤 대장 반영 콜백으로 전달한다', async () => {
@@ -226,7 +238,7 @@ describe('AccommodationElectricityBillImportModal', () => {
             />,
         );
 
-        await waitFor(() => expect(screen.getByDisplayValue('19,370')).toBeInTheDocument());
+        await screen.findByDisplayValue('19,370');
         expect(screen.getByRole('combobox')).toHaveValue(accommodation.id);
         expect(screen.getByText('주소 일치')).toBeInTheDocument();
         expect(screen.getByText('등록 가능')).toBeInTheDocument();
@@ -296,7 +308,7 @@ describe('AccommodationElectricityBillImportModal', () => {
             />,
         );
 
-        await waitFor(() => expect(screen.getByText('이미 청구 처리된 숙소입니다. 먼저 미청구로 변경해 주세요.')).toBeInTheDocument());
+        await screen.findByText('이미 청구 처리된 숙소입니다. 먼저 미청구로 변경해 주세요.');
         expect(screen.getByRole('button', { name: '1건 대장 반영' })).toBeDisabled();
     });
 
@@ -336,7 +348,7 @@ describe('AccommodationElectricityBillImportModal', () => {
             />,
         );
 
-        await waitFor(() => expect(screen.getByText('이미 대장에 반영된 동일 청구서 파일입니다.')).toBeInTheDocument());
+        await screen.findByText('이미 대장에 반영된 동일 청구서 파일입니다.');
         expect(screen.getByRole('button', { name: '1건 대장 반영' })).toBeDisabled();
     });
 
@@ -355,7 +367,7 @@ describe('AccommodationElectricityBillImportModal', () => {
             />,
         );
 
-        await waitFor(() => expect(screen.getByDisplayValue('23,500')).toBeInTheDocument());
+        await screen.findByDisplayValue('23,500');
         expect(screen.getByText(/가스요금 청구서 일괄등록/)).toBeInTheDocument();
         expect(screen.getByText('납부자번호 307583958')).toBeInTheDocument();
         expect(screen.getByText(/사용량 21m³/)).toBeInTheDocument();
@@ -394,7 +406,7 @@ describe('AccommodationElectricityBillImportModal', () => {
             />,
         );
 
-        await waitFor(() => expect(screen.getByDisplayValue('18,920')).toBeInTheDocument());
+        await screen.findByDisplayValue('18,920');
         expect(screen.getByText(/수도요금 청구서 일괄등록/)).toBeInTheDocument();
         expect(screen.getByText('수용가번호 1271-003-393-0004-11-1')).toBeInTheDocument();
         expect(screen.getByText(/사용량 19m³/)).toBeInTheDocument();
@@ -436,7 +448,7 @@ describe('AccommodationElectricityBillImportModal', () => {
             />,
         );
 
-        await waitFor(() => expect(screen.getByText('수도료 포함 숙소라 등록할 수 없습니다.')).toBeInTheDocument());
+        await screen.findByText('수도료 포함 숙소라 등록할 수 없습니다.');
         expect(screen.getByRole('button', { name: '1건 대장 반영' })).toBeDisabled();
     });
 });

@@ -29,11 +29,35 @@ export const getVehicleFineNoticeAttachment = functions
         }
         const snapshot = await admin.firestore().collection(VEHICLE_EXPENSE_COLLECTION).doc(expenseId).get();
         const expense = snapshot.data();
-        if (!isActiveVehicleImportExpense(snapshot) || expense?.type !== 'FINE') {
+        if (!isActiveVehicleImportExpense(snapshot) || expense?.type !== 'FINE' || expense.fineNotice?.attachmentRemoved === true) {
             throw new functions.https.HttpsError('not-found', '과태료 내역을 찾을 수 없습니다. 대장을 새로고침해 주세요.');
         }
         return { ...await readVehicleFineSource(expense.fineNotice?.sourceSha256),
             fileName: asString(expense.fineNotice?.sourceFileName) || '과태료 고지서' };
+    });
+
+export const deleteVehicleFineNoticeAttachment = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 5 })
+    .region('asia-northeast3')
+    .https.onCall(async (data: { expenseId?: unknown }, context) => {
+        const auth = await requireVehicleFineAccess(context);
+        const profile = await admin.firestore().collection('users').doc(auth.uid).get();
+        if (!profile.exists || (profile.data()?.status !== undefined && profile.data()?.status !== 'active')) throw new functions.https.HttpsError('permission-denied', '활성 사용자만 첨부파일을 삭제할 수 있습니다.');
+        const expenseId = asString(data?.expenseId);
+        if (!expenseId || expenseId.includes('/') || expenseId.length > 200) throw new functions.https.HttpsError('invalid-argument', '삭제할 고지서를 선택해 주세요.');
+        const db = admin.firestore();
+        const ref = db.collection(VEHICLE_EXPENSE_COLLECTION).doc(expenseId);
+        return db.runTransaction(async transaction => {
+            const snapshot = await transaction.get(ref);
+            const expense = snapshot.data();
+            if (!isActiveVehicleImportExpense(snapshot) || expense?.type !== 'FINE' || !expense.fineNotice?.sourceSha256) {
+                throw new functions.https.HttpsError('not-found', '연결된 고지서 파일을 찾을 수 없습니다.');
+            }
+            if (expense.fineNotice.attachmentRemoved === true) return { ok: true, alreadyRemoved: true };
+            transaction.update(ref, { 'fineNotice.attachmentRemoved': true,
+                'fineNotice.attachmentRemovedByUid': auth.uid, 'fineNotice.attachmentRemovedAt': admin.firestore.FieldValue.serverTimestamp() });
+            return { ok: true, alreadyRemoved: false };
+        });
     });
 
 interface FineFileInput {

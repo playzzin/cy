@@ -8,6 +8,7 @@ import { requireCallableAuth } from './auth';
 import { getServerGeminiSettings } from './serverAiSettings';
 import { analyzeKbApprovalPdf, KbApprovalReconciliationError } from './kbApprovalStatement';
 import { cancelStoredCardStatementFile } from './cardStatementImportCancellation';
+import { removeCardStatementAttachment } from './cardStatementAttachmentRemoval';
 import { assertCardStatementHasTransactions, readCardStatementAmount, reconcileCardStatementAmounts } from './cardStatementReconciliation';
 import {
     assertCardStatementStoragePath,
@@ -3311,6 +3312,8 @@ const resolveStoredCardStatement = async (input: StoredCardStatementInput): Prom
         throw new functions.https.HttpsError('invalid-argument', '파일 ID와 명세서 경로가 일치하지 않습니다.');
     }
     const yearMonth = resolveCardStatementYearMonth(storagePath, input?.yearMonth || file?.yearMonth);
+    const attachment = await db.collection(FILE_ANALYSES_COLLECTION).doc(getCardStatementFileAnalysisId(storagePath)).get();
+    if (attachment.data()?.attachmentRemoved === true) throw new functions.https.HttpsError('not-found', '삭제된 첨부파일입니다. 목록을 새로고침해 주세요.');
     if (!file) {
         const imports = await db.collection(COLLECTIONS.files).where('storagePath', '==', storagePath).limit(1).get();
         if (!imports.empty) file = { ...imports.docs[0].data(), id: imports.docs[0].id };
@@ -3394,7 +3397,8 @@ export const listCardStatementFiles = functions
                     && !/\.(pdf|png|jpe?g|webp|gif)$/i.test(object.name)) return;
                 byPath.set(object.name, buildStoredStatementFile(object.name, object.metadata || {}));
             });
-            return { ok: true, files: Array.from(byPath.values()) };
+            const removedPaths = new Set(analyses.docs.filter(entry => entry.data().attachmentRemoved === true).map(entry => entry.data().storagePath));
+            return { ok: true, files: Array.from(byPath.values()).filter(file => !file.attachmentRemoved && !removedPaths.has(file.storagePath)) };
         } catch (error) {
             throw toHttpsError(error);
         }
@@ -3429,6 +3433,7 @@ export const analyzeStoredCardStatementFile = functions
             const candidateRunId = buildAnalysisRunId();
             await db.runTransaction(async (transaction) => {
                 const current = (await transaction.get(analysisRef!)).data() || {};
+                if (current.attachmentRemoved === true) throw new functions.https.HttpsError('not-found', '삭제된 첨부파일은 분석할 수 없습니다.');
                 if (current.analysisStatus === 'analyzing' && Number(current.analysisStartedAtMillis) > Date.now() - 600_000) {
                     throw new functions.https.HttpsError('already-exists', '이 명세서를 분석하고 있습니다. 잠시 후 새로고침해 주세요.');
                 }
@@ -3506,6 +3511,7 @@ export const analyzeStoredCardStatementFile = functions
             await db.runTransaction(async (transaction) => {
                 const current = (await transaction.get(analysisRef!)).data() || {};
                 if (current.analysisRunId !== runId) throw new functions.https.HttpsError('aborted', '다른 분석 작업이 시작되어 이전 결과를 저장하지 않았습니다.');
+                if (current.attachmentRemoved === true) throw new functions.https.HttpsError('failed-precondition', '분석 중 첨부파일이 삭제되어 결과를 저장하지 않았습니다.');
                 if (file.jobId) {
                     const sourceFile = await transaction.get(db.collection(COLLECTIONS.files).doc(file.id));
                     if (!sourceFile.exists || sourceFile.data()?.status === 'cancelled') {
@@ -3535,6 +3541,16 @@ export const analyzeStoredCardStatementFile = functions
             throw toHttpsError(error);
         }
     }));
+
+export const deleteCardStatementAttachment = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 5 })
+    .region('asia-northeast3')
+    .https.onCall(async (data: { storagePath?: string; yearMonth?: string }, context) => {
+        try {
+            const auth = await requireCardStatementAccess(context) as NonNullable<functions.https.CallableContext['auth']>;
+            return await removeCardStatementAttachment(admin.firestore(), data, auth.uid);
+        } catch (error) { throw toHttpsError(error); }
+    });
 
 export const cancelCardStatementImportFile = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })

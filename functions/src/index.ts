@@ -41,6 +41,7 @@ export {
     analyzeCardStatementImportJob,
     cancelCardStatementImportUploadSession,
     cancelCardStatementImportFile,
+    deleteCardStatementAttachment,
     commitCardStatementImportJob,
     completeCardStatementImportUpload,
     createCardStatementImportJob,
@@ -69,6 +70,7 @@ export {
     analyzeVehicleFineNotices,
     commitVehicleFineImports,
     getVehicleFineNoticeAttachment,
+    deleteVehicleFineNoticeAttachment,
 } from './vehicleFineAnalysis';
 export {
     analyzeVehicleTollUsages,

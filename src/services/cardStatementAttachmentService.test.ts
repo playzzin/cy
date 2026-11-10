@@ -1,9 +1,19 @@
 import { getBlob, getDownloadURL, ref } from 'firebase/storage';
+import { httpsCallable } from 'firebase/functions';
 import { cardStatementAttachmentService as service, getCardStatementAttachmentError, getCardStatementFileName } from './cardStatementAttachmentService';
 
 jest.mock('firebase/storage', () => ({ getBlob: jest.fn(), getDownloadURL: jest.fn(), ref: jest.fn() }));
-jest.mock('../config/firebase', () => ({ storage: 'fixture-storage' }));
+jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
+jest.mock('../config/firebase', () => ({ storage: 'fixture-storage', functions: 'fixture-functions' }));
 const objectRef = { fullPath: 'statements/fixture.pdf' };
+
+test('removes only the requested registration through the authenticated server', async () => {
+  const remove = jest.fn().mockResolvedValue({ data: { ok: true } });
+  jest.mocked(httpsCallable).mockReturnValue(remove as any);
+  await service.remove('card-ledger-statements/2026-10/card/first.pdf');
+  expect(httpsCallable).toHaveBeenCalledWith('fixture-functions', 'deleteCardStatementAttachment', { timeout: 60_000 });
+  expect(remove).toHaveBeenCalledWith({ storagePath: 'card-ledger-statements/2026-10/card/first.pdf' });
+});
 const createObjectURL = URL.createObjectURL;
 const revokeObjectURL = URL.revokeObjectURL;
 
