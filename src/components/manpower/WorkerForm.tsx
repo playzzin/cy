@@ -105,6 +105,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         fileNameSaved: '',
         payType: DAILY_PAY_TYPE,
         salaryModel: DAILY_PAY_TYPE,
+        laborStatementPayType: 'direct',
         color: '#0f766e',
         bloodType: ''
     });
@@ -180,7 +181,10 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         setIsAnalyzing(false);
         setSelectedFile(null);
         if (initialData) {
-            setFormData(initialData);
+            setFormData({
+                ...initialData,
+                laborStatementPayType: initialData.laborStatementPayType === 'delegate' ? 'delegate' : 'direct',
+            });
         } else {
             setFormData({
                 name: '',
@@ -202,6 +206,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                 fileNameSaved: '',
                 payType: DAILY_PAY_TYPE,
                 salaryModel: DAILY_PAY_TYPE,
+                laborStatementPayType: 'direct',
                 color: '#0f766e',
                 bloodType: ''
             });
@@ -818,6 +823,39 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                     placeholder="예금주"
                                     className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
                                 />
+                            </div>
+                        </div>
+
+                        <div className="col-span-12 grid grid-cols-12">
+                            <div className="col-span-3 md:col-span-2 bg-slate-50 flex items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
+                                직불/위임
+                            </div>
+                            <div className="col-span-9 md:col-span-10 p-3">
+                                <div role="radiogroup" aria-label="직불/위임" className="flex flex-wrap items-center gap-6">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="laborStatementPayType"
+                                            value="direct"
+                                            checked={formData.laborStatementPayType === 'direct'}
+                                            onChange={handleChange}
+                                            className="text-brand-600 focus:ring-brand-500"
+                                        />
+                                        <span>직불</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="laborStatementPayType"
+                                            value="delegate"
+                                            checked={formData.laborStatementPayType === 'delegate'}
+                                            onChange={handleChange}
+                                            className="text-brand-600 focus:ring-brand-500"
+                                        />
+                                        <span>위임</span>
+                                    </label>
+                                </div>
+                                <p className="mt-2 text-xs text-slate-600">노무비 명세서의 기본 지급 방식으로 사용됩니다.</p>
                             </div>
                         </div>
 
