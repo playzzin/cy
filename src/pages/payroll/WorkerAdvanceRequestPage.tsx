@@ -60,7 +60,7 @@ const normalizeText = (value: unknown): string => String(value ?? '').trim();
 const normalizeKey = (value: unknown): string => normalizeText(value).toLowerCase().replace(/\s+/g, '');
 
 const parseAmountInput = (value: unknown): number => {
-    const cleaned = normalizeText(value).replace(/[^0-9]/g, '');
+    const cleaned = normalizeText(value).normalize('NFKC').replace(/[^0-9]/g, '');
     if (!cleaned) return 0;
     const parsed = Number(cleaned);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -435,8 +435,9 @@ export default function WorkerAdvanceRequestPage() {
     latestSummaryLoader.current = loadWorkerSummary;
 
     const handleAmountChange = (value: string) => {
-        const nextAmount = parseAmountInput(value);
-        setAmountInput(nextAmount > 0 ? formatAmountInput(nextAmount) : '');
+        // Preserve the DOM value while typing (including IME composition).
+        // Reformatting each keystroke moves the caret and discards full-width digits.
+        setAmountInput(value);
     };
 
     const setQuickAmount = (amount: number) => {
@@ -623,6 +624,8 @@ export default function WorkerAdvanceRequestPage() {
                             category={category} onCategory={setCategory} onSelect={setSelectedWorkerId}
                             amountFor={id => amountDrafts[draftKeyFor(id)] || ''} onAmount={(id, value) => {
                                 setSelectedWorkerId(id);
+                                setAmountDrafts(current => ({ ...current, [draftKeyFor(id)]: value }));
+                            }} onAmountBlur={(id, value) => {
                                 setAmountDrafts(current => ({ ...current, [draftKeyFor(id)]: formatAmountInput(parseAmountInput(value)) }));
                             }} onSubmit={() => void handleSubmit()} canSubmit={canSubmit} saving={saving} loading={loading}
                             search={workerSearch} onSearch={setWorkerSearch} /> : workerPool.length > 1 || linkedWorkerCandidates.length === 0 ? (
@@ -804,6 +807,7 @@ export default function WorkerAdvanceRequestPage() {
                                             <input
                                                 value={amountInput}
                                                 onChange={(event) => handleAmountChange(event.target.value)}
+                                                onBlur={(event) => setAmountInput(formatAmountInput(parseAmountInput(event.target.value)))}
                                                 inputMode="numeric"
                                                 placeholder="0"
                                                 className="min-w-0 flex-1 bg-transparent text-right text-xl font-black text-slate-950 outline-none"
