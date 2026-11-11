@@ -16,6 +16,8 @@ export interface CardStatementUsageDialogProps {
   ledgerTotal?: number;
   paths: string[];
   onClose: () => void;
+  onAttachmentsChanged?: () => void;
+  removalDisabled?: boolean;
 }
 
 interface FileState { loading: boolean; payload?: CardStatementFileDetailPayload; error?: string; }
@@ -32,8 +34,9 @@ const message = (error: unknown) => {
   return text && !/^(internal|unknown|unavailable)$/i.test(text) ? text : '명세서 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.';
 };
 
-const CardStatementUsageDialog: React.FC<CardStatementUsageDialogProps> = ({ yearMonth, cardId, cardLast4, cardName, ledgerTotal, paths, onClose }) => {
-  const pathKey = JSON.stringify(Array.from(new Set(paths.map(path => path.trim()).filter(Boolean))));
+const CardStatementUsageDialog: React.FC<CardStatementUsageDialogProps> = ({ yearMonth, cardId, cardLast4, cardName, ledgerTotal, paths, onClose, onAttachmentsChanged, removalDisabled }) => {
+  const [removedPaths, setRemovedPaths] = useState<string[]>([]);
+  const pathKey = JSON.stringify(Array.from(new Set(paths.map(path => path.trim()).filter(path => path && !removedPaths.includes(path)))));
   const files = useMemo<string[]>(() => JSON.parse(pathKey), [pathKey]);
   const scopeKey = `${yearMonth}:${cardId}:${cardLast4}:${pathKey}`;
   const [selected, setSelected] = useState(() => files[files.length - 1] || '');
@@ -213,7 +216,7 @@ const CardStatementUsageDialog: React.FC<CardStatementUsageDialogProps> = ({ yea
         </div>
       </Dialog.Content>
     </Dialog.Portal>
-    {viewingOriginal && activePath && <CardStatementFilesDialog paths={[activePath]} fileNames={{ [activePath]: selectedName }} title="카드 명세서 원본" onClose={() => setViewingOriginal(false)} />}
+      {viewingOriginal && activePath && <CardStatementFilesDialog paths={[activePath]} fileNames={{ [activePath]: selectedName }} title="카드 명세서 원본" removalDisabled={removalDisabled || !!busyPath} onRemoved={path => { setRemovedPaths(current => [...current, path]); setViewingOriginal(false); onAttachmentsChanged?.(); }} onClose={() => setViewingOriginal(false)} />}
   </Dialog.Root>;
 };
 

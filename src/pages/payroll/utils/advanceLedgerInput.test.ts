@@ -190,6 +190,40 @@ describe('가불관리 → 통합급여 입력 변환', () => {
     })).toBe(confirmed);
   });
 
+  it.each([1200000, 600000, 0])('저장 시각이 손상된 초안의 100만원 대신 수정된 %i원을 가져온다', (amount) => {
+    const source = manualInput({ currentAdvance: amount });
+    const staleDraft = manualInput({ currentAdvance: 1000000 });
+    expect(resolveInitialLedgerManualInput({
+      advanceInput: source,
+      advanceUpdatedAt: '2026-11-10T01:00:00.000Z',
+      settlementInput: staleDraft,
+      settlementUpdatedAt: { _methodName: 'serverTimestamp' },
+      settlementStatus: 'draft',
+    })).toBe(source);
+  });
+
+  it.each(['reviewed', 'confirmed', 'paid'])('저장 시각이 손상되어도 %s 급여의 검토·확정값은 보호한다', (status) => {
+    const snapshot = manualInput({ currentAdvance: 1000000 });
+    expect(resolveInitialLedgerManualInput({
+      advanceInput: manualInput({ currentAdvance: 1200000 }),
+      advanceUpdatedAt: '2026-11-10T01:00:00.000Z',
+      settlementInput: snapshot,
+      settlementUpdatedAt: { _methodName: 'serverTimestamp' },
+      settlementStatus: status,
+    })).toBe(snapshot);
+  });
+
+  it('정상 저장 시각이 있는 최신 급여 초안의 직접 수정값은 유지한다', () => {
+    const draft = manualInput({ currentAdvance: 900000 });
+    expect(resolveInitialLedgerManualInput({
+      advanceInput: manualInput({ currentAdvance: 1200000 }),
+      advanceUpdatedAt: '2026-11-10T01:00:00.000Z',
+      settlementInput: draft,
+      settlementUpdatedAt: '2026-11-10T02:00:00.000Z',
+      settlementStatus: 'draft',
+    })).toBe(draft);
+  });
+
   it('시간 정보가 없는 구형 초안은 새로 추가된 0원 칸만 원본으로 보완한다', () => {
     const source = manualInput({ other: 1414100, currentAdvance: 500000 });
     const legacyDraft = manualInput({ currentAdvance: 200000 });
@@ -202,5 +236,15 @@ describe('가불관리 → 통합급여 입력 변환', () => {
 
     expect(result?.labor.other).toBe(1414100);
     expect(result?.labor.currentAdvance).toBe(200000);
+  });
+
+  it('시각 필드 자체가 없던 구형 초안은 저장 오류로 간주하지 않고 직접 수정값을 보존한다', () => {
+    const result = resolveInitialLedgerManualInput({
+      advanceInput: manualInput({ currentAdvance: 1200000 }),
+      advanceUpdatedAt: '2026-11-10T01:00:00.000Z',
+      settlementInput: manualInput({ currentAdvance: 900000 }),
+      settlementStatus: 'draft',
+    });
+    expect(result?.labor.currentAdvance).toBe(900000);
   });
 });

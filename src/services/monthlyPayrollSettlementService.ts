@@ -151,6 +151,11 @@ const cleanUndefinedDeep = (value: unknown): unknown => {
             .filter((child) => child !== undefined);
     }
     if (value && typeof value === 'object') {
+        // Firestore FieldValue/Timestamp and Date are SDK values, not maps.
+        // Flattening serverTimestamp() stores {_methodName: 'serverTimestamp'}
+        // instead of a server timestamp and breaks source/draft freshness checks.
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype !== Object.prototype && prototype !== null) return value;
         return Object.fromEntries(
             Object.entries(value as Record<string, unknown>)
                 .map(([key, child]) => [key, cleanUndefinedDeep(child)] as const)

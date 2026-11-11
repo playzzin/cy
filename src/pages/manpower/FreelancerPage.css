@@ -12,6 +12,7 @@
 .freelancer-page-container .year-picker-container button:hover { background: #e5f4ef; }
 .freelancer-page-container .year-picker-container > span { min-width: 86px; padding: 0 8px; color: #172b46; text-align: center; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .freelancer-team-selector { flex: 1 1 320px; min-width: 0; }
+.freelancer-team-selector > .company-team-selector--advance { padding: 0; border: 0; }
 .freelancer-page-container :is(button, select):focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .freelancer-ledger { min-width: 0; border: 1px solid color-mix(in srgb, var(--freelancer-team-color) 30%, white); border-top: 5px solid var(--freelancer-team-color); border-radius: 8px; background: white; overflow: hidden; }
 .freelancer-ledger-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; min-height: 62px; padding: 18px 12px; background: color-mix(in srgb, var(--freelancer-team-color) 12%, white); color: #172b46; }

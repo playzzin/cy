@@ -57,6 +57,7 @@ export interface CardStatementImportJob {
 }
 
 export interface CardStatementImportFile {
+  attachmentRemoved?: boolean;
   id: string;
   jobId: string;
   yearMonth: string;

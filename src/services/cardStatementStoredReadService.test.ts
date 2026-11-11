@@ -30,6 +30,15 @@ const docs = (rows: Record<string, unknown>[]) => ({ docs: rows.map((row, index)
 let records: Record<string, Record<string, unknown>[]>;
 const callable = Object.assign(jest.fn(), { stream: jest.fn() });
 
+test('removed files stay hidden when falling back to saved records, including stale attachment links', async () => {
+  records.cardStatementFileAnalyses = [savedAnalysis({ attachmentRemoved: true }), {
+    id: 'ledger-removal', storagePath: ledgerPath, yearMonth: '2026-09', attachmentRemoved: true,
+  }];
+  expect(await listStoredStatementRecords('2026-09')).toEqual([]);
+  records.cardStatementFileAnalyses = [savedAnalysis({ attachmentRemoved: true })];
+  await expect(getStoredStatementRecordDetail({ fileId: imported.id, yearMonth: '2026-09' })).rejects.toThrow(/삭제된/);
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(collection).mockImplementation(((_db: unknown, ...segments: string[]) => segments.join('/')) as any);

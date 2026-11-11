@@ -3,8 +3,11 @@ import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import MaterialInboundCertificatePage from './MaterialInboundCertificatePage';
+import materialService from '../../services/materialService';
 import { saveInboundCertificateDraft, deleteInboundCertificateDraft, InboundCertificateDraft } from './materialInboundCertificateDraftStore';
 import { createInboundCertificateImageFile, createInboundPhotosPdfFile, downloadInboundFile } from './materialInboundCertificateExport';
+
+jest.mock('../../services/materialService', () => ({ __esModule: true, default: { getMaterialPhotoDownloadUrls: jest.fn() } }));
 
 jest.mock('./materialInboundCertificateExport', () => ({
     ...jest.requireActual('./materialInboundCertificateExport'),
@@ -19,6 +22,7 @@ const draft: InboundCertificateDraft = {
     photos: Array.from({ length: 40 }, (_, index) => ({ id: String(index), file: new File(['photo'], `${index}.jpg`, { type: 'image/jpeg' }), source: 'gallery' })),
 };
 const originalCreateUrl = URL.createObjectURL, originalRevokeUrl = URL.revokeObjectURL;
+const originalFetch = global.fetch;
 beforeEach(() => {
     jest.clearAllMocks();
     URL.createObjectURL = jest.fn(() => 'blob:test-photo'); URL.revokeObjectURL = jest.fn();
@@ -26,7 +30,23 @@ beforeEach(() => {
     (createInboundCertificateImageFile as jest.Mock).mockResolvedValue(new File(['certificate'], 'certificate.jpg', { type: 'image/jpeg' }));
     (createInboundPhotosPdfFile as jest.Mock).mockResolvedValue(new File(['photos'], 'photos.pdf', { type: 'application/pdf' }));
 });
-afterEach(() => { deleteInboundCertificateDraft(draft.id); URL.createObjectURL = originalCreateUrl; URL.revokeObjectURL = originalRevokeUrl; });
+afterEach(() => { deleteInboundCertificateDraft(draft.id); URL.createObjectURL = originalCreateUrl; URL.revokeObjectURL = originalRevokeUrl; global.fetch = originalFetch; });
+
+it('기존 입고 사진 조회에 실패해도 입고증을 표시하고 재시도 후 중복 없이 PDF에 넣는다', async () => {
+    saveInboundCertificateDraft({ ...draft, photos: [], returnTo: '/materials/transactions', photoReferences: [{ photoBatchId: 'batch' }, { photoBatchId: 'batch' }] });
+    (materialService.getMaterialPhotoDownloadUrls as jest.Mock).mockRejectedValueOnce(new Error('사진 접근 오류')).mockResolvedValue(['https://example.test/1.jpg']);
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['photo'], { type: 'image/jpeg' }) });
+    render(<MemoryRouter initialEntries={['/materials/inbound-certificate?draftId=certificate-test']}><MaterialInboundCertificatePage /></MemoryRouter>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('사진 접근 오류');
+    expect(screen.getByRole('heading', { name: '자재 입고증' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '입고증 저장' })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    expect(await screen.findByRole('img', { name: '입고 사진 1' })).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '첨부사진 미리보기' })).getAllByRole('img')).toHaveLength(1);
+    expect(materialService.getMaterialPhotoDownloadUrls).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '사진 PDF 저장' }));
+    await waitFor(() => expect(createInboundPhotosPdfFile).toHaveBeenCalledWith(expect.objectContaining({ photos: [expect.objectContaining({ file: expect.any(File) })] })));
+});
 
 it('발행일 없이 모든 정보를 표시하고 입고증과 40장 사진을 별도 다운로드한다', async () => {
     render(<MemoryRouter initialEntries={['/materials/inbound-certificate?draftId=certificate-test']}><MaterialInboundCertificatePage /></MemoryRouter>);

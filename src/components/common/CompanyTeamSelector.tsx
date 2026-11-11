@@ -1,10 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCheck, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, horizontalListSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { teamSettlementService } from '../../services/teamSettlementService';
 import { getContrastingTextColor, hexToRgba, normalizeHexColor } from '../../utils/color';
 import { applySupportTeamOrder, mergeVisibleSupportTeamOrder, normalizeSupportTeamOrder } from '../../utils/supportTeamOrder';
+import './TeamSelector.css';
+import './CompanyTeamSelector.css';
 
 export type CompanyTeamOption = {
     id: string;
@@ -24,6 +28,7 @@ type Props = {
     allowAllTeams?: boolean;
     ariaLabel?: string;
     compact?: boolean;
+    appearance?: 'default' | 'advance';
 };
 
 // 팀 정산 페이지와 회사 공통 순서 및 로컬 캐시를 함께 사용한다.
@@ -49,13 +54,15 @@ const TeamButton: React.FC<{
     editing: boolean;
     saving: boolean;
     compact?: boolean;
+    appearance?: Props['appearance'];
     onChange: Props['onChange'];
-}> = ({ team, selected, editing, saving, compact = false, onChange }) => {
+}> = ({ team, selected, editing, saving, compact = false, appearance = 'default', onChange }) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
         id: team.id,
         disabled: !editing || saving
     });
-    const color = normalizeHexColor(team.color, '#4f46e5');
+    const advance = appearance === 'advance';
+    const color = normalizeHexColor(team.color, advance ? '#64748b' : '#4f46e5');
     return (
         <button
             ref={setNodeRef}
@@ -66,23 +73,29 @@ const TeamButton: React.FC<{
             aria-label={editing ? `${team.name} 순서 변경` : `${team.name} 선택`}
             aria-pressed={editing ? undefined : selected}
             title={editing ? '드래그해서 순서를 변경하세요' : `${team.name} 선택`}
-            className={`relative inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border ${compact ? 'h-8 px-3 text-xs' : 'h-10 px-4 text-sm'} font-black tracking-tight transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${selected ? 'shadow-md ring-2 ring-slate-900/20 ring-offset-1' : 'shadow-sm'} ${editing ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${isDragging ? 'z-30 opacity-70 shadow-xl' : ''}`}
+            className={`${advance ? 'advance-team-button' : `relative inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border ${compact ? 'h-8 px-3 text-xs' : 'h-10 px-4 text-sm'} font-black tracking-tight transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 ${selected ? 'shadow-md ring-2 ring-slate-900/20 ring-offset-1' : 'shadow-sm'}`} ${editing ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${isDragging ? 'relative z-30 opacity-70 shadow-xl' : ''}`}
             style={{
-                backgroundColor: selected ? color : hexToRgba(color, 0.12),
-                borderColor: selected ? color : hexToRgba(color, 0.45),
-                color: selected ? getContrastingTextColor(color) : '#1f2937',
+                ...(advance ? { '--advance-team-color': color } : {
+                    backgroundColor: selected ? color : hexToRgba(color, 0.12),
+                    borderColor: selected ? color : hexToRgba(color, 0.45),
+                    color: selected ? getContrastingTextColor(color) : '#1f2937'
+                }),
                 transform: CSS.Transform.toString(transform),
                 transition
             }}
             onClick={() => { if (!editing) onChange(team.id); }}
         >
             {editing && <span className="text-base leading-none opacity-70" aria-hidden="true">⠿</span>}
+            {advance && <span className="advance-team-marker" style={{ color }} aria-hidden="true">
+                {selected ? <FontAwesomeIcon icon={faCheck} /> : <span />}
+            </span>}
             <span className="whitespace-nowrap">{team.name}</span>
         </button>
     );
 };
 
-const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = [], internalLabel = '', selectedTeamId, onChange, onMissingSelection, allowAllTeams = true, ariaLabel = '통합 현황 팀 선택', compact = false }) => {
+const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = [], internalLabel = '', selectedTeamId, onChange, onMissingSelection, allowAllTeams = true, ariaLabel = '통합 현황 팀 선택', compact = false, appearance = 'default' }) => {
+    const buttonsRef = useRef<HTMLDivElement>(null);
     const [savedOrder, setSavedOrder] = useState(readCompanyTeamOrder);
     const [draftOrder, setDraftOrder] = useState<string[]>([]);
     const [editing, setEditing] = useState(false);
@@ -96,6 +109,17 @@ const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = []
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
     );
+
+    useEffect(() => {
+        if (appearance !== 'advance' || editing) return;
+        const strip = buttonsRef.current;
+        const active = strip?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]');
+        if (!strip || !active || strip.scrollWidth <= strip.clientWidth) return;
+        const bounds = strip.getBoundingClientRect();
+        const selected = active.getBoundingClientRect();
+        if (selected.left < bounds.left) strip.scrollLeft += selected.left - bounds.left;
+        else if (selected.right > bounds.right) strip.scrollLeft += selected.right - bounds.right;
+    }, [appearance, editing, selectedTeamId, internal, support]);
 
     useEffect(() => {
         let cancelled = false;
@@ -156,17 +180,10 @@ const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = []
         </div>
     );
 
-    return (
-        <section className={`min-w-0 shrink-0 rounded-xl border border-slate-200 bg-white ${compact ? 'px-3 py-1' : 'p-3 sm:p-4'}`} aria-label={ariaLabel}>
-            <div className={compact ? 'flex min-w-0 items-center gap-2' : ''}>
-            <div className={compact ? 'contents' : 'flex flex-wrap items-center justify-between gap-2'}>
-                <div className="flex shrink-0 items-center gap-2">
-                    <h2 className={`${compact ? 'text-sm' : 'text-base'} font-black text-slate-900`} title="회사 공통 순서">팀</h2>
-                    {!compact && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600">회사 공통 순서</span>}
-                </div>
-                <div className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap ${compact ? 'order-2' : ''}`}>
+    const orderActions = (
+                <div className={appearance === 'advance' ? 'company-team-selector__actions' : `flex shrink-0 items-center gap-1.5 whitespace-nowrap ${compact ? 'order-2' : ''}`}>
                     {editing && (
-                        <button type="button" disabled={saving} onClick={() => void saveOrder(true)} className="inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                        <button type="button" disabled={saving} onClick={() => void saveOrder(true)} className={appearance === 'advance' ? 'company-team-selector__order-button' : 'inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50'}>
                             기본 순서
                         </button>
                     )}
@@ -181,11 +198,56 @@ const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = []
                             } else if (draftOrder === savedOrder) setEditing(false);
                             else void saveOrder();
                         }}
-                        className={`inline-flex h-8 items-center rounded-lg border px-3 text-xs font-black transition disabled:opacity-50 ${editing ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:bg-blue-50'}`}
+                        className={appearance === 'advance' ? 'company-team-selector__order-button' : `inline-flex h-8 items-center rounded-lg border px-3 text-xs font-black transition disabled:opacity-50 ${editing ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:bg-blue-50'}`}
                     >
                         {saving ? '저장 중...' : editing ? '순서 변경 완료' : '순서 변경'}
                     </button>
                 </div>
+    );
+
+    if (appearance === 'advance') {
+        return (
+            <section className="company-team-selector--advance" aria-label={ariaLabel}>
+                <div className="company-team-selector__row">
+                    <span className="advance-filter-label" aria-hidden="true"><FontAwesomeIcon icon={faUsers} />팀 선택</span>
+                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                        <div ref={buttonsRef} className="advance-team-buttons company-team-selector__buttons" role="group" aria-label="팀 선택">
+                            {allowAllTeams && <button type="button" className="advance-team-button advance-team-button--all"
+                                disabled={saving || editing} aria-pressed={!selectedTeamId} onClick={() => onChange('')}>
+                                전체 보기
+                            </button>}
+                            {internal.length > 0 && internalLabel && <span className="advance-filter-label">{internalLabel}</span>}
+                            <SortableContext items={internal.map(team => team.id)} strategy={horizontalListSortingStrategy}>
+                                {internal.map(team => <TeamButton key={team.id} team={team} selected={team.id === selectedTeamId}
+                                    editing={editing} saving={saving} appearance="advance" onChange={onChange} />)}
+                            </SortableContext>
+                            {support.length > 0 && <div className="company-team-selector__support" role="group" aria-label="지원팀 선택">
+                                <span className="advance-filter-label">지원팀</span>
+                                <SortableContext items={support.map(team => team.id)} strategy={horizontalListSortingStrategy}>
+                                    {support.map(team => <TeamButton key={team.id} team={team} selected={team.id === selectedTeamId}
+                                        editing={editing} saving={saving} appearance="advance" onChange={onChange} />)}
+                                </SortableContext>
+                            </div>}
+                            {!internal.length && !support.length && <span className="advance-team-empty" role="status">선택할 팀이 없습니다</span>}
+                        </div>
+                    </DndContext>
+                    {orderActions}
+                </div>
+                {editing && <p className="company-team-selector__hint">팀 버튼을 드래그해 순서를 바꾸세요. 완료하면 같은 팀 선택 메뉴에 공통 순서가 적용됩니다.</p>}
+                {error && <p role="alert" className="mt-2 text-sm font-semibold text-red-700">{error}</p>}
+            </section>
+        );
+    }
+
+    return (
+        <section className={`min-w-0 shrink-0 rounded-xl border border-slate-200 bg-white ${compact ? 'px-3 py-1' : 'p-3 sm:p-4'}`} aria-label={ariaLabel}>
+            <div className={compact ? 'flex min-w-0 items-center gap-2' : ''}>
+            <div className={compact ? 'contents' : 'flex flex-wrap items-center justify-between gap-2'}>
+                <div className="flex shrink-0 items-center gap-2">
+                    <h2 className={`${compact ? 'text-sm' : 'text-base'} font-black text-slate-900`} title="회사 공통 순서">팀</h2>
+                    {!compact && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600">회사 공통 순서</span>}
+                </div>
+                {orderActions}
             </div>
             {editing && <p className={compact ? 'sr-only' : 'mt-1 text-xs font-semibold text-blue-600'}>팀 버튼을 드래그해 순서를 바꾸세요. 완료하면 같은 팀 선택 메뉴에 공통 순서가 적용됩니다.</p>}
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

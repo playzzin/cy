@@ -544,6 +544,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                             setSelectedTeamId(teamId);
                         }}
                         ariaLabel="월급여 팀 선택"
+                        appearance="advance"
                         compact
                     />
                 </div>

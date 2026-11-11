@@ -93,6 +93,9 @@ const createOperationId = (): string => {
 };
 
 export const vehicleFineImportService = {
+    async removeAttachment(expenseId: string): Promise<void> {
+        await httpsCallable(functions, 'deleteVehicleFineNoticeAttachment', { timeout: 60_000 })({ expenseId });
+    },
     async getAttachment(expenseId: string): Promise<{ base64: string; mimeType: string; fileName: string }> {
         const callable = httpsCallable<{ expenseId: string }, { base64: string; mimeType: string; fileName: string }>(
             functions, 'getVehicleFineNoticeAttachment', { timeout: 60_000 },

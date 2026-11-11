@@ -18,7 +18,7 @@ test('등록→취소→재등록, AI 판독 변경, 실제 중복 방지와 사
     assert.equal(process.env.GCLOUD_PROJECT, 'demo-cy-vehicle-fine');
     assert(process.env.FIREBASE_STORAGE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST);
     const app = admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT, storageBucket: `${process.env.GCLOUD_PROJECT}.appspot.com` });
-    const { commitVehicleFineImports, getVehicleFineNoticeAttachment } = await import('./vehicleFineAnalysis');
+    const { commitVehicleFineImports, getVehicleFineNoticeAttachment, deleteVehicleFineNoticeAttachment } = await import('./vehicleFineAnalysis');
     const db = app.firestore();
     const context = { auth: { uid: 'fine-support', token: { role: 'support' } } } as any;
     const denied = (code: string) => (error: any) => error.code === code;
@@ -29,6 +29,7 @@ test('등록→취소→재등록, AI 판독 변경, 실제 중복 방지와 사
     const photo = (expenseId: string, actor = context) => getVehicleFineNoticeAttachment.run({ expenseId }, actor);
     try {
         await db.doc('vehicles/fine-vehicle').set({ licensePlate: '12가3456' });
+        await db.doc('users/fine-support').set({ role: 'support', status: 'active' });
         const first = await commit();
         assert.equal(first.createdCount, 1);
         const firstId = first.results[0].expenseId;
@@ -58,6 +59,17 @@ test('등록→취소→재등록, AI 판독 변경, 실제 중복 방지와 사
         await assert.rejects(saveVehicleFineSource({ base64: png, sourceSha256: 'a'.repeat(64) }), denied('invalid-argument'));
         const [metadata] = await app.storage().bucket().file(vehicleFineSourcePath(sourceSha256)).getMetadata();
         assert(!metadata.metadata?.firebaseStorageDownloadTokens);
+        const beforeRemoval = (await db.doc(`vehicleExpenses/${changedId}`).get()).data()!;
+        await assert.rejects(deleteVehicleFineNoticeAttachment.run({ expenseId: changedId }, {} as any), denied('unauthenticated'));
+        await assert.rejects(deleteVehicleFineNoticeAttachment.run({ expenseId: changedId }, { auth: { uid: 'ordinary', token: {} } } as any), denied('permission-denied'));
+        await deleteVehicleFineNoticeAttachment.run({ expenseId: changedId }, context);
+        assert.equal((await deleteVehicleFineNoticeAttachment.run({ expenseId: changedId }, context)).alreadyRemoved, true);
+        const afterRemoval = (await db.doc(`vehicleExpenses/${changedId}`).get()).data()!;
+        assert.equal(afterRemoval.amount, beforeRemoval.amount);
+        assert.equal(afterRemoval.fineNotice.sourceSha256, beforeRemoval.fineNotice.sourceSha256);
+        assert.equal(afterRemoval.fineNotice.attachmentRemoved, true);
+        await assert.rejects(photo(changedId), denied('not-found'));
+        assert.equal((await readVehicleFineSource(sourceSha256)).base64, png, '다른 고지서가 공유하는 원본과 감사 이력은 보존');
 
         const signUp = await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-key`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'fine-test@example.test', password: 'test-password-only', returnSecureToken: true }),

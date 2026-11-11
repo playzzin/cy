@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import {
@@ -11,6 +11,8 @@ interface Props {
   title?: string;
   fileNames?: Record<string, string>;
   onClose: () => void;
+  onRemoved?: (path: string) => void;
+  removalDisabled?: boolean;
 }
 
 const getRealAccountUrl = (): string => {
@@ -19,8 +21,25 @@ const getRealAccountUrl = (): string => {
   return `${url.pathname}${url.search}${url.hash}`;
 };
 
-const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 파일', fileNames, onClose }) => {
-  const files = useMemo(() => Array.from(new Set(paths.map(path => path.trim()).filter(Boolean))), [paths]);
+const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 파일', fileNames, onClose, onRemoved, removalDisabled }) => {
+  const [removed, setRemoved] = useState<string[]>([]);
+  const files = useMemo(() => Array.from(new Set(paths.map(path => path.trim()).filter(path => path && !removed.includes(path)))), [paths, removed]);
+  const [confirmPath, setConfirmPath] = useState('');
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState('');
+  const removingRef = useRef(false);
+  const remove = async () => {
+    if (!confirmPath || removingRef.current || removalDisabled) return;
+    removingRef.current = true; setRemoving(true); setRemoveError('');
+    const path = confirmPath;
+    try {
+      await cardStatementAttachmentService.remove(path);
+      setRemoved(current => [...current, path]); setConfirmPath('');
+      onRemoved?.(path);
+    } catch (cause) {
+      setRemoveError(cause instanceof Error ? cause.message : '파일 삭제에 실패했습니다. 다시 시도해 주세요.');
+    } finally { removingRef.current = false; setRemoving(false); }
+  };
   const [selected, setSelected] = useState(() => files[files.length - 1] || '');
   const [loaded, setLoaded] = useState<{ path: string; link: CardStatementAttachmentLink } | null>(null);
   const [error, setError] = useState('');
@@ -47,18 +66,25 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
   }, [activePath, retry]);
 
   return (
-    <Dialog.Root open onOpenChange={open => { if (!open) onClose(); }}>
+    <Dialog.Root open onOpenChange={open => { if (!open && !removingRef.current) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-[100] bg-slate-900/50" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-[101] max-h-[90vh] w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
           <div className="flex items-start justify-between gap-3">
             <div><Dialog.Title className="break-words text-lg font-extrabold text-slate-900">{title}</Dialog.Title><Dialog.Description className="mt-1 text-sm text-slate-500">연결된 {files.length}개 파일 중 확인할 원본을 선택해 주세요.</Dialog.Description></div>
-            <button type="button" onClick={onClose} aria-label="청구서 파일 닫기" className="shrink-0 rounded-lg border px-3 py-2 text-sm">닫기</button>
+            <button type="button" disabled={removing} onClick={onClose} aria-label="청구서 파일 닫기" className="shrink-0 rounded-lg border px-3 py-2 text-sm">닫기</button>
           </div>
           <div className="my-4 max-h-64 space-y-2 overflow-y-auto" aria-label="청구서 파일 목록">
-            {files.map((path, index) => <button key={path} type="button" aria-pressed={activePath === path} onClick={() => setSelected(path)} className={`flex w-full gap-2 rounded-xl border p-3 text-left text-sm ${activePath === path ? 'border-indigo-400 bg-indigo-50 text-indigo-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}><span className="shrink-0 text-slate-400">{index + 1}.</span><span className="break-all">{fileNames?.[path] || getCardStatementFileName(path)}</span></button>)}
+            {files.map((path, index) => <div key={path} className="flex items-center gap-2"><button type="button" aria-pressed={activePath === path} onClick={() => setSelected(path)} className={`flex min-w-0 flex-1 gap-2 rounded-xl border p-3 text-left text-sm ${activePath === path ? 'border-indigo-400 bg-indigo-50 text-indigo-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}><span className="shrink-0 text-slate-400">{index + 1}.</span><span className="break-all">{fileNames?.[path] || getCardStatementFileName(path)}</span></button>{/^card-(?:billing-statements|ledger-statements|statement-imports)\//.test(path) && <button type="button" disabled={removalDisabled || removing || !!confirmPath} aria-label={`${fileNames?.[path] || getCardStatementFileName(path)} 삭제`} onClick={() => { setConfirmPath(path); setRemoveError(''); }} className="shrink-0 rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700 disabled:opacity-40">삭제</button>}</div>)}
             {!files.length && <p className="p-4 text-sm text-slate-500">연결된 파일이 없습니다. 업로드 내역에서 조회월과 원본을 확인해 주세요.</p>}
           </div>
+          {removalDisabled && <p className="mb-3 text-sm text-amber-800">변경사항을 저장한 뒤 첨부파일을 삭제해 주세요.</p>}
+          {confirmPath && <div role="group" aria-label="첨부파일 삭제 확인" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+            <p className="break-all font-bold">{fileNames?.[confirmPath] || getCardStatementFileName(confirmPath)}</p>
+            <p className="mt-2">이 파일을 첨부 목록에서 삭제할까요? 다른 파일과 저장된 금액은 유지됩니다. 원본과 삭제 기록은 이력에 보관됩니다.</p>
+            {removeError && <p role="alert" className="mt-2 font-bold">{removeError}</p>}
+            <div className="mt-3 flex gap-2"><button type="button" disabled={removing} onClick={() => setConfirmPath('')} className="rounded-lg border bg-white px-3 py-2">돌아가기</button><button type="button" disabled={removing || removalDisabled} onClick={() => void remove()} className="rounded-lg bg-rose-700 px-3 py-2 font-bold text-white disabled:opacity-50">{removing ? '삭제 중…' : '확인, 파일 삭제'}</button></div>
+          </div>}
           {error && <div role="alert" className="rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800">
             <p>{error}</p>
             {isDevAdminSessionEnabled() && <div className="mt-2">

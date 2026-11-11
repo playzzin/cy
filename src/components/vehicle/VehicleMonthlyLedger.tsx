@@ -2367,7 +2367,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                                     ${row.amounts[type] > 500000 ? 'text-red-500 font-extrabold' : ''}
                                                 `}
                                             >
-                                                {type === 'FINE' && <VehicleFinePhotos expenses={getFineExpensesForRow(row)} vehiclePlate={row.vehicle.licensePlate} />}
+                                                {type === 'FINE' && <VehicleFinePhotos expenses={getFineExpensesForRow(row)} vehiclePlate={row.vehicle.licensePlate} removalDisabled={isDirty || saving} onRemoved={() => void loadData()} />}
                                             </EditableCell>
                                         ))}
 

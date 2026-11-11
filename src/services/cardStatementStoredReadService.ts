@@ -15,6 +15,7 @@ const matchesMonth = (path: string, yearMonth: string) =>
   && path.split('/').every(Boolean);
 
 interface SavedFileAnalysis {
+  attachmentRemoved?: boolean;
   id: string;
   yearMonth: string;
   storagePath: string;
@@ -88,7 +89,8 @@ export const listStoredStatementRecords = async (yearMonth: string): Promise<Car
       });
     });
   });
-  return [...byPath.values()];
+  const removedPaths = new Set(analyses.docs.filter(entry => entry.data().attachmentRemoved === true).map(entry => entry.data().storagePath));
+  return [...byPath.values()].filter(file => !file.attachmentRemoved && !removedPaths.has(file.storagePath));
 };
 
 export const getStoredStatementRecordDetail = async (input: StoredCardStatementInput): Promise<CardStatementFileDetailPayload> => {
@@ -105,10 +107,12 @@ export const getStoredStatementRecordDetail = async (input: StoredCardStatementI
     throw new Error('기존 업로드 기록에서 명세서를 찾을 수 없습니다. 목록을 새로고침해 주세요.');
   }
   if (file.status === 'cancelled') throw new Error('취소된 명세서의 상세내역은 조회할 수 없습니다.');
+  if (file.attachmentRemoved) throw new Error('삭제된 첨부파일입니다. 목록을 새로고침해 주세요.');
   const analysisSnapshot = await getDocs(query(collection(db, 'cardStatementFileAnalyses'), where('storagePath', '==', file.storagePath)));
   if (analysisSnapshot.docs.length > 1) throw new Error('저장된 명세서 분석이 중복되어 상세내역을 확인할 수 없습니다.');
   const analysisEntry = analysisSnapshot.docs[0];
   const analysis = analysisEntry ? { ...analysisEntry.data(), id: analysisEntry.id } as SavedFileAnalysis : undefined;
+  if (analysis?.attachmentRemoved) throw new Error('삭제된 첨부파일입니다. 목록을 새로고침해 주세요.');
   if (analysis && (!isMatchingAnalysis(analysis, file.yearMonth, file.storagePath) || analysis.file.status === 'cancelled')) {
     throw new Error('저장된 상세 분석의 월 또는 파일 정보가 일치하지 않습니다.');
   }

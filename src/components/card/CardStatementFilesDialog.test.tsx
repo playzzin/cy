@@ -7,12 +7,49 @@ import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 jest.mock('../../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: jest.fn() }));
 
 jest.mock('../../services/cardStatementAttachmentService', () => ({
-  cardStatementAttachmentService: { resolve: jest.fn() },
+  cardStatementAttachmentService: { resolve: jest.fn(), remove: jest.fn() },
   getCardStatementFileName: (path: string) => path.split('/').pop() || '청구서 파일',
   getCardStatementAttachmentError: () => '파일 조회 권한을 확인해 주세요.',
 }));
 const resolve = jest.mocked(cardStatementAttachmentService.resolve);
+const remove = jest.mocked(cardStatementAttachmentService.remove);
 beforeEach(() => { resolve.mockImplementation(async path => ({ url: `https://example.com/${path}`, release: jest.fn() })); });
+
+test('deletes only the confirmed PDF, preserves the other selection and prevents duplicate requests', async () => {
+  const first = 'card-ledger-statements/2026-10/card/first.pdf';
+  const second = 'card-ledger-statements/2026-10/card/second.pdf';
+  let finish!: () => void;
+  remove.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const onRemoved = jest.fn();
+  render(<CardStatementFilesDialog paths={[first, second]} onRemoved={onRemoved} onClose={jest.fn()} />);
+  await screen.findByRole('link', { name: '새 탭에서 원본 열기' });
+  fireEvent.click(screen.getByRole('button', { name: 'second.pdf 삭제' }));
+  expect(remove).not.toHaveBeenCalled();
+  expect(screen.getByRole('group', { name: '첨부파일 삭제 확인' })).toHaveTextContent('다른 파일과 저장된 금액은 유지');
+  fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
+  fireEvent.click(screen.getByRole('button', { name: '삭제 중…' }));
+  expect(remove).toHaveBeenCalledTimes(1);
+  expect(remove).toHaveBeenCalledWith(second);
+  await act(async () => finish());
+  expect(screen.queryByRole('button', { name: 'second.pdf 삭제' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '1. first.pdf' })).toBeInTheDocument();
+  expect(await screen.findByRole('link', { name: '새 탭에서 원본 열기' })).toHaveAttribute('href', `https://example.com/${first}`);
+  expect(onRemoved).toHaveBeenCalledWith(second);
+});
+
+test('a rejected deletion preserves files and allows a retry; dirty ledgers disable deletion', async () => {
+  const path = 'card-ledger-statements/2026-10/card/first.pdf';
+  remove.mockRejectedValueOnce(new Error('삭제 권한이 없습니다.')).mockResolvedValueOnce(undefined);
+  const view = render(<CardStatementFilesDialog paths={[path]} onClose={jest.fn()} removalDisabled />);
+  expect(screen.getByRole('button', { name: 'first.pdf 삭제' })).toBeDisabled();
+  view.rerender(<CardStatementFilesDialog paths={[path]} onClose={jest.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'first.pdf 삭제' }));
+  fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('삭제 권한');
+  expect(screen.getByRole('button', { name: '1. first.pdf' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
+  await screen.findByText(/연결된 파일이 없습니다/);
+});
 
 test('offers all unique files and opens only the selected original through a native link', async () => {
   render(<CardStatementFilesDialog paths={['folder/first.pdf', 'folder/second.pdf', 'folder/first.pdf', '']} onClose={jest.fn()} />);

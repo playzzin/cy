@@ -134,6 +134,15 @@ test('stored statement API persists Gemini details, preserves posted bills, and 
         await standaloneRef.update({ analysisStartedAtMillis: Date.now() - 600_001 });
         assert.equal((await getCardStatementFileDetail.run({ storagePath: standalonePath }, context)).analysisStatus, 'failed');
         assert.equal((await analyzeStoredCardStatementFile.run({ storagePath: standalonePath }, context)).analysisStatus, 'completed');
+        const { deleteCardStatementAttachment } = await import('./cardBillingStatementAnalysis');
+        await assert.rejects(deleteCardStatementAttachment.run({ storagePath: standalonePath }, context), (error: any) => error.code === 'permission-denied');
+        await db.doc('users/attachment-manager').set({ role: 'support', status: 'active' });
+        await deleteCardStatementAttachment.run({ storagePath: standalonePath }, { auth: { uid: 'attachment-manager', token: {} } } as any);
+        const afterRemoval: any = await listCardStatementFiles.run({ yearMonth: '2026-09' }, context);
+        assert.ok(!afterRemoval.files.some((entry: any) => entry.storagePath === standalonePath), 'Storage enumeration must not revive removed attachments');
+        await assert.rejects(getCardStatementFileDetail.run({ storagePath: standalonePath }, context), /삭제된/);
+        await assert.rejects(analyzeStoredCardStatementFile.run({ storagePath: standalonePath }, context), /삭제된/);
+        assert.equal((await app.storage().bucket().file(standalonePath).exists())[0], true, 'Audit original remains intact');
     } finally {
         global.fetch = originalFetch;
         await app.delete();

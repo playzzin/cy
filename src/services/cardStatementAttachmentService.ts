@@ -1,5 +1,6 @@
 import { getBlob, getDownloadURL, ref } from 'firebase/storage';
-import { storage } from '../config/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { storage, functions } from '../config/firebase';
 
 export interface CardStatementAttachmentLink {
   url: string;
@@ -33,6 +34,9 @@ export const getCardStatementAttachmentError = (error: unknown): string => {
 };
 
 export const cardStatementAttachmentService = {
+  async remove(path: string): Promise<void> {
+    await httpsCallable(functions, 'deleteCardStatementAttachment', { timeout: 60_000 })({ storagePath: path });
+  },
   async resolve(path: string): Promise<CardStatementAttachmentLink> {
     const value = path.trim();
     const invalid = () => Object.assign(new Error('Invalid statement attachment path'), { code: 'attachment/invalid-path' });

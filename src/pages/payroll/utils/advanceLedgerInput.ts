@@ -299,7 +299,14 @@ export const resolveInitialLedgerManualInput = (params: {
 
   const advanceUpdatedAt = toEpochMillis(params.advanceUpdatedAt);
   const settlementUpdatedAt = toEpochMillis(params.settlementUpdatedAt);
-  if (advanceUpdatedAt > 0 && settlementUpdatedAt > 0) {
+  // Older saves flattened serverTimestamp() into an unreadable plain object.
+  // Recover that known corruption from the dated source, including decreases
+  // and zero, while retaining the fallback for genuinely undated legacy drafts.
+  const hasBrokenServerTimestamp = Boolean(
+    params.settlementUpdatedAt && typeof params.settlementUpdatedAt === 'object'
+    && (params.settlementUpdatedAt as { _methodName?: unknown })._methodName === 'serverTimestamp'
+  );
+  if (advanceUpdatedAt > 0 && (settlementUpdatedAt > 0 || hasBrokenServerTimestamp)) {
     return advanceUpdatedAt > settlementUpdatedAt ? advanceInput : settlementInput;
   }
 

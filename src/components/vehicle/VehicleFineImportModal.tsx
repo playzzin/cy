@@ -394,6 +394,11 @@ const VehicleFineImportModal: React.FC<VehicleFineImportModalProps> = ({
                                                         />
                                                         <div className="min-w-0">
                                                             <p className="truncate text-sm font-extrabold text-slate-900">{row.analysis.originalFileName}</p>
+                                                            <button type="button" aria-label={`${row.analysis.originalFileName} 분석 파일 삭제`} onClick={() => {
+                                                        const removedIndex = row.analysis.fileIndex;
+                                                        setSelectedFiles(current => current.filter((_, index) => index !== removedIndex));
+                                                        setRows(current => current.filter(item => item.analysis.fileIndex !== removedIndex).map(item => ({ ...item, analysis: { ...item.analysis, fileIndex: item.analysis.fileIndex > removedIndex ? item.analysis.fileIndex - 1 : item.analysis.fileIndex } })));
+                                                    }} className="mt-1 text-xs font-bold text-rose-700 hover:underline">파일 삭제</button>
                                                             <p className="mt-1 text-xs font-semibold text-slate-500">{row.analysis.issuer || '발급기관 미확인'} · {noticeTypeLabel(row.analysis.noticeType)}</p>
                                                         </div>
                                                     </div>

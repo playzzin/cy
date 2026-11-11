@@ -114,6 +114,7 @@ export type VehicleExpensePayer = 'COMPANY' | 'DRIVER';
 export type VehicleExpenseStatus = 'ACTIVE' | 'CANCELLED';
 
 export interface VehicleFineNoticeMeta {
+    attachmentRemoved?: boolean;
     sourceFileName: string;
     sourceSha256?: string;
     issuer: string;

@@ -5,8 +5,27 @@ import VehicleFinePhotos from './VehicleFinePhotos';
 import { vehicleFineImportService } from '../../services/vehicleFineImportService';
 import type { VehicleExpenseRecord } from '../../types/vehicle';
 
-jest.mock('../../services/vehicleFineImportService', () => ({ vehicleFineImportService: { getAttachment: jest.fn() } }));
+jest.mock('../../services/vehicleFineImportService', () => ({ vehicleFineImportService: { getAttachment: jest.fn(), removeAttachment: jest.fn() } }));
 const expenses = ['first', 'second'].map((id, index) => ({ id, vehicleId: 'test', date: `2026-11-0${index + 1}`, type: 'FINE', amount: 32000, payer: 'COMPANY', fineNotice: { sourceFileName: `${id}.png` } } as VehicleExpenseRecord));
+
+test('selected notice deletion is confirmed, failure is retryable and the second notice remains', async () => {
+    const remove = jest.mocked(vehicleFineImportService.removeAttachment);
+    remove.mockRejectedValueOnce(new Error('다시 시도해 주세요.')).mockResolvedValueOnce(undefined);
+    render(<VehicleFinePhotos expenses={expenses} vehiclePlate="12가3456" />);
+    fireEvent.click(screen.getByRole('button', { name: '12가3456 과태료 사진 보기' }));
+    await screen.findByAltText('과태료 고지서 원본');
+    fireEvent.click(screen.getByRole('button', { name: '선택한 파일 삭제' }));
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('다시 시도');
+    fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /first.png/ })).not.toBeInTheDocument());
+    expect(remove).toHaveBeenLastCalledWith('first');
+    expect(screen.queryByRole('button', { name: /first.png/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /second.png/ })).toBeInTheDocument();
+    await waitFor(() => expect(vehicleFineImportService.getAttachment).toHaveBeenLastCalledWith('second'));
+    expect(expenses.map(expense => expense.amount)).toEqual([32000, 32000]);
+});
 beforeEach(() => {
     jest.clearAllMocks();
     URL.createObjectURL = jest.fn(() => 'blob:test-preview');

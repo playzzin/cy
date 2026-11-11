@@ -27,6 +27,24 @@ const buildImportedTotal = (overrides: Partial<CardTransaction>): CardTransactio
 });
 
 describe('card statement duplicate protection', () => {
+  it('preserves separate identical purchases whose stable server IDs encode occurrence', () => {
+    const first = buildImportedTotal({ id: `card-statement__2026-07__card-9910__${'a'.repeat(40)}`, amount: 6000, merchant: '테스트 가맹점', statementSourceSha256: 'c'.repeat(64) });
+    const second = { ...first, id: `card-statement__2026-07__card-9910__${'b'.repeat(40)}` };
+    const repeatedRead = { ...first };
+    const result = dedupeImportedStatementTransactions([first, second, repeatedRead]);
+    expect(result).toHaveLength(2);
+    expect(result.reduce((sum, row) => sum + row.amount, 0)).toBe(12000);
+    expect(new Set(result.map(row => row.id))).toEqual(new Set([first.id, second.id]));
+  });
+
+  it('an ambiguous legacy alias cannot merge two distinct modern purchase occurrences', () => {
+    const first = buildImportedTotal({ id: `card-statement__2026-07__card-9910__${'a'.repeat(40)}`, statementSourceSha256: 'c'.repeat(64) });
+    const second = { ...first, id: `card-statement__2026-07__card-9910__${'b'.repeat(40)}` };
+    const legacy = buildImportedTotal({});
+    const result = dedupeImportedStatementTransactions([legacy, first, second]);
+    expect(result.map(row => row.id)).toEqual([legacy.id, first.id, second.id]);
+  });
+
   it('uses the original file name as the identity across import job folders', () => {
     expect(getStatementFileIdentity(
       'card-billing-statements/2026-07/imports/job-a/001_김세흔팀_9910.pdf',

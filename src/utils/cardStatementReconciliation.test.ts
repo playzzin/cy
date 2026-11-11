@@ -14,6 +14,7 @@ const result = (overrides: Partial<CardStatementImportResult> = {}): CardStateme
 test('matches signed transaction amounts to the independently extracted statement total', () => {
   expect(reconcileCardStatement([result({ transactionTotalAmount: 99999 })], 'completed')).toEqual({
     status: 'matched', statementTotal: 15000, transactionTotal: 15000, difference: 0, transactionCount: 2, transactionsAvailable: true,
+    normalTotal: 20000, cancelledTotal: 5000, normalCount: 1, cancelledCount: 1,
   });
 });
 

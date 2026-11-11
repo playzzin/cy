@@ -2068,6 +2068,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             {statementCard && (statementView === 'original' ? <CardStatementFilesDialog
                 paths={statementCardPaths}
                 title={statementCard.name + ' 사용내역서 원본'}
+                removalDisabled={isDirty || saving || !!statementUploadingRowId}
+                onRemoved={() => void loadData()}
                 onClose={() => setStatementCardId(null)}
             /> : <CardStatementUsageDialog
                 key={`${yearMonth}:${statementCard.id}`}
@@ -2076,6 +2078,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 cardLast4={statementCard.last4}
                 cardName={statementCard.name}
                 ledgerTotal={statementCardRows.reduce((sum, row) => sum + row.total, 0)}
+                onAttachmentsChanged={() => void loadData()}
+                removalDisabled={isDirty || saving || !!statementUploadingRowId}
                 paths={statementCardPaths}
                 onClose={() => setStatementCardId(null)}
             />)}

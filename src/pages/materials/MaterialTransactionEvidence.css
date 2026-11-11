@@ -1,0 +1,26 @@
+.material-transaction-evidence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.material-transaction-evidence > button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; margin: 0; padding: 7px 9px; border: 1px solid #d5e2ed; border-radius: 6px; background: #edf3f8; color: #315778; font-size: 12px; font-weight: 700; line-height: 1.5; text-decoration: none; white-space: nowrap; }
+.material-transaction-evidence > button:hover { background: #dfeaf3; }
+.material-transaction-evidence > button:focus-visible { outline: 2px solid #315778; outline-offset: 2px; }
+.material-transaction-evidence small { font-weight: 400; }
+.material-transaction-documents { min-width: 0; padding: 14px 16px; border-top: 1px solid #e2e8f0; background: #f8fafc; font-size: 12px; }
+.material-transaction-documents__title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 0 0 10px; color: #334e68; font-weight: 700; }
+.material-transaction-documents__title small { color: #76869a; font-size: 11px; font-weight: 400; }
+.material-transaction-documents__group { padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: white; }
+.material-transaction-documents__group + .material-transaction-documents__group { margin-top: 8px; }
+.material-transaction-documents__heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.material-transaction-documents__kind { padding: 3px 7px; border-radius: 5px; font-weight: 700; }
+.material-transaction-documents__kind[data-type=inbound] { color: #18735d; background: #eaf6f1; }
+.material-transaction-documents__kind[data-type=outbound] { color: #b85a21; background: #fff0e9; }
+.material-transaction-documents__party { flex: 1; min-width: 120px; color: #475569; overflow-wrap: anywhere; }
+.material-transaction-documents__notes { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #edf2f7; line-height: 1.7; color: #475569; }
+.material-transaction-documents__notes > strong { flex: none; font-size: 11px; color: #76869a; }
+.material-transaction-documents__notes ul { min-width: 0; margin: 0; padding: 0; list-style: none; }
+.material-transaction-documents__notes li { white-space: pre-wrap; overflow-wrap: anywhere; }
+.material-transaction-documents__notes li + li { margin-top: 5px; }
+.material-transaction-documents__empty { color: #94a3b8; }
+@media (max-width: 480px) {
+    .material-transaction-documents { padding: 10px; }
+    .material-transaction-documents__group { padding: 10px; }
+    .material-transaction-documents__heading .material-transaction-evidence { width: 100%; }
+}

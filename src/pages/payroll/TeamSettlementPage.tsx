@@ -3585,6 +3585,7 @@ export const TeamSettlementPage: React.FC = () => {
           onChange={handleTeamSelect}
           allowAllTeams={false}
           ariaLabel="정산 팀 선택"
+          appearance="advance"
           compact
         />
       </div>

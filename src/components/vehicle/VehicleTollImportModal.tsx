@@ -328,7 +328,11 @@ const VehicleTollImportModal: React.FC<VehicleTollImportModalProps> = ({
                                                 <div className="min-w-0">
                                                     <div className="flex items-start gap-3">
                                                         <input type="checkbox" checked={row.selected} disabled={row.analysis.duplicate} onChange={(event) => updateRow(key, { selected: event.target.checked })} className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40" aria-label={`${row.analysis.originalFileName} 등록 선택`} />
-                                                        <div className="min-w-0"><p className="truncate text-sm font-extrabold text-slate-900">{row.analysis.originalFileName}</p><p className="mt-1 text-xs font-semibold text-slate-500">{row.analysis.provider || '발급기관 미확인'} · 명세서 총액</p></div>
+                                                        <div className="min-w-0"><p className="truncate text-sm font-extrabold text-slate-900">{row.analysis.originalFileName}</p><p className="mt-1 text-xs font-semibold text-slate-500">{row.analysis.provider || '발급기관 미확인'} · 명세서 총액</p><button type="button" aria-label={`${row.analysis.originalFileName} 분석 파일 삭제`} onClick={() => {
+                                                        const removedIndex = row.analysis.fileIndex;
+                                                        setSelectedFiles(current => current.filter((_, index) => index !== removedIndex));
+                                                        setRows(current => current.filter(item => item.analysis.fileIndex !== removedIndex).map(item => ({ ...item, analysis: { ...item.analysis, fileIndex: item.analysis.fileIndex > removedIndex ? item.analysis.fileIndex - 1 : item.analysis.fileIndex } })));
+                                                    }} className="mt-1 text-xs font-bold text-rose-700 hover:underline">파일 삭제</button></div>
                                                     </div>
                                                     <div className="mt-3 flex flex-wrap items-center gap-2 pl-7">
                                                         <span className={`rounded border px-2 py-1 text-[11px] font-extrabold ${confidenceClass(row.analysis.confidence)}`}>신뢰도 {Math.round(row.analysis.confidence * 100)}%</span>
