@@ -70,3 +70,44 @@ test('실제 XLSX 직렬화 후에도 앞자리 0·긴 계좌·금액·문자열
     expect(JSON.stringify(input)).toBe(original);
     expect(getAdvanceKBFileName({ ...input, teamLabel: 'A/B:팀' })).toBe('팀별가불내역_국민은행용_2026-10_A_B_팀_전체 신청.xlsx');
 });
+
+test.each([
+    ['corporate', '법인입금', 100000, 100000, 1],
+    ['personal', '개인입금', 80000, 50000, 2],
+    ['other', '기타입금', 20000, 20000, 1],
+    ['unclassified', '미선택·기존 구분', 8000, 8000, 1],
+] as const)('%s 구분만 합산하고 다른 구분과 오류 계좌의 금액을 이체에서 제외한다', (depositFilter, label, total, validAmount, count) => {
+    const groups = buildAdvanceSummary([
+        request({ depositAccount: 'corporate' }),
+        request({ id: 'personal', category: 'second', requestedAmount: 50000, depositAccount: 'personal' }),
+        request({ id: 'other', category: 'other', requestedAmount: 20000, depositAccount: 'other' }),
+        request({ id: 'legacy', requestedAmount: 5000, depositAccount: 'cheongyeon' }),
+        request({ id: 'empty', requestedAmount: 3000 }),
+        request({ id: 'invalid', workerId: 'other-worker', teamId: 'b', requestedAmount: 30000, depositAccount: 'personal' }),
+        request({ id: 'cancelled', status: 'cancelled', requestedAmount: 900000, depositAccount: 'corporate' }),
+    ], teams, { yearMonth: '2026-10', teamId: '', item: 'all', query: '' }, workers).groups;
+    const input = source({ groups, depositFilter });
+    const original = JSON.stringify(input);
+    const snapshot = buildAdvanceKBSnapshot(input, '가불', '{이름} 가불');
+    expect(snapshot.rows).toHaveLength(count);
+    expect(snapshot.criteria).toMatchObject({ totalAmount: total, targetLabel: `전체 팀 · 입금구분: ${label}`, exportCount: 1 });
+    const restored = XLSX.read(XLSX.write(buildKBTransferWorkbook(snapshot), { type: 'array', bookType: 'xlsx' }), { type: 'array' });
+    expect(restored.Sheets['국민은행용']['!ref']).toBe('A1:E2');
+    expect(restored.Sheets['국민은행용'].C2.v).toBe(validAmount);
+    expect(restored.Sheets['국민은행용'].B2).toMatchObject({ t: 's', v: '00012345678' });
+    expect(getAdvanceKBFileName(input)).toContain(`_${label}.xlsx`);
+    expect(JSON.stringify(input)).toBe(original);
+});
+
+test('입금구분 필터는 이미 선택된 팀·회차·검색 범위를 넓히지 않는다', () => {
+    const groups = buildAdvanceSummary([
+        request({ depositAccount: 'corporate' }),
+        request({ id: 'second', category: 'second', requestedAmount: 50000, depositAccount: 'personal' }),
+        request({ id: 'outside', teamId: 'b', category: 'second', requestedAmount: 30000, depositAccount: 'personal' }),
+    ], teams, { yearMonth: '2026-10', teamId: 'a', item: 'second', query: '검증' }, workers).groups;
+    const input = source({ groups, categoryLabel: '2회차', teamLabel: '검증팀', query: '검증' });
+    expect(buildAdvanceKBSnapshot({ ...input, depositFilter: 'personal' }, '', '').rows.map(row => row.amount)).toEqual([50000]);
+    const empty = buildAdvanceKBSnapshot({ ...input, depositFilter: 'corporate' }, '', '');
+    expect(empty.rows).toEqual([]);
+    expect(empty.criteria.totalAmount).toBe(0);
+});

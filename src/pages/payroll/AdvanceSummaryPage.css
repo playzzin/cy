@@ -76,6 +76,10 @@
 .as-team-heading-total strong { font-size: 14px; font-variant-numeric: tabular-nums; }
 .as-team-heading h3 { margin: 0; min-width: 0; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
 .as-team-heading span { flex-shrink: 0; font-size: 12px; }
+.as-team-deposit { display: flex; flex: 1 1 100%; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.as-team-deposit > span { font-weight: 600; }
+.as-team-deposit .as-deposit-control { flex: 1; min-width: 110px; }
+.as-team-deposit > small { flex-basis: 100%; color: #64748b; font-size: 10px; }
 .as-table-scroll { min-width: 0; }
 .as-table-fit { width: max-content; min-width: 100%; }
 .as-table-scroll:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
@@ -224,7 +228,6 @@
     .as-col-name { width: 10%; }
     .as-col-category { width: 9%; }
     .as-col-amount { width: 12%; }
-    .as-col-deposit { width: 13%; }
     .as-col-memo { width: 11%; }
     .as-team .as-account { white-space: nowrap; }
     .as-worker-name { white-space: normal; overflow: visible; }

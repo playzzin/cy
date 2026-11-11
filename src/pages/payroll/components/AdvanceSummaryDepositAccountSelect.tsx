@@ -44,7 +44,7 @@ export default function AdvanceSummaryDepositAccountSelect({ label, sources, dis
     return <div className="as-deposit-control" aria-busy={saving}>
         <select className={`as-deposit-select as-deposit-${value || 'none'}`} aria-label={label}
             value={value} disabled={disabled || saving || !sources.length || sources.some(source => !source.id)}
-            title={value === 'mixed' ? '신청별 선택이 다릅니다. 새로 선택하면 현재 조회 중인 이 행의 모든 신청에 적용됩니다.' : '선택하면 자동 저장됩니다.'}
+            title={value === 'mixed' ? '팀 내 신청별 구분이 다릅니다. 새로 선택하면 조회 월의 이 팀 전체 신청·선입금에 적용됩니다.' : '선택하면 조회 월의 이 팀 전체 신청·선입금에 자동 저장됩니다.'}
             onChange={event => void save(event.target.value)}>
             {value === 'mixed' && <option value="mixed" disabled>혼합</option>}
             {legacyOption && <option value={legacyOption.value} disabled>{selectedLabel}</option>}

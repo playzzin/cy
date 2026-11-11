@@ -152,6 +152,38 @@ test('국민은행 출력 대상의 계좌 오류를 보여주며 정상 대상�
     expect(XLSX.writeFile).not.toHaveBeenCalled();
 });
 
+test('국민은행 미리보기에서 입금구분을 바꾸면 해당 금액과 파일명으로 내려받고 빈 구분은 막는다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ id: 'test-worker', bankName: '국민은행', accountNumber: '000-1234-5678', accountHolder: '검증 예금주' }]);
+    (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([
+        { ...record, depositAccount: 'corporate' },
+        { ...record, id: 'second', category: 'second', requestedAmount: 50000, depositAccount: 'personal' },
+    ]);
+    renderPage();
+    await screen.findByRole('rowheader', { name: '검증 작업자' });
+    fireEvent.click(screen.getByRole('button', { name: '국민은행용 엑셀' }));
+    const preview = screen.getByRole('dialog', { name: '국민은행용 엑셀 미리보기' });
+    const filter = within(preview).getByRole('combobox', { name: /입금구분/ });
+    const download = within(preview).getByRole('button', { name: '국민은행용 다운로드' });
+    fireEvent.change(filter, { target: { value: 'personal' } });
+    expect(within(preview).getByRole('row', { name: /검증 작업자/ })).toHaveTextContent('50,000원');
+    fireEvent.click(download);
+    const [workbook, filename] = (XLSX.writeFile as jest.Mock).mock.calls[0];
+    expect(filename).toBe('팀별가불내역_국민은행용_2026-10_전체 팀_전체 신청_개인입금.xlsx');
+    expect(workbook.Sheets['국민은행용'].C2.v).toBe(50000);
+    expect(XLSX.utils.sheet_to_json(workbook.Sheets['검증'], { header: 1 })).toEqual(expect.arrayContaining([
+        ['팀/대상', '전체 팀 · 입금구분: 개인입금'], ['총 이체금액', 50000],
+    ]));
+    fireEvent.change(filter, { target: { value: 'other' } });
+    expect(within(preview).getByRole('status')).toHaveTextContent('선택한 입금구분에 해당하는 내역이 없습니다');
+    expect(download).toBeDisabled();
+    fireEvent.click(download);
+    expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
+    fireEvent.change(filter, { target: { value: 'all' } });
+    expect(download).toBeEnabled();
+    expect(within(preview).getByRole('row', { name: /검증 작업자/ })).toHaveTextContent('200,000원');
+    expect(advancePaymentDepositAccountService.save).not.toHaveBeenCalled();
+});
+
 test('조회 월이 바뀌면 이전 국민은행 미리보기를 폐기한다', async () => {
     renderPage();
     await screen.findByRole('rowheader', { name: '검증 작업자' });
@@ -305,18 +337,19 @@ test('조회할 수 없는 팀 링크는 빈 결과를 유지하고 전체 보�
     expect(screen.getByRole('rowheader', { name: '검증 작업자' })).toBeInTheDocument();
 });
 
-test('금액·입금구분·비고는 한 행에 표시하고 계좌는 바로 아래 행에서 최신 정보를 보여준다', async () => {
+test('입금구분은 팀 머리글에서 지정하고 작업자 금액·비고 아래에 최신 계좌를 표시한다', async () => {
     renderPage();
     const account = await screen.findByRole('cell', { name: /^계좌 테스트은행 000-0000-0000 예금주 등록 예금주/ });
     const cells = within(screen.getByRole('row', { name: /검증 작업자/ })).getAllByRole('cell');
     expect(cells[1]).toHaveClass('as-money');
-    expect(cells[5]).toHaveClass('as-deposit');
-    expect(cells[6]).toHaveClass('as-memo');
+    expect(cells[5]).toHaveClass('as-memo');
+    expect(within(screen.getByRole('region', { name: '검증 A팀 가불내역' })).getByRole('combobox', { name: '검증 A팀 팀 입금구분' })).toBeInTheDocument();
+    expect(within(screen.getByRole('table')).queryByRole('combobox')).not.toBeInTheDocument();
     const rows = within(screen.getByRole('table')).getAllByRole('row');
     const workerIndex = rows.indexOf(screen.getByRole('row', { name: /검증 작업자/ }));
     expect(within(rows[workerIndex + 1]).getByRole('cell')).toBe(account);
-    expect(account).toHaveAttribute('colspan', '8');
-    expect(screen.getAllByRole('columnheader').map(header => header.textContent)).toEqual(['번호', '이름', '1회차', '2회차', '선입금', '총금액', '입금구분', '비고']);
+    expect(account).toHaveAttribute('colspan', '7');
+    expect(screen.getAllByRole('columnheader').map(header => header.textContent)).toEqual(['번호', '이름', '1회차', '2회차', '선입금', '총금액', '비고']);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ id: 'test-worker', bankName: '변경은행', accountNumber: '000-1111-0000', accountHolder: '변경 예금주' }]);
     fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
     expect(await screen.findByRole('cell', { name: /^계좌 변경은행 000-1111-0000 예금주 변경 예금주/ })).toBeInTheDocument();
@@ -341,12 +374,12 @@ test('입금계좌 세 가지를 색상과 함께 자동 저장하고 새로고�
     (advancePaymentDepositAccountService.save as jest.Mock).mockImplementation(async changes => { stored = { ...stored, depositAccount: changes[0].depositAccount }; });
     renderPage();
     for (const next of ['corporate', 'personal', 'other', ''] as const) {
-        const select = await screen.findByRole('combobox', { name: '검증 A팀 검증 작업자 입금계좌' });
+        const select = await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' });
         const previous = stored.depositAccount;
         fireEvent.change(select, { target: { value: next } });
         await waitFor(() => expect(select).toHaveValue(next));
         expect(select).toHaveClass(`as-deposit-${next || 'none'}`);
-        const depositTotals = screen.getByLabelText('입금계좌별 합계');
+        const depositTotals = screen.getByLabelText('입금구분별 합계');
         for (const [value, label] of [['corporate', '법인입금'], ['personal', '개인입금'], ['other', '기타입금']]) {
             expect(within(select).getByRole('option', { name: label })).toBeInTheDocument();
             const card = within(depositTotals).getByRole('group', { name: `${label} 총액` });
@@ -356,7 +389,7 @@ test('입금계좌 세 가지를 색상과 함께 자동 저장하고 새로고�
         expect(screen.getByText('검증용 비고')).toBeInTheDocument();
         expect(within(screen.getByLabelText('조회 결과 합계')).getAllByText('150,000')[0]).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
-        expect(await screen.findByRole('combobox', { name: '검증 A팀 검증 작업자 입금계좌' })).toHaveValue(next);
+        expect(await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' })).toHaveValue(next);
     }
 });
 
@@ -364,7 +397,7 @@ test('입금계좌 저장 중 중복 요청을 막고 실패하면 원래 선택
     let failSave: (error: Error) => void = () => {};
     (advancePaymentDepositAccountService.save as jest.Mock).mockImplementationOnce(() => new Promise((_resolve, reject) => { failSave = reject; }));
     renderPage();
-    const select = await screen.findByRole('combobox', { name: '검증 A팀 검증 작업자 입금계좌' });
+    const select = await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' });
     fireEvent.change(select, { target: { value: 'other' } });
     expect(select).toBeDisabled();
     expect(screen.getByRole('button', { name: '새로고침' })).toBeDisabled();
@@ -385,7 +418,7 @@ test('합산된 내역의 입금계좌가 다르면 혼합으로 표시하고 �
         { ...record, id: 'monthly', category: 'second', depositAccount: 'dawon' },
     ]);
     renderPage();
-    const select = await screen.findByRole('combobox', { name: '검증 A팀 검증 작업자 입금계좌' });
+    const select = await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' });
     expect(select).toHaveValue('mixed');
     fireEvent.change(select, { target: { value: 'personal' } });
     await waitFor(() => expect(select).toHaveValue('personal'));
@@ -401,13 +434,65 @@ test('이전 월의 입금계좌 저장이 늦게 끝나도 현재 월 선택을
     (advanceRequestService.listByYearMonth as jest.Mock).mockImplementation(async yearMonth =>
         [{ ...record, yearMonth, depositAccount: yearMonth === '2026-10' ? '' : 'dawon' }]);
     renderPage();
-    fireEvent.change(await screen.findByRole('combobox', { name: '검증 A팀 검증 작업자 입금계좌' }), { target: { value: 'personal' } });
+    fireEvent.change(await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' }), { target: { value: 'personal' } });
     fireEvent.click(screen.getByRole('button', { name: '다음 달' }));
-    const nextMonthSelect = await screen.findByRole('combobox', { name: '검증 A팀 검증 작업자 입금계좌' });
+    const nextMonthSelect = await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' });
     expect(nextMonthSelect).toHaveValue('dawon');
     await act(async () => finishSave());
     expect(nextMonthSelect).toHaveValue('dawon');
     expect(nextMonthSelect).toBeEnabled();
+});
+
+test('팀 입금구분은 검색·회차에 가려진 팀원과 선입금을 함께 저장하고 다른 팀·월·취소 내역은 유지한다', async () => {
+    (teamService.getTeams as jest.Mock).mockResolvedValue([
+        { id: 'test-team', legacyId: 'old-team', name: '검증 A팀', companyId: 'test-company' },
+        { id: 'team-b', name: '검증 B팀', companyId: 'test-company' },
+    ]);
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
+        { id: 'test-worker', bankName: '국민은행', accountNumber: '000-1234-5678' },
+        { id: 'hidden-worker', bankName: '국민은행', accountNumber: '000-8765-4321' },
+    ]);
+    let stored = [
+        { ...record, depositAccount: 'corporate' },
+        { ...record, id: 'hidden', workerId: 'hidden-worker', workerName: '숨은 팀원', teamId: 'old-team', category: 'second', requestedAmount: 40000, depositAccount: 'personal' },
+        { ...record, id: 'manual', source: 'manual-prepayment', status: 'paid', category: 'other', requestedAmount: 10000, depositAccount: '' },
+        { ...record, id: 'other-team', teamId: 'team-b', depositAccount: 'personal' },
+        { ...record, id: 'old-month', yearMonth: '2026-09', depositAccount: 'personal' },
+        { ...record, id: 'cancelled', status: 'cancelled', depositAccount: 'personal' },
+        { ...record, id: 'rejected', status: 'rejected', depositAccount: 'personal' },
+    ];
+    (advanceRequestService.listByYearMonth as jest.Mock).mockImplementation(async () => stored);
+    (advancePaymentDepositAccountService.save as jest.Mock).mockImplementation(async changes => {
+        stored = stored.map(request => ({ ...request, depositAccount: changes.find((change: { id: string }) => change.id === request.id)?.depositAccount ?? request.depositAccount }));
+    });
+    renderPage('/payroll/advance-summary?yearMonth=2026-10&teamId=old-team&item=first');
+    const select = await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' });
+    fireEvent.change(screen.getByLabelText('이름·팀·비고 검색'), { target: { value: '검증 작업자' } });
+    expect(select).toHaveValue('mixed');
+    expect(screen.queryByRole('rowheader', { name: '숨은 팀원' })).not.toBeInTheDocument();
+    fireEvent.change(select, { target: { value: 'other' } });
+    await waitFor(() => expect(select).toHaveValue('other'));
+    expect(advancePaymentDepositAccountService.save).toHaveBeenCalledTimes(1);
+    expect(advancePaymentDepositAccountService.save).toHaveBeenCalledWith(expect.arrayContaining([
+        { id: 'entry', expectedDepositAccount: 'corporate', depositAccount: 'other' },
+        { id: 'hidden', expectedDepositAccount: 'personal', depositAccount: 'other' },
+        { id: 'manual', expectedDepositAccount: '', depositAccount: 'other' },
+    ]), 'advance_requests');
+    expect((advancePaymentDepositAccountService.save as jest.Mock).mock.calls[0][0]).toHaveLength(3);
+    expect(stored.filter(request => ['other-team', 'old-month', 'cancelled', 'rejected'].includes(request.id))
+        .every(request => request.depositAccount === 'personal')).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '검색·필터 초기화' }));
+    expect(screen.getByRole('combobox', { name: '검증 A팀 팀 입금구분' })).toHaveValue('other');
+    expect(screen.getByRole('combobox', { name: '검증 B팀 팀 입금구분' })).toHaveValue('personal');
+    expect(screen.getByRole('group', { name: '기타입금 총액' })).toHaveTextContent('200,000');
+    fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+    expect(await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' })).toHaveValue('other');
+    fireEvent.click(screen.getByRole('button', { name: '국민은행용 엑셀' }));
+    const preview = screen.getByRole('dialog', { name: '국민은행용 엑셀 미리보기' });
+    fireEvent.change(within(preview).getByRole('combobox', { name: /입금구분/ }), { target: { value: 'other' } });
+    fireEvent.click(within(preview).getByRole('button', { name: '국민은행용 다운로드' }));
+    const [workbook] = (XLSX.writeFile as jest.Mock).mock.calls[0];
+    expect(XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets['국민은행용'], { header: 1 }).slice(1).map(row => row[2]).sort()).toEqual([160000, 40000]);
 });
 
 test('회차별 금액을 별도 열과 팀 소계에 표시하고 분류 필터를 입금 총액에도 적용한다', async () => {
@@ -453,7 +538,7 @@ test('목록의 회차 버튼은 조회 조건과 동기화되고 빈 분류에�
 test('기존 입금 구분은 임의로 바꾸지 않고 새 구분 선택 시 원본과 총액을 갱신한다', async () => {
     (advanceRequestService.listByYearMonth as jest.Mock).mockResolvedValue([{ ...record, depositAccount: 'cheongyeon' }]);
     renderPage();
-    const select = await screen.findByRole('combobox', { name: '검증 A팀 검증 작업자 입금계좌' });
+    const select = await screen.findByRole('combobox', { name: '검증 A팀 팀 입금구분' });
     expect(within(select).getByRole('option', { name: '기존: 청연결제' })).toBeDisabled();
     expect(select).toHaveValue('cheongyeon');
     expect(screen.getByRole('group', { name: '미선택·기존 구분' })).toHaveTextContent('150,000');

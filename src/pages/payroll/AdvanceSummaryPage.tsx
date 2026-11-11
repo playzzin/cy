@@ -146,6 +146,11 @@ const AdvanceSummaryPage: React.FC = () => {
     const status = result.uid === uid && result.month === yearMonth ? result.status : 'loading';
     const summary = useMemo(() => buildAdvanceSummary(status === 'ready' ? result.requests : [], result.teams,
         { yearMonth, teamId, item, query }, result.workers), [status, result.requests, result.teams, result.workers, yearMonth, teamId, item, query]);
+    // Team classification covers the whole month, even when search or round filters hide rows.
+    const teamDepositSources = useMemo(() => new Map(buildAdvanceSummary(status === 'ready' ? result.requests : [], result.teams,
+        { yearMonth, teamId: '', item: 'all', query: '' }, result.workers).groups
+        .map(group => [group.team.id, group.rows.flatMap(row => row.depositAccountSources)])),
+    [status, result.requests, result.teams, result.workers, yearMonth]);
     const selectedTeam = result.teams.find(team => team.id === teamId || team.legacyId === teamId);
     const manageableRequests = result.requests.filter(request => {
         if (request.deletedAt || request.source === 'manual-prepayment' || request.yearMonth !== yearMonth) return false;
@@ -303,7 +308,7 @@ const AdvanceSummaryPage: React.FC = () => {
                     {ADVANCE_REQUEST_CATEGORIES.map(category => <div key={category}><dt>{ADVANCE_REQUEST_CATEGORY_LABELS[category]}</dt><dd>{won(summary[category])}<small>원</small></dd></div>)}
                     <div><dt>조회 인원 / 팀</dt><dd>{summary.workerCount}<small>명</small><span> / </span>{summary.groups.length}<small>팀</small></dd></div>
                 </dl>
-                <dl className="as-deposit-totals" aria-label="입금계좌별 합계">
+                <dl className="as-deposit-totals" aria-label="입금구분별 합계">
                     {ADVANCE_DEPOSIT_ACCOUNTS.map(account => <div key={account.value} className={`as-deposit-${account.value}`} role="group" aria-label={`${account.label} 총액`}>
                         <dt>{account.label} 총액</dt><dd>{won(summary.depositTotals[account.value])}<small>원</small></dd>
                     </div>)}
@@ -345,16 +350,23 @@ const AdvanceSummaryPage: React.FC = () => {
                             <div className="as-team-heading">
                                 <div className="as-team-title"><h3>{group.team.name}</h3><span>{group.rows.length}명</span></div>
                                 <div className="as-team-heading-total"><small>팀 합계</small><strong>{won(group.total)}원</strong></div>
+                                <div className="as-team-deposit">
+                                    <span>팀 입금구분</span>
+                                    <AdvanceSummaryDepositAccountSelect key={`${uid}/${yearMonth}/${group.team.id}`}
+                                        label={`${group.team.name} 팀 입금구분`} sources={teamDepositSources.get(group.team.id) || []}
+                                        disabled={savingDepositAccount} onSave={saveDepositAccounts} />
+                                    <small>조회 월의 팀 전체 신청·선입금에 적용</small>
+                                </div>
                             </div>
                             <AdvanceSummaryFitTable label={`${group.team.name} 가불내역 표`}>
                             <table>
                                 <caption className="sr-only">{group.team.name} 가불내역, 단위 원</caption>
                                 <colgroup><col className="as-col-no" /><col className="as-col-name" />
                                     {visibleCategories.map(category => <col key={category} className="as-col-category" />)}
-                                    <col className="as-col-amount" /><col className="as-col-deposit" /><col className="as-col-memo" /></colgroup>
+                                    <col className="as-col-amount" /><col className="as-col-memo" /></colgroup>
                                 <thead><tr><th scope="col">번호</th><th scope="col">이름</th>
                                     {visibleCategories.map(category => <th key={category} scope="col">{ADVANCE_REQUEST_CATEGORY_LABELS[category]}</th>)}
-                                    <th scope="col">총금액</th><th scope="col">입금구분</th><th scope="col">비고</th></tr></thead>
+                                    <th scope="col">총금액</th><th scope="col">비고</th></tr></thead>
                                 <tbody>{group.rows.map((row, index) => <React.Fragment key={row.key}><tr>
                                     <td className="as-number">{index + 1}</td>
                                     <th scope="row"><span className="as-worker-name" title={row.workerName}>{row.workerName}</span></th>
@@ -362,11 +374,6 @@ const AdvanceSummaryPage: React.FC = () => {
                                         {category === 'other' ? <button type="button" className="as-prepayment-edit" aria-label={`${row.workerName} 선입금 수기 입력`} onClick={() => setPrepaymentWorker(row.workerId)}>{won(row.items.other || 0)}</button> : won(row.items[category] || 0)}
                                     </td>)}
                                     <td className="as-money as-total-money" data-label="총금액">{won(row.amount)}</td>
-                                    <td className="as-deposit" data-label="입금계좌">
-                                        <AdvanceSummaryDepositAccountSelect key={`${uid}/${yearMonth}/${group.team.id}/${row.key}`}
-                                            label={`${group.team.name} ${row.workerName} 입금계좌`} sources={row.depositAccountSources}
-                                            disabled={savingDepositAccount} onSave={saveDepositAccounts} />
-                                    </td>
                                     <td className="as-memo">
                                         <span className="as-memo-print">{row.memos.join('\n')}</span>
                                         <button type="button" className={`as-memo-edit${row.memos.length ? ' as-memo-filled' : ''}`} aria-haspopup="dialog" aria-label={`${group.team.name} ${row.workerName} 비고 수정`}
@@ -377,7 +384,7 @@ const AdvanceSummaryPage: React.FC = () => {
                                         </button>
                                     </td>
                                 </tr><tr className="as-account-row" aria-label={`${index + 1}번 계좌정보`}>
-                                    <td className="as-account" colSpan={visibleCategories.length + 5}>
+                                    <td className="as-account" colSpan={visibleCategories.length + 4}>
                                         <small>계좌</small>{row.bankName && <small>{row.bankName}</small>}
                                         <span>{row.accountNumber || '미등록'}</span>
                                         <span className="as-account-holder"><small>예금주</small><span>{row.accountHolder || '미등록'}</span></span>
@@ -388,13 +395,13 @@ const AdvanceSummaryPage: React.FC = () => {
                                 </tr></React.Fragment>)}</tbody>
                                 <tfoot><tr><th scope="row" colSpan={2}>팀 소계</th>
                                     {visibleCategories.map(category => <td key={category} className="as-money as-category-money" data-label={ADVANCE_REQUEST_CATEGORY_LABELS[category]}>{won(group.rows.reduce((total, row) => total + (row.items[category] || 0), 0))}</td>)}
-                                    <td className="as-money as-total-money" data-label="총금액">{won(group.total)}</td><td className="as-team-count" colSpan={2}>{group.rows.length}명</td></tr></tfoot>
+                                    <td className="as-money as-total-money" data-label="총금액">{won(group.total)}</td><td className="as-team-count">{group.rows.length}명</td></tr></tfoot>
                             </table>
                             </AdvanceSummaryFitTable>
                         </section>;
                     })}
                 </AdvanceSummaryTeamLayout>}
-                {summary.groups.length > 0 && <p className="as-report-footnote">현재 조회 조건 기준 · 동일 작업자의 신청은 팀별로 합산됩니다. · 계좌번호·예금주는 현재 작업자 등록 정보 기준입니다. · 입금계좌 선택과 비고는 현재 조회 중인 신청 원본에 저장됩니다.</p>}
+                {summary.groups.length > 0 && <p className="as-report-footnote">현재 조회 조건 기준 · 동일 작업자의 신청은 팀별로 합산됩니다. · 계좌번호·예금주는 현재 작업자 등록 정보 기준입니다. · 팀 입금구분은 검색·회차와 관계없이 조회 월의 해당 팀 전체 신청·선입금에 저장됩니다. · 비고는 현재 조회 중인 신청 원본에 저장됩니다.</p>}
             </div>}
             {memoEditor && memoEditor.uid === uid && memoEditor.month === yearMonth && <AdvanceSummaryMemoDialog
                 workerName={memoEditor.row.workerName} context={`${monthLabel} · ${memoEditor.teamName}`}
