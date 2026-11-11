@@ -16,6 +16,11 @@ interface Props {
 const formatQuantity = (value: number) => value.toLocaleString('ko-KR', { maximumFractionDigits: 9 });
 const chevron = (open: boolean) => <ChevronDown size={16} className={`material-balances__group-chevron${open ? ' is-open' : ''}`} aria-hidden="true" />;
 const closedSelection = { constructionKey: '', siteId: '', rentalKey: '', date: '' };
+const renderSiteRows = (children: React.ReactElement[], enabled: boolean) => enabled
+    ? Array.from({ length: Math.ceil(children.length / 3) }, (_, index) => <div key={index} className="material-balances__site-row">
+        {children.slice(index * 3, index * 3 + 3)}
+    </div>)
+    : children;
 
 const MaterialBalanceGroupList: React.FC<Props> = ({ groups, grouping, sourceRows, rentalCompanies, onPhotos, onCertificate }) => {
     const [selection, setSelection] = useState(closedSelection);
@@ -58,7 +63,7 @@ const MaterialBalanceGroupList: React.FC<Props> = ({ groups, grouping, sourceRow
                     {chevron(open)}
                 </button></h2>
                 {open && <div id={contentId} className="material-balances__group-content">
-                    {group.children.map((section, sectionIndex) => {
+                    {renderSiteRows(group.children.map((section, sectionIndex) => {
                         const sectionValue = section.children[0].rows[0][fields[1]];
                         const sectionOpen = selection[fields[1]] === sectionValue;
                         const sectionId = `${contentId}-section-${sectionIndex}`;
@@ -69,7 +74,7 @@ const MaterialBalanceGroupList: React.FC<Props> = ({ groups, grouping, sourceRow
                                 <span>{section.children.length}{isSite ? '개 임대사 구분' : '개 현장'}</span>{chevron(sectionOpen)}
                             </button></h3>
                             {sectionOpen && <div id={sectionId} className="material-balances__section-content">
-                                {section.children.map((child, childIndex) => {
+                                {renderSiteRows(section.children.map((child, childIndex) => {
                                     const days = groupMaterialBalanceTransactionsByDate(child.rows);
                                     const pair = child.rows[0];
                                     const dateKey = (date: string) => JSON.stringify([pair.siteId, pair.rentalKey, date]);
@@ -83,7 +88,7 @@ const MaterialBalanceGroupList: React.FC<Props> = ({ groups, grouping, sourceRow
                                             {isSite && child.rows.some(row => row.rentalNeedsReview) && <span className="material-balances__group-review">임대사 확인 필요</span>}
                                             <span className="material-balances__subgroup-count">{days.length}일</span>{chevron(childOpen)}
                                         </button></h4>
-                                        {childOpen && <div id={childId}>
+                                        {childOpen && <div id={childId} className="material-balances__subgroup-content">
                                             <div className="material-balances__date-tools"><span>최근 날짜순 · 품목 내역 기준</span></div>
                                             {days.map((day, dayIndex) => {
                                                 const key = dateKey(day.date);
@@ -115,10 +120,10 @@ const MaterialBalanceGroupList: React.FC<Props> = ({ groups, grouping, sourceRow
                                             })}
                                         </div>}
                                     </section>;
-                                })}
+                                }), !isSite)}
                             </div>}
                         </section>;
-                    })}
+                    }), isSite)}
                 </div>}
             </section>;
         })}
