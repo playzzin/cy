@@ -116,3 +116,54 @@ it('묶음 저장 실패 시 성공 로그를 남기거나 저장된 원본을 �
     expect(stored.get('duplicate')?.isActive).toBe(true);
     expect(materialLogService.safeCreateLog).not.toHaveBeenCalled();
 });
+
+it('이전 자동 기본 목록을 제외하고 엑셀의 91개를 조회하되 저장 문서를 보존한다', async () => {
+    const old = makeMaterial('old-default', { isCatalogDefault: true });
+    const legacy = makeMaterial('old-description', { description: 'Excel 기본 자재', spec: 'H02' });
+    seed(old, legacy);
+    const rows = await getUniqueMaterialsForSelection();
+    expect(rows).toHaveLength(91);
+    expect(rows[0]).toMatchObject({ category: '동바리', itemName: '수직재', spec: 'P-17' });
+    expect(rows[40]).toMatchObject({ category: '비계', itemName: '수직재', spec: 'P-38' });
+    expect(rows[81]).toMatchObject({ category: '기타', itemName: '파이프', spec: '6M' });
+    expect(stored.get(old.id)).toEqual(old);
+    expect(stored.get(legacy.id)).toEqual(legacy);
+    expect(materialFirestoreService.saveMaterialsBatch).not.toHaveBeenCalled();
+    expect(await getAllMaterials()).toHaveLength(91);
+});
+
+it('직접 등록하거나 수정한 구형 품목은 추가 자재로 보존하고 삭제한 기본 품목을 복원하지 않는다', async () => {
+    seed(makeMaterial('manual'), makeMaterial('catalog_edited', { isCatalogDefault: false, spec: 'QA-EDITED' }),
+        makeMaterial('catalog_list_v2_hidden', { spec: 'P-17', isActive: false, hiddenCatalogDefault: true }));
+    const rows = await getUniqueMaterialsForSelection();
+    expect(rows).toHaveLength(92);
+    expect(rows.some(row => row.spec === 'P-17')).toBe(false);
+    expect(rows.some(row => row.id === 'manual')).toBe(true);
+    expect(rows.some(row => row.id === 'catalog_edited')).toBe(true);
+    expect(rows.some(row => row.spec === 'P-12')).toBe(true);
+});
+
+it('이전 목록에서 이동·숨김 처리한 문서는 보존하고 새 엑셀의 모든 품목을 구성한다', async () => {
+    const moved = makeMaterial(`catalog_${encodeURIComponent('동바리::발판::5018')}`, {
+        category: '시스템', itemName: '발판', spec: '5018', isCatalogDefault: false,
+    });
+    const hidden = makeMaterial('old-hidden', { itemName: '멍에재', spec: '2.5M', isActive: false, hiddenCatalogDefault: true });
+    seed(moved, hidden);
+    const rows = await getUniqueMaterialsForSelection();
+    expect(rows.filter(row => row.isCatalogDefault)).toHaveLength(91);
+    expect(rows).toEqual(expect.arrayContaining([
+        expect.objectContaining({ category: '동바리', itemName: '발판', spec: '5018' }),
+        expect.objectContaining({ category: '동바리', itemName: '멍에재', spec: '2.5M' }),
+        expect.objectContaining({ id: moved.id, category: '시스템' }),
+    ]));
+    expect(stored.get(moved.id)).toEqual(moved);
+    expect(stored.get(hidden.id)).toEqual(hidden);
+});
+
+it('새 기준 품목과 동일한 직접 등록 자재를 삭제하면 새 기본 품목도 다시 생성하지 않는다', async () => {
+    const manual = makeMaterial('manual-current', { spec: 'P-17' });
+    seed(manual);
+    await deleteMaterial(manual);
+    expect((await getAllMaterials()).some(row => row.spec === 'P-17')).toBe(false);
+    expect(materialFirestoreService.saveMaterialsBatch).toHaveBeenCalledTimes(1);
+});

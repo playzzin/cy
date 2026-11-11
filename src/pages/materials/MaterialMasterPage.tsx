@@ -1,11 +1,12 @@
 import './MaterialWorkspace.css';
+import './MaterialMasterPage.css';
 import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxesStacked, faPlus, faEdit, faTrash, faSave, faTimes } from '@fortawesome/free-solid-svg-icons';
 import materialService, { buildMaterialBusinessKey } from '../../services/materialService';
 import { Material } from '../../types/materials';
-import { sortMaterialDisplayRows } from '../../utils/materialOrdering';
+import { isCurrentCatalogMaterial, sortMaterialCatalogRows } from '../../utils/materialCatalogOrdering';
 import { getMaterialMasterCategory, getMaterialMasterDisplayGroupKey, MATERIAL_MASTER_CATEGORIES, MaterialMasterDisplayGroupKey } from './materialMasterGrouping';
 
 const MATERIAL_GROUPS: Array<{ key: MaterialMasterDisplayGroupKey; title: string; accent: string }> = [
@@ -279,9 +280,9 @@ const MaterialMasterPage: React.FC = () => {
         });
 
         return {
-            dongbari: sortMaterialDisplayRows(groups.dongbari),
-            scaffolding: sortMaterialDisplayRows(groups.scaffolding),
-            other: sortMaterialDisplayRows(groups.other),
+            dongbari: sortMaterialCatalogRows(groups.dongbari),
+            scaffolding: sortMaterialCatalogRows(groups.scaffolding),
+            other: sortMaterialCatalogRows(groups.other),
         };
     }, [filteredMaterials]);
 
@@ -400,7 +401,7 @@ const MaterialMasterPage: React.FC = () => {
                 </div>
 
                 <div className="hidden h-full overflow-auto md:block">
-                    <table className="w-full min-w-[480px] text-sm">
+                    <table className="material-master-table w-full text-sm">
                         <colgroup>
                             <col className="w-32" />
                             <col className="w-40" />
@@ -462,13 +463,20 @@ const MaterialMasterPage: React.FC = () => {
             <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
                 <h2 className="flex items-center gap-2 text-sm font-bold text-slate-800">
                     <span className={`h-5 w-1.5 rounded-full ${accentClass}`} />
-                    {title}
+                    {title === '기타' ? title : `시스템 ${title}`}
                 </h2>
                 <span className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-500">
-                    {rows.length} 품목
+                    {rows.filter(isCurrentCatalogMaterial).length || rows.length} 품목
                 </span>
             </header>
-            {renderMaterialTable(rows, emptyText)}
+            {renderMaterialTable(rows.filter(isCurrentCatalogMaterial).length > 0
+                ? rows.filter(isCurrentCatalogMaterial) : rows, emptyText)}
+            {rows.some(isCurrentCatalogMaterial) && rows.some(row => !isCurrentCatalogMaterial(row)) && (
+                <details className="material-master-additional" open={editingItem && !isCurrentCatalogMaterial(editingItem) ? true : undefined}>
+                    <summary>추가 등록 자재 {rows.filter(row => !isCurrentCatalogMaterial(row)).length}개</summary>
+                    {renderMaterialTable(rows.filter(row => !isCurrentCatalogMaterial(row)), emptyText)}
+                </details>
+            )}
         </section>
     );
 
@@ -480,7 +488,7 @@ const MaterialMasterPage: React.FC = () => {
                         <FontAwesomeIcon icon={faBoxesStacked} className="text-indigo-600" />
                         자재 마스터 관리
                     </h1>
-                    <p className="mt-1 hidden text-slate-500 sm:block">동바리·비계·기타 자재를 분류별로 관리합니다</p>
+                    <p className="mt-1 text-slate-500">자재 품목 리스트 기준 · 시스템 동바리 40종 · 시스템 비계 41종 · 기타 10종</p>
                 </div>
                 {canManageCatalog && (<button
                     onClick={handleAdd}
@@ -539,7 +547,7 @@ const MaterialMasterPage: React.FC = () => {
                                 required
                                 value={formData.spec}
                                 onChange={(e) => setFormData({ ...formData, spec: e.target.value })}
-                                placeholder="예: P17"
+                                placeholder="예: P-17"
                                 className="w-full border border-slate-300 rounded-lg px-3 py-2"
                             />
                             <datalist id="material-spec-options">
@@ -599,9 +607,11 @@ const MaterialMasterPage: React.FC = () => {
                 {canManageCatalog && <p className="mb-3 text-xs text-slate-500">{editingItem ? '분류·품명은 목록에서 선택하세요. 새 품명은 직접 입력할 수 있습니다. Enter 저장 · Esc 취소' : '목록의 분류·품명·규격·단위를 누르면 바로 수정할 수 있습니다.'}</p>}
                 <div role="group" aria-label="자재 대분류" className="material-master-tabs mb-4 flex flex-shrink-0 flex-wrap gap-2">
                     {[{ key: '' as const, title: '전체' }, ...MATERIAL_GROUPS].map(group => {
+                        const catalogRows = materials.filter(isCurrentCatalogMaterial);
+                        const countedRows = catalogRows.length ? catalogRows : materials;
                         const count = group.key
-                            ? materials.filter(material => getMaterialMasterDisplayGroupKey(material) === group.key).length
-                            : materials.length;
+                            ? countedRows.filter(material => getMaterialMasterDisplayGroupKey(material) === group.key).length
+                            : countedRows.length;
                         return (
                             <button
                                 key={group.key}
@@ -649,7 +659,7 @@ const MaterialMasterPage: React.FC = () => {
                     </div>
                 ) : (
                     <div className="min-h-0 flex-1 overflow-visible lg:overflow-auto">
-                        <div className={`grid min-h-full grid-cols-1 gap-4 ${groupFilter ? '' : 'xl:grid-cols-2'}`}>
+                        <div className={`material-master-grid grid min-h-full grid-cols-1 gap-4 ${groupFilter ? 'material-master-grid--single' : ''}`}>
                             {MATERIAL_GROUPS
                                 .filter(group => !groupFilter || group.key === groupFilter)
                                 .map(group => (

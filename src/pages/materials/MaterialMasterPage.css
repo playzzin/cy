@@ -1,0 +1,16 @@
+.material-master-grid { align-items: start; }
+.material-master-table { table-layout: fixed; min-width: 360px; }
+.material-master-table col:nth-child(1) { width: 16%; }
+.material-master-table col:nth-child(2) { width: 23%; }
+.material-master-table col:nth-child(3) { width: 33%; }
+.material-master-table col:nth-child(4) { width: 11%; }
+.material-master-table col:nth-child(5) { width: 17%; }
+.material-master-table th, .material-master-table td { padding: 8px 5px; overflow-wrap: anywhere; }
+.material-master-table td { font-size: 12px; }
+.material-master-additional { border-top: 1px solid #dce5ee; }
+.material-master-additional > summary { cursor: pointer; padding: 12px; color: #52667c; font-size: 12px; font-weight: 600; }
+.material-master-additional > summary:hover { background: #f3f6fa; }
+.material-master-additional > summary:focus-visible { outline: 2px solid #183955; outline-offset: -2px; }
+@media (min-width: 1280px) {
+    .material-master-grid:not(.material-master-grid--single) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

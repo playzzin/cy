@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { useMaterialAdministration } from '../../hooks/useMaterialAdministration';
 import MaterialMasterPage from './MaterialMasterPage';
 import materialService, { buildMaterialBusinessKey } from '../../services/materialService';
+import { EXCEL_MATERIAL_CATALOG } from '../../constants/materialCatalog';
 
 jest.mock('../../hooks/useMaterialAdministration', () => ({ useMaterialAdministration: jest.fn() }));
 jest.mock('../../services/materialService', () => ({
@@ -28,6 +29,25 @@ beforeEach(() => {
     );
 });
 afterEach(() => { window.matchMedia = originalMatchMedia; });
+
+it('엑셀 91개 품목을 세 구역에 원본 순서로 표시하고 규격으로 검색한다', async () => {
+    const rows = EXCEL_MATERIAL_CATALOG.flatMap(group => group.specs.map(spec => ({
+        ...group, id: `${group.category}/${group.itemName}/${spec}`, spec, unit: 'EA', isActive: true,
+    })));
+    (materialService.getUniqueMaterialsForSelection as jest.Mock).mockResolvedValue([...rows].reverse());
+    render(<MaterialMasterPage />);
+    const dongbari = await screen.findByRole('region', { name: '동바리 자재' });
+    expect(within(dongbari).getByRole('heading', { name: '시스템 동바리' })).toBeInTheDocument();
+    expect(within(dongbari).getAllByRole('row')).toHaveLength(41);
+    expect(within(dongbari).getAllByRole('row')[1]).toHaveTextContent('P-17');
+    expect(within(dongbari).getAllByRole('row')[13]).toHaveTextContent('하부자키');
+    expect(within(dongbari).getAllByRole('row')[14]).toHaveTextContent('W상부쟈키');
+    expect(within(screen.getByRole('region', { name: '비계 자재' })).getAllByRole('row')).toHaveLength(42);
+    expect(within(screen.getByRole('region', { name: '기타 자재' })).getAllByRole('row')).toHaveLength(11);
+    expect(screen.getByRole('button', { name: '전체 91' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('규격 검색'), { target: { value: 'W상부쟈키' } });
+    expect(within(screen.getByRole('region', { name: '동바리 자재' })).getAllByRole('row')).toHaveLength(2);
+});
 
 it('세 분류만 표시하고 기존 시스템 자재는 기타에서 검색할 수 있다', async () => {
     render(<MaterialMasterPage />);

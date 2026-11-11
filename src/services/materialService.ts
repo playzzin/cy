@@ -15,7 +15,7 @@ import {
 } from '../types/zod/materialSchema';
 import type { MaterialLogAction, MaterialLogEntityType } from '../types/materialLog';
 import { EXCEL_MATERIAL_CATALOG } from '../constants/materialCatalog';
-import { sortMaterialDisplayRows } from '../utils/materialOrdering';
+import { isCurrentCatalogMaterial, sortMaterialCatalogRows } from '../utils/materialCatalogOrdering';
 import { storageService } from './storageService';
 import { usesTeamScopedReads } from './teamScopedReadService';
 
@@ -154,7 +154,18 @@ const compareMaterialPreference = (candidate: Material, current: Material): numb
 };
 
 const sortMaterialsForSelection = (rows: Material[]): Material[] => {
-    return sortMaterialDisplayRows(rows);
+    return sortMaterialCatalogRows(rows);
+};
+
+// Retire only untouched defaults from the previous workbook. Keep their stored
+// documents for historical transactions, and retain explicitly edited defaults.
+const isSelectableMaterial = (row: Material): boolean => {
+    if (row.isActive === false || row.hiddenCatalogDefault === true) return false;
+    const untouchedDefault = row.isCatalogDefault === true || (
+        row.isCatalogDefault !== false &&
+        (String(row.id || '').startsWith('catalog_') || row.description === 'Excel 기본 자재')
+    );
+    return !untouchedDefault || isCurrentCatalogMaterial(row);
 };
 
 const createCatalogMaterials = (): Material[] => {
@@ -183,8 +194,11 @@ const createCatalogMaterials = (): Material[] => {
     return rows;
 };
 
+// A new workbook is a new baseline. Previous catalog documents may have been
+// moved or hidden; retain those records without suppressing this workbook.
+const CATALOG_DOCUMENT_PREFIX = 'catalog_list_v2_';
 const getCatalogDocumentId = (materialKey: string): string =>
-    `catalog_${encodeURIComponent(materialKey)}`;
+    `${CATALOG_DOCUMENT_PREFIX}${encodeURIComponent(materialKey)}`;
 
 const getMaterialKey = (material: Pick<Material, 'category' | 'itemName' | 'spec'> & { materialKey?: string }): string =>
     material.materialKey || buildMaterialBusinessKey(material);
@@ -251,7 +265,10 @@ const createPersistedCatalogMaterial = (material: Material, now: Date): Material
 };
 
 const ensureCatalogMaterialsPersisted = async (rows: Material[], persist = true): Promise<Material[]> => {
-    const existingMaterialKeys = new Set(rows.map((row) => row.materialKey || buildMaterialBusinessKey(row)));
+    const existingMaterialKeys = new Set(rows.filter(row =>
+        row.id.startsWith(CATALOG_DOCUMENT_PREFIX) ||
+        (row.isActive !== false && row.hiddenCatalogDefault !== true)
+    ).map((row) => row.materialKey || buildMaterialBusinessKey(row)));
     const existingIds = new Set(rows.map((row) => row.id).filter(Boolean));
     const now = new Date();
     const missingCatalogRows = createCatalogMaterials()
@@ -280,7 +297,7 @@ const getSelectableMaterials = async (): Promise<Material[]> => {
 
     const masterRows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
     const persistedCatalogRows = await ensureCatalogMaterialsPersisted(masterRows, !scoped);
-    const rows = [...masterRows, ...persistedCatalogRows].filter((row) => row.isActive !== false && row.hiddenCatalogDefault !== true);
+    const rows = [...masterRows, ...persistedCatalogRows].filter(isSelectableMaterial);
 
     const selectableRows = mergeMaterialsForSelection(rows);
     if (!scoped) selectableMaterialsCache = {
@@ -339,7 +356,7 @@ export const getAllMaterials = async (): Promise<Material[]> => {
     const scoped = await usesTeamScopedReads();
     const rows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
     const persistedCatalogRows = await ensureCatalogMaterialsPersisted(rows, !scoped);
-    return [...rows, ...persistedCatalogRows].filter((row) => row.isActive !== false && row.hiddenCatalogDefault !== true) as any[];
+    return sortMaterialCatalogRows([...rows, ...persistedCatalogRows].filter(isSelectableMaterial));
 };
 
 export const getUniqueMaterialsForSelection = async (): Promise<Material[]> => {
@@ -457,10 +474,15 @@ export const deleteMaterial = async (materialOrId: string | Material): Promise<v
     });
     const deletedSnapshot = createInactiveMaterial({ ...normalized, id: fallbackId });
 
-    await materialFirestoreService.saveMaterialsBatch([
+    const writes = [
         deletedSnapshot,
         ...rowsToHide.map(createInactiveMaterial),
-    ]);
+    ];
+    const catalog = createCatalogMaterials().find(row => getMaterialKey(row) === materialKey);
+    if (catalog && !writes.some(row => row.id === catalog.id)) {
+        writes.push(createInactiveMaterial(catalog));
+    }
+    await materialFirestoreService.saveMaterialsBatch(writes);
     clearMaterialSelectionCache();
     await logMaterialChange('deleted', 'material', target as any, deletedSnapshot as any);
 };
