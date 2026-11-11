@@ -9,6 +9,7 @@ interface Props {
     category: AdvanceRequestCategory;
     onCategory: (value: 'first' | 'second') => void;
     onSelect: (id: string) => void;
+    onHistory: (id: string) => void;
     amountFor: (id: string) => string;
     onAmount: (id: string, value: string) => void;
     onAmountBlur: (id: string, value: string) => void;
@@ -39,8 +40,12 @@ export default function AdvanceRequestMobileInput(props: Props) {
                         onFocus={() => props.onSelect(worker.id!)} onChange={event => props.onAmount(worker.id!, event.target.value)}
                         onBlur={event => props.onAmountBlur(worker.id!, event.target.value)} /><span>원</span>
                 </label>
-                <button type="button" className="advance-mobile-submit" aria-label={`${worker.name} 가불 신청`}
-                    disabled={props.selectedWorkerId !== worker.id || !props.canSubmit || props.saving} onClick={props.onSubmit}>신청</button>
+                <div className="advance-mobile-actions">
+                    <button type="button" className="advance-mobile-submit" aria-label={`${worker.name} 가불 신청`}
+                        disabled={props.selectedWorkerId !== worker.id || !props.canSubmit || props.saving} onClick={props.onSubmit}>신청</button>
+                    <button type="button" className="advance-mobile-history" aria-label={`${worker.name} 신청 내역·취소`}
+                        disabled={props.saving} onClick={() => props.onHistory(worker.id!)}>내역·취소</button>
+                </div>
             </div>)}
         </div>
     </section>;

@@ -127,7 +127,7 @@
 .advance-mobile-rounds button[aria-pressed=true] { background: #2563eb; color: white; border-color: #2563eb; }
 .advance-mobile-input > input { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #e2e8f0; border-radius: 8px; }
 .advance-mobile-workers { margin-top: 8px; }
-.advance-mobile-worker { display: grid; grid-template-columns: minmax(0,1fr) minmax(100px,1.2fr) 48px; gap: 6px; align-items: center; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
+.advance-mobile-worker { display: grid; grid-template-columns: minmax(0,1fr) minmax(100px,1.2fr) 60px; gap: 6px; align-items: center; padding: 8px 0; border-bottom: 1px solid #e2e8f0; }
 .advance-mobile-worker.is-selected { background: #eff6ff; }
 .advance-mobile-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 14px; font-weight: 700; text-align: left; padding: 2px; }
 .advance-mobile-team-color { width: 8px; height: 28px; border-radius: 3px; flex-shrink: 0; }
@@ -136,6 +136,9 @@
 .advance-mobile-amount > span:last-child { font-size: 12px; color: #64748b; }
 .advance-mobile-submit { border-radius: 6px; background: #2563eb; color: white; font-size: 13px; font-weight: 700; }
 .advance-mobile-submit:disabled { background: #e2e8f0; color: #64748b; }
+.advance-mobile-actions { display: grid; gap: 4px; }
+.advance-mobile-history { border: 1px solid #fecdd3; border-radius: 6px; background: white; color: #be123c; font-size: 12px; font-weight: 700; }
+.advance-mobile-history:disabled { opacity: 0.5; }
 .advance-mobile-input :focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .advance-work-details { order: 1; align-self: start; min-width: 0; }
 @media (max-width: 767px) {

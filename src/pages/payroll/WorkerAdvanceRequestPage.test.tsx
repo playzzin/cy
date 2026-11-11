@@ -148,6 +148,69 @@ it('신청 취소 후 취소 내역과 삭제 버튼을 유지하고 삭제하�
     } finally { confirm.mockRestore(); }
 });
 
+it('모바일 팀원 옆 내역·취소에서 전체 회차를 열고 대리 신청을 한 번만 취소한다', async () => {
+    const originalMedia = window.matchMedia;
+    const originalScroll = HTMLElement.prototype.scrollIntoView;
+    Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true,
+        value: () => ({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }) });
+    HTMLElement.prototype.scrollIntoView = jest.fn();
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    const member = { ...worker, id: 'member-a', legacyId: '', uid: '', name: '팀원 테스트' };
+    const request = { id: 'member-request', workerId: member.id, requesterUid: 'leader', yearMonth: month(), requestedAmount: 20000, category: 'second', status: 'requested' };
+    (getTeamScopedRows as jest.Mock).mockResolvedValue([worker, member]);
+    (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([{ workerId: member.id, date: `${month()}-01`, amount: 300000 }]);
+    (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([request]);
+    let finishCancel!: () => void;
+    (advanceRequestService.cancelRequest as jest.Mock).mockImplementation(() => new Promise<void>(resolve => {
+        finishCancel = () => {
+            (advanceRequestService.listForWorkerIds as jest.Mock).mockResolvedValue([{ ...request, status: 'cancelled' }]);
+            resolve();
+        };
+    }));
+    const view = render(<WorkerAdvanceRequestPage />);
+    try {
+        await screen.findByRole('button', { name: '팀원 테스트 신청 내역·취소' });
+        fireEvent.change(screen.getByRole('combobox', { name: '신청 내역 분류' }), { target: { value: 'first' } });
+        fireEvent.click(screen.getByRole('button', { name: '팀원 테스트 신청 내역·취소' }));
+        expect(screen.getByRole('combobox', { name: '신청 내역 분류' })).toHaveValue('all');
+        expect(screen.getByRole('heading', { name: member.name })).toHaveFocus();
+        expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled();
+        const cancel = await screen.findByRole('button', { name: '신청 취소' });
+        await waitFor(() => expect(cancel).toBeEnabled());
+        expect(screen.getAllByText('280,000원').length).toBeGreaterThan(0);
+        fireEvent.click(cancel);
+        expect(advanceRequestService.cancelRequest).not.toHaveBeenCalled();
+        confirm.mockReturnValue(true);
+        fireEvent.click(cancel);
+        fireEvent.click(cancel);
+        expect(advanceRequestService.cancelRequest).toHaveBeenCalledTimes(1);
+        expect(advanceRequestService.cancelRequest).toHaveBeenCalledWith(request.id, 'leader');
+        expect(cancel).toBeDisabled();
+        expect(screen.getByRole('button', { name: '팀원 테스트 신청 내역·취소' })).toBeDisabled();
+        await act(async () => finishCancel());
+        expect(await screen.findByRole('status')).toHaveTextContent('신청을 취소했습니다.');
+        expect(within(screen.getByRole('article')).getByText('취소')).toBeInTheDocument();
+        expect(screen.getAllByText('300,000원').length).toBeGreaterThan(0);
+    } finally {
+        view.unmount(); window.matchMedia = originalMedia;
+        HTMLElement.prototype.scrollIntoView = originalScroll; confirm.mockRestore();
+    }
+});
+
+it('상단 신청 내역·취소는 필터를 풀고 선택한 작업자의 취소 버튼으로 이동한다', async () => {
+    const originalScroll = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = jest.fn();
+    const view = render(<WorkerAdvanceRequestPage />);
+    try {
+        await screen.findByRole('button', { name: '신청 취소' });
+        fireEvent.change(screen.getByRole('combobox', { name: '신청 내역 분류' }), { target: { value: 'first' } });
+        expect(screen.queryByRole('button', { name: '신청 취소' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '신청 내역·취소' }));
+        expect(screen.getByRole('heading', { name: worker.name })).toHaveFocus();
+        expect(screen.getByRole('button', { name: '신청 취소' })).toBeEnabled();
+    } finally { view.unmount(); HTMLElement.prototype.scrollIntoView = originalScroll; }
+});
+
 it('확인에서 돌아오거나 서버가 거부하면 신청을 유지한다', async () => {
     const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
     try {

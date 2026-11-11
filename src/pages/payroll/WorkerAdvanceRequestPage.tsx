@@ -235,6 +235,8 @@ export default function WorkerAdvanceRequestPage() {
     const [category, setCategory] = useState<AdvanceRequestCategory>('first');
     const [historyCategory, setHistoryCategory] = useState<'all' | AdvanceRequestCategory>('all');
     const [message, setMessage] = useState('');
+    const [requestActionMessage, setRequestActionMessage] = useState('');
+    const historyHeadingRef = useRef<HTMLHeadingElement>(null);
     const [summaryError, setSummaryError] = useState('');
     const [loadedSummaryKey, setLoadedSummaryKey] = useState('');
     const summaryRequestId = useRef(0);
@@ -310,6 +312,15 @@ export default function WorkerAdvanceRequestPage() {
     const summaryReady = Boolean(selectedWorker?.id && loadedSummaryKey === summaryKey && !summaryError && !summaryLoading);
     const canSubmit = Boolean(summaryReady && requestedAmount > 0 && requestedAmount <= summary.availableAmount && !saving);
     const displaySummaryAmount = (amount: number) => summaryError ? '확인 필요' : !summaryReady && selectedWorker ? '계산 중' : formatCurrency(amount);
+
+    useEffect(() => { setRequestActionMessage(''); }, [selectedWorkerId, selectedYearMonth]);
+
+    const openRequestHistory = (workerId: string) => {
+        setSelectedWorkerId(workerId);
+        setHistoryCategory('all');
+        historyHeadingRef.current?.focus({ preventScroll: true });
+        historyHeadingRef.current?.scrollIntoView({ block: 'start' });
+    };
 
     const loadBaseData = useCallback(async () => {
         setLoading(true);
@@ -545,13 +556,14 @@ export default function WorkerAdvanceRequestPage() {
         savingLock.current = true;
         setSaving(true);
         setMessage('');
+        setRequestActionMessage('');
         try {
             if (action === 'cancel') await advanceRequestService.cancelRequest(request.id, currentUser?.uid);
             else await advanceRequestService.deleteRequest(request.id);
             await latestSummaryLoader.current();
-            setMessage(action === 'cancel' ? '신청을 취소했습니다.' : '신청 내역을 삭제했습니다.');
+            setRequestActionMessage(action === 'cancel' ? '신청을 취소했습니다.' : '신청 내역을 삭제했습니다.');
         } catch (error) {
-            setMessage('처리하지 못했습니다. 신청 상태와 권한을 확인하고 새로고침 후 다시 시도해 주세요.');
+            setRequestActionMessage('처리하지 못했습니다. 신청 상태와 권한을 확인하고 새로고침 후 다시 시도해 주세요.');
         } finally {
             savingLock.current = false;
             setSaving(false);
@@ -571,6 +583,11 @@ export default function WorkerAdvanceRequestPage() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                        <button type="button" onClick={() => openRequestHistory(selectedWorkerId)}
+                            disabled={saving || loading || !selectedWorkerId}
+                            className="flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-sm font-bold text-rose-700 disabled:opacity-50">
+                            <ClipboardList size={16} />신청 내역·취소
+                        </button>
                         <label className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3">
                             <CalendarDays size={16} className="text-slate-500" />
                             <input
@@ -621,7 +638,7 @@ export default function WorkerAdvanceRequestPage() {
 
                     <div className="p-4">
                         {isMobile ? <AdvanceRequestMobileInput workers={filteredWorkers} selectedWorkerId={selectedWorkerId}
-                            category={category} onCategory={setCategory} onSelect={setSelectedWorkerId}
+                            category={category} onCategory={setCategory} onSelect={setSelectedWorkerId} onHistory={openRequestHistory}
                             amountFor={id => amountDrafts[draftKeyFor(id)] || ''} onAmount={(id, value) => {
                                 setSelectedWorkerId(id);
                                 setAmountDrafts(current => ({ ...current, [draftKeyFor(id)]: value }));
@@ -886,13 +903,15 @@ export default function WorkerAdvanceRequestPage() {
                                     <ClipboardList size={14} />
                                     신청 내역
                                 </div>
-                                <h2 className="mt-1 text-lg font-black text-slate-950">{selectedWorker?.name || '작업자'}</h2>
+                                <h2 ref={historyHeadingRef} tabIndex={-1} className="mt-1 scroll-mt-4 text-lg font-black text-slate-950">{selectedWorker?.name || '작업자'}</h2>
                             </div>
                             <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-600">
                                 {visibleWorkerRequests.length}건
                             </span>
                         </div>
 
+                        <p className="px-4 pt-3 text-xs leading-5 text-slate-600">직접 신청한 승인 대기 건은 취소할 수 있습니다. 취소 내역은 남고 신청 가능액에 반영됩니다.</p>
+                        {requestActionMessage && <div role="status" className="mx-4 mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-bold text-blue-800">{requestActionMessage}</div>}
                         <label className="flex items-center gap-3 border-b border-slate-200 px-4 py-3 text-xs font-bold text-slate-500">
                             신청 분류
                             <select aria-label="신청 내역 분류" value={historyCategory}
