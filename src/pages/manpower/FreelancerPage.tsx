@@ -1088,6 +1088,7 @@ const FreelancerPage: React.FC = () => {
                         onMissingSelection={loading || masterLoading ? undefined : setSelectedTeamId}
                         allowAllTeams={false}
                         ariaLabel="프리랜서 신고 팀 선택"
+                        appearance="advance"
                     />
                 </div>
             </div>

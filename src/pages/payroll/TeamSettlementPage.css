@@ -128,13 +128,15 @@
 .team-settlement-page .overflow-auto > table > tbody > tr,
 .team-settlement-page .overflow-auto > table > tbody > tr > td { background: #fff; }
 .team-settlement-page .overflow-auto > table :is(th, td) { border-color: var(--settlement-line); }
-.team-settlement-page .overflow-auto > table th { font-size: 11px; font-weight: 700; }
-.team-settlement-page .overflow-auto > table td { font-size: 12px; }
+.team-settlement-page .overflow-auto > table th { font-size: 14px; font-weight: 700; }
+.team-settlement-page .overflow-auto > table td { font-size: 15px; }
+.team-settlement-page table .text-sm { font-size: 17px; }
+.team-settlement-page table .text-xs { font-size: 15px; }
 .team-settlement-page table input { border-radius: 4px; border-color: var(--settlement-line); }
 .team-settlement-page table input:disabled { background: #f8f9fa; color: #414750; }
 .team-settlement-page table td[data-label="비고"] input { text-overflow: ellipsis; }
 .team-settlement-page table td[data-label="상세"] > div { flex-wrap: wrap; gap: 2px; }
-.team-settlement-page table td[data-label="상세"] button { padding: 4px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
+.team-settlement-page table td[data-label="상세"] button { padding: 4px; border-radius: 4px; font-size: 14px; white-space: nowrap; }
 .team-settlement-page table td[data-label="상세"] button:disabled { opacity: 0.35; }
 .team-settlement-page table td[colspan] { color: var(--settlement-muted); }
 .team-settlement-page__expense-expanded-detail table { line-height: 1.5; }
@@ -174,12 +176,12 @@
   .team-settlement-page table[data-compact="adjustment"] > thead > tr > th:nth-child(5) { width: 17%; }
   .team-settlement-page table[data-compact="adjustment"] td[data-label="비고"] > div { min-width: 0; }
   .team-settlement-page table[data-compact] > :is(thead, tbody) > tr > :is(th, td) { padding: 7px 3px; }
-  .team-settlement-page table[data-compact] input { min-width: 0; padding: 5px 2px; font-size: 12px; }
-  .team-settlement-page table[data-compact] button { padding: 5px 2px; font-size: 11px; }
+  .team-settlement-page table[data-compact] input { min-width: 0; padding: 5px 2px; font-size: 15px; }
+  .team-settlement-page table[data-compact] button { padding: 5px 2px; font-size: 14px; }
   .team-settlement-page table[data-compact] .team-settlement-page__readonly-input:disabled { display: none; }
-  .team-settlement-page table[data-compact] .team-settlement-page__readonly-value { display: block; width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
-  .team-settlement-page table[data-compact] td[data-label="구분"] > span { padding: 2px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
-  .team-settlement-page table[data-compact] td[data-label="공수"] > input { font-size: 11px; }
+  .team-settlement-page table[data-compact] .team-settlement-page__readonly-value { display: block; width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+  .team-settlement-page table[data-compact] td[data-label="구분"] > span { padding: 2px; border-radius: 4px; font-size: 14px; white-space: nowrap; }
+  .team-settlement-page table[data-compact] td[data-label="공수"] > input { font-size: 14px; }
   .team-settlement-page #settlement-purchase-payroll td[data-label="비고"] > div { min-width: 0; }
   .team-settlement-page #settlement-purchase-payroll button { white-space: nowrap; }
   .team-settlement-page table:is([data-compact="support"], [data-compact="transaction"]) {
@@ -236,6 +238,8 @@
   .team-settlement-page > header > .flex { gap: 4px; }
   .team-settlement-page .text-sm { font-size: 12px; line-height: 1.4; }
   .team-settlement-page .text-xs { font-size: 11px; line-height: 1.4; }
+  .team-settlement-page table .text-sm { font-size: 15px; }
+  .team-settlement-page table .text-xs { font-size: 14px; }
   .team-settlement-page .mt-6,
   .team-settlement-page .mt-5,
   .team-settlement-page .mt-4 { margin-top: 12px; }
@@ -279,7 +283,7 @@
 
   .team-settlement-page .overflow-auto > table {
     width: 100%; min-width: 0; table-layout: fixed;
-    font-size: 11px; line-height: 1.4; font-variant-numeric: tabular-nums;
+    font-size: 14px; line-height: 1.4; font-variant-numeric: tabular-nums;
   }
   .team-settlement-page .overflow-auto > table > thead { position: static; }
   .team-settlement-page .overflow-auto > table > :is(thead, tbody) > tr > :is(th, td) {
@@ -291,15 +295,15 @@
   .team-settlement-page #settlement-rate-validation th:nth-child(4) { width: 10%; }
   .team-settlement-page #settlement-rate-validation th:nth-child(5) { width: 18%; }
   .team-settlement-page #settlement-rate-validation th:nth-child(6) { width: 16%; }
-  .team-settlement-page table input { width: 100%; margin: 0; padding: 3px 1px; min-height: 28px; font-size: 11px; }
+  .team-settlement-page table input { width: 100%; margin: 0; padding: 3px 1px; min-height: 28px; font-size: 14px; }
   .team-settlement-page table input:disabled {
     background: transparent; border-color: transparent; color: #334155; -webkit-text-fill-color: #334155; opacity: 1;
   }
-  .team-settlement-page table button { min-height: 30px; padding: 3px 2px; font-size: 11px; line-height: 1.3; white-space: nowrap; }
-  .team-settlement-page td[data-label="구분"] > span { padding: 2px 1px; border-radius: 4px; font-size: 10px; white-space: nowrap; }
+  .team-settlement-page table button { min-height: 30px; padding: 3px 2px; font-size: 14px; line-height: 1.3; white-space: nowrap; }
+  .team-settlement-page td[data-label="구분"] > span { padding: 2px 1px; border-radius: 4px; font-size: 13px; white-space: nowrap; }
   .team-settlement-page td[data-label="상세"] > .flex { gap: 2px; flex-wrap: wrap; }
   .team-settlement-page td[colspan] > .rounded-lg { padding: 6px 2px; border: 0; }
-  .team-settlement-page .team-settlement-page__expense-expanded-detail table { font-size: 11px; line-height: 1.4; }
+  .team-settlement-page .team-settlement-page__expense-expanded-detail table { font-size: 14px; line-height: 1.4; }
   .team-settlement-page .team-settlement-page__readonly-input:disabled { display: none; }
   .team-settlement-page__readonly-value { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
 
@@ -323,7 +327,7 @@
     color: #64748b; text-align: center;
   }
   .team-settlement-page table[data-compact] > tbody > tr > td[data-label="비고"]::before {
-    content: '비고'; flex: 0 0 auto; font-size: 10px; color: #64748b;
+    content: '비고'; flex: 0 0 auto; font-size: 13px; color: #64748b;
   }
   .team-settlement-page table[data-compact] > tbody > tr > td[data-label="비고"] > div { flex: 1; }
   .team-settlement-page table[data-compact] td[data-label="비고"] input { min-height: 24px; text-align: center; }
@@ -335,7 +339,7 @@
 @media screen and (max-width: 767px) {
   .team-settlement-page .overflow-auto > :is(.team-settlement-page__site-detail, .team-settlement-page__worker-detail) {
     table-layout: auto;
-    font-size: 10px;
+    font-size: 13px;
   }
   .team-settlement-page .overflow-auto > :is(.team-settlement-page__site-detail, .team-settlement-page__worker-detail) > :is(thead, tbody) > tr > :is(th, td[data-label]) {
     padding-inline: 1px;
