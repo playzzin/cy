@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import WorkerAdvanceRequestPage from './WorkerAdvanceRequestPage';
 import { manpowerService } from '../../services/manpowerService';
 import { dailyReportService } from '../../services/dailyReportService';
@@ -53,6 +54,7 @@ it('모바일은 팀 색상과 이름 옆 금액으로 회차별 신청하며 �
         expect(screen.queryByText('당시 가능액')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '선입금' })).not.toBeInTheDocument();
         fireEvent.change(first, { target: { value: '10000' } });
+        fireEvent.blur(first);
         fireEvent.click(screen.getByRole('button', { name: '2회차' }));
         const second = screen.getByRole('textbox', { name: '테스트 팀장 2회차 신청 금액' });
         expect(second).toHaveValue('');
@@ -80,6 +82,42 @@ it('팀장이 서버에서 허용한 소속 팀원을 선택해 가불을 대신
         expect.objectContaining({ workerId: 'member-a', requesterUid: 'leader', requestedAmount: 10000, category: 'second' }), expect.any(String)));
     await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
     expect(screen.getByText('가불 신청을 등록했습니다.')).toBeInTheDocument();
+});
+
+it.each([false, true])('금액 편집과 전각 숫자 입력을 유지하고 정규화된 금액으로 신청한다 (모바일: %s)', async mobile => {
+    const original = window.matchMedia;
+    Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true,
+        value: () => ({ matches: mobile, addEventListener: jest.fn(), removeEventListener: jest.fn() }) });
+    (getTeamScopedRows as jest.Mock).mockResolvedValue([worker]);
+    (advanceRequestService.createRequest as jest.Mock).mockResolvedValue('saved');
+    const view = render(<WorkerAdvanceRequestPage />);
+    try {
+        await screen.findAllByText('230,000원');
+        const input = screen.getByRole('textbox', { name: mobile ? '테스트 팀장 1회차 신청 금액' : '신청 금액 원' }) as HTMLInputElement;
+        const submit = screen.getByRole('button', { name: mobile ? '테스트 팀장 가불 신청' : '가불 신청' });
+        userEvent.type(input, '123000');
+        input.setSelectionRange(1, 1);
+        userEvent.type(input, '45', { skipClick: true });
+        expect(input).toHaveValue('14523000');
+        expect(submit).toBeDisabled();
+        fireEvent.blur(input);
+        expect(input).toHaveValue('14,523,000');
+
+        userEvent.clear(input);
+        fireEvent.compositionStart(input);
+        fireEvent.change(input, { target: { value: '１２３' } });
+        expect(input).toHaveValue('１２３');
+        fireEvent.change(input, { target: { value: '１２３０００' } });
+        fireEvent.compositionEnd(input, { data: '１２３０００' });
+        expect(input).toHaveValue('１２３０００');
+        fireEvent.blur(input);
+        expect(input).toHaveValue('123,000');
+        expect(submit).toBeEnabled();
+        userEvent.click(submit);
+        await screen.findByText('가불 신청을 등록했습니다.');
+        expect(advanceRequestService.createRequest).toHaveBeenCalledWith(
+            expect.objectContaining({ workerId: worker.id, requestedAmount: 123000, category: 'first' }), expect.any(String));
+    } finally { view.unmount(); window.matchMedia = original; }
 });
 
 it('신청 취소 후 취소 내역과 삭제 버튼을 유지하고 삭제하면 재조회에서도 사라진다', async () => {
