@@ -94,11 +94,20 @@ export function buildTeamSettlementExpenseEntries(sources: SettlementExpenseSour
     const charged = sources.matchesTeam(claim.chargeToTeamId, claim.chargeToTeamName);
     if (other ? !payer : !payer && !charged) return;
     const amount = Math.round(number(claim.amount));
-    if (amount < 0) throw new Error('경비 청구 금액을 확인해 주세요.');
+    const isCredit = amount < 0 && (claim.claimType === 'otherExpense' || (!claim.claimType && other));
+    if (amount < 0 && !isCredit) throw new Error('경비 청구 금액을 확인해 주세요.');
     if (!amount) return;
     if (!claim.id) throw new Error('경비 청구 식별자가 없습니다.');
     const label = categoryLabels[claim.category] ?? claim.category ?? '기타';
     const suffix = label + (claim.description?.trim() ? ` - ${claim.description.trim()}` : '');
+    if (isCredit) {
+      // Settlement rows use non-negative amounts; a credit offsets deductions via additions.
+      const memo = `${buildTeamExpenseSettlementMemo(claim, 'deduction')} / 차감`;
+      entries.push({ direction: 'addition', item: { id: `team_expense_claim:${sources.yearMonth}:${claim.id}:addition`, source: 'auto',
+        origin: 'team_expense_claim', category: `경비 차감(${suffix})`, amount: -amount, memo },
+      details: [{ subject: claim.payerTeamName || '-', label: suffix, amount: -amount, date: claim.date, note: memo }] });
+      return;
+    }
     const addClaim = (direction: 'deduction' | 'addition') => {
       const memo = buildTeamExpenseSettlementMemo(claim, direction);
       entries.push({ direction, item: { id: `team_expense_claim:${sources.yearMonth}:${claim.id}:${direction}`, source: 'auto',

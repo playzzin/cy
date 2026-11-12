@@ -5,6 +5,7 @@ import { faSave, faTimes, faWonSign, faBolt, faFire, faTint, faWifi, faBroom, fa
 import { Accommodation, CostProfile, Contract } from '../../types/accommodation';
 import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 import { getDefaultAccommodationOverchargeThreshold } from '../../utils/accommodationOvercharge';
+import { getAccommodationBillingEndMonth, isAccommodationBillingEndMonth } from '../../utils/accommodationLifecycle';
 
 type CostMode = 'variable' | 'fixed' | 'included';
 
@@ -244,6 +245,7 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
         getInitialOverchargeThreshold(initialData)
     );
     const [status, setStatus] = useState<Accommodation['status']>(initialData?.status || 'active');
+    const [billingEndYearMonth, setBillingEndYearMonth] = useState(() => initialData ? getAccommodationBillingEndMonth(initialData) : '');
     const [ownership, setOwnership] = useState<Accommodation['ownership']>(initialData?.ownership || 'Cheongyeon');
 
     // Contract State
@@ -258,6 +260,7 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
         setType(initialData?.type || 'OneRoom');
         setUtilityOverchargeThreshold(getInitialOverchargeThreshold(initialData));
         setStatus(initialData?.status || 'active');
+        setBillingEndYearMonth(initialData ? getAccommodationBillingEndMonth(initialData) : '');
         setOwnership(initialData?.ownership || 'Cheongyeon');
         setContract(getNormalizedContract(initialData));
         setCostProfile(normalizeCostProfileForForm(initialData?.costProfile));
@@ -279,6 +282,14 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         const normalizedContract = normalizeContractForForm(contract);
+        if (status === 'inactive' && !isAccommodationBillingEndMonth(billingEndYearMonth)) {
+            window.alert('비용 종료월을 입력해주세요.');
+            return;
+        }
+        if (status === 'inactive' && normalizedContract.startDate && billingEndYearMonth < normalizedContract.startDate.slice(0, 7)) {
+            window.alert('비용 종료월은 계약 시작월보다 빠를 수 없습니다.');
+            return;
+        }
         const defaultOverchargeThreshold = getDefaultAccommodationOverchargeThreshold(type);
         onSubmit({
             name,
@@ -288,6 +299,7 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                 ? utilityOverchargeThreshold || defaultOverchargeThreshold
                 : 0,
             status,
+            billingEndYearMonth: status === 'inactive' ? billingEndYearMonth : '',
             ownership,
             contract: normalizedContract,
             costProfile
@@ -385,6 +397,7 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">상태</label>
                                             <select
+                                                aria-label="숙소 상태"
                                                 value={status}
                                                 onChange={(e) => setStatus(e.target.value as Accommodation['status'])}
                                                 className={`w-full p-2.5 border rounded-xl outline-none font-bold text-sm
@@ -398,6 +411,15 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                                             </select>
                                         </div>
                                     </div>
+                                    {status === 'inactive' && (
+                                        <label className="block rounded-xl border border-indigo-100 bg-indigo-50 p-3">
+                                            <span className="text-sm font-bold text-slate-700">비용 종료월</span>
+                                            <input type="month" aria-label="비용 종료월" required value={billingEndYearMonth}
+                                                onChange={event => setBillingEndYearMonth(event.target.value)}
+                                                className="mt-2 w-full rounded-xl border border-slate-200 bg-white p-2.5 font-bold" />
+                                            <span className="mt-2 block text-xs text-slate-600">선택한 월까지 월세와 비용을 포함합니다. 계약 만기일과 별도로 적용됩니다.</span>
+                                        </label>
+                                    )}
                                     {(type === 'TwoRoom' || type === 'ThreeRoom') && (
                                         <div className="rounded-xl border border-rose-100 bg-rose-50/60 p-3">
                                             <label className="mb-1.5 ml-1 block text-xs font-bold text-rose-700">

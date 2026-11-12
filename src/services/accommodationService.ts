@@ -1,9 +1,11 @@
 import { accommodationFirestoreService } from './accommodationFirestoreService';
 import { accommodationAssignmentService } from './accommodationAssignmentService';
 import { accommodationBillingTargetService } from './accommodationBillingTargetService';
+import { supportCancellationLogService } from './supportCancellationLogService';
+import { applyAccommodationTerminationHistory, getAccommodationStatusForMonth, isAccommodationContractInMonth } from '../utils/accommodationLifecycle';
 import { Accommodation, UtilityRecord } from '../types/accommodation';
 import { AccommodationAssignment } from '../types/accommodationAssignment';
-import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate, normalizeDateText } from '../utils/supportBillingPeriod';
+import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../utils/supportBillingPeriod';
 import {
     buildAccommodationUtilityRecordId,
     dedupeAccommodationUtilityRecords,
@@ -101,31 +103,26 @@ const buildUtilityRecord = (
     };
 };
 
-const getYearMonthStartDateText = (yearMonth: string): string => {
-    const match = /^(\d{4})-(\d{2})$/.exec(String(yearMonth ?? '').trim());
-    if (!match) return '';
-    return `${match[1]}-${match[2]}-01`;
+const isAccommodationBillableForMonth = (accommodation: Accommodation, yearMonth: string): boolean => {
+    if (getAccommodationStatusForMonth(accommodation, yearMonth) !== 'active') return false;
+
+    return isAccommodationContractInMonth(accommodation, yearMonth);
 };
 
-const isAccommodationBillableForMonth = (accommodation: Accommodation, yearMonth: string): boolean => {
-    if (accommodation.status && accommodation.status !== 'active') return false;
-
-    const monthStart = getYearMonthStartDateText(yearMonth);
-    const contractEndDate = normalizeDateText(accommodation.contract?.endDate);
-    // A contract that ends during this month still needs its final utility
-    // settlement. Exclude it only from months that start after the contract.
-    if (monthStart && contractEndDate && contractEndDate < monthStart) return false;
-
-    return true;
+const loadAccommodations = async (status?: 'active' | 'inactive'): Promise<Accommodation[]> => {
+    const rooms = await accommodationFirestoreService.listAccommodations(status);
+    if (!rooms.some(room => room.status === 'inactive' && !room.endedDate && !room.billingEndYearMonth)) return rooms;
+    const logs = await supportCancellationLogService.getLogsByResourceType('accommodation');
+    return applyAccommodationTerminationHistory(rooms, logs);
 };
 
 export const accommodationService = {
     listAllAccommodations: async (status?: 'active' | 'inactive') => {
-        return accommodationFirestoreService.listAccommodations(status);
+        return loadAccommodations(status);
     },
 
     getAccommodations: async (status?: 'active' | 'inactive') => {
-        return accommodationFirestoreService.listAccommodations(status);
+        return loadAccommodations(status);
     },
 
     getAccommodation: async (id: string) => {
@@ -167,7 +164,7 @@ export const accommodationService = {
 
     getMonthlyLedger: async (yearMonth: string): Promise<UtilityRecord[]> => {
         const [accommodations, utilityRecords, billingTargets] = await Promise.all([
-            accommodationFirestoreService.listAccommodations(),
+            loadAccommodations(),
             accommodationFirestoreService.listUtilityRecords(yearMonth),
             accommodationBillingTargetService.listTargets()
         ]);

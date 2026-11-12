@@ -170,9 +170,9 @@ const validateClaimInput = (input: TeamExpenseClaimInput): void => {
   if (!String(input.payerTeamName ?? '').trim()) errors.push('payerTeamName');
   if (!String(input.category ?? '').trim()) errors.push('category');
   if (!String(input.description ?? '').trim()) errors.push('description');
-  if (!Number.isFinite(normalizeAmount(input.amount)) || normalizeAmount(input.amount) < 0) errors.push('amount');
-
   const claimType = normalizeClaimType(input.claimType, input as unknown as Record<string, unknown>);
+  if (!Number.isFinite(normalizeAmount(input.amount)) || (normalizeAmount(input.amount) < 0 && claimType !== 'otherExpense')) errors.push('amount');
+
   if (claimType === 'teamCharge' && !String(input.chargeToTeamId ?? '').trim()) {
     errors.push('chargeToTeamId');
   }

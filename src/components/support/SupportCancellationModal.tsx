@@ -7,11 +7,13 @@ import {
   type SupportCancellationReason,
   type SupportCancellationResourceType,
 } from '../../types/supportCancellationLog';
+import { isAccommodationBillingEndMonth } from '../../utils/accommodationLifecycle';
 
 export interface SupportCancellationFormValue {
   reason: SupportCancellationReason;
   reasonLabel: string;
   processedDate: string;
+  billingEndYearMonth?: string;
   settlementAmount?: number;
   note: string;
 }
@@ -58,6 +60,7 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
   const reasonOptions = SUPPORT_CANCELLATION_REASON_OPTIONS[resourceType];
   const [reason, setReason] = useState<SupportCancellationReason>(reasonOptions[0]);
   const [processedDate, setProcessedDate] = useState(getTodayText);
+  const [billingEndYearMonth, setBillingEndYearMonth] = useState(() => getTodayText().slice(0, 7));
   const [settlementAmountText, setSettlementAmountText] = useState('');
   const [note, setNote] = useState('');
 
@@ -65,6 +68,7 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
     if (!isOpen) return;
     setReason(reasonOptions[0]);
     setProcessedDate(getTodayText());
+    setBillingEndYearMonth(getTodayText().slice(0, 7));
     setSettlementAmountText('');
     setNote('');
   }, [isOpen, reasonOptions]);
@@ -92,11 +96,16 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
       window.alert('처리 내역을 입력해주세요.');
       return;
     }
+    if (resourceType === 'accommodation' && !isAccommodationBillingEndMonth(billingEndYearMonth)) {
+      window.alert('비용 종료월을 입력해주세요.');
+      return;
+    }
 
     await onSubmit({
       reason,
       reasonLabel: SUPPORT_CANCELLATION_REASON_LABELS[reason],
       processedDate,
+      ...(resourceType === 'accommodation' ? { billingEndYearMonth } : {}),
       settlementAmount,
       note: trimmedNote,
     });
@@ -104,7 +113,7 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 px-4 py-6">
-      <form onSubmit={handleSubmit} className="support-cancellation-modal w-full max-w-2xl overflow-hidden rounded-2xl bg-white text-slate-800 shadow-2xl">
+      <form onSubmit={handleSubmit} className="support-cancellation-modal max-h-[calc(100dvh-3rem)] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white text-slate-800 shadow-2xl">
         <style>{`
           .support-cancellation-modal input,
           .support-cancellation-modal select,
@@ -179,6 +188,16 @@ export const SupportCancellationModal: React.FC<SupportCancellationModalProps> =
               />
             </label>
           </div>
+
+          {resourceType === 'accommodation' && (
+            <label className="block rounded-xl border border-indigo-100 bg-indigo-50 p-3">
+              <span className="text-sm font-black text-slate-700">비용 종료월</span>
+              <input type="month" aria-label="비용 종료월" required value={billingEndYearMonth}
+                onChange={event => setBillingEndYearMonth(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-bold" />
+              <span className="mt-2 block text-xs text-slate-600">선택한 월까지 월세와 비용을 포함합니다. 계약 만기일과 별도로 적용됩니다.</span>
+            </label>
+          )}
 
           <label className="block">
             <span className="text-sm font-black text-slate-700">정산/환급 금액</span>

@@ -296,6 +296,7 @@ export const SupportCancellationHistory: React.FC<SupportCancellationHistoryProp
                           {log.assigneeName && <span>사용자: {log.assigneeName}</span>}
                           {log.teamName && <span>팀: {log.teamName}</span>}
                           {log.billingTargetName && <span>청구: {log.billingTargetName}</span>}
+                          {log.resourceType === 'accommodation' && log.billingEndYearMonth && <span>비용 종료월: {log.billingEndYearMonth}까지</span>}
                         </div>
                       </td>
                       <td className="px-4 py-4">

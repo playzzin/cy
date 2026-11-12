@@ -47,6 +47,8 @@ export interface Accommodation {
     type: 'OneRoom' | 'TwoRoom' | 'ThreeRoom' | 'Apartment';
     utilityOverchargeThreshold?: number;
     status: 'active' | 'inactive';
+    endedDate?: string; // Actual termination date; contract.endDate remains the agreed expiry.
+    billingEndYearMonth?: string; // Last month included in rent and utility costs (inclusive).
     ownership: 'Cheongyeon' | 'Dawon' | 'Individual';
 
     contract: Contract;

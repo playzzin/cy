@@ -3,6 +3,11 @@ import { Timestamp } from '../types/timestamp';
 import { accommodationFirestoreService } from './accommodationFirestoreService';
 import { accommodationService } from './accommodationService';
 import { accommodationBillingTargetService } from './accommodationBillingTargetService';
+import { supportCancellationLogService } from './supportCancellationLogService';
+import type { Accommodation } from '../types/accommodation';
+import type { SupportCancellationLog } from '../types/supportCancellationLog';
+
+jest.mock('./supportCancellationLogService', () => ({ supportCancellationLogService: { getLogsByResourceType: jest.fn(async () => []) } }));
 
 jest.mock('./accommodationFirestoreService', () => ({
     accommodationFirestoreService: {
@@ -75,6 +80,32 @@ describe('accommodationService saved utility ledger boundary', () => {
         jest.clearAllMocks();
         mockedSaveUtilityRecord.mockResolvedValue(undefined);
         mockedListBillingTargets.mockResolvedValue([]);
+        jest.mocked(supportCancellationLogService.getLogsByResourceType).mockResolvedValue([]);
+    });
+
+    it('11월 처리·만기여도 비용 종료월을 10월로 지정하면 10월 비용을 유지하고 11월부터 제외한다', async () => {
+        const ended = { id: 'room/204', name: '검증숙소', status: 'inactive',
+            contract: { startDate: '2026-01-01', endDate: '2026-11-10', monthlyRent: 500000 } } as Accommodation;
+        mockedListAccommodations.mockResolvedValue([ended]);
+        mockedListUtilityRecords.mockImplementation(async yearMonth => [buildRecord({ yearMonth, costs: { ...buildRecord().costs, rent: 450000 } })]);
+        jest.mocked(supportCancellationLogService.getLogsByResourceType).mockResolvedValue([{
+            resourceType: 'accommodation', resourceId: ended.id, statusAfter: 'inactive',
+            processedDate: '2026-11-12', createdAtIso: '2026-11-12T01:00:00Z',
+            billingEndYearMonth: '2026-10',
+        } as SupportCancellationLog]);
+        const rooms = await accommodationService.listAllAccommodations();
+        expect(rooms[0].endedDate).toBe('2026-11-12');
+        expect(rooms[0].billingEndYearMonth).toBe('2026-10');
+        expect((await accommodationService.getMonthlyLedger('2026-10'))[0].costs.rent).toBe(450000);
+        expect(await accommodationService.getMonthlyLedger('2026-11')).toEqual([]);
+        expect(await accommodationService.getMonthlyLedger('2026-12')).toEqual([]);
+        expect(accommodationFirestoreService.saveAccommodation).not.toHaveBeenCalled();
+    });
+
+    it('종료일이 이미 저장되어 있으면 과거 이력을 추가 조회하지 않는다', async () => {
+        mockedListAccommodations.mockResolvedValue([{ id: 'room', status: 'inactive', endedDate: '2026-11-12' } as Accommodation]);
+        await accommodationService.listAllAccommodations();
+        expect(supportCancellationLogService.getLogsByResourceType).not.toHaveBeenCalled();
     });
 
     it('does not invent ledger rows when billing target loading fails', async () => {

@@ -315,7 +315,7 @@ const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
       form.id
       || form.date !== defaultClaim.date
       || form.description.trim()
-      || form.amount > 0
+      || form.amount !== 0
       || form.memo.trim()
       || form.attachments.length > 0
       || pendingAttachments.length > 0
@@ -835,7 +835,8 @@ const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
     if (!isStandaloneClaim && !form.cardLabel) errors.push('결제수단을 선택해주세요.');
     if (!String(form.category ?? '').trim()) errors.push('구분을 선택해주세요.');
     if (!form.description.trim()) errors.push('내용을 입력해주세요.');
-    if (form.amount <= 0) errors.push('금액을 입력해주세요.');
+    if (!Number.isFinite(form.amount) || form.amount === 0) errors.push('0원이 아닌 금액을 입력해주세요.');
+    else if (form.amount < 0 && !isOtherClaim) errors.push('마이너스 금액은 기타청구에서만 입력할 수 있습니다.');
 
     if (form.claimType === 'teamCharge') {
       if (!form.chargeToTeamId && !form.chargeToTeamName.trim()) errors.push('청구대상팀을 선택해주세요.');
@@ -1774,6 +1775,11 @@ const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
                     className={`${inputClass} text-right tabular-nums`}
                     placeholder="금액 입력"
                   />
+                  {isOtherClaim && (
+                    <span className="mt-1.5 block text-xs font-bold text-amber-700">
+                      차감할 금액은 마이너스(-)로 입력하세요. 예: -100,000
+                    </span>
+                  )}
                 </label>
 
                 <label className="sm:col-span-2">

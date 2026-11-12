@@ -58,6 +58,27 @@ test('주고받는 경비 양쪽에 동일한 금액을 한 번씩 반영한다'
   expect(incoming.filter(row => row.direction === 'deduction')).toHaveLength(1);
   expect(incoming[0].item.amount).toBe(outgoing[0].item.amount);
 });
+
+test('기타청구 음수는 해당 팀에만 차감으로 반영하고 정산 스키마를 만족한다', () => {
+  const credit = claim({ claimType: 'otherExpense', payerTeamId: 'team', payerTeamName: '검증팀',
+    chargeToTeamId: '', chargeToTeamName: '', amount: -200, description: '숙소비 차감' });
+  const rows = build(sources({ cardDocs: [card()], teamExpenseClaims: [credit, credit] }));
+  const deduction = rows.filter(row => row.direction === 'deduction');
+  const addition = rows.filter(row => row.direction === 'addition');
+  expect(addition).toHaveLength(1);
+  expect(addition[0]).toMatchObject({ item: { amount: 200, category: '경비 차감(식대 - 숙소비 차감)' },
+    details: [{ subject: '검증팀', amount: 200 }] });
+  expect(addition[0].item.memo).toContain('기타청구');
+  expect(addition[0].item.memo).not.toContain('받을 후청구');
+  expect(deduction.reduce((sum, row) => sum + row.item.amount, 0) - addition[0].item.amount).toBe(800);
+  expect(getTeamSettlementExpenseDetail(addition[0].item, rows).rows.reduce((sum, row) => sum + row.amount, 0)).toBe(200);
+  expect(TeamSettlementDocumentSchema.safeParse({ ...document(), deductions: deduction.map(row => row.item), additions: addition.map(row => row.item) }).success).toBe(true);
+  expect(build(sources({ matchesTeam: id => id === 'another-team', teamExpenseClaims: [credit] }))).toEqual([]);
+});
+
+test.each(['teamCharge', 'officeExpense'] as const)('%s의 음수 원본은 정산에서 거절한다', claimType => {
+  expect(() => build(sources({ teamExpenseClaims: [claim({ claimType, payerTeamId: 'team', amount: -200 })] }))).toThrow('경비 청구 금액');
+});
 test('저장본을 바꾸지 않고 누락·변경·중복·원본 부재를 구분한다', () => {
   const entries = build(sources({ cardDocs: [card(), card({ id: 'b', cardLabel: 'B' })] }));
   const saved = document();

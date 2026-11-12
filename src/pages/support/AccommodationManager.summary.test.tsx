@@ -203,6 +203,28 @@ it('계약 종료 다음 달부터 목록·상하단 집계에서 제외한다',
     expect(screen.queryByText(ended.name)).not.toBeInTheDocument();
 });
 
+it('비용 종료월이 10월이면 11월 만기·처리여도 10월 목록·월세·보증금·엑셀까지만 포함한다', async () => {
+    const ended = room('11월종료', 500000, 1000000, { status: 'inactive', endedDate: '2026-11-12', billingEndYearMonth: '2026-10' });
+    ended.contract.endDate = '2026-11-10';
+    jest.mocked(accommodationService.listAllAccommodations).mockResolvedValue([ended]);
+    window.sessionStorage.setItem('cy.support-management.year-month', '2026-10');
+    render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AccommodationManager /></MemoryRouter>);
+    await waitFor(() => expectSummaries(500000, 1000000, 500000));
+    expect(screen.getByRole('button', { name: '운영 중 1호' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+    await waitFor(() => expect(buildAccommodationStatusWorkbook).toHaveBeenCalledTimes(1));
+    expect(jest.mocked(buildAccommodationStatusWorkbook).mock.calls[0][0].rows[0].accommodation.id).toBe(ended.id);
+    act(() => rememberSupportManagementYearMonth('2026-11'));
+    await waitFor(() => expectSummaries(0, 0, 0));
+    expect(screen.getByRole('button', { name: '운영 중 0호' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '보관/종료 1호' }));
+    expectSummaries(0, 0, 0);
+    expect(screen.getByText(ended.name)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '운영 중 0호' }));
+    act(() => rememberSupportManagementYearMonth('2026-10'));
+    await waitFor(() => expectSummaries(500000, 1000000, 500000));
+});
+
 it('시작일 미입력 숙소는 임의로 날짜를 추정하지 않고 확인 필요 건수를 표시한다', async () => {
     const unknownStart = room('날짜미상', 450000, 5000000);
     unknownStart.contract.startDate = '';

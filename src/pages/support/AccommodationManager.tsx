@@ -42,6 +42,7 @@ import { supportCancellationLogService } from '../../services/supportCancellatio
 import { getContrastingTextColor } from '../../utils/color';
 import { getSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
 import { getAccommodationContractAmounts, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
+import { getAccommodationStatusForMonth, isAccommodationContractInMonth, isAccommodationBillingEndMonth, getAccommodationBillingEndMonth } from '../../utils/accommodationLifecycle';
 import type { SiteDataType } from '../../types/menu';
 
 interface AccommodationManagerProps {
@@ -664,7 +665,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     };
 
     const contractMonthAccommodations = useMemo(() => accommodations.filter(accommodation => (
-        overlapsAccommodationMonth(accommodation.contract || {}, summaryMonth)
+        isAccommodationContractInMonth(accommodation, summaryMonth)
+        || (getAccommodationBillingEndMonth(accommodation) && summaryMonth > getAccommodationBillingEndMonth(accommodation))
     )), [accommodations, summaryMonth]);
 
     const selectedTeamScopedAccommodations = useMemo(() => {
@@ -698,11 +700,12 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
         return selectedTeamScopedAccommodations.filter(acc => {
             const activeList = getMonthAssignmentsForAccommodation(acc);
+            const monthStatus = getAccommodationStatusForMonth(acc, summaryMonth);
 
             if (filterStatus === 'todo') {
-                if (acc.status !== 'active') return false;
+                if (monthStatus !== 'active') return false;
                 if (activeList.length > 0) return false;
-            } else if (filterStatus !== 'all' && acc.status !== filterStatus) {
+            } else if (filterStatus !== 'all' && monthStatus !== filterStatus) {
                 return false;
             }
 
@@ -938,6 +941,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     }
 
     function getAccommodationRent(accommodation: Accommodation): number {
+        const endMonth = getAccommodationBillingEndMonth(accommodation);
+        if (endMonth && summaryMonth > endMonth) return 0;
         return getAccommodationContractAmounts(accommodation, getCurrentMonthLedgerRecord(accommodation)).rent;
     }
 
@@ -969,6 +974,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     }
 
     function getAccommodationDeposit(accommodation: Accommodation): number {
+        const endMonth = getAccommodationBillingEndMonth(accommodation);
+        if (endMonth && summaryMonth > endMonth) return 0;
         return getAccommodationContractAmounts(accommodation, getCurrentMonthLedgerRecord(accommodation)).deposit;
     }
 
@@ -1037,8 +1044,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     };
 
     const handleEditClick = (item: Accommodation) => {
-        const normalizedRent = getAccommodationRent(item);
-        const normalizedDeposit = getAccommodationDeposit(item);
+        const { rent: normalizedRent, deposit: normalizedDeposit } = getAccommodationContractAmounts(item, getCurrentMonthLedgerRecord(item));
         const normalizedItem = {
             ...item,
             contract: {
@@ -1142,7 +1148,13 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     const handleFormSubmit = async (data: Omit<Accommodation, 'id' | 'createdAt' | 'updatedAt'>) => {
         try {
             if (editingItem) {
-                await accommodationService.updateAccommodation(editingItem.id, data);
+                const now = new Date();
+                const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                await accommodationService.updateAccommodation(editingItem.id, {
+                    ...data,
+                    endedDate: data.status === 'active' ? '' : editingItem.endedDate || (editingItem.status === 'active' ? today : ''),
+                    billingEndYearMonth: data.status === 'active' ? '' : data.billingEndYearMonth,
+                });
             } else {
                 await accommodationService.addAccommodation(data);
             }
@@ -1162,6 +1174,11 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     const handleCancellationSubmit = async (form: SupportCancellationFormValue) => {
         if (!cancellationTarget) return;
         const accommodation = cancellationTarget;
+        if (!isAccommodationBillingEndMonth(form.billingEndYearMonth)
+            || (accommodation.contract?.startDate && form.billingEndYearMonth! < accommodation.contract.startDate.slice(0, 7))) {
+            alert('계약 시작월 이후의 비용 종료월을 입력해주세요.');
+            return;
+        }
         setSavingCancellation(true);
 
         try {
@@ -1184,6 +1201,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
             await accommodationService.updateAccommodation(accommodation.id, {
                 status: 'inactive',
+                endedDate: form.processedDate,
+                billingEndYearMonth: form.billingEndYearMonth,
                 currentOccupantName: '',
                 currentOccupantPhone: ''
             });
@@ -1195,6 +1214,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 reason: form.reason,
                 reasonLabel: form.reasonLabel,
                 processedDate: form.processedDate,
+                billingEndYearMonth: form.billingEndYearMonth,
                 statusBefore: accommodation.status,
                 statusAfter: 'inactive',
                 assigneeName: activeList.map((assignment) => normalizeKey(assignment.workerName)).filter(Boolean).join(', ') || accommodation.currentOccupantName,
@@ -1244,7 +1264,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
         if (!result.isConfirmed) return;
 
         try {
-            await accommodationService.updateAccommodation(item.id, { status: 'active' });
+            await accommodationService.updateAccommodation(item.id, { status: 'active', endedDate: '', billingEndYearMonth: '' });
             await supportCancellationLogService.createLog({
                 resourceType: 'accommodation',
                 resourceId: item.id,
@@ -1305,10 +1325,10 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     // Stats Logic
     const totalCount = selectedTeamScopedAccommodations.length;
     const currentWorkCount = selectedTeamScopedAccommodations.filter((accommodation) => (
-        accommodation.status === 'active' && getMonthAssignmentsForAccommodation(accommodation).length === 0
+        getAccommodationStatusForMonth(accommodation, summaryMonth) === 'active' && getMonthAssignmentsForAccommodation(accommodation).length === 0
     )).length;
-    const occupiedCount = selectedTeamScopedAccommodations.filter(a => a.status === 'active').reduce((acc, _) => acc + 1, 0); // safe count
-    const vacantCount = selectedTeamScopedAccommodations.filter(a => a.status === 'inactive').reduce((acc, _) => acc + 1, 0);
+    const occupiedCount = selectedTeamScopedAccommodations.filter(a => getAccommodationStatusForMonth(a, summaryMonth) === 'active').length;
+    const vacantCount = selectedTeamScopedAccommodations.filter(a => getAccommodationStatusForMonth(a, summaryMonth) === 'inactive').length;
     // The list and both summaries share the selected contract month and filters.
     const { rent: totalRent, deposit: totalDeposit } = filteredTotals;
     const missingContractStartCount = filteredAccommodations.filter(room => !room.contract?.startDate?.trim()).length;

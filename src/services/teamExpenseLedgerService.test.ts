@@ -115,6 +115,33 @@ describe('teamExpenseLedgerService save consistency', () => {
 
   afterEach(() => { jest.restoreAllMocks(); });
 
+  it('기타청구 차감 금액을 음수 그대로 저장하고 다시 읽는다', async () => {
+    const input = buildInput({ amount: -100000, status: 'charged' });
+    const id = await teamExpenseLedgerService.saveClaim(input);
+    expect(mockedSetDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ id }), expect.objectContaining({ amount: -100000, claimType: 'otherExpense' }), { merge: true }
+    );
+    (getTeamScopedRows as jest.Mock).mockResolvedValueOnce([{ ...input, id }]);
+    expect(await teamExpenseLedgerService.getClaimsByMonth(input.yearMonth)).toEqual([
+      expect.objectContaining({ id, amount: -100000 })
+    ]);
+  });
+
+  it('기존 기타청구의 금액을 음수로 수정할 수 있다', async () => {
+    const input = buildInput({ status: 'charged' });
+    mockedGetDoc.mockResolvedValueOnce(existingDoc(input) as any);
+    await teamExpenseLedgerService.saveClaim({ ...input, id: 'credit-edit', amount: -50000 });
+    expect(mockedSetDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'credit-edit' }), expect.objectContaining({ amount: -50000 }), { merge: true }
+    );
+  });
+
+  it.each(['teamCharge', 'officeExpense'] as const)('%s에서는 음수 저장을 계속 차단한다', async claimType => {
+    await expect(teamExpenseLedgerService.saveClaim(buildInput({ claimType, chargeToTeamId: 'target', amount: -1000 })))
+      .rejects.toThrow('amount');
+    expect(mockedSetDoc).not.toHaveBeenCalled();
+  });
+
   it('reads approved requests from the existing ledger collection with their source link and receipt', async () => {
     (collection as jest.Mock).mockImplementation((_db, collectionName) => ({ collectionName }));
     (where as jest.Mock).mockImplementation((field, op, value) => ({ field, op, value }));

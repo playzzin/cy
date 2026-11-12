@@ -7,6 +7,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  where,
   setDoc,
   type DocumentData,
   type Unsubscribe,
@@ -73,6 +74,7 @@ const normalizeLog = (id: string, data: DocumentData): SupportCancellationLog =>
     reason,
     reasonLabel: asText(data.reasonLabel, SUPPORT_CANCELLATION_REASON_LABELS[reason] || '기타 처리'),
     processedDate: asText(data.processedDate),
+    billingEndYearMonth: asOptionalText(data.billingEndYearMonth),
     statusBefore: asOptionalText(data.statusBefore),
     statusAfter: asOptionalText(data.statusAfter),
     assigneeName: asOptionalText(data.assigneeName),
@@ -101,6 +103,12 @@ const filterResourceType = (
 
 export const supportCancellationLogService = {
   collectionName: COLLECTION_NAME,
+
+  getLogsByResourceType: async (resourceType: SupportCancellationResourceType): Promise<SupportCancellationLog[]> => {
+    // Historical month calculations must not depend on the recent-history limit.
+    const snapshot = await getDocs(query(collection(db, COLLECTION_NAME), where('resourceType', '==', resourceType)));
+    return snapshot.docs.map(row => normalizeLog(row.id, row.data()));
+  },
 
   createLog: async (
     input: CreateSupportCancellationLogInput,

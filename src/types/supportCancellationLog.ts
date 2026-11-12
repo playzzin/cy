@@ -27,6 +27,7 @@ export interface SupportCancellationLog {
   reason: SupportCancellationReason;
   reasonLabel: string;
   processedDate: string;
+  billingEndYearMonth?: string;
   statusBefore?: string;
   statusAfter?: string;
   assigneeName?: string;

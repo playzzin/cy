@@ -34,6 +34,21 @@ jest.mock('../../../services/teamExpenseLedgerService', () => ({ teamExpenseLedg
 jest.mock('../../../services/teamExpenseCategoryService', () => ({ DEFAULT_TEAM_EXPENSE_CATEGORIES: [], teamExpenseCategoryService: { getCategories: async () => [] } }));
 jest.mock('../../../utils/swal', () => ({ toast: { error: jest.fn() } }));
 
+it('음수 기타청구를 상세에 유지하고 팀별 금액과 전체 합계에서 차감한다', async () => {
+  (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValueOnce([
+    { id: 'cost', yearMonth: '2026-09', payerTeamId: 'fixture-team', claimType: 'otherExpense', amount: 90000, status: 'charged' },
+    { id: 'credit', yearMonth: '2026-09', payerTeamId: 'fixture-team', claimType: 'otherExpense', amount: -30000, status: 'charged' },
+    { id: 'draft', yearMonth: '2026-09', payerTeamId: 'fixture-team', claimType: 'otherExpense', amount: -50000, status: 'draft' }
+  ]);
+  (dailyReportService.getReports as jest.Mock).mockResolvedValueOnce([]);
+  const { result } = renderHook(() => useExpenseLedgerData('2026-09', 'fixture-team', 'posted', true));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.summaries[0]).toMatchObject({ otherClaim: 60000 });
+  expect(result.current.totals).toMatchObject({ otherClaim: 60000, total: 60000 });
+  expect(result.current.selectedClaims.other.map(row => row.amount)).toEqual(expect.arrayContaining([90000, -30000]));
+  expect(result.current.selectedClaims.other).toHaveLength(2);
+});
+
 it('공수 조회 실패를 0공수로 오인하지 않도록 평균 집계를 보류한다', async () => {
   const warning = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
   (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValueOnce([

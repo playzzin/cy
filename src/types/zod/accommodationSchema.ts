@@ -47,6 +47,8 @@ export const accommodationSchema = z.object({
     type: AccommodationType,
     utilityOverchargeThreshold: z.number().nonnegative().optional(),
     status: AccommodationStatus.default('active'),
+    endedDate: z.string().optional(),
+    billingEndYearMonth: z.string().optional(),
     ownership: AccommodationOwnership,
     contract: AccommodationContractSchema,
     costProfile: CostProfileSchema,
