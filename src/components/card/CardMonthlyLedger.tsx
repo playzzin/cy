@@ -1288,7 +1288,18 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         setSaveFeedback(null);
     }, []);
 
+    const canSaveLedger = !loadingCards && !loading && !saving && !statementUploadingRowId && !isStatementImportOpen
+        && yearMonth === requestedYearMonth && loadedExportScope?.yearMonth === requestedYearMonth
+        && loadedExportScope?.cards === cards && rows.length > 0;
+
     const handleSave = async () => {
+        if (!canSaveLedger) return;
+        // Capture both sides before any await; a concurrent reload must not pair
+        // the previous screen's amounts with newly fetched source transactions.
+        const saveRows = [...rows];
+        const originalTransactions = [...originalTxsRef.current];
+        const saveLoadRequestId = loadRequestIdRef.current;
+        const saveScope = exportScopeRef.current;
         setSaving(true);
         try {
             // Saving is safety-sensitive: unlike the normal screen load, this
@@ -1298,18 +1309,28 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 cardBillingService.getBillingsByMonth(yearMonth),
                 teamSettlementProtectionService.getConfirmedTeamSettlementKeys(yearMonth)
             ]);
+            if (saveLoadRequestId !== loadRequestIdRef.current
+                || saveScope.yearMonth !== exportScopeRef.current.yearMonth
+                || saveScope.cards !== exportScopeRef.current.cards) {
+                setSaveFeedback({
+                    status: 'error',
+                    title: '저장 중단',
+                    message: '조회 결과가 바뀌었습니다. 최신 카드 대장을 확인한 뒤 다시 저장해 주세요.'
+                });
+                return;
+            }
             // A positive row without a resolvable billing target must not be
             // persisted by itself: that would make the ledger and team expense
             // disagree. Zero rows remain eligible so their saved transactions
             // and associated DRAFT billing can be cleared.
             const resolvedTargetsByRowId = new Map(
-                rows.map((row) => [row.id, resolveCardBillingTarget(row)] as const)
+                saveRows.map((row) => [row.id, resolveCardBillingTarget(row)] as const)
             );
-            const missingTargetRows = rows.filter((row) => (
+            const missingTargetRows = saveRows.filter((row) => (
                 row.total > 0 && !resolvedTargetsByRowId.get(row.id)
             ));
             const missingTargetRowIds = new Set(missingTargetRows.map((row) => row.id));
-            const settlementProtectedRows = rows.filter((row) => {
+            const settlementProtectedRows = saveRows.filter((row) => {
                 const target = resolvedTargetsByRowId.get(row.id);
                 return Boolean(target && teamSettlementProtectionService.isConfirmedTarget(
                     confirmedSettlementKeys,
@@ -1317,7 +1338,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 ));
             });
             const settlementProtectedRowIds = new Set(settlementProtectedRows.map((row) => row.id));
-            const postedBillingProtectedRows = rows.filter((row) => (
+            const postedBillingProtectedRows = saveRows.filter((row) => (
                 getAllBillingDocumentsForRow(row, freshBillingDocuments)
                     .some(isPostedCardBillingDocument)
             ));
@@ -1325,7 +1346,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 postedBillingProtectedRows.map((row) => row.id)
             );
             const preflightClaimedBillingIds = new Set(
-                rows.flatMap((row) => (
+                saveRows.flatMap((row) => (
                     getAllBillingDocumentsForRow(row, freshBillingDocuments)
                         .map((document) => document.id)
                         .filter(Boolean)
@@ -1335,13 +1356,13 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 yearMonth,
                 billings: freshBillingDocuments,
                 claimedBillingIds: preflightClaimedBillingIds,
-                currentCardIds: new Set(rows.map((row) => normalizeKey(row.card.id)).filter(Boolean)),
+                currentCardIds: new Set(saveRows.map((row) => normalizeKey(row.card.id)).filter(Boolean)),
                 isProtectedTarget: (document) => teamSettlementProtectionService.isConfirmedTarget(
                     confirmedSettlementKeys,
                     { teamId: document.teamId, teamName: document.teamName }
                 )
             });
-            const rowsWithoutDirectProtection = rows.filter((row) => (
+            const rowsWithoutDirectProtection = saveRows.filter((row) => (
                 !missingTargetRowIds.has(row.id) &&
                 !settlementProtectedRowIds.has(row.id) &&
                 !postedBillingProtectedRowIds.has(row.id)
@@ -1361,7 +1382,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             });
             const sourceFullyEligibleCardIds = new Set<string>();
             const allRowsByCardId = new Map<string, CardLedgerRow[]>();
-            rows.forEach((row) => {
+            saveRows.forEach((row) => {
                 const cardId = normalizeKey(row.card.id);
                 const cardRows = allRowsByCardId.get(cardId) ?? [];
                 cardRows.push(row);
@@ -1377,7 +1398,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 ledgerInput: {
                     yearMonth,
                     visibleRows: eligibleRows.map((row) => ({ row })),
-                    originalTransactions: originalTxsRef.current,
+                    originalTransactions,
                     categories: CATEGORIES,
                     getBillingDocumentsForRow: (row) => getAllBillingDocumentsForRow(row, freshBillingDocuments)
                 },
@@ -1404,7 +1425,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     message: outcome.stage === 'final-read'
                         ? '최종 저장 결과를 다시 불러오지 못함(저장 재시도로 중복 없이 확인 가능)'
                         : outcome.stage === 'stored-read'
-                            ? '저장된 데이터를 다시 불러오지 못해 팀별 경비 자동 반영을 중단했습니다. 잠시 후 저장을 다시 누르면 중복 없이 재시도됩니다.'
+                            ? '저장된 데이터를 다시 불러오지 못해 팀별 경비 자동 반영을 중단했습니다. 화면을 새로고침한 뒤 다시 저장해 주세요.'
                             : '대장은 저장됐지만 자동 반영을 확인하지 못했습니다.',
                     operationId: result.operationId
                 });
@@ -1414,7 +1435,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 setSaveFeedback({
                     status: 'warning',
                     title: '대장은 저장됐지만 자동 반영을 확인하지 못했습니다.',
-                    message: '저장된 데이터를 다시 불러오지 못해 팀별 경비 자동 반영을 중단했습니다. 잠시 후 저장을 다시 누르면 중복 없이 재시도됩니다.',
+                    message: '저장된 데이터를 다시 불러오지 못해 팀별 경비 자동 반영을 중단했습니다. 화면을 새로고침한 뒤 다시 저장해 주세요.',
                     operationId: result.operationId
                 });
                 return;
@@ -1758,9 +1779,9 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     <SupportExcelDownloadButton disabled={!canExportLedger} hasUnsavedChanges={isDirty} onDownload={handleExcelDownload} />
                     <button
                         onClick={handleSave}
-                        disabled={saving}
+                        disabled={!canSaveLedger}
                         className={`px-5 sm:px-6 py-2.5 rounded-xl font-bold text-white shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center gap-2 whitespace-nowrap
-                            ${saving ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'}
+                            ${!canSaveLedger ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'}
                         `}
                     >
                         <FontAwesomeIcon icon={faSave} />
@@ -1772,7 +1793,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             {saveFeedback && (
                 <SupportSaveFeedback
                     feedback={saveFeedback}
-                    retryDisabled={saving}
+                    retryDisabled={!canSaveLedger}
                     onRetry={saveFeedback.status !== 'success' ? () => void handleSave() : undefined}
                     onDismiss={() => setSaveFeedback(null)}
                 />

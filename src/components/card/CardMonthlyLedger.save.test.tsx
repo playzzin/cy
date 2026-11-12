@@ -12,7 +12,9 @@ import { manpowerService } from '../../services/manpowerService';
 import { officeStaffService } from '../../services/officeStaffService';
 import CardStatementUsageDialog from './CardStatementUsageDialog';
 import CardStatementFilesDialog from './CardStatementFilesDialog';
+import CardStatementImportModal from './CardStatementImportModal';
 import type { Card, CardTransaction } from '../../types/card';
+import type { CardBillingDocument } from '../../types/cardBilling';
 import type { CardMonthlyLedgerSaveResult } from '../../services/cardMonthlyLedgerMutationService';
 
 jest.mock('../../utils/supportResourceExcelExport', () => ({ buildCardLedgerWorkbook: jest.fn(() => ({})), downloadSupportResourceWorkbook: jest.fn() }));
@@ -24,7 +26,7 @@ jest.mock('../../services/cardStatementAttachmentService', () => ({
   getCardStatementFileName: (path: string) => path.split('/').pop(),
   getCardStatementAttachmentError: () => '파일 조회 실패',
 }));
-jest.mock('./CardStatementImportModal', () => ({ __esModule: true, default: () => null }));
+jest.mock('./CardStatementImportModal', () => ({ __esModule: true, default: jest.fn(() => null) }));
 jest.mock('./CardStatementImportHistoryModal', () => ({ CardStatementImportHistoryModal: () => null }));
 jest.mock('./CardStatementFilesDialog', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('./CardStatementUsageDialog', () => ({
@@ -57,6 +59,18 @@ let diagnostic: jest.SpyInstance;
 const ledger = jest.mocked(cardMonthlyLedgerMutationService.saveMonthlyLedger);
 const billings = jest.mocked(cardBillingService.getBillingsByMonth);
 const protection = jest.mocked(teamSettlementProtectionService.getConfirmedTeamSettlementKeys);
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+const completeImport = () => jest.mocked(CardStatementImportModal).mock.calls.slice(-1)[0][0].onCompleted?.();
 
 beforeEach(() => {
   jest.mocked(CardStatementFilesDialog).mockClear().mockImplementation(({ onClose }) => <div role="dialog" aria-label="사용내역서 원본"><button onClick={onClose}>원본 닫기</button></div>);
@@ -164,6 +178,56 @@ it('blocks card export while loading a changed filter and after a failed month l
   expect(downloadSupportResourceWorkbook).not.toHaveBeenCalled();
 });
 
+it.each(['reload', 'month', 'cards'])('blocks saving during a pending or failed %s read', async (scope) => {
+  const { rerender } = render(<CardMonthlyLedger cards={cards} teams={teams} loadingCards={false} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: /^저장$/ })).toBeEnabled());
+  const pending = deferred<CardTransaction[]>();
+  jest.mocked(cardService.getTransactionsByMonth).mockReturnValueOnce(pending.promise);
+  if (scope === 'month') {
+    await act(async () => rememberSupportManagementYearMonth('2026-08'));
+  } else if (scope === 'cards') {
+    rerender(<CardMonthlyLedger cards={[...cards]} teams={teams} loadingCards={false} />);
+  } else {
+    act(completeImport);
+  }
+  const save = screen.getByRole('button', { name: /^저장$/ });
+  expect(save).toBeDisabled();
+  fireEvent.click(save);
+  expect(ledger).not.toHaveBeenCalled();
+  await act(async () => pending.reject(Error('fixture pending read refused')));
+  expect(screen.getByRole('button', { name: /^저장$/ })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /^저장$/ }));
+  expect(ledger).not.toHaveBeenCalled();
+});
+
+it('aborts a save when a completed import replaces its source snapshot during preflight', async () => {
+  transactions = [{ id: 'old-memo', cardId: card.id, cardLabel: card.name, date: '2026-07-01', yearMonth: '2026-07', merchant: 'fixture', category: 'OTHER', amount: 0, memo: 'PDF로 가져옴' }];
+  // eslint-disable-next-line testing-library/no-unnecessary-act
+  await act(async () => { render(<CardMonthlyLedger cards={cards} teams={teams} loadingCards={false} />); });
+  const preflight = deferred<CardBillingDocument[]>();
+  billings.mockReturnValueOnce(preflight.promise);
+  fireEvent.click(screen.getByRole('button', { name: /^저장$/ }));
+
+  const reload = deferred<CardTransaction[]>();
+  jest.mocked(cardService.getTransactionsByMonth).mockReturnValueOnce(reload.promise);
+  act(completeImport);
+  transactions = [{ id: 'new-import', cardId: card.id, cardLabel: card.name, date: '2026-06-12', yearMonth: '2026-07', merchant: 'fixture', category: 'OTHER', amount: 100, memo: 'PDF로 가져옴' }];
+  await act(async () => reload.resolve(transactions));
+  await act(async () => preflight.resolve([]));
+
+  expect(await screen.findByText('저장 중단')).toBeInTheDocument();
+  expect(ledger).not.toHaveBeenCalled();
+  expect(cardBillingService.replaceDraftBilling).not.toHaveBeenCalled();
+  expect(screen.getAllByRole('textbox')[0]).toHaveValue('100');
+  const importedTransactions = transactions;
+  fireEvent.click(screen.getByRole('button', { name: /^저장$/ }));
+  await waitFor(() => expect(ledger).toHaveBeenCalledWith(expect.objectContaining({
+    originalTransactions: importedTransactions,
+    visibleRows: [expect.objectContaining({ row: expect.objectContaining({ total: 100 }) })],
+  })));
+  await screen.findByText('저장 및 팀별 경비 반영 완료');
+});
+
 it('post-save settlement read failure remains a ledger-preserving warning even when diagnostics throw', async () => {
   protection.mockResolvedValueOnce({ teamIds: new Set(), teamNames: new Set() })
     .mockRejectedValueOnce(new Error('fixture settlement read refused'));
@@ -211,7 +275,7 @@ it('post-save null snapshot uses the existing saved-ledger warning and leaves bi
   await screen.findByText('대장은 저장됐지만 자동 반영을 확인하지 못했습니다.');
   expect(ledger).toHaveBeenCalledTimes(1);
   expect(cardBillingService.replaceDraftBilling).not.toHaveBeenCalled();
-  expect(screen.getByRole('button', { name: '다시 저장' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '다시 저장' })).toBeDisabled();
 });
 
 it('preflight team protection preserves original guide and excludes protected amounts from the ledger input', async () => {

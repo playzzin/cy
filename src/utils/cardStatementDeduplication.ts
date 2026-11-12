@@ -288,7 +288,11 @@ export const dedupeImportedStatementTransactions = (
   const suppressedImportSources = new Set<string>();
 
   dedupedTransactions.forEach((transaction) => {
-    if (!normalizeText(transaction.id).startsWith('card-ledger__')) return;
+    const transactionId = normalizeText(transaction.id);
+    if (!transactionId.startsWith('card-ledger__')) return;
+    // A memo-only row carries notes/attachments, not a manual amount override.
+    // Keep it alongside imports when the same PDF is registered again.
+    if (transactionId.endsWith('__MEMO') && Number(transaction.amount) === 0) return;
 
     const ledgerSourceIdentities = new Set(getCardStatementSourceIdentities(transaction));
     if (ledgerSourceIdentities.size === 0) return;
