@@ -114,6 +114,20 @@ test('multiword FALL BAC and FALL BACK approval methods preserve amounts and can
     }
 });
 
+test('ISP KEYIN approvals on later pages reconcile with zero VAT and cancellation rows', () => {
+    for (const method of ['ISP KEYIN', 'ISP  KEYIN', 'ISP\tKEYIN', 'ISPKEYIN']) {
+        const onlineRow = (amount: number, status = '정상') => row(amount, status)
+            .replace(' 1,000 IC ', ` 0 ${method} `);
+        const parsed = parseKbApprovalStatement([
+            header() + row(11000),
+            onlineRow(14000) + onlineRow(11000, '승인취소'),
+        ]);
+        assert.equal(parsed?.grandTotalAmount, 14000);
+        assert.deepEqual(parsed?.cards[0].transactions.map(transaction => transaction.amount), [11000, 14000, -11000]);
+        assert.throws(() => parseKbApprovalStatement([header() + row(11000), onlineRow(14000)]), KbApprovalReconciliationError);
+    }
+});
+
 test('multiple cards are grouped using visible transaction card numbers', () => {
     const parsed = parseKbApprovalStatement([header(25000, 0, '2/0').replace('카드번호 1234-56**-****-1234', '카드번호 전체')
         + row(11000) + row(14000, '정상', '5678')]);
@@ -139,7 +153,7 @@ test('real PDF text extraction reads every page and preserves cancellation witho
     const pdf = await PDFDocument.create();
     pdf.registerFontkit(require('@pdf-lib/fontkit'));
     const font = await pdf.embedFont(readFileSync(require.resolve('@fontsource/noto-sans-kr/files/noto-sans-kr-korean-400-normal.woff')), { subset: true });
-    for (const text of [header() + row(11000), row(14000), row(-11000, '승인취소')]) {
+    for (const text of [header() + row(11000), row(14000).replace(' IC ', ' ISP KEYIN '), row(-11000, '승인취소')]) {
         const page = pdf.addPage([1000, 840]);
         text.trim().split('\n').forEach((line, i) => page.drawText(line, { x: 30, y: 800 - i * 20, size: 10, font }));
     }
