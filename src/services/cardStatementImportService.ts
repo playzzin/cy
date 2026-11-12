@@ -127,9 +127,12 @@ export const cardStatementImportService = {
     return { ...result.data, results: sortResults(result.data.results || []) };
   },
 
-  async cancelStoredFile(fileId: string): Promise<void> {
-    const callable = httpsCallable<{ fileId: string }, { ok: boolean }>(functions, 'cancelCardStatementImportFile');
-    await callable({ fileId });
+  async cancelStoredFile(fileId: string, options: { deleteOriginal?: boolean } = {}): Promise<void> {
+    const callable = httpsCallable<{ fileId: string; deleteOriginal?: boolean }, { ok: boolean; originalDeleted?: boolean }>(functions, 'cancelCardStatementImportFile');
+    const result = await callable({ fileId, ...options });
+    if (options.deleteOriginal && result.data.originalDeleted !== true) {
+      throw Object.assign(new Error('원본 삭제 완료를 확인하지 못했습니다. 화면을 다시 열어 확인하고, 계속되면 관리자에게 서버 적용 상태를 문의해 주세요.'), { details: { sourceDeletionStatus: 'pending' } });
+    }
   },
 
   async createUploadSession(

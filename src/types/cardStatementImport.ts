@@ -71,6 +71,8 @@ export interface CardStatementImportFile {
   sourceHashObservedSha256?: string;
   sourceHashVerifiedAt?: Timestamp;
   status: CardStatementImportFileStatus;
+  sourceDeletionStatus?: 'pending' | 'deleted';
+  sourceDeletedAt?: Timestamp;
   statementMonth?: string;
   grandTotalAmount?: number;
   grandTotalAvailable?: boolean;

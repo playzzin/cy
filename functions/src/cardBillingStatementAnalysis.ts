@@ -3555,10 +3555,10 @@ export const deleteCardStatementAttachment = functions
 export const cancelCardStatementImportFile = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 10 })
     .region('asia-northeast3')
-    .https.onCall(withGeminiUsageContext(async (data: { fileId?: string }, context) => {
+    .https.onCall(withGeminiUsageContext(async (data: { fileId?: string; deleteOriginal?: boolean }, context) => {
         try {
             const auth = await requireCardStatementAccess(context) as NonNullable<functions.https.CallableContext['auth']>;
-            return await cancelStoredCardStatementFile(admin.firestore(), asString(data?.fileId), auth.uid);
+            return await cancelStoredCardStatementFile(admin.firestore(), asString(data?.fileId), auth.uid, { deleteOriginal: data?.deleteOriginal === true });
         } catch (error) {
             throw toHttpsError(error);
         }

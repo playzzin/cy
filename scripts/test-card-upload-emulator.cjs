@@ -9,7 +9,7 @@ if (!env.JAVA_HOME && fs.existsSync(path.join(javaPath, 'bin', 'java.exe'))) {
   env.PATH = env.Path;
 }
 const cli = path.join(env.APPDATA, 'npm', 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
-const result = spawnSync(process.execPath, [cli, 'emulators:exec', '--only', 'firestore', '--project', 'demo-card-upload-cancellation', 'node --test functions/lib/cardStatementImportCancellation.test.js functions/lib/cardStatementImportIdentity.test.js'], { env, stdio: ['inherit', 'pipe', 'pipe'], encoding: 'utf8', windowsHide: true });
+const result = spawnSync(process.execPath, [cli, 'emulators:exec', '--only', 'firestore,storage', '--project', 'demo-card-upload-cancellation', 'node --test functions/lib/cardStatementImportCancellation.test.js functions/lib/cardStatementImportIdentity.test.js'], { env, stdio: ['inherit', 'pipe', 'pipe'], encoding: 'utf8', windowsHide: true });
 if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);
 // Firebase CLI on Windows sometimes fails while shutting down after successful assertions.

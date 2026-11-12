@@ -10,6 +10,112 @@ test('zeroed ledger and cancelled history may cancel; any remaining amount is pr
     assert.throws(() => assertCardStatementCancellationSafe('completed', [], [{ status: 'DRAFT', totalAmount: 0, lineItems: [{ amount: 10 }] }]), /금액이 남아/);
 });
 
+test('Firestore: original deletion cleans attachments, protects shared sources and retries safely', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
+    const app = admin.initializeApp({ projectId: 'demo-card-upload-cancellation' }, 'original-deletion');
+    const db = app.firestore();
+    const deletes: string[] = [];
+    const options = { deleteOriginal: true, deleteStorageFile: async (path: string) => { deletes.push(path); } };
+    const seed = async (suffix: string, overrides: Record<string, unknown> = {}) => {
+        const fileId = `original-${suffix}`;
+        const jobId = `original-job-${suffix}`;
+        const sourcePath = `card-billing-statements/2026-10/imports/${jobId}/statement.pdf`;
+        const fileRef = db.doc(`cardStatementImportFiles/${fileId}`);
+        const txRef = db.doc(`cardTransactions/original-tx-${suffix}`);
+        const billRef = db.doc(`cardBillings/original-bill-${suffix}`);
+        const batch = db.batch();
+        batch.set(fileRef, { jobId, yearMonth: '2026-10', storagePath: sourcePath, status: 'completed', ...overrides });
+        batch.set(db.doc(`cardStatementImportJobs/${jobId}`), { yearMonth: '2026-10', status: 'completed' });
+        batch.set(db.doc(`cardStatementImportResults/original-result-${suffix}`), { jobId, fileId, matchedCardId: `original-card-${suffix}`, status: 'committed' });
+        batch.set(txRef, { yearMonth: '2026-10', cardId: `original-card-${suffix}`, amount: 0, evidenceUrl: sourcePath, statementAttachmentPaths: [sourcePath, 'unrelated.pdf'] });
+        batch.set(billRef, { yearMonth: '2026-10', totalAmount: 0, status: 'DRAFT', statementAttachmentPaths: [sourcePath, 'unrelated.pdf'] });
+        await batch.commit();
+        return { fileId, fileRef, txRef, billRef, sourcePath };
+    };
+    try {
+        const normal = await seed('normal');
+        assert.deepEqual(await cancelStoredCardStatementFile(db, normal.fileId, 'tester', options), { ok: true, alreadyCancelled: false, originalDeleted: true });
+        assert.deepEqual(deletes, [normal.sourcePath]);
+        assert.equal((await normal.fileRef.get()).data()?.sourceDeletionStatus, 'deleted');
+        assert.equal((await normal.txRef.get()).data()?.evidenceUrl, undefined);
+        assert.deepEqual((await normal.txRef.get()).data()?.statementAttachmentPaths, ['unrelated.pdf']);
+        assert.deepEqual((await normal.billRef.get()).data()?.statementAttachmentPaths, ['unrelated.pdf']);
+        assert.equal((await db.doc(`cardStatementImportCancellations/${normal.fileId}`).get()).data()?.sourceDeletionStatus, 'deleted');
+        assert.deepEqual(await cancelStoredCardStatementFile(db, normal.fileId, 'tester', options), { ok: true, alreadyCancelled: true, originalDeleted: true });
+        assert.equal(deletes.length, 1);
+
+        const retained = await seed('retained', { status: 'cancelled', cancelledByUid: 'previous-user' });
+        // A later upload for the same card/hash must survive cleanup of an old path.
+        const otherTx = db.doc('cardTransactions/original-new-upload');
+        await otherTx.set({ yearMonth: '2026-10', cardId: 'original-card-retained', amount: 100, evidenceUrl: 'new-upload.pdf' });
+        await cancelStoredCardStatementFile(db, retained.fileId, 'tester', options);
+        assert.equal((await retained.fileRef.get()).data()?.cancelledByUid, 'previous-user');
+        assert.equal((await otherTx.get()).data()?.evidenceUrl, 'new-upload.pdf');
+        assert.equal((await otherTx.get()).data()?.amount, 100);
+        assert.deepEqual((await retained.billRef.get()).data()?.statementAttachmentPaths, ['unrelated.pdf']);
+
+        const retry = await seed('retry');
+        await assert.rejects(cancelStoredCardStatementFile(db, retry.fileId, 'tester', {
+            deleteOriginal: true, deleteStorageFile: async () => { throw new Error('storage unavailable'); },
+        }), (error: any) => error.code === 'unavailable' && error.details?.sourceDeletionStatus === 'pending');
+        assert.equal((await retry.fileRef.get()).data()?.status, 'cancelled');
+        assert.equal((await retry.fileRef.get()).data()?.sourceDeletionStatus, 'pending');
+        await cancelStoredCardStatementFile(db, retry.fileId, 'tester', options);
+        assert.equal((await retry.fileRef.get()).data()?.sourceDeletionStatus, 'deleted');
+
+        const guarded = await seed('guarded');
+        const before = deletes.length;
+        await guarded.txRef.update({ amount: 1 });
+        await assert.rejects(cancelStoredCardStatementFile(db, guarded.fileId, 'tester', options), /금액이 남아/);
+        await guarded.txRef.update({ amount: 0 });
+        await guarded.billRef.update({ status: 'CONFIRMED' });
+        await assert.rejects(cancelStoredCardStatementFile(db, guarded.fileId, 'tester', options), /확정된/);
+        assert.equal(deletes.length, before);
+        assert.equal((await guarded.fileRef.get()).data()?.status, 'completed');
+
+        const shared = await seed('shared');
+        const externalBill = db.doc('cardBillings/original-other-month');
+        await externalBill.set({ yearMonth: '2026-11', totalAmount: 10, statementAttachmentPaths: [shared.sourcePath] });
+        await assert.rejects(cancelStoredCardStatementFile(db, shared.fileId, 'tester', options), /금액이 남아/);
+        await externalBill.update({ totalAmount: 0 });
+        await cancelStoredCardStatementFile(db, shared.fileId, 'tester', options);
+        assert.deepEqual((await externalBill.get()).data()?.statementAttachmentPaths, []);
+
+        const duplicate = await seed('duplicate');
+        await db.doc('cardStatementImportFiles/original-shared-file').set({ storagePath: duplicate.sourcePath, status: 'completed' });
+        await assert.rejects(cancelStoredCardStatementFile(db, duplicate.fileId, 'tester', options), /다른 업로드/);
+
+        const invalid = await seed('invalid', { storagePath: 'workers/private.pdf' });
+        await assert.rejects(cancelStoredCardStatementFile(db, invalid.fileId, 'tester', options), /카드 명세서 보관 경로/);
+        assert.equal((await invalid.fileRef.get()).data()?.status, 'completed');
+    } finally {
+        await app.delete();
+    }
+});
+
+test('Storage emulator: confirmed deletion removes the object and tolerates an already missing original', {
+    skip: !process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_STORAGE_EMULATOR_HOST,
+}, async () => {
+    const projectId = 'demo-card-upload-cancellation';
+    const app = admin.initializeApp({ projectId, storageBucket: `${projectId}.appspot.com` });
+    const db = app.firestore();
+    try {
+        for (const exists of [true, false]) {
+            const fileId = `storage-original-${exists}`;
+            const jobId = `storage-job-${exists}`;
+            const sourcePath = `card-billing-statements/2026-10/imports/${jobId}/statement.pdf`;
+            const object = app.storage().bucket().file(sourcePath);
+            if (exists) await object.save(Buffer.from('%PDF-1.4\nfixture only'), { contentType: 'application/pdf' });
+            await db.doc(`cardStatementImportJobs/${jobId}`).set({ yearMonth: '2026-10', status: 'completed' });
+            await db.doc(`cardStatementImportFiles/${fileId}`).set({ jobId, yearMonth: '2026-10', storagePath: sourcePath, status: 'completed' });
+            await cancelStoredCardStatementFile(db, fileId, 'tester', { deleteOriginal: true });
+            assert.equal((await object.exists())[0], false);
+            assert.equal((await db.doc(`cardStatementImportFiles/${fileId}`).get()).data()?.sourceDeletionStatus, 'deleted');
+        }
+    } finally {
+        await app.delete();
+    }
+});
+
 test('processing jobs and posted bills are protected even at zero', () => {
     for (const status of ['uploading', 'queued', 'analyzing', 'committing']) assert.throws(() => assertCardStatementCancellationSafe(status, [], []), /처리 중/);
     for (const status of ['CONFIRMED', 'PAID', 'OVERDUE']) assert.throws(() => assertCardStatementCancellationSafe('completed', [], [{ status, totalAmount: 0 }]), /확정된/);
