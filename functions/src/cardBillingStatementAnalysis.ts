@@ -1325,7 +1325,7 @@ const buildPreparedCommit = async (
     };
 };
 
-const commitCardStatementBillingGroupTransaction = async (params: {
+export const commitCardStatementBillingGroupTransaction = async (params: {
     db: FirebaseFirestore.Firestore;
     billingId: string;
     group: CardStatementImportBillingGroup;
@@ -1449,7 +1449,13 @@ const commitCardStatementBillingGroupTransaction = async (params: {
         pendingTransactionUpserts.forEach((transactionPayload) => {
             transaction.set(
                 db.collection(COLLECTIONS.transactions).doc(asString(transactionPayload.id)),
-                transactionPayload,
+                {
+                    ...transactionPayload,
+                    status: 'ACTIVE',
+                    // A reimport can reuse an id whose previous ledger row was cancelled.
+                    cancelledAt: admin.firestore.FieldValue.delete(),
+                    cancelledByUid: admin.firestore.FieldValue.delete(),
+                },
                 { merge: true }
             );
         });

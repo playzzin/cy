@@ -160,6 +160,27 @@ describe('card statement duplicate protection', () => {
     expect(deduped[0].id).toContain('card-statement__');
   });
 
+  it.each([false, true])('keeps reimported amounts alongside a memo-only row (reversed: %s)', (reverse) => {
+    const imported = buildImportedTotal({});
+    const memo = buildImportedTotal({
+      id: 'card-ledger__2026-07__card-9910__2026-07-13__2026-07-31__MEMO',
+      amount: 0,
+      memo: 'Keep this note',
+      operationId: 'card-monthly-ledger:2026-07',
+      lastOperationId: 'card-monthly-ledger:2026-07',
+    });
+    const transactions = reverse ? [imported, memo] : [memo, imported];
+
+    const deduped = dedupeImportedStatementTransactions(transactions);
+
+    expect(deduped).toHaveLength(2);
+    expect(deduped.reduce((sum, transaction) => sum + transaction.amount, 0)).toBe(imported.amount);
+    expect(deduped).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: memo.id, memo: 'Keep this note' }),
+      expect.objectContaining({ id: imported.id, statementAttachmentPaths: imported.statementAttachmentPaths }),
+    ]));
+  });
+
   it('keeps a manually corrected monthly-ledger amount instead of its source imports', () => {
     const first = buildImportedTotal({});
     const second = buildImportedTotal({
