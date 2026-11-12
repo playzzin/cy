@@ -89,9 +89,9 @@ export const parseKbApprovalStatement = (pages: readonly string[]): KbApprovalSt
         if (!/^\d{5}\s+KM\d{4}\s+/.test(lines[i])) continue;
         const row = /^\d{5}\s+KM(\d{4})\s+(.+?)\s+일시불\s+(-?[\d,]+)\s+국내\s+\d+\s+\S+$/.exec(lines[i]);
         const date = (lines[i - 2] || '').replace(/\./g, '-');
-        // KB exports may truncate the multiword approval method "FALL BACK"
-        // to "FALL BAC". Both are one method field, followed by the same status.
-        const detail = /\s(\d+)\s+(-?[\d,]+)\s+(?:FALL\s+BAC(?:K)?|\S+)\s+(정상|승인취소)\s+\S+$/.exec(lines[i + 1] || '');
+        // Approval methods can contain spaces: "ISP KEYIN" or "FALL BACK"
+        // (sometimes truncated to "FALL BAC"). Preserve the trailing status fields.
+        const detail = /\s(\d+)\s+(-?[\d,]+)\s+(?:ISP\s+KEYIN|FALL\s+BAC(?:K)?|\S+)\s+(정상|승인취소)\s+\S+$/.exec(lines[i + 1] || '');
         if (!row || !detail || detail[1] !== '0' || !validDate(date) || date < start || date > end
             || !/^\d{2}:\d{2}:\d{2}$/.test(lines[i - 1] || '')) {
             throw new KbApprovalReconciliationError('거래 행의 날짜·금액·상태를 확인할 수 없습니다.');
