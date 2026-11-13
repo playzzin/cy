@@ -1186,19 +1186,10 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
             const activeIds = activeList
                 .map((assignment) => normalizeKey(assignment.id))
                 .filter((id): id is string => Boolean(id));
-            if (activeIds.length > 0) {
-                await accommodationAssignmentService.endAssignmentsBatch(activeIds, form.processedDate);
-            }
-
             const targetRows = (await accommodationBillingTargetService.listTargetsByAccommodationId(accommodation.id))
                 .filter((target) => !normalizeKey(target.endDate));
-            if (targetRows.length > 0) {
-                await accommodationBillingTargetService.applyTargetChanges({
-                    accommodationId: accommodation.id,
-                    closeRecords: targetRows.map((target) => ({ id: target.id, endDate: form.processedDate }))
-                });
-            }
 
+            // Validate protected settlements and clear later expenses before ending assignments.
             await accommodationService.updateAccommodation(accommodation.id, {
                 status: 'inactive',
                 endedDate: form.processedDate,
@@ -1206,6 +1197,16 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 currentOccupantName: '',
                 currentOccupantPhone: ''
             });
+            if (activeIds.length > 0) {
+                await accommodationAssignmentService.endAssignmentsBatch(activeIds, form.processedDate);
+            }
+
+            if (targetRows.length > 0) {
+                await accommodationBillingTargetService.applyTargetChanges({
+                    accommodationId: accommodation.id,
+                    closeRecords: targetRows.map((target) => ({ id: target.id, endDate: form.processedDate }))
+                });
+            }
 
             await supportCancellationLogService.createLog({
                 resourceType: 'accommodation',

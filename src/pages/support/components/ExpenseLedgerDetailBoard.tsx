@@ -179,14 +179,13 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       total: number;
       userSet: Set<string>;
       statusSet: Set<string>;
-      excludedRentFields: Set<string>;
     }>();
 
     accommodationDocs.forEach((doc) => {
       const isPersonalBilling = isPersonalBillingTarget(doc.issuedToType);
       (doc.lineItems || []).forEach((item, index) => {
         const rawAmount = toAmount(item.amount);
-        if (rawAmount === 0 && !isPersonalBilling && !item.excludedContractRent) return;
+        if (rawAmount === 0 && !isPersonalBilling) return;
         // 개인청구 금액은 팀 정산 합계에서는 제외되지만, 상세표에서는
         // 저장된 원장 금액을 그대로 보여 줘야 AI 청구서 반영 여부를
         // 사용자가 확인할 수 있다.
@@ -209,8 +208,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
           other: 0,
           total: 0,
           userSet: new Set<string>(),
-          statusSet: new Set<string>(),
-          excludedRentFields: new Set<string>()
+          statusSet: new Set<string>()
         };
 
         const expenseBucket = getAccommodationExpenseBucket(item);
@@ -232,10 +230,6 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         row.total += amount;
         row.userSet.add(doc.issuedToWorkerName || doc.teamName || '팀 공용');
         row.statusSet.add(isPersonalBilling ? '개인청구' : getLedgerAwareBillingStatusLabel(doc.status, [item]));
-        if (item.excludedContractRent) {
-          row.statusSet.add(`${item.excludedContractRent.endMonth} 종료 · 월세 제외`);
-          row.excludedRentFields.add(expenseBucket);
-        }
         rowMap.set(key, row);
       });
     });
@@ -399,20 +393,6 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
   }, [cardDocs]);
 
   const accommodationAdjustments = otherClaims.filter(isAccommodationAdjustmentClaim);
-  const excludedRents = accommodationDocs.flatMap(doc => doc.lineItems
-    .filter(item => item.excludedContractRent)
-    .map(item => ({ ...item, key: `${doc.id}:${item.id}`, teamName: doc.teamName })));
-  const contractRentDetails = excludedRents.length > 0 && (
-    <div aria-label="계약 종료 월세 제외 내역" className="border-b border-slate-200 bg-sky-50 px-3 py-2 text-xs">
-      <div className="font-black text-sky-900">계약 종료월 이후의 자동 월세는 합계에서 제외했습니다.</div>
-      {excludedRents.map(item => (
-        <div key={item.key} className="mt-1">
-          {showTeamColumn ? `${item.teamName} · ` : ''}{item.label} · {item.excludedContractRent!.endMonth} 종료 · {formatCurrency(item.excludedContractRent!.amount)}원 제외
-        </div>
-      ))}
-      <div className="mt-1 text-slate-600">전기·가스·인터넷 등 별도 정산 내역은 유지됩니다.</div>
-    </div>
-  );
   const accommodationAdjustmentTotal = accommodationAdjustments.reduce((sum, claim) => sum + toAmount(claim.amount), 0);
   const adjustmentDetails = accommodationAdjustments.length > 0 && (
     <div aria-label="숙소비 조정 내역" className="border-b border-slate-200 bg-amber-50 px-3 py-2 text-xs">
@@ -483,7 +463,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       ? claimSections.find((section) => section.key === claimSectionKey)
       : undefined;
     const focusedAccommodationRows = accommodationDetail
-      ? accommodationRows.filter((row) => toAmount(row[accommodationDetail.amountKey]) !== 0 || row.excludedRentFields.has(selectedItemKey))
+      ? accommodationRows.filter((row) => toAmount(row[accommodationDetail.amountKey]) !== 0)
       : [];
     const focusedVehicleRows = vehicleDetail
       ? vehicleRows.filter((row) => toAmount(row[vehicleDetail.amountKey]) !== 0)
@@ -542,7 +522,6 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         </div>
 
         <div className={tableViewportClass}>
-          {accommodationDetail && contractRentDetails}
           {selectedItemKey === 'accommodation' && adjustmentDetails}
           {accommodationDetail && (
             <table className={fitWidth ? 'w-full table-fixed border-collapse text-xs' : 'w-full min-w-[680px] border-collapse text-sm'}>
@@ -760,7 +739,6 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         >
           {teamName} 숙소 상세내역
         </div>
-        {contractRentDetails}
         {adjustmentDetails}
         <div className={tableViewportClass}>
           <table className={fitWidth ? 'w-full table-fixed border-collapse text-xs' : 'w-full min-w-[1120px] border-collapse text-xs'}>

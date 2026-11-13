@@ -17,7 +17,7 @@ import { recordSupportWriteOperationSafely } from './supportWriteOperationLogSer
 import { getErrorMessage, reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
 import { Timestamp } from '../types/timestamp';
 import { accommodationService } from './accommodationService';
-import { applyAccommodationRentPeriod, isAutomaticAccommodationRent } from '../utils/accommodationRentPeriod';
+import { applyAccommodationExpensePeriod } from '../utils/accommodationExpensePeriod';
 import {
     AccommodationBillingDocument,
     AccommodationBillingLineItem,
@@ -597,9 +597,9 @@ export const accommodationBillingService = {
             } as AccommodationBillingDocument;
         });
         if (!params.forExpenseLedger || !documents.some((document: AccommodationBillingDocument) => (
-            isDraftAccommodationBillingStatus(document.status) && document.lineItems.some(isAutomaticAccommodationRent)
+            document.lineItems.some(item => item.sourceAccommodationId)
         ))) return documents;
-        return applyAccommodationRentPeriod(documents, await accommodationService.listAllAccommodations());
+        return applyAccommodationExpensePeriod(documents, await accommodationService.listAllAccommodations());
     },
 
     async upsertBillingDocument(
@@ -625,6 +625,12 @@ export const accommodationBillingService = {
         const beforeBilling = await findAccommodationBillingDocumentById(docData.id);
         if (beforeBilling && isProtectedAccommodationBillingStatus(beforeBilling.status)) {
             throw new Error(`accommodation-billing-protected-modification-blocked:${String(beforeBilling.status ?? '')}`);
+        }
+        if (docData.lineItems.some(item => item.sourceAccommodationId)) {
+            const [allowed] = applyAccommodationExpensePeriod([docData], await accommodationService.listAllAccommodations());
+            if ((allowed?.lineItems.length ?? 0) !== docData.lineItems.length) {
+                throw new Error('종료월 이후에는 숙소 경비를 저장할 수 없습니다.');
+            }
         }
 
         const storedTeamId = teamUuid ?? null;
@@ -839,10 +845,10 @@ export const accommodationBillingService = {
         }
 
         const currentBilling = mapAccommodationBillingDocument(row, items);
-        if (currentBilling.lineItems.some(isAutomaticAccommodationRent)) {
-            const [checked] = applyAccommodationRentPeriod([currentBilling], await accommodationService.listAllAccommodations());
-            if (checked.lineItems.some(item => item.excludedContractRent)) {
-                throw new Error('계약 종료월 이후의 자동 월세가 남아 있어 확정할 수 없습니다. 숙소 청구서에서 해당 월세를 확인하고 수정해 주세요.');
+        if (currentBilling.lineItems.some(item => item.sourceAccommodationId)) {
+            const [checked] = applyAccommodationExpensePeriod([currentBilling], await accommodationService.listAllAccommodations());
+            if ((checked?.lineItems.length ?? 0) !== currentBilling.lineItems.length) {
+                throw new Error('계약 종료월 이후의 숙소 경비가 남아 있어 확정할 수 없습니다. 종료 이후 내역을 삭제한 뒤 다시 시도해 주세요.');
             }
         }
 

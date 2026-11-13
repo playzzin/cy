@@ -3,7 +3,7 @@ import { useExpenseLedgerData } from './useExpenseLedgerData';
 import { teamExpenseLedgerService } from '../../../services/teamExpenseLedgerService';
 import { dailyReportService } from '../../../services/dailyReportService';
 import { accommodationBillingService } from '../../../services/accommodationBillingService';
-import { applyAccommodationRentPeriod } from '../../../utils/accommodationRentPeriod';
+import { applyAccommodationExpensePeriod } from '../../../utils/accommodationExpensePeriod';
 import type { Accommodation } from '../../../types/accommodation';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 
@@ -76,7 +76,7 @@ it('숙소 청구서 자체의 음수 조정도 합계에서 차감한다', asyn
   expect(result.current.totals.accommodation).toBe(550000);
 });
 
-it('월 이동 시 10월 월세 95만원을 유지하고 11월은 종료 월세만 제외해 100만원을 표시한다', async () => {
+it('10월 95만원을 유지하고 11월은 종료 숙소의 모든 경비와 상세 행을 제외한다', async () => {
   const room = { id: 'ended', status: 'active', contract: { endDate: '2026-10-31' } } as Accommodation;
   (accommodationBillingService.getBillingDocuments as jest.Mock).mockImplementation(async ({ yearMonth, forExpenseLedger }) => {
     expect(forExpenseLedger).toBe(true);
@@ -92,7 +92,7 @@ it('월 이동 시 10월 월세 95만원을 유지하고 11월은 종료 월세�
         { id: 'worker-rent', amount: 500000, targetField: 'accommodation', sourceType: 'utility_ledger', sourceAccommodationId: 'worker-room' },
       ] },
     ] as AccommodationBillingDocument[];
-    return applyAccommodationRentPeriod(docs, [room]);
+    return applyAccommodationExpensePeriod(docs, [room]);
   });
   (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValue([]);
   const { result, rerender } = renderHook(({ month }) => useExpenseLedgerData(month, 'fixture-team', 'all', false, true), {
@@ -102,8 +102,9 @@ it('월 이동 시 10월 월세 95만원을 유지하고 11월은 종료 월세�
   expect(result.current.totals.accommodation).toBe(950000);
   rerender({ month: '2026-11' });
   await waitFor(() => expect(result.current.totals.accommodation).toBe(1000000));
-  expect(result.current.totals.utility).toBe(30100);
-  expect(result.current.selectedRawDocs.accommodationDocs[0].lineItems[0].excludedContractRent?.amount).toBe(450000);
+  expect(result.current.totals.utility).toBe(0);
+  expect(result.current.selectedRawDocs.accommodationDocs.flatMap(doc => doc.lineItems)
+    .some(item => item.sourceAccommodationId === 'ended')).toBe(false);
 });
 
 it('음수 기타청구를 상세에 유지하고 팀별 금액과 전체 합계에서 차감한다', async () => {

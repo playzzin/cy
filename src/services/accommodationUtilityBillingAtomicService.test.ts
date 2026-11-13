@@ -167,6 +167,17 @@ describe('accommodationUtilityBillingAtomicService', () => {
     mockedDeleteField.mockImplementation(() => ({ __deleteField: true }) as never);
   });
 
+  it('종료 이후에는 오래 열린 화면의 자동청구도 생성하지 않는다', async () => {
+    const store = installTransactionHarness({
+      'accommodations/acc-101': { status: 'inactive', billingEndYearMonth: '2026-07' },
+    });
+    await expect(accommodationUtilityBillingAtomicService.reconcileRecord({
+      yearMonth: '2026-08', record, desiredDocuments: [billing('new', 'team', [line('rent')])],
+      relatedDocuments: [], sourceDocumentsByDesiredId: [],
+    })).rejects.toThrow('종료월 이후');
+    expect(store.size).toBe(1);
+  });
+
   it('replaces only the record lines while preserving manual and other-accommodation lines', async () => {
     const own = line('own');
     const manual = line('f64f0db4-7992-4718-b493-31ad84f60b04', {

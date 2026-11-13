@@ -375,7 +375,7 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
     expect(isProtectedAccommodationBillingStatus('OVERDUE')).toBe(true);
   });
 
-  it('경비 조회에서만 종료 후 월세를 제외하고 원본 조회와 데이터는 유지한다', async () => {
+  it('경비 조회에서 종료 후 청구 행과 빈 문서를 제거하고 원본 조회는 유지한다', async () => {
     jest.mocked(accommodationService.listAllAccommodations).mockResolvedValue([
       { id: 'acc-1', status: 'active', contract: { endDate: '2026-06-30' } } as any,
     ]);
@@ -384,7 +384,7 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
     expect(raw[0].lineItems[0].amount).toBe(450000);
     expect(accommodationService.listAllAccommodations).not.toHaveBeenCalled();
     const expenses = await accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: '2026-07', forExpenseLedger: true });
-    expect(expenses[0].lineItems[0]).toMatchObject({ amount: 0, excludedContractRent: { amount: 450000, endMonth: '2026-06' } });
+    expect(expenses).toEqual([]);
     expect(mockedUpdateDoc).not.toHaveBeenCalled();
     expect(mockedUpdateItem).not.toHaveBeenCalled();
     expect(mockedDeleteItem).not.toHaveBeenCalled();
@@ -396,7 +396,7 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
     ]);
     mockedListDocs.mockResolvedValue({ data: { accommodationBillingDocuments: [{ ...buildStoredDoc(), issuedToType }] } } as any);
     mockedListItems.mockResolvedValue({ data: { accommodationBillingLineItems: [buildStoredItem({ amount: 450000 })] } } as any);
-    await expect(accommodationBillingService.confirmAndPostToAdvancePayment(BILLING_ID)).rejects.toThrow('계약 종료월 이후의 자동 월세');
+    await expect(accommodationBillingService.confirmAndPostToAdvancePayment(BILLING_ID)).rejects.toThrow('계약 종료월 이후의 숙소 경비');
     expect(mockedUpdateDoc).not.toHaveBeenCalled();
     expect(mockedUpdateAdvance).not.toHaveBeenCalled();
   });

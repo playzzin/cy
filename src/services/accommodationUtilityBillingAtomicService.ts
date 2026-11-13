@@ -6,6 +6,8 @@ import {
   type Transaction,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import type { Accommodation } from '../types/accommodation';
+import { isAccommodationExpenseAfterEnd } from '../utils/accommodationLifecycle';
 import type {
   AccommodationBillingDocument,
   AccommodationBillingLineItem,
@@ -245,6 +247,12 @@ export const accommodationUtilityBillingAtomicService = {
     });
 
     return runTransaction(db, async (transaction) => {
+      if (input.desiredDocuments.length > 0 && input.record.accommodationId) {
+        const room = await transaction.get(doc(db, 'accommodations', input.record.accommodationId));
+        if (room.exists() && isAccommodationExpenseAfterEnd(room.data() as Accommodation, yearMonth)) {
+          throw new Error('종료월 이후에는 숙소 경비를 생성할 수 없습니다. 새로고침해 주세요.');
+        }
+      }
       const guardRef = doc(db, SYNC_GUARD_COLLECTION, getGuardId(yearMonth, recordId));
       const guardSnapshot = await transaction.get(guardRef);
       const guardData = guardSnapshot.exists()

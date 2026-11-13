@@ -2,7 +2,7 @@ import { accommodationFirestoreService } from './accommodationFirestoreService';
 import { accommodationAssignmentService } from './accommodationAssignmentService';
 import { accommodationBillingTargetService } from './accommodationBillingTargetService';
 import { supportCancellationLogService } from './supportCancellationLogService';
-import { applyAccommodationTerminationHistory, getAccommodationStatusForMonth, isAccommodationContractInMonth } from '../utils/accommodationLifecycle';
+import { applyAccommodationTerminationHistory, getAccommodationStatusForMonth, isAccommodationContractInMonth, isAccommodationExpenseAfterEnd } from '../utils/accommodationLifecycle';
 import { Accommodation, UtilityRecord } from '../types/accommodation';
 import { AccommodationAssignment } from '../types/accommodationAssignment';
 import { DEFAULT_SUPPORT_BILLING_START_DATE, isSupportBillingMonthEnabled, maxIsoDate, minIsoDate } from '../utils/supportBillingPeriod';
@@ -116,6 +116,17 @@ const loadAccommodations = async (status?: 'active' | 'inactive'): Promise<Accom
     return applyAccommodationTerminationHistory(rooms, logs);
 };
 
+const assertUtilityRecordsWithinPeriod = async (records: Array<Partial<UtilityRecord>>) => {
+    const ids = [...new Set(records.map(record => String(record.accommodationId ?? '').trim()).filter(Boolean))];
+    const rooms = await Promise.all(ids.map(id => accommodationFirestoreService.getAccommodation(id)));
+    records.forEach(record => {
+        const room = rooms.find(value => value?.id === record.accommodationId);
+        if (room && isAccommodationExpenseAfterEnd(room, record.yearMonth || '')) {
+            throw new Error('종료월 이후에는 숙소 경비를 저장할 수 없습니다. 새로고침해 주세요.');
+        }
+    });
+};
+
 export const accommodationService = {
     listAllAccommodations: async (status?: 'active' | 'inactive') => {
         return loadAccommodations(status);
@@ -141,6 +152,11 @@ export const accommodationService = {
     },
 
     updateAccommodation: async (id: string, data: Partial<Accommodation>) => {
+        if ('status' in data || 'contract' in data || 'endedDate' in data || 'billingEndYearMonth' in data) {
+            const { saveAccommodationAndCleanupExpenses } = await import('./accommodationTerminationCleanupService');
+            await saveAccommodationAndCleanupExpenses(id, data);
+            return;
+        }
         await accommodationFirestoreService.saveAccommodation({ ...data, id } as Accommodation);
     },
 
@@ -219,6 +235,7 @@ export const accommodationService = {
         const id = data.id
             ? String(data.id)
             : buildAccommodationUtilityRecordId(accommodationId, yearMonth);
+        await assertUtilityRecordsWithinPeriod([data]);
         await accommodationFirestoreService.saveUtilityRecord({ ...data, id } as Partial<UtilityRecord> & { id: string });
     },
 
@@ -237,10 +254,12 @@ export const accommodationService = {
             if (!id || id.includes('/')) throw new Error('공과금 대장 ID를 확인해 주세요. 저장하지 않았습니다.');
             return { ...record, accommodationId, yearMonth, id };
         });
+        await assertUtilityRecordsWithinPeriod(validated);
         await accommodationFirestoreService.saveUtilityRecords(dedupeAccommodationUtilityRecordWrites(validated));
     },
 
     replaceUtilityRecord: async (record: UtilityRecord) => {
+        await assertUtilityRecordsWithinPeriod([record]);
         await accommodationFirestoreService.replaceUtilityRecord(record);
     },
 

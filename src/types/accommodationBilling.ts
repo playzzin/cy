@@ -34,8 +34,6 @@ export interface AccommodationBillingLineItem {
     sourceType?: 'utility_ledger' | 'manual';
     sourceAccommodationId?: string;
     sourceUtilityRecordId?: string;
-    /** Expense-view metadata only; the saved billing amount is unchanged. */
-    excludedContractRent?: { amount: number; endMonth: string };
     status?: AccommodationBillingLineItemStatus;
     cancelledAt?: Timestamp;
     updatedAt?: Timestamp;

@@ -3,7 +3,7 @@ import '@testing-library/jest-dom';
 import { render, screen, within } from '@testing-library/react';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import { ExpenseLedgerDetailBoard } from './ExpenseLedgerDetailBoard';
-import { applyAccommodationRentPeriod } from '../../../utils/accommodationRentPeriod';
+import { applyAccommodationExpensePeriod } from '../../../utils/accommodationExpensePeriod';
 import type { Accommodation } from '../../../types/accommodation';
 
 jest.mock('../hooks/useExpenseLedgerData', () => ({
@@ -25,24 +25,24 @@ jest.mock('../hooks/useExpenseLedgerData', () => ({
 }));
 
 describe('ExpenseLedgerDetailBoard', () => {
-  test.each([undefined, 'accommodation'] as const)('계약 종료 월세 제외 이유와 3개 숙소 및 정산 공과금을 표시한다 (%s)', selectedItemKey => {
+  test.each([undefined, 'accommodation'] as const)('종료 후 숙소 행과 공과금 및 제외 안내까지 표시하지 않는다 (%s)', selectedItemKey => {
     const documents = [450000, 500000, 500000].map((amount, i) => ({
       id: `doc-${i}`, yearMonth: '2026-11', teamId: 'test-team', teamName: '검증팀',
       issuedToType: i === 1 ? 'worker' : 'team', status: 'draft',
       lineItems: [{ id: `rent-${i}`, label: `검증숙소 ${i} 월세`, amount, targetField: 'accommodation', sourceType: 'utility_ledger', sourceAccommodationId: `room-${i}` }],
     } as AccommodationBillingDocument));
     documents[0].lineItems.push({ id: 'electricity', label: '검증숙소 0 전기세', amount: 30100, targetField: 'electricity', sourceType: 'utility_ledger', sourceAccommodationId: 'room-0' });
-    const docs = applyAccommodationRentPeriod(documents, [
+    const docs = applyAccommodationExpensePeriod(documents, [
       { id: 'room-0', status: 'active', contract: { endDate: '2026-10-31' } } as Accommodation,
     ]);
     render(<ExpenseLedgerDetailBoard teamName="검증팀" color="#64748b" accommodationDocs={docs}
       vehicleDocs={[]} cardDocs={[]} receivableClaims={[]} payableClaims={[]} otherClaims={[]} selectedItemKey={selectedItemKey} />);
     const groups = within(screen.getAllByRole('table')[0]).getAllByRole('rowgroup');
-    expect(within(groups[1]).getAllByRole('row')).toHaveLength(3);
+    expect(within(groups[1]).getAllByRole('row')).toHaveLength(2);
     expect(groups[2]).toHaveTextContent('1,000,000');
-    expect(screen.getByLabelText('계약 종료 월세 제외 내역')).toHaveTextContent('2026-10 종료 · 450,000원 제외');
-    expect(screen.getByText(/2026-10 종료 · 월세 제외/)).toBeInTheDocument();
-    expect(groups[2].textContent?.includes('30,100')).toBe(!selectedItemKey);
+    expect(screen.queryByLabelText('계약 종료 월세 제외 내역')).not.toBeInTheDocument();
+    expect(screen.queryByText('검증숙소 0')).not.toBeInTheDocument();
+    expect(groups[2]).not.toHaveTextContent('30,100');
   });
   test.each([undefined, 'accommodation'] as const)('숙소 상세 3건을 유지하고 별도 조정 후 합계를 표시한다 (%s)', (selectedItemKey) => {
     const accommodationDocs = [450000, 500000, 500000].map((amount, i) => ({

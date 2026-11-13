@@ -78,6 +78,7 @@ const buildRecord = (patch: Partial<UtilityRecord> = {}): UtilityRecord => ({
 describe('accommodationService saved utility ledger boundary', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        jest.mocked(accommodationFirestoreService.getAccommodation).mockResolvedValue(null);
         mockedSaveUtilityRecord.mockResolvedValue(undefined);
         mockedListBillingTargets.mockResolvedValue([]);
         jest.mocked(supportCancellationLogService.getLogsByResourceType).mockResolvedValue([]);
@@ -123,6 +124,19 @@ describe('accommodationService saved utility ledger boundary', () => {
         mockedListAccommodations.mockResolvedValue([{ id: 'room', status: 'inactive', endedDate: '2026-11-12' } as Accommodation]);
         await accommodationService.listAllAccommodations();
         expect(supportCancellationLogService.getLogsByResourceType).not.toHaveBeenCalled();
+    });
+
+    it('종료한 숙소의 이후 경비 재저장은 단건·일괄·롤백 모두 차단한다', async () => {
+        jest.mocked(accommodationFirestoreService.getAccommodation).mockResolvedValue({
+            id: 'room/204', status: 'inactive', billingEndYearMonth: '2026-10',
+        } as Accommodation);
+        const future = buildRecord({ yearMonth: '2026-11' });
+        await expect(accommodationService.saveUtilityRecord(future)).rejects.toThrow('종료월 이후');
+        await expect(accommodationService.saveUtilityRecords([buildRecord(), future])).rejects.toThrow('종료월 이후');
+        await expect(accommodationService.replaceUtilityRecord(future)).rejects.toThrow('종료월 이후');
+        expect(mockedSaveUtilityRecord).not.toHaveBeenCalled();
+        expect(accommodationFirestoreService.saveUtilityRecords).not.toHaveBeenCalled();
+        expect(mockedReplaceUtilityRecord).not.toHaveBeenCalled();
     });
 
     it('does not invent ledger rows when billing target loading fails', async () => {
