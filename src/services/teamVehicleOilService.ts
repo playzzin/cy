@@ -6,6 +6,7 @@ export interface TeamVehicleOilMetric {
     currentKm: number;
     lastOilKm: number;
     cycleKm: number;
+    remark?: string;
 }
 
 export const saveTeamVehicleOil = async (records: TeamVehicleOilMetric[]): Promise<void> => {

@@ -7,7 +7,7 @@ import { isTeamLeader, TeamRow, text } from './teamReadPolicy';
 import { projectTeamVehicleOil } from './teamVehicleOilSummary';
 import { isPreviewIdentity } from './devPreviewPolicy';
 
-type OilMetric = { id: string; currentKm: number; lastOilKm: number; cycleKm: number };
+type OilMetric = { id: string; currentKm: number; lastOilKm: number; cycleKm: number; remark?: string };
 const fail = (code: functions.https.FunctionsErrorCode, message: string): never => { throw new functions.https.HttpsError(code, message); };
 const validId = (id: unknown): id is string => typeof id === 'string' && id.trim() === id && id.length > 0 && id.length <= 1500 && !id.includes('/') && !['.', '..'].includes(id);
 
@@ -18,9 +18,10 @@ export const saveTeamVehicleOilData = async (input: any, context: functions.http
     if (!Array.isArray(records) || !records.length || records.length > 100
         || records.some(record => !record || !validId(record.id)
             || !['currentKm', 'lastOilKm', 'cycleKm'].every(key => typeof record[key] === 'number' && Number.isFinite(record[key]) && record[key] >= 0 && record[key] <= 1_000_000_000)
-            || record.cycleKm <= 0 || record.lastOilKm > record.currentKm)
+            || record.cycleKm <= 0 || record.lastOilKm > record.currentKm
+            || (record.remark !== undefined && !['', '할부형', '반납형'].includes(record.remark)))
         || new Set(records.map(record => record.id)).size !== records.length) {
-        fail('invalid-argument', '차량과 거리 값을 확인해 주세요. 최근 교체거리는 현재거리 이하여야 합니다.');
+        fail('invalid-argument', '차량·비고·거리 값을 확인해 주세요. 최근 교체거리는 현재거리 이하여야 합니다.');
     }
     const db = admin.firestore();
     await db.runTransaction(async transaction => {
@@ -54,7 +55,10 @@ export const saveTeamVehicleOilData = async (input: any, context: functions.http
         // Merge only supplied vehicle fields. Other teams and untouched vehicles
         // survive concurrent saves; all authorization reads are in this transaction.
         transaction.set(db.doc('support_shared_data/engine_oil_cycle'), {
-            data: Object.fromEntries(records.map(({ id, currentKm, lastOilKm, cycleKm }) => [id, { id, currentKm, lastOilKm, cycleKm }])),
+            data: Object.fromEntries(records.map(({ id, currentKm, lastOilKm, cycleKm, remark }) => [id, {
+                id, currentKm, lastOilKm, cycleKm,
+                ...(remark !== undefined ? { remark } : {}),
+            }])),
             schemaVersion: 1, updatedAt: FieldValue.serverTimestamp(), updatedByUid: auth.uid,
         }, { merge: true });
     });

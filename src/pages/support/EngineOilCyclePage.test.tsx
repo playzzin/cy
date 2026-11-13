@@ -91,6 +91,53 @@ test('쉼표로 표시한 최근교체거리가 현재거리보다 크면 저장
     expect(saveTeamVehicleOil).not.toHaveBeenCalled();
 });
 
+test('팀장 비고는 미선택으로 시작하고 개별·일괄 저장 및 재조회 후 유지하거나 지울 수 있다', async () => {
+    let saved = { ...record, remark: undefined as string | undefined };
+    (getTeamScopedRows as jest.Mock).mockImplementation(async () => [saved]);
+    (saveTeamVehicleOil as jest.Mock).mockImplementation(async ([metric]) => { saved = { ...saved, ...metric }; });
+    openPage();
+    await screen.findByText('조회 1 / 1대');
+    const remark = () => screen.getByRole('combobox', { name: `${record.plate} 비고` });
+    expect(remark()).toHaveValue('');
+    for (const [value, button] of [['할부형', '저장'], ['반납형', '변경 1건 저장'], ['', '변경 1건 저장']]) {
+        fireEvent.change(remark(), { target: { value } });
+        fireEvent.click(screen.getByRole('button', { name: button }));
+        await waitFor(() => expect(saveTeamVehicleOil).toHaveBeenLastCalledWith([
+            { id: 'own', currentKm: 19000, lastOilKm: 10000, cycleKm: 10000, remark: value }
+        ]));
+        await waitFor(() => expect(screen.queryByRole('button', { name: '변경 1건 저장' })).not.toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: '차량정보 새로고침' }));
+        await screen.findByText('조회 1 / 1대');
+        expect(remark()).toHaveValue(value);
+    }
+    expect(supportSharedDataService.save).not.toHaveBeenCalled();
+});
+
+test('관리자 비고는 저장·재조회·주기 변경·거리 초기화에서 유지되고 미저장 비고는 변경 표시를 유지한다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (vehicleService.getVehicles as jest.Mock).mockResolvedValue([{ id: 'own', licensePlate: record.plate }]);
+    let saved = { own: { ...record, remark: '' } };
+    (supportSharedDataService.load as jest.Mock).mockImplementation(async () => saved);
+    (supportSharedDataService.save as jest.Mock).mockImplementation(async (_key, payload) => { saved = payload; });
+    const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    openPage();
+    await screen.findByText('조회 1 / 1대');
+    fireEvent.change(screen.getByRole('combobox', { name: `${record.plate} 비고` }), { target: { value: '반납형' } });
+    fireEvent.click(screen.getByRole('button', { name: '전체 적용' }));
+    await screen.findByText(/전체교체주기를 8,000km로 적용/);
+    fireEvent.click(screen.getByRole('button', { name: '변경 1건 저장' }));
+    await screen.findByText('1건 저장되었습니다.');
+    expect(saved.own.remark).toBe('반납형');
+    fireEvent.click(screen.getByRole('button', { name: '차량정보 새로고침' }));
+    await screen.findByText('조회 1 / 1대');
+    expect(screen.getByRole('combobox', { name: `${record.plate} 비고` })).toHaveValue('반납형');
+    fireEvent.click(screen.getByRole('button', { name: '오일기록 초기화' }));
+    await screen.findByText('엔진오일 기록을 초기화했습니다.');
+    expect(saved.own).toEqual({ id: 'own', currentKm: 0, lastOilKm: 0, cycleKm: 8000, remark: '반납형' });
+    expect(JSON.parse(localStorage.getItem('engine_oil_vehicle_metrics_v2')!).own.remark).toBe('반납형');
+    confirm.mockRestore();
+});
+
 test('차량 저장 권한이 거절되면 성공으로 표시하지 않고 전체 저장으로 대체하지 않는다', async () => {
     const log = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     (saveTeamVehicleOil as jest.Mock).mockRejectedValueOnce(new Error('permission-denied'));
@@ -158,4 +205,14 @@ test.each([8000, 10000, undefined])('브라우저 기록 이전 시 저장된 �
     openPage();
     await screen.findByText('조회 1 / 1대');
     expect(supportSharedDataService.save).toHaveBeenCalledWith('engine_oil_cycle', { own: expect.objectContaining({ cycleKm: cycleKm ?? 7000 }) });
+});
+
+test.each(['할부형', '', undefined])('브라우저 기록 이전 시 서버 비고 %s를 우선하고 없는 필드만 로컬에서 복구한다', async remark => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (vehicleService.getVehicles as jest.Mock).mockResolvedValue([{ id: 'own', licensePlate: record.plate }]);
+    (supportSharedDataService.load as jest.Mock).mockResolvedValue({ own: { ...record, remark } });
+    localStorage.setItem('engine_oil_vehicle_metrics_v2', JSON.stringify({ own: { ...record, remark: '반납형' } }));
+    openPage();
+    await screen.findByText('조회 1 / 1대');
+    expect(screen.getByRole('combobox', { name: `${record.plate} 비고` })).toHaveValue(remark ?? '반납형');
 });

@@ -3,7 +3,8 @@
 }
 
 .engine-oil-field,
-.engine-oil-field > input {
+.engine-oil-field > input,
+.engine-oil-field > select {
     font-family: inherit;
     font-size: inherit;
     font-weight: 700;
@@ -84,7 +85,8 @@
         text-align: right;
     }
 
-    .engine-oil-field > input {
+    .engine-oil-field > input,
+    .engine-oil-field > select {
         width: 9rem;
         min-width: 0;
         max-width: 55%;

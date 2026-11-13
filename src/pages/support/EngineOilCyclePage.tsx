@@ -32,6 +32,7 @@ interface EngineOilMetric {
     currentKm: number;
     lastOilKm: number;
     cycleKm: number;
+    remark?: string;
 }
 
 interface EngineOilRecord extends EngineOilMetric {
@@ -45,6 +46,7 @@ interface EngineOilDraft {
     currentKm: string;
     lastOilKm: string;
     cycleKm: string;
+    remark?: string;
 }
 
 interface OilStatus {
@@ -64,6 +66,7 @@ type EngineOilMetricInput = {
     currentKm?: number | string;
     lastOilKm?: number | string;
     cycleKm?: number | string;
+    remark?: string;
 };
 
 const STORAGE_KEY = 'engine_oil_vehicle_metrics_v2';
@@ -88,7 +91,8 @@ const normalizeMetric = (id: string, value?: EngineOilMetricInput, fallbackCycle
     const lastOilKm = Math.max(0, toNumber(value?.lastOilKm));
     const cycleKm = Math.max(1, toNumber(value?.cycleKm || fallbackCycle));
 
-    return { id, currentKm, lastOilKm, cycleKm };
+    return { id, currentKm, lastOilKm, cycleKm,
+        ...(typeof value?.remark === 'string' && ['', '할부형', '반납형'].includes(value.remark) ? { remark: value.remark } : {}) };
 };
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
@@ -127,6 +131,8 @@ const mergeMetricMaps = (
         }
 
         merged[id] = {
+            ...localMetric,
+            ...sharedMetric,
             id,
             currentKm: sharedMetric.currentKm > 0 ? sharedMetric.currentKm : localMetric.currentKm,
             lastOilKm: sharedMetric.lastOilKm > 0 ? sharedMetric.lastOilKm : localMetric.lastOilKm,
@@ -167,7 +173,8 @@ const buildMetricPayload = (records: EngineOilRecord[]) => (
             id: record.id,
             currentKm: record.currentKm,
             lastOilKm: record.lastOilKm,
-            cycleKm: record.cycleKm
+            cycleKm: record.cycleKm,
+            ...(record.remark !== undefined ? { remark: record.remark } : {})
         };
         return acc;
     }, {})
@@ -183,7 +190,8 @@ const toDraft = (record: EngineOilRecord): EngineOilDraft => ({
     id: record.id,
     currentKm: String(record.currentKm),
     lastOilKm: String(record.lastOilKm),
-    cycleKm: String(record.cycleKm)
+    cycleKm: String(record.cycleKm),
+    remark: record.remark
 });
 
 const toDraftMap = (records: EngineOilRecord[]): Record<string, EngineOilDraft> => (
@@ -236,7 +244,8 @@ const parseDraft = (draft: EngineOilDraft): EngineOilMetric => (
     normalizeMetric(draft.id, {
         currentKm: draft.currentKm,
         lastOilKm: draft.lastOilKm,
-        cycleKm: draft.cycleKm
+        cycleKm: draft.cycleKm,
+        remark: draft.remark
     })
 );
 
@@ -622,7 +631,6 @@ const EngineOilCyclePage: React.FC = () => {
 
         const saved = await commitRecords(records, drafts);
         if (!saved) return;
-        setChangedIds(new Set());
         showToast(`전체교체주기를 ${cycleKm.toLocaleString('ko-KR')}km로 적용했습니다.`);
     };
 
@@ -684,7 +692,7 @@ const EngineOilCyclePage: React.FC = () => {
                                     엔진오일 교체주기 관제표
                                 </h1>
                                 <p className="mt-2 max-w-3xl text-xs font-medium leading-5 text-slate-500 sm:text-sm sm:leading-6">
-                                    차량번호와 팀은 차량 관리 데이터에서 자동으로 가져오고, 엔진오일 거리 기록만 차량별로 저장합니다.
+                                    차량번호와 팀은 차량 관리 데이터에서 자동으로 가져오고, 비고와 엔진오일 거리 기록은 차량별로 저장합니다.
                                 </p>
                             </div>
                         </div>
@@ -838,12 +846,13 @@ const EngineOilCyclePage: React.FC = () => {
                     )}
 
                     <div className="engine-oil-table-container mt-4 lg:overflow-x-auto lg:rounded-2xl lg:border lg:border-slate-200">
-                        <table role="table" aria-label="차량별 엔진오일 교체주기" className="engine-oil-table w-full border-collapse bg-white text-sm lg:min-w-[980px]">
+                        <table role="table" aria-label="차량별 엔진오일 교체주기" className="engine-oil-table w-full border-collapse bg-white text-sm lg:min-w-[1080px]">
                             <thead className="hidden bg-slate-100 text-slate-600 lg:sticky lg:top-0 lg:z-10 lg:table-header-group">
                                 <tr role="row">
                                     <th scope="col" className="px-3 py-3 text-left text-xs font-black">상태</th>
                                     <th scope="col" className="px-3 py-3 text-left text-xs font-black">차량번호</th>
                                     <th scope="col" className="px-3 py-3 text-left text-xs font-black">팀</th>
+                                    <th scope="col" className="px-3 py-3 text-left text-xs font-black">비고</th>
                                     <th scope="col" className="px-3 py-3 text-right text-xs font-black">현재거리</th>
                                     <th scope="col" className="px-3 py-3 text-right text-xs font-black">최근교체</th>
                                     <th scope="col" className="px-3 py-3 text-right text-xs font-black">다음교체</th>
@@ -855,13 +864,13 @@ const EngineOilCyclePage: React.FC = () => {
                             <tbody>
                                 {loading ? (
                                     <tr>
-                                        <td colSpan={9} className="px-3 py-16 text-center text-sm font-bold text-slate-400">
+                                        <td colSpan={10} className="px-3 py-16 text-center text-sm font-bold text-slate-400">
                                             차량 정보를 불러오는 중입니다.
                                         </td>
                                     </tr>
                                 ) : visibleRecords.length === 0 ? (
                                     <tr>
-                                        <td colSpan={9} className="px-3 py-8">
+                                        <td colSpan={10} className="px-3 py-8">
                                             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm font-bold text-slate-400">
                                                 표시할 차량이 없습니다.
                                             </div>
@@ -897,6 +906,20 @@ const EngineOilCyclePage: React.FC = () => {
                                                     />
                                                     {record.team}
                                                 </span>
+                                            </td>
+                                            <td role="cell" className="engine-oil-field px-3 py-2 text-right">
+                                                <span className="engine-oil-field-label">비고</span>
+                                                <select
+                                                    aria-label={`${record.plate} 비고`}
+                                                    value={draft.remark ?? ''}
+                                                    onChange={(event) => setDraftValue(record.id, 'remark', event.target.value)}
+                                                    disabled={saving}
+                                                    className={`w-24 rounded-lg border px-2 py-2 text-sm font-bold outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 ${changed ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white'}`}
+                                                >
+                                                    <option value="">미선택</option>
+                                                    <option value="할부형">할부형</option>
+                                                    <option value="반납형">반납형</option>
+                                                </select>
                                             </td>
                                             <td role="cell" className="engine-oil-field px-3 py-2 text-right">
                                                 <span className="engine-oil-field-label">현재거리 <span className="font-normal">(km)</span></span>

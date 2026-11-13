@@ -25,6 +25,7 @@ export function projectTeamVehicleOil(vehicles: TeamRow[], workers: TeamRow[], t
             currentKm: distance(metric?.currentKm),
             lastOilKm: distance(metric?.lastOilKm),
             cycleKm: distance(metric?.cycleKm, DEFAULT_CYCLE_KM) || DEFAULT_CYCLE_KM,
+            ...(typeof metric?.remark === 'string' && ['', '할부형', '반납형'].includes(metric.remark) ? { remark: metric.remark as string } : {}),
         }];
     });
 }

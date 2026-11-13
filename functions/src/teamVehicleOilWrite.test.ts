@@ -9,6 +9,10 @@ test('오일 기록 저장은 비로그인·미리보기·잘못된 입력을 �
     for (const records of [[], [{ id: '../other' }], [{ id: 'v', currentKm: 10, lastOilKm: 20, cycleKm: 10000 }]]) {
         await assert.rejects(saveTeamVehicleOilData({ records }, { auth: { uid: 'leader', token: {} } } as any), (e: any) => e.code === 'invalid-argument');
     }
+    for (const remark of [null, 1, {}, ['할부형'], '알 수 없음']) {
+        await assert.rejects(saveTeamVehicleOilData({ records: [{ id: 'v', currentKm: 100, lastOilKm: 10, cycleKm: 8000, remark }] },
+            { auth: { uid: 'leader', token: {} } } as any), (e: any) => e.code === 'invalid-argument');
+    }
 });
 
 test('현재 팀 배정을 다시 검증하고 타 팀·미변경 차량을 보존하며 혼합 저장 전체를 거부한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST }, async () => {
@@ -31,10 +35,20 @@ test('현재 팀 배정을 다시 검증하고 타 팀·미변경 차량을 보�
         Object.entries(fixtures).forEach(([path, data]) => batch.set(db.doc(path), data));
         await batch.commit();
         assert.deepEqual(await save(['oil-own', 'oil-member']), { savedIds: ['oil-own', 'oil-member'] });
-        const data = (await db.doc('support_shared_data/engine_oil_cycle').get()).data()!.data;
+        let data = (await db.doc('support_shared_data/engine_oil_cycle').get()).data()!.data;
         assert.deepEqual(data['oil-own'], metric('oil-own'));
         assert.deepEqual(data['oil-other'], { currentKm: 999 });
         assert.deepEqual(data.untouched, { currentKm: 555 });
+        for (const remark of ['할부형', '반납형', '']) {
+            await saveTeamVehicleOilData({ records: [{ ...metric('oil-own'), remark }] }, context);
+            // A distance-only save from an older client must preserve the remark.
+            await save(['oil-own']);
+            data = (await db.doc('support_shared_data/engine_oil_cycle').get()).data()!.data;
+            assert.deepEqual(data['oil-own'], { ...metric('oil-own'), remark });
+            assert.deepEqual(data['oil-member'], metric('oil-member'));
+            assert.deepEqual(data['oil-other'], { currentKm: 999 });
+            assert.deepEqual(data.untouched, { currentKm: 555 });
+        }
         await assert.rejects(save(['oil-own', 'oil-other']), (e: any) => e.code === 'permission-denied');
         await assert.rejects(save(['missing']), (e: any) => e.code === 'permission-denied');
         await db.doc('vehicles/oil-own').update({ currentAssigneeId: 'other-team', billingTargetType: 'TEAM', billingTargetId: 'oil-team' });

@@ -23,7 +23,7 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         'vehicles/moved-oil': { currentAssigneeType: 'TEAM', currentAssigneeId: 'team-b', billingTargetType: 'TEAM', billingTargetId: 'team-a' },
         'vehicleAssignments/past-oil': { vehicleId: 'moved-oil', assigneeType: 'TEAM', assigneeId: 'team-a', endDate: '2026-01-01' },
         'support_shared_data/engine_oil_cycle': { data: {
-            'own-oil': { currentKm: 18000, lastOilKm: 10000, cycleKm: 10000, otherTeamNote: 'private' },
+            'own-oil': { currentKm: 18000, lastOilKm: 10000, cycleKm: 10000, remark: '할부형', otherTeamNote: 'private' },
             'other-oil': { currentKm: 999999 },
             'moved-oil': { currentKm: 888888 },
         } },
@@ -86,6 +86,7 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         const oil = (await call('vehicle_oil_summary', 'leader', { filters: { teamId: 'team-b', vehicleId: 'other-oil' } })).rows;
         assert.deepEqual(oil.map((row: any) => row.id).sort(), ['member-oil', 'own-oil']);
         assert.equal(oil.find((row: any) => row.id === 'own-oil').currentKm, 18000);
+        assert.equal(oil.find((row: any) => row.id === 'own-oil').remark, '할부형');
         assert.equal(JSON.stringify(oil).includes('private'), false);
         for (const uid of ['pending', 'unlinked', 'missing', 'ordinary-worker']) {
             await assert.rejects(call('vehicle_oil_summary', uid), (error: any) => error.code === 'permission-denied');

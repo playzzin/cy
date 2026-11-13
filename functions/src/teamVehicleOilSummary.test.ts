@@ -31,3 +31,11 @@ test('기록이 없거나 주기가 잘못된 차량은 8000km를 적용하고 �
     const rows = projectTeamVehicleOil(vehicles, [], [{ id: 'a', name: '가상 A팀' }], metrics);
     assert.deepEqual(rows.map(row => row.cycleKm), [8000, 8000, 8000, 8000, 8000, 5000, 8000, 10000, 15000]);
 });
+
+test('저장한 비고는 팀장 재조회에 포함하고 이전 기록과 잘못된 비고는 미선택으로 둔다', () => {
+    const remarks = [undefined, null, '할부형', '반납형', '', 'unknown', { secret: true }];
+    const vehicles = remarks.map((_, index) => ({ id: String(index), currentAssigneeType: 'TEAM', currentAssigneeId: 'a' }));
+    const metrics = Object.fromEntries(remarks.map((remark, index) => [String(index), { remark }]));
+    const rows = projectTeamVehicleOil(vehicles, [], [{ id: 'a', name: '가상 A팀' }], metrics);
+    assert.deepEqual(rows.map(row => row.remark), [undefined, undefined, '할부형', '반납형', '', undefined, undefined]);
+});
