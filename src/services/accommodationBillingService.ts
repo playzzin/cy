@@ -16,6 +16,8 @@ import {
 import { recordSupportWriteOperationSafely } from './supportWriteOperationLogService';
 import { getErrorMessage, reportSupportWriteError, SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../utils/supportWriteErrorReporting';
 import { Timestamp } from '../types/timestamp';
+import { accommodationService } from './accommodationService';
+import { applyAccommodationRentPeriod, isAutomaticAccommodationRent } from '../utils/accommodationRentPeriod';
 import {
     AccommodationBillingDocument,
     AccommodationBillingLineItem,
@@ -525,6 +527,7 @@ export const accommodationBillingService = {
         teamId: string;
         yearMonth: string;
         strict?: boolean;
+        forExpenseLedger?: boolean;
     }): Promise<AccommodationBillingDocument[]> {
         const [docsRes, itemsRes] = await Promise.all([
             listAllAccommodationBillingDocuments({ limit: Number.MAX_SAFE_INTEGER, offset: 0, yearMonth: params.yearMonth }),
@@ -551,7 +554,7 @@ export const accommodationBillingService = {
             return teamUuid ? dcTeamId === teamUuid : false;
         });
 
-        return filteredDocs.map((d: any) => {
+        const documents = filteredDocs.map((d: any) => {
             const teamId = getRelatedId(d, 'team', 'teamId');
             const issuedToWorkerId = getRelatedId(d, 'issuedToWorker', 'issuedToWorkerId');
 
@@ -593,6 +596,10 @@ export const accommodationBillingService = {
                 postedAdvancePaymentId: d?.postedAdvancePaymentId ? String(d.postedAdvancePaymentId) : undefined
             } as AccommodationBillingDocument;
         });
+        if (!params.forExpenseLedger || !documents.some((document: AccommodationBillingDocument) => (
+            isDraftAccommodationBillingStatus(document.status) && document.lineItems.some(isAutomaticAccommodationRent)
+        ))) return documents;
+        return applyAccommodationRentPeriod(documents, await accommodationService.listAllAccommodations());
     },
 
     async upsertBillingDocument(
@@ -829,6 +836,14 @@ export const accommodationBillingService = {
         if (storedStatus === 'CONFIRMED') return;
         if (storedStatus !== 'DRAFT') {
             throw new Error(`accommodation-billing-protected-confirmation-blocked:${String(row?.status ?? '')}`);
+        }
+
+        const currentBilling = mapAccommodationBillingDocument(row, items);
+        if (currentBilling.lineItems.some(isAutomaticAccommodationRent)) {
+            const [checked] = applyAccommodationRentPeriod([currentBilling], await accommodationService.listAllAccommodations());
+            if (checked.lineItems.some(item => item.excludedContractRent)) {
+                throw new Error('계약 종료월 이후의 자동 월세가 남아 있어 확정할 수 없습니다. 숙소 청구서에서 해당 월세를 확인하고 수정해 주세요.');
+            }
         }
 
         const rawIssuedToType = row?.issuedToType ? String(row.issuedToType) : 'worker';

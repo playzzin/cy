@@ -12,6 +12,11 @@ export const getAccommodationBillingEndMonth = (room: Accommodation): string => 
         ? room.billingEndYearMonth! : dateText(room.endedDate).slice(0, 7);
 };
 
+/** Contract expiry also stops recurring rent when the room is still marked active. */
+export const getAccommodationRentEndMonth = (room: Accommodation): string => (
+    getAccommodationBillingEndMonth(room) || dateText(room.contract?.endDate).slice(0, 7)
+);
+
 /** The selected billing end month is inclusive and independent of contract expiry. */
 export const getAccommodationStatusForMonth = (
     room: Accommodation,

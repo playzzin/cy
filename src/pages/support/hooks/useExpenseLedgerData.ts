@@ -595,7 +595,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       const [teamList, siteList, accommodationList, vehicleList, cardBillingList, claimList, companyList, cardMasterList, cardBillingTargetList, categoryList, dailyReportList] = await Promise.all([
         teamService.getTeams(),
         siteService.getSites(),
-        accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth }),
+        accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, forExpenseLedger: true }),
         vehicleBillingService.getBillingsByMonth(yearMonth),
         cardBillingService.getBillingsByMonth(yearMonth),
         teamExpenseLedgerService.getClaimsByMonth(yearMonth),
