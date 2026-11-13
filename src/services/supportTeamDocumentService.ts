@@ -4,6 +4,7 @@ import { auth, functions } from '../config/firebase';
 export type SupportDocumentPerson = {
     id: string; name: string; teamId: string; teamName: string; role: string;
     relation: 'own' | 'other';
+    status?: string; isActive?: boolean;
     hasIdentity: boolean; hasBank: boolean; hasDirectPayBank: boolean;
 };
 export type SupportDocumentKind = 'identity' | 'bank' | 'directPayBank';
@@ -19,12 +20,12 @@ const call = async <T>(data: Record<string, unknown>, signal?: AbortSignal): Pro
     return response.data;
 };
 export const supportTeamDocumentService = {
-    list: async (signal?: AbortSignal): Promise<SupportDocumentPerson[]> => {
-        const data = await call<{ workers: SupportDocumentPerson[] }>({ action: 'list' }, signal);
+    list: async (signal?: AbortSignal, includeRetired = false): Promise<SupportDocumentPerson[]> => {
+        const data = await call<{ workers: SupportDocumentPerson[] }>({ action: 'list', ...(includeRetired && { includeRetired: true }) }, signal);
         if (!Array.isArray(data.workers)) throw new Error('서류 공유 대상을 확인하지 못했습니다.');
         return data.workers;
     },
-    read: async (workerId: string, kind: SupportDocumentKind, name: string, signal?: AbortSignal): Promise<File | null> => {
+    read: async (workerId: string, kind: SupportDocumentKind, name: string, signal?: AbortSignal, includeRetired = false): Promise<File | null> => {
         const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
         const user = auth.currentUser;
         const parts: BlobPart[] = [];
@@ -33,7 +34,7 @@ export const supportTeamDocumentService = {
         do {
             if (auth.currentUser !== user) throw new Error('로그인 계정이 변경되었습니다. 다시 조회해 주세요.');
             const data: { photo: Photo | PhotoPart | null } = await call({
-                action: 'read', workerId, kind, ...(kind === 'identity' ? { offset, ...(revision && { revision }) } : {}),
+                action: 'read', workerId, kind, ...(includeRetired && { includeRetired: true }), ...(kind === 'identity' ? { offset, ...(revision && { revision }) } : {}),
             }, signal);
             const photo = data.photo;
             if (!photo && offset === 0) return null;

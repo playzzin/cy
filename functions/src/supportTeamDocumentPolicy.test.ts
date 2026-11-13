@@ -1,6 +1,6 @@
 import { strict as assert } from 'assert';
 import { test } from 'node:test';
-import { supportDocumentPeople, documentRowIds } from './supportTeamDocumentPolicy';
+import { supportDocumentPeople, documentRowIds, summaryDocumentWorker, activeDocumentWorker } from './supportTeamDocumentPolicy';
 import { summaryDirectoryTeams } from './workerSummaryDirectory';
 import { TeamRow } from './teamReadPolicy';
 
@@ -51,4 +51,28 @@ test('사무실의 전체 서류 조회는 유지하고 팀장에게는 지정�
     const source = fixture();
     assert.equal(supportDocumentPeople({ ...source, office: true }).length, 5);
     assert.deepEqual(supportDocumentPeople({ ...source, allowedTeamIds: [] }), []);
+});
+
+test('퇴사자 포함은 기존 팀 범위 안의 퇴사자만 추가하고 퇴사한 팀장의 인증 기준은 유지한다', () => {
+    const source = fixture();
+    source.workers[1].status = '퇴사';
+    source.workers[2].isActive = false;
+    source.workers[4].status = '퇴사';
+    const people = supportDocumentPeople({ ...source, includeRetired: true });
+    assert.deepEqual(people.map(worker => worker.id), ['own-leader', 'other-worker', 'other-leader', 'never-attended']);
+    assert.equal(people[1].status, '퇴사');
+    assert.equal(people[2].isActive, false);
+    assert.equal(activeDocumentWorker(source.workers[1]), false);
+    assert.equal(activeDocumentWorker(source.workers[2]), false);
+    assert.equal(supportDocumentPeople({ ...source, office: true, includeRetired: true }).length, 5);
+});
+
+test('퇴사 상태의 호환값을 포함하되 출입금지·삭제·보관 작업자는 포함하지 않는다', () => {
+    for (const status of ['퇴사', '퇴사자', ' retired ', 'RESIGNED', 'inactive']) {
+        assert.equal(summaryDocumentWorker({ id: 'worker', status }), false);
+        assert.equal(summaryDocumentWorker({ id: 'worker', status }, true), true);
+    }
+    for (const status of ['출입금지', 'blocked', 'archived', 'deleted', '해체']) {
+        assert.equal(summaryDocumentWorker({ id: 'worker', status, isActive: false }, true), false);
+    }
 });

@@ -14,6 +14,7 @@ import WorkerIdImageShare from './WorkerIdImageShare';
 import WorkerBankPhotoRegistration from './WorkerBankPhotoRegistration';
 import { supportTeamDocumentService, type SupportDocumentPerson } from '../../services/supportTeamDocumentService';
 import { isDevPreviewFrame } from '../../utils/devPreviewRuntime';
+import { getWorkerStatusGroup } from '../../utils/workerStatus';
 import './WorkerSummaryPage.css';
 
 
@@ -363,9 +364,10 @@ const workerMatchesTeam = (worker: Worker, team?: Team | null, fallbackTeamId = 
 };
 
 const isActiveWorker = (worker: Worker) => {
-    const status = normalizeText(worker.status);
-    return worker.isActive !== false && status !== '퇴사' && status !== 'inactive' && status !== '출입금지';
+    return getWorkerStatusGroup(worker) === 'active' && !['deleted', '해체'].includes(normalizeText(worker.status));
 };
+const isRetiredWorker = (worker: Worker) => getWorkerStatusGroup(worker) === 'retired'
+    && !['deleted', '해체'].includes(normalizeText(worker.status));
 
 const DocumentStatus: React.FC<{ document: string; registered: boolean; canView: boolean; unavailableLabel?: string }> = ({ document, registered, canView, unavailableLabel = '조회 대상 아님' }) => {
     const status = !canView ? 'unavailable' : registered ? 'registered' : 'missing';
@@ -391,6 +393,7 @@ const WorkerSummaryPage: React.FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [mobileView, setMobileView] = useState<'select' | 'summary'>('select');
     const [selectedOnly, setSelectedOnly] = useState(false);
+    const [includeRetired, setIncludeRetired] = useState(false);
     const [selectedWorkerIds, setSelectedWorkerIds] = useState<Set<string>>(new Set());
     const [isSendingImage, setIsSendingImage] = useState(false);
     const selectionHeadingRef = React.useRef<HTMLHeadingElement>(null);
@@ -405,7 +408,7 @@ const WorkerSummaryPage: React.FC = () => {
     useEffect(() => {
         const controller = new AbortController();
         setSupportDocuments(null); setDocumentError(false); setDocumentLoading(restricted);
-        if (restricted) void supportTeamDocumentService.list(controller.signal).then(people => {
+        if (restricted) void supportTeamDocumentService.list(controller.signal, true).then(people => {
             if (!controller.signal.aborted) setSupportDocuments(people);
         }).catch(() => {
             if (!controller.signal.aborted) setDocumentError(true);
@@ -419,10 +422,10 @@ const WorkerSummaryPage: React.FC = () => {
         const merged = new Map(baseWorkers.map(worker => [worker.id, worker]));
         supportPeople.forEach(person => {
             if (!merged.has(person.id)) merged.set(person.id, { id: person.id, name: person.name, teamId: person.teamId,
-                teamName: person.teamName, role: person.role, status: '재직' });
+                teamName: person.teamName, role: person.role, status: person.status, isActive: person.isActive });
         });
-        return Array.from(merged.values());
-    }, [baseWorkers, supportPeople, loadError]);
+        return Array.from(merged.values()).filter(worker => isActiveWorker(worker) || (includeRetired && isRetiredWorker(worker)));
+    }, [baseWorkers, supportPeople, loadError, includeRetired]);
     const teams = useMemo(() => {
         const merged = new Map(baseTeams.map(team => [team.id, team]));
         supportPeople.forEach(person => {
@@ -431,9 +434,9 @@ const WorkerSummaryPage: React.FC = () => {
         return Array.from(merged.values());
     }, [baseTeams, supportPeople]);
     const readSupportIdentity = useCallback((worker: { id?: string }, name: string, signal: AbortSignal) =>
-        supportTeamDocumentService.read(worker.id!, 'identity', name, signal), []);
+        supportTeamDocumentService.read(worker.id!, 'identity', name, signal, includeRetired), [includeRetired]);
     const readSupportBank = useCallback((worker: { id?: string }, name: string, signal: AbortSignal) =>
-        supportTeamDocumentService.read(worker.id!, 'directPayBank', name, signal), []);
+        supportTeamDocumentService.read(worker.id!, 'directPayBank', name, signal, includeRetired), [includeRetired]);
     const unavailableDocumentLabel = documentLoading || (!documentError && supportDocuments === null)
         ? '확인 중' : documentError ? '조회 실패' : '조회 대상 아님';
 
@@ -448,7 +451,7 @@ const WorkerSummaryPage: React.FC = () => {
                 setSelectedWorkerIds(new Set());
                 setDocumentWorkerIds(new Set());
                 const directory = restricted
-                    ? (await getTeamScopedRows<{ workers: Worker[]; teams: Team[]; documentWorkerIds: string[] }>('worker_summary_directory'))?.[0]
+                    ? (await getTeamScopedRows<{ workers: Worker[]; teams: Team[]; documentWorkerIds: string[] }>('worker_summary_directory', { includeRetired: true }))?.[0]
                     : null;
                 if (restricted && (!directory || !Array.isArray(directory.workers) || !Array.isArray(directory.teams)
                     || !Array.isArray(directory.documentWorkerIds))) throw new Error('작업자 명단 조회 권한을 확인하지 못했습니다.');
@@ -460,9 +463,9 @@ const WorkerSummaryPage: React.FC = () => {
                 if (cancelled) return;
                 if (!allWorkers || !allTeams) throw new Error('소속 팀 조회 권한을 확인하지 못했습니다.');
 
-                // Active workers only
+                // Keep authorized former workers available for the optional document filter.
                 const teamIds = new Set(allTeams.flatMap(team => [team.id, team.legacyId]).filter(Boolean));
-                const activeWorkers = allWorkers.filter(worker => isActiveWorker(worker)
+                const availableWorkers = allWorkers.filter(worker => (isActiveWorker(worker) || isRetiredWorker(worker))
                     && (!restricted || teamIds.has(worker.teamId)));
 
                 const cheongyeonCompanies = allCompanies.filter((company) => isCheongyeonCompanyName(company.name));
@@ -488,8 +491,8 @@ const WorkerSummaryPage: React.FC = () => {
                     })
                     .sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR'));
 
-                setWorkers(activeWorkers);
-                setDocumentWorkerIds(new Set(directory?.documentWorkerIds ?? activeWorkers.map(worker => worker.id!)));
+                setWorkers(availableWorkers);
+                setDocumentWorkerIds(new Set(directory?.documentWorkerIds ?? availableWorkers.map(worker => worker.id!)));
                 setTeams(allowedTeams);
                 setSelectedTeam((prev) => {
                     if (!prev) return '';
@@ -574,8 +577,13 @@ const WorkerSummaryPage: React.FC = () => {
         () => selectedWorkers.filter(worker => documentWorkerIds.has(worker.id!) || supportDocumentById.has(worker.id!)),
         [selectedWorkers, documentWorkerIds, supportDocumentById]
     );
-    const selectedOwnDocumentWorkers = useMemo(() => selectedWorkers.filter(worker => documentWorkerIds.has(worker.id!)), [selectedWorkers, documentWorkerIds]);
-    const needsSupportRead = (restricted && isDevPreviewFrame) || selectedDocumentWorkers.some(worker => !documentWorkerIds.has(worker.id!));
+    const selectedOwnDocumentWorkers = useMemo(() => selectedWorkers.filter(worker => isActiveWorker(worker) && documentWorkerIds.has(worker.id!)), [selectedWorkers, documentWorkerIds]);
+    const needsSupportRead = (restricted && isDevPreviewFrame) || selectedDocumentWorkers.some(worker => isRetiredWorker(worker) || !documentWorkerIds.has(worker.id!));
+    const changeIncludeRetired = (checked: boolean) => {
+        setIncludeRetired(checked);
+        if (!checked) setSelectedWorkerIds(previous => new Set(workers
+            .filter(worker => isActiveWorker(worker) && previous.has(worker.id!)).map(worker => worker.id!)));
+    };
     const visibleSelectedCount = filteredWorkers.filter(w => selectedWorkerIds.has(w.id!)).length;
     const allVisibleSelected = filteredWorkers.length > 0 && visibleSelectedCount === filteredWorkers.length;
 
@@ -788,6 +796,10 @@ const WorkerSummaryPage: React.FC = () => {
                             })}
                         </TeamFilter>
                     </TeamFilterWrapper>
+                    <label className="ws-retired-toggle">
+                        <input type="checkbox" checked={includeRetired} onChange={event => changeIncludeRetired(event.target.checked)} />
+                        퇴사자 포함
+                    </label>
                 </SidebarHeader>
 
                 <div className="ws-search-area">
@@ -848,7 +860,7 @@ const WorkerSummaryPage: React.FC = () => {
                                 >
                                     <Checkbox checked={selectedWorkerIds.has(worker.id!)} onChange={() => toggleSelection(worker.id!)} aria-label={`${worker.name} 선택`} />
                                     <WorkerInfo>
-                                        <WorkerName>{worker.name}</WorkerName>
+                                        <WorkerName>{worker.name}{isRetiredWorker(worker) && <span className="ws-retired-badge">퇴사</span>}</WorkerName>
                                         <WorkerDetail>
                                             <TeamColorDot $color={teamColor} />
                                             <span>{teamName} | {worker.idNumber ? worker.idNumber.substring(0, 6) : '------'}</span>
@@ -937,6 +949,7 @@ const WorkerSummaryPage: React.FC = () => {
                                                 <td className="ws-number px-4 py-3 text-slate-500 text-center align-middle">{index + 1}</td>
                                                 <td className="ws-name px-4 py-3 font-medium text-slate-900 text-center align-middle">
                                                     <strong>{w.name.replace(/[0-9]/g, '')}</strong>
+                                                    {isRetiredWorker(w) && <span className="ws-retired-badge">퇴사</span>}
                                                     <span className="ws-mobile-team" data-html2canvas-ignore>{workerTeamMetaById.get(w.id!)?.name || '미배정'}</span>
                                                 </td>
                                                 <td data-label="주민번호" className="px-2 py-3 text-slate-600 text-center text-sm align-middle">

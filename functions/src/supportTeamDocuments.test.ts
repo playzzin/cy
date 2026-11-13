@@ -37,7 +37,7 @@ test('팀장은 지원 이력 없이 명단의 타팀 서류를 읽으며 일반
         const denied = (code: string) => (error: any) => error.code === code;
         try {
             for (const [path, row] of Object.entries(fixtures)) await db.doc(path).set(row);
-            for (const path of ['id_cards/support-test.png', bankPhotoPath('guest', photoId), bankPhotoPath('guest', directId, true), bankPhotoPath('absent', photoId)]) {
+            for (const path of ['id_cards/support-test.png', bankPhotoPath('guest', photoId), bankPhotoPath('guest', directId, true), bankPhotoPath('absent', photoId), bankPhotoPath('retired', photoId)]) {
                 await bucket.file(path).save(png, { resumable: false, metadata: { contentType: 'image/png' } });
             }
             await assert.rejects(handleSupportTeamDocuments({ action: 'list' }, {} as any), denied('unauthenticated'));
@@ -85,6 +85,17 @@ test('팀장은 지원 이력 없이 명단의 타팀 서류를 읽으며 일반
             await db.doc('workers/guest').update({ fileNameSaved: 'id_cards/support-test.png' });
             assert.equal((await call({ action: 'read', workerId: 'absent', kind: 'bank' }) as any).photo.base64, png.toString('base64'));
             for (const workerId of ['outside', 'retired']) await assert.rejects(call({ action: 'read', workerId, kind: 'bank' }), denied('permission-denied'));
+            const retiredDirectory = await call({ action: 'list', includeRetired: true }) as any;
+            assert.equal(retiredDirectory.workers.find((worker: any) => worker.id === 'retired').status, '퇴사');
+            assert.equal((await call({ action: 'read', workerId: 'retired', kind: 'bank', includeRetired: true }) as any).photo.base64, png.toString('base64'));
+            await assert.rejects(call({ action: 'read', workerId: 'outside', kind: 'bank', includeRetired: true }), denied('permission-denied'));
+            await assert.rejects(call({ action: 'read', workerId: 'retired', kind: 'bank', includeRetired: 'true' }), denied('permission-denied'));
+            await db.doc('workers/retired').update({ fileNameSaved: 'id_cards/support-test.png', directPayBankPhotoId: directId });
+            await bucket.file(bankPhotoPath('retired', directId, true)).save(png, { resumable: false, metadata: { contentType: 'image/png' } });
+            for (const kind of ['identity', 'directPayBank']) assert.equal((await call({ action: 'read', workerId: 'retired', kind, includeRetired: true }) as any).photo.base64, png.toString('base64'));
+            await db.doc('workers/retired').update({ status: '출입금지' });
+            await assert.rejects(call({ action: 'read', workerId: 'retired', kind: 'bank', includeRetired: true }), denied('permission-denied'));
+            await db.doc('workers/retired').update({ status: '퇴사' });
             await assert.rejects(preview({ action: 'read', workerId: 'outside', kind: 'identity' }), denied('permission-denied'));
             await db.doc('workers/guest').update({ fileNameSaved: bankPhotoPath('guest', photoId) });
             await assert.rejects(call({ action: 'read', workerId: 'guest', kind: 'identity' }), denied('failed-precondition'));

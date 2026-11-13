@@ -171,7 +171,7 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
         const collection = text(request.collection);
         const filters = request.filters || {};
         if (collection === 'worker_summary_directory') {
-            return { rows: serialize([await readWorkerSummaryDirectory(db, teams, metrics)]) };
+            return { rows: serialize([await readWorkerSummaryDirectory(db, teams, metrics, filters.includeRetired === true)]) };
         }
         if (collection === 'vehicle_oil_summary') {
             // Ignore client-supplied team/vehicle IDs and never return the shared map.

@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { TeamRow, text } from './teamReadPolicy';
 import { queryByIds, queryRows, TeamQueryMetrics } from './teamScopedQuery';
+import { summaryDocumentWorker } from './supportTeamDocumentPolicy';
 
 const companyKey = (value: unknown) => text(value).toLowerCase()
     .replace(/주식회사|\(주\)|（주）|㈜|\(株\)/g, '').replace(/[\s().,·ㆍ-]/g, '');
@@ -36,7 +37,7 @@ export function summaryDirectoryTeams(teams: TeamRow[], companies: TeamRow[], ow
     });
 }
 
-export async function readWorkerSummaryDirectory(db: admin.firestore.Firestore, ownTeams: TeamRow[], metrics?: TeamQueryMetrics) {
+export async function readWorkerSummaryDirectory(db: admin.firestore.Firestore, ownTeams: TeamRow[], metrics?: TeamQueryMetrics, includeRetired = false) {
     const [teams, companies] = await Promise.all([
         queryRows(db.collection('teams').select('legacyId', 'name', 'color', 'companyId', 'companyName', 'isActive', 'status'), metrics),
         queryRows(db.collection('companies').select('legacyId', 'name'), metrics),
@@ -44,7 +45,8 @@ export async function readWorkerSummaryDirectory(db: admin.firestore.Firestore, 
     const allowedTeams = summaryDirectoryTeams(teams, companies, ownTeams);
     const teamIds = allowedTeams.flatMap(team => [team.id, text(team.legacyId)]).filter(Boolean);
     const ownIds = new Set(ownTeams.flatMap(team => [team.id, text(team.legacyId)]).filter(Boolean));
-    const workers = (await queryByIds(db, 'workers', ['teamId'], teamIds, metrics)).filter(active);
+    const workers = (await queryByIds(db, 'workers', ['teamId'], teamIds, metrics))
+        .filter(worker => summaryDocumentWorker(worker, includeRetired));
     const documentWorkerIds = workers.filter(worker => ownIds.has(text(worker.teamId))).map(worker => worker.id);
     return {
         id: 'worker-summary',

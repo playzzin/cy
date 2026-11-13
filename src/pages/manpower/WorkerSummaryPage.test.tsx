@@ -67,7 +67,7 @@ test('팀장 미리보기의 내 팀 서류도 동일한 조회 API를 사용하
     expect(screen.getByRole('button', { name: '직불용 통장사본 등록' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '직불용 통장사본 공유' }));
     await screen.findByAltText('가상가 직불용 통장사본 공유 미리보기');
-    expect(supportTeamDocumentService.read).toHaveBeenCalledWith('one', 'directPayBank', expect.any(String), expect.any(AbortSignal));
+    expect(supportTeamDocumentService.read).toHaveBeenCalledWith('one', 'directPayBank', expect.any(String), expect.any(AbortSignal), false);
     expect(readWorkerBankPhoto).not.toHaveBeenCalled();
 });
 
@@ -84,7 +84,7 @@ test('서버 조회 대상에서 제외된 인원의 서류를 미등록으로 �
         ], documentWorkerIds: ['one', 'two'],
     }]);
     await openPage();
-    expect(getTeamScopedRows).toHaveBeenCalledWith('worker_summary_directory');
+    expect(getTeamScopedRows).toHaveBeenCalledWith('worker_summary_directory', { includeRetired: true });
     expect(manpowerService.getWorkers).not.toHaveBeenCalled();
     expect(screen.getByRole('option', { name: '전체 팀 보기 (3명)' })).toBeInTheDocument();
     expect(screen.queryByText('미배정 인원')).not.toBeInTheDocument();
@@ -129,13 +129,13 @@ test('지원 이력이나 월 조건 없이 다른 팀장의 등록 여부와 �
     ]) {
         fireEvent.click(screen.getByRole('button', { name: button }));
         await screen.findByAltText(preview);
-        expect(supportTeamDocumentService.read).toHaveBeenLastCalledWith('guest', kind, expect.any(String), expect.any(AbortSignal));
+        expect(supportTeamDocumentService.read).toHaveBeenLastCalledWith('guest', kind, expect.any(String), expect.any(AbortSignal), false);
         fireEvent.click(screen.getByRole('button', { name: `${button} 닫기` }));
     }
     expect(readWorkerBankPhoto).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('서류 기준월')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '신분증 공유' })).toBeEnabled();
-    expect(supportTeamDocumentService.list).toHaveBeenLastCalledWith(expect.any(AbortSignal));
+    expect(supportTeamDocumentService.list).toHaveBeenLastCalledWith(expect.any(AbortSignal), true);
 });
 
 test('지원팀 서버 조회 실패를 미등록과 구별하고 재시도 후 등록 상태로 갱신한다', async () => {
@@ -177,6 +177,68 @@ async function openPage() {
     render(<WorkerSummaryPage />);
     await screen.findByRole('checkbox', { name: '가상가 선택' });
 }
+
+test('퇴사자 포함은 인원수·검색·전체 선택에 적용되고 해제하면 퇴사자 선택만 지운다', async () => {
+    await openPage();
+    const toggle = screen.getByRole('checkbox', { name: '퇴사자 포함' });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByRole('option', { name: '전체 팀 보기 (3명)' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '가상가 선택' }));
+    fireEvent.click(toggle);
+    expect(screen.getByRole('option', { name: '전체 팀 보기 (4명)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /가상 A팀 \(3명\)/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '가상퇴사' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /목록 전체 선택/ }));
+    expect(screen.getByRole('table')).toHaveTextContent('가상퇴사');
+    expect(screen.getByRole('status')).toHaveTextContent('2명 선택');
+    fireEvent.click(toggle);
+    expect(screen.queryByRole('checkbox', { name: '가상퇴사 선택' })).not.toBeInTheDocument();
+    expect(screen.getByRole('table')).not.toHaveTextContent('가상퇴사');
+    expect(screen.getByRole('table')).toHaveTextContent('가상가');
+    expect(screen.getByRole('status')).toHaveTextContent('1명 선택');
+    fireEvent.click(toggle);
+    expect(screen.getByRole('checkbox', { name: '가상퇴사 선택' })).not.toBeChecked();
+});
+
+test.each([false, true])('퇴사자의 신분증과 직불용 통장사본을 서버 권한 확인으로 조회한다 (팀 제한: %s)', async restricted => {
+    jest.mocked(useRestrictedTeamWorkflow).mockReturnValue(restricted);
+    const workers = [
+        { id: 'one', name: '가상가', teamId: 'a', status: '재직' },
+        { id: 'retired', name: '가상퇴사', teamId: 'a', status: '퇴사', fileNameSaved: 'id_cards/synthetic.png', directPayBankPhotoId: 'photo' },
+        { id: 'blocked', name: '가상출입금지', teamId: 'a', status: '출입금지', isActive: false },
+        { id: 'deleted', name: '가상삭제', teamId: 'a', status: 'deleted', isActive: false },
+    ];
+    jest.mocked(manpowerService.getWorkers).mockResolvedValue(workers as any);
+    jest.mocked(getTeamScopedRows).mockResolvedValue([{ teams: [{ id: 'a', name: '가상 A팀' }], workers, documentWorkerIds: ['one', 'retired'] }]);
+    jest.mocked(supportTeamDocumentService.read).mockResolvedValue(new File(['fixture'], 'retired.png', { type: 'image/png' }));
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: jest.fn(() => 'blob:retired') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
+    await openPage();
+    fireEvent.click(screen.getByRole('checkbox', { name: '퇴사자 포함' }));
+    expect(screen.queryByText('가상출입금지')).not.toBeInTheDocument();
+    expect(screen.queryByText('가상삭제')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '가상퇴사 선택' }));
+    expect(screen.getByRole('button', { name: '직불용 통장사본 등록' })).toBeDisabled();
+    for (const [label, kind] of [['신분증', 'identity'], ['직불용 통장사본', 'directPayBank']]) {
+        fireEvent.click(screen.getByRole('button', { name: `${label} 공유` }));
+        await screen.findByAltText(`가상퇴사 ${label} 공유 미리보기`);
+        expect(supportTeamDocumentService.read).toHaveBeenLastCalledWith('retired', kind, expect.any(String), expect.any(AbortSignal), true);
+        fireEvent.click(screen.getByRole('button', { name: `${label} 공유 닫기` }));
+    }
+    expect(readWorkerBankPhoto).not.toHaveBeenCalled();
+});
+
+test('서류 조회 명단으로만 들어온 퇴사자도 기본 목록에서 제외한다', async () => {
+    jest.mocked(useRestrictedTeamWorkflow).mockReturnValue(true);
+    jest.mocked(getTeamScopedRows).mockResolvedValue([{ teams: [{ id: 'a', name: '가상 A팀' }], workers: [{ id: 'one', name: '가상가', teamId: 'a' }], documentWorkerIds: ['one'] }]);
+    jest.mocked(supportTeamDocumentService.list).mockResolvedValue([{ id: 'guest-retired', name: '가상타팀퇴사', teamId: 'a', teamName: '가상 A팀', role: '', relation: 'other', status: '퇴사', hasIdentity: true, hasBank: true, hasDirectPayBank: true }]);
+    await openPage();
+    expect(screen.queryByText('가상타팀퇴사')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: '퇴사자 포함' }));
+    expect(await screen.findByRole('checkbox', { name: '가상타팀퇴사 선택' })).toBeInTheDocument();
+});
 
 test('팀과 검색어를 바꿔도 선택을 유지하고 전체 선택은 현재 목록에만 적용한다', async () => {
     await openPage();

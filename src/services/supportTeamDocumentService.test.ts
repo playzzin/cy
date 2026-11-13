@@ -39,3 +39,15 @@ test('전체 사진을 반환하는 이전 서버와도 호환된다', async () 
     expect(file?.size).toBe(3);
     expect(file?.name).toBe('가상.jpg');
 });
+
+test('퇴사자 포함 조건을 명단과 신분증의 모든 조각 및 통장사본 조회에 전달한다', async () => {
+    read.mockResolvedValueOnce({ data: { workers: [] } });
+    await supportTeamDocumentService.list(undefined, true);
+    expect(read).toHaveBeenLastCalledWith({ action: 'list', includeRetired: true });
+    read.mockResolvedValueOnce(part('AQI=', 0)).mockResolvedValueOnce(part('AwQ=', 2));
+    await supportTeamDocumentService.read('retired', 'identity', '가상 퇴사자', undefined, true);
+    expect(read.mock.calls.slice(1).every(([request]) => request.includeRetired === true)).toBe(true);
+    read.mockResolvedValueOnce({ data: { photo: { base64: 'AQID', contentType: 'image/png' } } });
+    await supportTeamDocumentService.read('retired', 'directPayBank', '가상 퇴사자', undefined, true);
+    expect(read).toHaveBeenLastCalledWith({ action: 'read', workerId: 'retired', kind: 'directPayBank', includeRetired: true });
+});

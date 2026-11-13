@@ -48,7 +48,7 @@ async function readDocumentPhoto(path: string, input: { kind: string; offset?: n
     }
 }
 
-export async function readSupportDocumentScope(db: admin.firestore.Firestore, uid: string) {
+export async function readSupportDocumentScope(db: admin.firestore.Firestore, uid: string, includeRetired = false) {
     const [user, menu] = await db.getAll(db.doc(`users/${uid}`), db.doc('settings/menus_v12'));
     const profile = user.data();
     if (!profile || profile.status !== 'active') deny();
@@ -76,7 +76,7 @@ export async function readSupportDocumentScope(db: admin.firestore.Firestore, ui
     const allowedTeamIds = allowedTeams.flatMap(documentRowIds);
     const workers = office ? await queryRows(db.collection('workers')) : await queryByIds(db, 'workers', ['teamId'], allowedTeamIds);
     // No paths, account numbers or identity numbers leave the directory.
-    return { people: supportDocumentPeople({ ownTeamIds, allowedTeamIds, office, teams, workers }), workers };
+    return { people: supportDocumentPeople({ ownTeamIds, allowedTeamIds, office, teams, workers, includeRetired }), workers };
 }
 
 export async function handleSupportTeamDocuments(input: any, context: functions.https.CallableContext) {
@@ -88,7 +88,8 @@ export async function handleSupportTeamDocuments(input: any, context: functions.
         throw new functions.https.HttpsError('invalid-argument', '서류 공유 요청을 확인해 주세요.');
     }
     const db = admin.firestore();
-    const scope = await readSupportDocumentScope(db, uid);
+    const includeRetired = input.includeRetired === true;
+    const scope = await readSupportDocumentScope(db, uid, includeRetired);
     if (input.action === 'list') return { workers: scope.people };
     if (!scope.people.some(worker => worker.id === input.workerId)) deny();
     const worker = scope.workers.find(row => row.id === input.workerId)!;
@@ -104,7 +105,7 @@ export async function handleSupportTeamDocuments(input: any, context: functions.
         throw new functions.https.HttpsError('failed-precondition', '서류 원본 경로를 확인해 주세요.');
     }
     const photo = await readDocumentPhoto(path, input);
-    const current = await readSupportDocumentScope(db, uid);
+    const current = await readSupportDocumentScope(db, uid, includeRetired);
     if (!current.people.some(row => row.id === worker.id)) deny();
     if (text(current.workers.find(row => row.id === worker.id)?.[field]) !== version) {
         throw new functions.https.HttpsError('aborted', '서류가 변경되었습니다. 다시 준비해 주세요.');

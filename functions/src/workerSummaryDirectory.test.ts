@@ -34,6 +34,8 @@ test('팀장 명단은 같은 회사 여러 팀을 포함하지만 급여·타�
         'workers/own': { name: '가상작업자', teamId: 'legacy-a', fileNameSaved: 'own-id', bankPhotoId: 'own-bank', directPayBankPhotoId: 'own-direct-bank', salary: 111 },
         'workers/other': { name: '가상다른팀', teamId: 'b', idNumber: 'synthetic-id', contact: 'synthetic-phone', address: '가상주소', bloodType: 'A', fileNameSaved: 'private-id', bankPhotoId: 'private-bank', directPayBankPhotoId: 'private-direct-bank', salary: 999, bankAccount: 'private-account', notes: 'secret' },
         'workers/retired': { name: '가상퇴사', teamId: 'b', status: '퇴사' },
+        'workers/own-retired': { name: '가상내팀퇴사', teamId: 'a', status: '퇴사', fileNameSaved: 'retired-id' },
+        'workers/blocked': { name: '가상출입금지', teamId: 'a', status: '출입금지', isActive: false },
         'workers/inactive': { name: '가상비활성', teamId: 'b', isActive: false },
         'workers/external': { name: '가상외부', teamId: 'c' },
         'workers/unassigned': { name: '가상미배정' },
@@ -47,6 +49,10 @@ test('팀장 명단은 같은 회사 여러 팀을 포함하지만 급여·타�
         assert.deepEqual(directory.teams.map((team: any) => team.id), ['a', 'b']);
         assert.deepEqual(directory.workers.map((worker: any) => worker.id), ['leader', 'other', 'own']);
         assert.deepEqual(directory.documentWorkerIds, ['leader', 'own']);
+        const withRetired = (await getTeamScopedData.run({ collection: 'worker_summary_directory', filters: { includeRetired: true, companyId: 'external', teamId: 'c' } }, { auth: { uid: 'leader', token: {} } } as any)).rows[0];
+        assert.deepEqual(withRetired.workers.map((worker: any) => worker.id), ['inactive', 'leader', 'other', 'own', 'own-retired', 'retired']);
+        assert.deepEqual(withRetired.documentWorkerIds, ['leader', 'own', 'own-retired']);
+        assert.equal(withRetired.workers.find((worker: any) => worker.id === 'own-retired').fileNameSaved, 'retired-id');
         const other = directory.workers.find((worker: any) => worker.id === 'other');
         assert.deepEqual(other, { id: 'other', name: '가상다른팀', teamId: 'b', idNumber: 'synthetic-id', contact: 'synthetic-phone', address: '가상주소', bloodType: 'A' });
         assert.equal(directory.workers.find((worker: any) => worker.id === 'own').fileNameSaved, 'own-id');
@@ -54,7 +60,7 @@ test('팀장 명단은 같은 회사 여러 팀을 포함하지만 급여·타�
         assert.equal(JSON.stringify(directory).includes('private-direct-bank'), false);
         assert.equal(JSON.stringify(directory).includes('secret'), false);
         assert.equal(JSON.stringify(directory).includes('salary'), false);
-        assert.deepEqual((await call('workers')).rows.map((worker: any) => worker.id), ['leader', 'own']);
+        assert.deepEqual((await call('workers')).rows.map((worker: any) => worker.id), ['blocked', 'leader', 'own', 'own-retired']);
         for (const uid of ['pending', 'unlinked', 'missing', 'worker']) {
             await assert.rejects(call('worker_summary_directory', uid), (error: any) => error.code === 'permission-denied');
         }
