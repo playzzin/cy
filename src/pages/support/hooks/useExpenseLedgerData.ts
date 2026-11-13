@@ -28,7 +28,7 @@ import {
 } from '../../../utils/supportAssignmentTargets';
 import { normalizeVehicleExpenseType } from '../../../utils/vehicleExpenseType';
 import { getHistoricalAttendedSiteOptions } from '../../../utils/dailyReportHistoricalSite';
-import { getAccommodationExpenseBucket } from '../../../utils/accommodationExpenseClassification';
+import { getAccommodationExpenseBucket, isAccommodationAdjustmentClaim } from '../../../utils/accommodationExpenseClassification';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import type { Card, CardBillingTargetRecord, CardBillingTargetType } from '../../../types/card';
 import type { CardBillingDocument } from '../../../types/cardBilling';
@@ -560,7 +560,7 @@ const summarizeCardBillingAmountFromDetailRows = (doc: CardBillingDocument): num
   }, 0);
 };
 
-export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, billingScope: BillingScope = 'all', includeDailyReports = false) => {
+export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, billingScope: BillingScope = 'all', includeDailyReports = false, includePersonalAccommodation = false) => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [accommodationDocs, setAccommodationDocs] = useState<AccommodationBillingDocument[]>([]);
@@ -709,8 +709,10 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   );
 
   const teamExpenseAccommodationDocs = useMemo(
-    () => includedAccommodationDocs.filter(isTeamExpenseBillingDocument),
-    [includedAccommodationDocs]
+    // The expense overview mirrors its detail rows, including personal rooms.
+    // Settlement consumers keep their existing team-only accounting by default.
+    () => includePersonalAccommodation ? includedAccommodationDocs : includedAccommodationDocs.filter(isTeamExpenseBillingDocument),
+    [includedAccommodationDocs, includePersonalAccommodation]
   );
 
   const baseIncludedVehicleDocs = useMemo(
@@ -764,8 +766,8 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
 
   const statusCounts = useMemo<BillingStatusCounts>(
     () => ({
-      accommodationDraft: accommodationDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && !isPostedAccommodation(doc)).length,
-      accommodationConfirmed: accommodationDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && isPostedAccommodation(doc)).length,
+      accommodationDraft: accommodationDocs.filter((doc) => (includePersonalAccommodation || isTeamExpenseBillingDocument(doc)) && !isPostedAccommodation(doc)).length,
+      accommodationConfirmed: accommodationDocs.filter((doc) => (includePersonalAccommodation || isTeamExpenseBillingDocument(doc)) && isPostedAccommodation(doc)).length,
       vehicleDraft: vehicleDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && !isPostedVehicle(doc)).length,
       vehiclePosted: vehicleDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && isPostedVehicle(doc)).length,
       cardDraft: cardDocs.filter((doc) => isTeamExpenseBillingDocument(doc) && !isPostedCard(doc)).length,
@@ -774,7 +776,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       claimCharged: scopedClaims.filter((claim) => claim.status === 'charged').length,
       claimSettled: scopedClaims.filter((claim) => claim.status === 'settled').length
     }),
-    [accommodationDocs, cardDocs, scopedClaims, vehicleDocs]
+    [accommodationDocs, cardDocs, scopedClaims, vehicleDocs, includePersonalAccommodation]
   );
 
   const summaries = useMemo(() => {
@@ -801,7 +803,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       const row = ensure(team);
       (doc.lineItems ?? []).forEach((item) => {
         const amount = toFiniteNumber(item.amount);
-        if (amount <= 0) return;
+        if (amount === 0) return;
         const expenseBucket = getAccommodationExpenseBucket(item);
         if (expenseBucket === 'accommodation') row.accommodation += amount;
         else if (expenseBucket === 'privateRoom') row.privateRoom += amount;
@@ -849,7 +851,8 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
 
       if (payerTeam && isOtherExpense) {
         const payer = ensure(payerTeam);
-        payer.otherClaim += amount;
+        if (isAccommodationAdjustmentClaim(claim)) payer.accommodation += amount;
+        else payer.otherClaim += amount;
         return;
       }
 

@@ -83,6 +83,23 @@ describe('accommodationService saved utility ledger boundary', () => {
         jest.mocked(supportCancellationLogService.getLogsByResourceType).mockResolvedValue([]);
     });
 
+    it('종료일과 처리 이력이 없는 기존 숙소도 저장된 계약기간 내 월별 경비를 유지한다', async () => {
+        mockedListAccommodations.mockResolvedValue([{
+            id: 'room/204', name: '검증숙소', status: 'inactive',
+            contract: { startDate: '', endDate: '2026-11-10', monthlyRent: 500000 },
+        } as Accommodation]);
+        mockedListUtilityRecords.mockImplementation(async yearMonth => yearMonth === '2026-10'
+            ? [buildRecord({ yearMonth, costs: { ...buildRecord().costs, rent: 450000 } })] : []);
+        const records = await accommodationService.getMonthlyLedger('2026-10');
+        expect(records).toHaveLength(1);
+        expect(records[0].costs.rent).toBe(450000);
+        expect(await accommodationService.getMonthlyLedger('2026-09')).toEqual([]);
+        mockedListUtilityRecords.mockResolvedValue([buildRecord({ yearMonth: '2026-12' })]);
+        expect(await accommodationService.getMonthlyLedger('2026-12')).toEqual([]);
+        expect(accommodationFirestoreService.saveAccommodation).not.toHaveBeenCalled();
+        expect(mockedSaveUtilityRecord).not.toHaveBeenCalled();
+    });
+
     it('11월 처리·만기여도 비용 종료월을 10월로 지정하면 10월 비용을 유지하고 11월부터 제외한다', async () => {
         const ended = { id: 'room/204', name: '검증숙소', status: 'inactive',
             contract: { startDate: '2026-01-01', endDate: '2026-11-10', monthlyRent: 500000 } } as Accommodation;

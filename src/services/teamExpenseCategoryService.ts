@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import type { TeamExpenseCategory, TeamExpenseCategoryScope } from '../types/teamExpenseLedger';
+import { ACCOMMODATION_ADJUSTMENT_CATEGORY } from '../utils/accommodationExpenseClassification';
 
 const COLLECTION_NAME = 'team_expense_categories';
 
@@ -19,6 +20,7 @@ export const DEFAULT_TEAM_EXPENSE_CATEGORIES: TeamExpenseCategory[] = [
   { id: 'deposit', label: '보증금', scope: 'otherExpense', order: 110, isActive: true, isDefault: true },
   { id: 'marking', label: '마이킹', scope: 'otherExpense', order: 120, isActive: true, isDefault: true },
   { id: 'equipment', label: '장비비', scope: 'otherExpense', order: 130, isActive: true, isDefault: true },
+  { id: ACCOMMODATION_ADJUSTMENT_CATEGORY, label: '숙소비 조정', scope: 'otherExpense', order: 135, isActive: true, isDefault: true },
   { id: 'officeExpense', label: '사무실경비', scope: 'officeExpense', order: 140, isActive: true, isDefault: true },
   { id: 'etc', label: '기타', scope: 'both', order: 900, isActive: true, isDefault: true },
   { id: 'fuel', label: '유류비', scope: 'teamCharge', order: 1000, isActive: false, isDefault: true },

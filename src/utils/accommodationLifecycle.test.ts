@@ -54,3 +54,15 @@ it('종료일 근거가 없는 숙소를 임의로 과거 운영 중으로 추�
     expect(getAccommodationStatusForMonth(room(), '2026-10')).toBe('inactive');
     expect(applyAccommodationTerminationHistory([room()], [log({ processedDate: '' })])[0].endedDate).toBeUndefined();
 });
+
+it('저장된 동일 숙소·월 기록만 복원하고 계약기간과 명시된 비용 종료월을 우선한다', () => {
+    const legacy = room({ contract: { startDate: '2026-05-01', endDate: '2026-11-10' } as Accommodation['contract'] });
+    const saved = { accommodationId: 'room', yearMonth: '2026-10' };
+    expect(getAccommodationStatusForMonth(legacy, '2026-10', saved)).toBe('active');
+    expect(getAccommodationStatusForMonth(legacy, '2026-09', saved)).toBe('inactive');
+    expect(getAccommodationStatusForMonth(legacy, '2026-10', { ...saved, accommodationId: 'other' })).toBe('inactive');
+    for (const yearMonth of ['2026-04', '2026-12']) {
+        expect(getAccommodationStatusForMonth(legacy, yearMonth, { ...saved, yearMonth })).toBe('inactive');
+    }
+    expect(getAccommodationStatusForMonth({ ...legacy, billingEndYearMonth: '2026-09' }, '2026-10', saved)).toBe('inactive');
+});

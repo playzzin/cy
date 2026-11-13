@@ -700,7 +700,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
 
         return selectedTeamScopedAccommodations.filter(acc => {
             const activeList = getMonthAssignmentsForAccommodation(acc);
-            const monthStatus = getAccommodationStatusForMonth(acc, summaryMonth);
+            const monthStatus = getAccommodationStatusForMonth(acc, summaryMonth, getCurrentMonthLedgerRecord(acc));
 
             if (filterStatus === 'todo') {
                 if (monthStatus !== 'active') return false;
@@ -756,7 +756,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                 ...billingTargetSearchValues
             ].some(value => String(value ?? '').toLowerCase().includes(query));
         });
-    }, [selectedTeamScopedAccommodations, filterStatus, monthAssignmentsByAccommodationId, searchTerm, billingTargets, accommodationByAnyId, summaryMonth]);
+    }, [selectedTeamScopedAccommodations, filterStatus, monthAssignmentsByAccommodationId, searchTerm, billingTargets, accommodationByAnyId, summaryMonth, currentMonthLedgerByAccommodationId]);
 
     const ownershipSummary = useMemo(() => {
         const summary: Record<string, { count: number; rent: number; deposit: number; occupants: number }> = {
@@ -1325,10 +1325,10 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     // Stats Logic
     const totalCount = selectedTeamScopedAccommodations.length;
     const currentWorkCount = selectedTeamScopedAccommodations.filter((accommodation) => (
-        getAccommodationStatusForMonth(accommodation, summaryMonth) === 'active' && getMonthAssignmentsForAccommodation(accommodation).length === 0
+        getAccommodationStatusForMonth(accommodation, summaryMonth, getCurrentMonthLedgerRecord(accommodation)) === 'active' && getMonthAssignmentsForAccommodation(accommodation).length === 0
     )).length;
-    const occupiedCount = selectedTeamScopedAccommodations.filter(a => getAccommodationStatusForMonth(a, summaryMonth) === 'active').length;
-    const vacantCount = selectedTeamScopedAccommodations.filter(a => getAccommodationStatusForMonth(a, summaryMonth) === 'inactive').length;
+    const occupiedCount = selectedTeamScopedAccommodations.filter(a => getAccommodationStatusForMonth(a, summaryMonth, getCurrentMonthLedgerRecord(a)) === 'active').length;
+    const vacantCount = selectedTeamScopedAccommodations.filter(a => getAccommodationStatusForMonth(a, summaryMonth, getCurrentMonthLedgerRecord(a)) === 'inactive').length;
     // The list and both summaries share the selected contract month and filters.
     const { rent: totalRent, deposit: totalDeposit } = filteredTotals;
     const missingContractStartCount = filteredAccommodations.filter(room => !room.contract?.startDate?.trim()).length;

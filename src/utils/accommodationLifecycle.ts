@@ -1,4 +1,4 @@
-import type { Accommodation } from '../types/accommodation';
+import type { Accommodation, UtilityRecord } from '../types/accommodation';
 import type { SupportCancellationLog } from '../types/supportCancellationLog';
 import { overlapsAccommodationMonth } from './accommodationMonthSummary';
 
@@ -13,10 +13,18 @@ export const getAccommodationBillingEndMonth = (room: Accommodation): string => 
 };
 
 /** The selected billing end month is inclusive and independent of contract expiry. */
-export const getAccommodationStatusForMonth = (room: Accommodation, yearMonth: string): Accommodation['status'] => {
+export const getAccommodationStatusForMonth = (
+    room: Accommodation,
+    yearMonth: string,
+    savedRecord?: Pick<UtilityRecord, 'accommodationId' | 'yearMonth'>,
+): Accommodation['status'] => {
     if (room.status !== 'inactive') return 'active';
     const endMonth = getAccommodationBillingEndMonth(room);
-    return endMonth && yearMonth <= endMonth ? 'active' : 'inactive';
+    if (endMonth) return yearMonth <= endMonth ? 'active' : 'inactive';
+    // Legacy status-only terminations have no reliable cutoff. A saved ledger
+    // proves this month's use without inventing an end date or future charges.
+    return savedRecord?.accommodationId === room.id && savedRecord.yearMonth === yearMonth
+        && overlapsAccommodationMonth(room.contract || {}, yearMonth) ? 'active' : 'inactive';
 };
 
 export const isAccommodationContractInMonth = (room: Accommodation, yearMonth: string): boolean => {

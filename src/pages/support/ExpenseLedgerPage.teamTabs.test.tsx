@@ -162,7 +162,7 @@ describe('ExpenseLedgerPage team tabs', () => {
 
     const allAverage = screen.getByRole('region', { name: '팀별 평균경비' });
     expect(within(allAverage).getByText('50,000원')).not.toBeNull();
-    expect(mockUseExpenseLedgerData).toHaveBeenLastCalledWith(expect.any(String), 'all', 'posted', true);
+    expect(mockUseExpenseLedgerData).toHaveBeenLastCalledWith(expect.any(String), 'all', 'posted', true, true);
     fireEvent.click(screen.getByRole('tab', { name: /청연팀/ }));
     const teamAverage = screen.getByRole('region', { name: '팀별 평균경비' });
     expect(within(teamAverage).getByText('2.5')).not.toBeNull();

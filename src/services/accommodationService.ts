@@ -103,8 +103,8 @@ const buildUtilityRecord = (
     };
 };
 
-const isAccommodationBillableForMonth = (accommodation: Accommodation, yearMonth: string): boolean => {
-    if (getAccommodationStatusForMonth(accommodation, yearMonth) !== 'active') return false;
+const isAccommodationBillableForMonth = (accommodation: Accommodation, yearMonth: string, savedRecord?: UtilityRecord): boolean => {
+    if (getAccommodationStatusForMonth(accommodation, yearMonth, savedRecord) !== 'active') return false;
 
     return isAccommodationContractInMonth(accommodation, yearMonth);
 };
@@ -179,7 +179,8 @@ export const accommodationService = {
 
         return accommodations
             .filter((accommodation) => {
-                if (!isAccommodationBillableForMonth(accommodation, yearMonth)) return false;
+                const savedRecord = existingByAccommodationId.get(String(accommodation.id).trim());
+                if (!isAccommodationBillableForMonth(accommodation, yearMonth, savedRecord)) return false;
 
                 const accommodationId = String(accommodation.id ?? '').trim();
                 const accommodationName = String(accommodation.name ?? '').trim();

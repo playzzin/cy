@@ -2,8 +2,13 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useExpenseLedgerData } from './useExpenseLedgerData';
 import { teamExpenseLedgerService } from '../../../services/teamExpenseLedgerService';
 import { dailyReportService } from '../../../services/dailyReportService';
+import { accommodationBillingService } from '../../../services/accommodationBillingService';
 
 jest.mock('../../../services/dailyReportService', () => ({ dailyReportService: { getReports: jest.fn() } }));
+
+beforeEach(() => {
+  (accommodationBillingService.getBillingDocuments as jest.Mock).mockResolvedValue([]);
+});
 
 it('팀 경비를 해당팀 담당현장 공수와 다른현장 지원 공수의 합으로 나눈다', async () => {
   (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValueOnce([
@@ -26,13 +31,47 @@ it('팀 경비를 해당팀 담당현장 공수와 다른현장 지원 공수의
 jest.mock('../../../services/teamService', () => ({ teamService: { getTeams: async () => [{ id: 'fixture-team', name: 'fixture', companyName: '청연이엔지' }] } }));
 jest.mock('../../../services/siteService', () => ({ siteService: { getSites: async () => [] } }));
 jest.mock('../../../services/companyService', () => ({ companyService: { getCompanies: async () => [] } }));
-jest.mock('../../../services/accommodationBillingService', () => ({ accommodationBillingService: { getBillingDocuments: async () => [] } }));
+jest.mock('../../../services/accommodationBillingService', () => ({ accommodationBillingService: { getBillingDocuments: jest.fn(async () => []) } }));
 jest.mock('../../../services/vehicleBillingService', () => ({ vehicleBillingService: { getBillingsByMonth: async () => [] } }));
 jest.mock('../../../services/cardBillingService', () => ({ cardBillingService: { getBillingsByMonth: async () => [] } }));
 jest.mock('../../../services/cardService', () => ({ cardService: { getCards: async () => [], listAllCardBillingTargets: async () => [] } }));
 jest.mock('../../../services/teamExpenseLedgerService', () => ({ teamExpenseLedgerService: { getClaimsByMonth: jest.fn() } }));
 jest.mock('../../../services/teamExpenseCategoryService', () => ({ DEFAULT_TEAM_EXPENSE_CATEGORIES: [], teamExpenseCategoryService: { getCategories: async () => [] } }));
 jest.mock('../../../utils/swal', () => ({ toast: { error: jest.fn() } }));
+
+it.each([
+  ['2026-10', false, 950000, 450000],
+  ['2026-11', true, 1000000, 500000],
+])('%s 경비내역은 개인숙소와 조정을 포함하고 정산의 개인청구 제외는 유지한다', async (month, adjusted, displayed, settlement) => {
+  const billing = (type: 'team' | 'worker', amounts: number[]) => ({
+    id: type, yearMonth: month, teamId: 'fixture-team', issuedToType: type, status: 'draft',
+    lineItems: amounts.map((amount, i) => ({ id: `${type}-${i}`, amount, targetField: 'accommodation', sourceType: 'utility_ledger' })),
+  });
+  const docs = [billing('team', adjusted ? [450000, 500000] : [450000]), billing('worker', [500000])];
+  (accommodationBillingService.getBillingDocuments as jest.Mock).mockResolvedValueOnce(docs).mockResolvedValueOnce(docs);
+  const claims = adjusted ? [{ id: 'adjustment', yearMonth: month, payerTeamId: 'fixture-team',
+    claimType: 'otherExpense', category: 'accommodationAdjustment', amount: -450000, status: 'charged' }] : [];
+  (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValueOnce(claims).mockResolvedValueOnce(claims);
+  const { result: overview } = renderHook(() => useExpenseLedgerData(month, 'fixture-team', 'posted', false, true));
+  await waitFor(() => expect(overview.current.loading).toBe(false));
+  expect(overview.current.summaries[0]).toMatchObject({ accommodation: displayed, otherClaim: 0 });
+  expect(overview.current.totals).toMatchObject({ accommodation: displayed, total: displayed });
+  expect(overview.current.selectedRawDocs.accommodationDocs).toHaveLength(2);
+  const { result: accounting } = renderHook(() => useExpenseLedgerData(month, 'fixture-team', 'posted'));
+  await waitFor(() => expect(accounting.current.loading).toBe(false));
+  expect(accounting.current.totals).toMatchObject({ accommodation: settlement, otherClaim: 0, total: settlement });
+});
+
+it('숙소 청구서 자체의 음수 조정도 합계에서 차감한다', async () => {
+  (accommodationBillingService.getBillingDocuments as jest.Mock).mockResolvedValueOnce([{
+    id: 'team-credit', yearMonth: '2026-11', teamId: 'fixture-team', issuedToType: 'team', status: 'confirmed',
+    lineItems: [1000000, -450000].map((amount, i) => ({ id: `${i}`, amount, targetField: 'accommodation' })),
+  }]);
+  (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValueOnce([]);
+  const { result } = renderHook(() => useExpenseLedgerData('2026-11', 'fixture-team', 'posted'));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.totals.accommodation).toBe(550000);
+});
 
 it('음수 기타청구를 상세에 유지하고 팀별 금액과 전체 합계에서 차감한다', async () => {
   (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValueOnce([

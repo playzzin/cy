@@ -1,5 +1,6 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import { render, screen, within } from '@testing-library/react';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import { ExpenseLedgerDetailBoard } from './ExpenseLedgerDetailBoard';
 
@@ -22,6 +23,24 @@ jest.mock('../hooks/useExpenseLedgerData', () => ({
 }));
 
 describe('ExpenseLedgerDetailBoard', () => {
+  test.each([undefined, 'accommodation'] as const)('숙소 상세 3건을 유지하고 별도 조정 후 합계를 표시한다 (%s)', (selectedItemKey) => {
+    const accommodationDocs = [450000, 500000, 500000].map((amount, i) => ({
+      id: `doc-${i}`, yearMonth: '2026-11', teamId: 'test-team', teamName: '검증팀',
+      issuedToType: i === 1 ? 'worker' : 'team', issuedToWorkerId: '', issuedToWorkerName: '', status: 'draft',
+      lineItems: [{ id: `rent-${i}`, label: `검증숙소 ${i} 월세`, amount, targetField: 'accommodation', sourceAccommodationId: `room-${i}` }],
+    } as AccommodationBillingDocument));
+    render(<ExpenseLedgerDetailBoard teamName="검증팀" color="#64748b" accommodationDocs={accommodationDocs}
+      vehicleDocs={[]} cardDocs={[]} receivableClaims={[]} payableClaims={[]} selectedItemKey={selectedItemKey}
+      otherClaims={[{ id: 'adjustment', yearMonth: '2026-11', date: '2026-11-10', payerTeamId: 'test-team', payerTeamName: '검증팀',
+        claimType: 'otherExpense', category: 'accommodationAdjustment', description: '종료 숙소 월세 차감', amount: -450000, status: 'charged' }]} />);
+    const table = screen.getAllByRole('table')[0];
+    const groups = within(table).getAllByRole('rowgroup');
+    expect(within(groups[1]).getAllByRole('row')).toHaveLength(3);
+    expect(groups[2]).toHaveTextContent('1,000,000');
+    expect(within(screen.getByLabelText('숙소비 조정 내역')).getByText('-450,000')).toBeInTheDocument();
+    expect(screen.getAllByText('종료 숙소 월세 차감')).toHaveLength(1);
+  });
+
   test('개인청구 숙소도 AI 원장에 저장된 금액을 상세표에 표시한다', () => {
     const accommodationDoc: AccommodationBillingDocument = {
       id: 'lee-worker-2026-08',

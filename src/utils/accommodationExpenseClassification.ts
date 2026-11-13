@@ -1,4 +1,11 @@
 import type { AccommodationBillingLineItem } from '../types/accommodationBilling';
+import type { TeamExpenseClaim } from '../types/teamExpenseLedger';
+
+export const ACCOMMODATION_ADJUSTMENT_CATEGORY = 'accommodationAdjustment';
+
+export const isAccommodationAdjustmentClaim = (claim: Pick<TeamExpenseClaim, 'claimType' | 'category'>): boolean => (
+  claim.claimType === 'otherExpense' && claim.category === ACCOMMODATION_ADJUSTMENT_CATEGORY
+);
 
 export type AccommodationExpenseBucket =
   | 'accommodation'

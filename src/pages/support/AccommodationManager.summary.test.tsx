@@ -225,6 +225,33 @@ it('비용 종료월이 10월이면 11월 만기·처리여도 10월 목록·월
     await waitFor(() => expectSummaries(500000, 1000000, 500000));
 });
 
+it('종료일 정보가 없는 숙소의 저장된 과거 경비를 목록·집계·엑셀에 표시한다', async () => {
+    const ended = room('기존종료', 450000, 5000000, { status: 'inactive' });
+    ended.contract.startDate = '';
+    ended.contract.endDate = '2026-11-10';
+    jest.mocked(accommodationService.listAllAccommodations).mockResolvedValue([ended]);
+    jest.mocked(accommodationService.getMonthlyLedger).mockImplementation(async yearMonth => yearMonth === '2026-10' ? [{
+        id: 'saved-october', accommodationId: ended.id, accommodationName: ended.name, yearMonth,
+        costs: { rent: 450000, electricity: 20000, gas: 0, water: 0, internet: 0, maintenance: 0, other: 0, total: 470000 },
+        paymentStatus: 'unpaid',
+    }] : []);
+    window.sessionStorage.setItem('cy.support-management.year-month', '2026-10');
+    render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AccommodationManager /></MemoryRouter>);
+    await waitFor(() => expectSummaries(450000, 5000000, 450000));
+    expect(screen.getByText(ended.name)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '운영 중 1호' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+    await waitFor(() => expect(buildAccommodationStatusWorkbook).toHaveBeenCalledTimes(1));
+    expect(jest.mocked(buildAccommodationStatusWorkbook).mock.calls[0][0].rows.map(row => row.accommodation.id)).toEqual([ended.id]);
+    act(() => rememberSupportManagementYearMonth('2026-09'));
+    await waitFor(() => expectSummaries(0, 0, 0));
+    expect(screen.queryByText(ended.name)).not.toBeInTheDocument();
+    act(() => rememberSupportManagementYearMonth('2026-10'));
+    await waitFor(() => expectSummaries(450000, 5000000, 450000));
+    act(() => rememberSupportManagementYearMonth('2026-12'));
+    await waitFor(() => expectSummaries(0, 0, 0));
+});
+
 it('시작일 미입력 숙소는 임의로 날짜를 추정하지 않고 확인 필요 건수를 표시한다', async () => {
     const unknownStart = room('날짜미상', 450000, 5000000);
     unknownStart.contract.startDate = '';

@@ -4,7 +4,7 @@ import { Image as ImageIcon } from 'lucide-react';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import type { CardBillingDocument } from '../../../types/cardBilling';
 import type { TeamExpenseClaim } from '../../../types/teamExpenseLedger';
-import { getAccommodationExpenseBucket } from '../../../utils/accommodationExpenseClassification';
+import { getAccommodationExpenseBucket, isAccommodationAdjustmentClaim } from '../../../utils/accommodationExpenseClassification';
 import type { VehicleBillingDocument } from '../../../types/vehicleBilling';
 import {
   formatCurrency,
@@ -185,7 +185,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       const isPersonalBilling = isPersonalBillingTarget(doc.issuedToType);
       (doc.lineItems || []).forEach((item, index) => {
         const rawAmount = toAmount(item.amount);
-        if (rawAmount <= 0 && !isPersonalBilling) return;
+        if (rawAmount === 0 && !isPersonalBilling) return;
         // 개인청구 금액은 팀 정산 합계에서는 제외되지만, 상세표에서는
         // 저장된 원장 금액을 그대로 보여 줘야 AI 청구서 반영 여부를
         // 사용자가 확인할 수 있다.
@@ -392,6 +392,20 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       .sort((a, b) => `${a.teamName} ${a.cardName}`.localeCompare(`${b.teamName} ${b.cardName}`, 'ko-KR'));
   }, [cardDocs]);
 
+  const accommodationAdjustments = otherClaims.filter(isAccommodationAdjustmentClaim);
+  const accommodationAdjustmentTotal = accommodationAdjustments.reduce((sum, claim) => sum + toAmount(claim.amount), 0);
+  const adjustmentDetails = accommodationAdjustments.length > 0 && (
+    <div aria-label="숙소비 조정 내역" className="border-b border-slate-200 bg-amber-50 px-3 py-2 text-xs">
+      <div className="font-black text-amber-900">숙소비 조정 (아래 합계에 반영)</div>
+      {accommodationAdjustments.map(claim => (
+        <div key={claim.id} className="mt-1 flex items-start justify-between gap-3">
+          <span>{showTeamColumn ? `${claim.payerTeamName} · ` : ''}{claim.description}</span>
+          <strong className="shrink-0 tabular-nums">{formatCurrency(claim.amount)}</strong>
+        </div>
+      ))}
+    </div>
+  );
+
   const claimSections = useMemo<ClaimSection[]>(() => {
     return [
       {
@@ -422,7 +436,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         description: '해당 팀에게만 반영되는 보증금, 마이킹, 기타 청구 금액',
         colorClass: 'bg-amber-50 text-amber-800',
         totalClass: 'bg-amber-50 text-amber-800',
-        rows: sortClaims(otherClaims).map((claim) => ({
+        rows: sortClaims(otherClaims.filter(claim => !isAccommodationAdjustmentClaim(claim))).map((claim) => ({
           ...claim,
           counterparty: ''
         }))
@@ -474,7 +488,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
           ? focusedCardRows.length
           : focusedClaimRows.length;
     const focusedTotal = accommodationDetail
-      ? focusedAccommodationRows.reduce((sum, row) => sum + toAmount(row[accommodationDetail.amountKey]), 0)
+      ? focusedAccommodationRows.reduce((sum, row) => sum + toAmount(row[accommodationDetail.amountKey]), selectedItemKey === 'accommodation' ? accommodationAdjustmentTotal : 0)
       : vehicleDetail
         ? focusedVehicleRows.reduce((sum, row) => sum + toAmount(row[vehicleDetail.amountKey]), 0)
         : selectedItemKey === 'card'
@@ -508,6 +522,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         </div>
 
         <div className={tableViewportClass}>
+          {selectedItemKey === 'accommodation' && adjustmentDetails}
           {accommodationDetail && (
             <table className={fitWidth ? 'w-full table-fixed border-collapse text-xs' : 'w-full min-w-[680px] border-collapse text-sm'}>
               <thead>
@@ -538,7 +553,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
                   </tr>
                 )}
               </tbody>
-              {focusedAccommodationRows.length > 0 && (
+              {(focusedAccommodationRows.length > 0 || (selectedItemKey === 'accommodation' && accommodationAdjustments.length > 0)) && (
                 <tfoot>
                   <tr className="border-t-2 border-slate-300 bg-white shadow-[0_-1px_0_#cbd5e1]">
                     <td colSpan={showTeamColumn ? 4 : 3} className="px-3 py-3 text-center text-sm font-black text-slate-700">합계</td>
@@ -724,6 +739,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         >
           {teamName} 숙소 상세내역
         </div>
+        {adjustmentDetails}
         <div className={tableViewportClass}>
           <table className={fitWidth ? 'w-full table-fixed border-collapse text-xs' : 'w-full min-w-[1120px] border-collapse text-xs'}>
             <thead>
@@ -764,11 +780,11 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
                 </tr>
               )}
             </tbody>
-            {accommodationRows.length > 0 && (
+            {(accommodationRows.length > 0 || accommodationAdjustments.length > 0) && (
               <tfoot>
                 <tr className="border-t-2 border-slate-300 bg-slate-50">
                   <td colSpan={showTeamColumn ? 2 : 1} className="border border-slate-200 px-2 py-2 text-center font-black">총 합계</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.rent, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.rent, accommodationAdjustmentTotal))}</td>
                   <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.privateRoom, 0))}</td>
                   <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.electricity, 0))}</td>
                   <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.gas, 0))}</td>
@@ -777,7 +793,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
                   <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.other, 0))}</td>
                   <td className="border border-slate-200 px-2 py-2" />
                   <td className="border border-slate-200 px-2 py-2" />
-                  <td className="border border-slate-200 bg-red-50 px-2 py-2 text-right font-black tabular-nums text-red-600">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.total, 0))}</td>
+                  <td className="border border-slate-200 bg-red-50 px-2 py-2 text-right font-black tabular-nums text-red-600">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.total, accommodationAdjustmentTotal))}</td>
                 </tr>
               </tfoot>
             )}

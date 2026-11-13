@@ -97,7 +97,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
     rawDocs,
     teamAverageExpenses = {},
     dailyReportsError
-  } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope, true);
+  } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope, true, true);
 
   const draftCount =
     statusCounts.accommodationDraft +
@@ -134,7 +134,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
       { label: '사무실경비', amount: totals.officeExpense, icon: Landmark, tone: '#0284c7' },
       { label: '받을 후청구', amount: totals.receivable, icon: ArrowDownLeft, tone: '#059669' },
       { label: '내야 할 후청구', amount: totals.payable, icon: ArrowUpRight, tone: '#dc2626' },
-      { label: '정산 반영 합계', amount: totals.total, icon: Sigma, tone: '#0f172a' }
+      { label: '경비내역 합계', amount: totals.total, icon: Sigma, tone: '#0f172a' }
     ],
     [totals.accommodation, totals.card, totals.officeExpense, totals.otherClaim, totals.payable, totals.receivable, totals.total, totals.utility, totals.vehicle]
   );
@@ -157,7 +157,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
           <div>
             <h1 className={embedded ? 'text-sm font-black text-slate-950' : 'text-xl font-black text-slate-950'}>팀별 경비내역</h1>
             <p className={embedded ? 'hidden' : 'mt-1 text-sm font-medium text-slate-500'}>
-              카드·숙소·차량 대장에서 저장한 경비와 청구완료·정산완료 후청구 내역을 표시합니다.
+              카드·숙소·차량 대장의 경비와 청구완료·정산완료 후청구를 표시합니다. 숙소비에는 개인청구와 숙소비 조정이 포함됩니다.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -227,7 +227,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
           <section aria-label="팀별 평균경비" className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
               <h2 className="text-base font-black text-slate-950">팀별 평균경비 (원/공수)</h2>
-              <p className="mt-1 text-xs text-slate-600">팀 경비(정산 반영 합계) ÷ (해당팀 담당현장 공수 + 다른현장 지원 공수). 타팀 공수는 제외하며, 공수가 없으면 평균을 표시하지 않습니다.</p>
+              <p className="mt-1 text-xs text-slate-600">조회한 팀 경비 ÷ (해당팀 담당현장 공수 + 다른현장 지원 공수). 타팀 공수는 제외하며, 공수가 없으면 평균을 표시하지 않습니다.</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
@@ -376,7 +376,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
                   cardDocs={rawDocs.cardDocs}
                   receivableClaims={[]}
                   payableClaims={[]}
-                  otherClaims={[]}
+                  otherClaims={rawDocs.claims}
                   officeClaims={[]}
                   categoryOptions={allCategoryOptions}
                   showClaims={false}
