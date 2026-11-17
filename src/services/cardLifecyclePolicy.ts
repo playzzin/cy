@@ -9,7 +9,7 @@ export const isInactiveCardStatus = (status?: CardStatus | null): boolean => (
     Boolean(status && INACTIVE_CARD_STATUSES.has(status))
 );
 
-export const canRestoreCardStatus = (status?: CardStatus | null): boolean => status === 'SUSPENDED';
+export const canRestoreCardStatus = (status?: CardStatus | null): boolean => isInactiveCardStatus(status);
 
 export const assertCardCanBeAssignedOrBilled = (status?: CardStatus | null): void => {
     if (isInactiveCardStatus(status)) {
@@ -19,7 +19,7 @@ export const assertCardCanBeAssignedOrBilled = (status?: CardStatus | null): voi
 
 export const assertCardCanBeRestored = (status?: CardStatus | null): void => {
     if (!canRestoreCardStatus(status)) {
-        throw new Error('card-restore-requires-suspended-status');
+        throw new Error('card-restore-requires-inactive-status');
     }
 };
 

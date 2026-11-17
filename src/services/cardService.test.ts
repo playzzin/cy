@@ -128,22 +128,22 @@ describe('cardService inactive-card guards', () => {
         expect(mockedFirestore.applyCardBillingTargetChanges).not.toHaveBeenCalled();
     });
 
-    it.each(['AVAILABLE', 'CLOSED'] as const)('refuses restore from %s at the facade boundary', async (status) => {
+    it.each(['AVAILABLE', 'ASSIGNED'] as const)('refuses restore from %s at the facade boundary', async (status) => {
         mockedFirestore.getCard.mockResolvedValue(buildCard(status));
 
-        await expect(cardService.restoreSuspendedCard({
+        await expect(cardService.restoreCardUse({
             cardId: 'card-3909',
             effectiveDate: '2026-08-19',
             operationId: 'restore-op',
             auditLog: restoreAuditLog,
-        })).rejects.toThrow('card-restore-requires-suspended-status');
+        })).rejects.toThrow('card-restore-requires-inactive-status');
         expect(mockedFirestore.transitionCardLifecycle).not.toHaveBeenCalled();
     });
 
-    it('delegates a suspended restore as one lifecycle command', async () => {
-        mockedFirestore.getCard.mockResolvedValue(buildCard('SUSPENDED'));
+    it.each(['SUSPENDED', 'CLOSED'] as const)('delegates a %s restore as one lifecycle command', async (status) => {
+        mockedFirestore.getCard.mockResolvedValue(buildCard(status));
 
-        await cardService.restoreSuspendedCard({
+        await cardService.restoreCardUse({
             cardId: 'card-3909',
             effectiveDate: '2026-08-19',
             operationId: 'restore-op',

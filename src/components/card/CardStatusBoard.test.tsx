@@ -55,7 +55,8 @@ describe('CardStatusBoard inactive card controls', () => {
         });
     });
 
-    it('offers restore only for suspended cards and disables inactive assignment/billing controls', async () => {
+    it.each([false, true])('offers restore for both inactive statuses (mobile: %s)', async (mobile) => {
+        (window.matchMedia as jest.Mock).mockReturnValue({ matches: mobile });
         const onAssign = jest.fn();
         const onBillingTargetAssign = jest.fn();
         const onCancelUse = jest.fn();
@@ -80,7 +81,11 @@ describe('CardStatusBoard inactive card controls', () => {
         fireEvent.click(screen.getByRole('button', { name: /정지\/해지/ }));
 
         expect(screen.getByRole('button', { name: '카드 정지 해제: 정지카드' })).toBeEnabled();
-        expect(screen.queryByRole('button', { name: '카드 정지 해제: 해지카드' })).not.toBeInTheDocument();
+        const closedRestore = screen.getByRole('button', { name: '카드 해지 해제: 해지카드' });
+        expect(closedRestore).toBeEnabled();
+        fireEvent.click(closedRestore);
+        expect(onRestoreUse).toHaveBeenCalledWith(expect.objectContaining({ id: 'card-9911', status: 'CLOSED' }));
+        expect(onCancelUse).not.toHaveBeenCalled();
         expect(screen.queryByRole('button', { name: /카드 사용취소 처리/ })).not.toBeInTheDocument();
 
         const staleAssigneeButtons = screen.getAllByRole('button', { name: '김진민팀' });

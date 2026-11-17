@@ -1167,7 +1167,7 @@ service cloud.firestore {
           && hasValidCardLifecycleMarker(operationId, 'CANCEL', cardId, afterStatus)
         )
         || (
-          beforeStatus == 'SUSPENDED'
+          beforeStatus in ['SUSPENDED', 'CLOSED']
           && afterStatus == 'AVAILABLE'
           && hasEmptyCardOperationalSnapshot(request.resource.data)
           && hasValidCardLifecycleMarker(operationId, 'RESTORE', cardId, afterStatus)

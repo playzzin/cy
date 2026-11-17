@@ -12,6 +12,7 @@ import { Card, CardBillingTargetRecord, CardBillingTargetType } from '../../type
 import { Team } from '../../services/teamService';
 import { iconMap } from '../../constants/iconMap';
 import { cardService } from '../../services/cardService';
+import { canRestoreCardStatus } from '../../services/cardLifecyclePolicy';
 import { OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeStaffAssignmentReference } from '../../utils/supportAssignmentTargets';
 import { getContrastingTextColor } from '../../utils/color';
 import { SupportExcelDownloadButton } from '../support/SupportExcelDownloadButton';
@@ -791,17 +792,17 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                             <span>배정/청구</span>
                                                         </button>
                                                     )}
-                                                    {card.status === 'SUSPENDED' ? (
+                                                    {canRestoreCardStatus(card.status) ? (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); onRestoreUse(card); }}
                                                             disabled={Boolean(restoringCardId)}
                                                             className="w-7 h-7 rounded-md bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                                                            aria-label={`카드 정지 해제: ${card.name}`}
-                                                            title="카드 정지 해제"
+                                                            aria-label={`카드 ${card.status === 'CLOSED' ? '해지' : '정지'} 해제: ${card.name}`}
+                                                            title={`카드 ${card.status === 'CLOSED' ? '해지' : '정지'} 해제`}
                                                         >
                                                             <FontAwesomeIcon icon={faRotateLeft} spin={restoringCardId === card.id} className="text-xs" />
                                                         </button>
-                                                    ) : card.status === 'CLOSED' ? null : (
+                                                    ) : (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); onCancelUse(card); }}
                                                             className="w-7 h-7 rounded-md bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-400 hover:text-amber-600 transition-colors"
@@ -897,7 +898,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     <span>설정</span>
                                                 </button>
                                             )}
-                                            {card.status === 'SUSPENDED' ? (
+                                            {canRestoreCardStatus(card.status) ? (
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -905,12 +906,12 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     }}
                                                     disabled={Boolean(restoringCardId)}
                                                     className="w-8 h-8 rounded-full bg-emerald-50 hover:bg-emerald-100 flex items-center justify-center text-emerald-600 hover:text-emerald-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-                                                    aria-label={`카드 정지 해제: ${card.name}`}
-                                                    title="카드 정지 해제"
+                                                    aria-label={`카드 ${card.status === 'CLOSED' ? '해지' : '정지'} 해제: ${card.name}`}
+                                                    title={`카드 ${card.status === 'CLOSED' ? '해지' : '정지'} 해제`}
                                                 >
                                                     <FontAwesomeIcon icon={faRotateLeft} spin={restoringCardId === card.id} className="text-xs" />
                                                 </button>
-                                            ) : card.status === 'CLOSED' ? null : (
+                                            ) : (
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
