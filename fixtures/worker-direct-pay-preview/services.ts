@@ -6,6 +6,12 @@ export const manpowerService = {
     getWorkers: async () => rows(),
     updateWorker: async (id: string, update: object) => localStorage.setItem(key, JSON.stringify(rows().map((row: any) => row.id === id ? { ...row, ...update } : row))),
 };
+export const deleteWorkerDirectPayAccount = async (worker: any) => {
+    const updates = { directPayBankName: '', directPayAccountNumber: '', directPayAccountHolder: '', directPayBankPhotoId: '' };
+    await manpowerService.updateWorker(worker.id, updates);
+    if (worker.directPayBankPhotoId) localStorage.removeItem(`${key}-photo-${worker.directPayBankPhotoId}`);
+    return updates;
+};
 export const teamService = { getTeams: async () => [{ id: 'test-team', name: '검증팀', companyId: 'test-company', type: '시공팀', status: 'active' }] };
 export const companyService = { getCompanies: async () => [{ id: 'test-company', name: '청연 검증회사', status: 'active' }] };
 export const accountDirectoryService = { getEntries: async () => [] };

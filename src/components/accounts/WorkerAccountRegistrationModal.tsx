@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { manpowerService, Worker } from '../../services/manpowerService';
-import { BANK_PHOTO_ACCEPT, readWorkerBankPhoto, saveWorkerBankPhoto, validateWorkerBankPhoto } from '../../services/workerBankPhotoService';
+import { BANK_PHOTO_ACCEPT, deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto, validateWorkerBankPhoto } from '../../services/workerBankPhotoService';
 import { analyzeBankAccountPhoto, isCompleteBankAccount, normalizeBankAccountFields } from '../../services/bankAccountPhotoService';
 import { getWorkerAccount, WorkerAccountPurpose, workerAccountLabel, workerAccountPatch, workerPhotoField } from '../../utils/workerAccount';
+import { directPayAccountHolderError } from '../../utils/workerDirectPayAccount';
 
 interface Props {
     worker: Worker;
@@ -24,15 +25,19 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
     const [invalidPhoto, setInvalidPhoto] = useState(false);
+    const [confirmDelete, setConfirmDelete] = useState(false);
     const [copiedPhotoRequired, setCopiedPhotoRequired] = useState(false);
     const running = useRef(false);
     // A photo retry must not write the already-saved account over a later edit elsewhere.
     const savedAccount = useRef<string | null>(null);
+    const persistedWorker = useRef(worker);
     const photoField = workerPhotoField(purpose);
     const expectedPhotoId = useRef(worker[photoField] || '');
     const label = workerAccountLabel(purpose);
     const basic = getWorkerAccount(worker, 'default');
     const analysisFile = photo?.file ?? viewedPhoto;
+    const holderError = purpose === 'directPay' ? directPayAccountHolderError(worker.name, fields.accountHolder) : '';
+    const canDelete = purpose === 'directPay' && Boolean(persistedWorker.current.directPayBankName || persistedWorker.current.directPayAccountNumber || persistedWorker.current.directPayAccountHolder || expectedPhotoId.current);
 
     useEffect(() => () => { analysisVersion.current += 1; }, []);
 
@@ -114,7 +119,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
     useEffect(() => { const urls = viewedUrls.current; return () => urls.forEach(url => URL.revokeObjectURL(url)); }, []);
 
     const save = async () => {
-        if (running.current || analyzing || !worker.id || invalidPhoto || copiedPhotoRequired || !isCompleteBankAccount(fields)) return;
+        if (running.current || analyzing || !worker.id || invalidPhoto || copiedPhotoRequired || holderError || !isCompleteBankAccount(fields)) return;
         running.current = true; setBusy(true); setError('');
         let accountSaved = savedAccount.current !== null;
         try {
@@ -124,17 +129,30 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
                 accountSaved = false;
                 await manpowerService.updateWorker(worker.id, updates);
                 savedAccount.current = serialized;
+                persistedWorker.current = { ...persistedWorker.current, ...updates };
                 accountSaved = true;
                 onSaved(updates);
             }
             if (photo) {
                 const id = await saveWorkerBankPhoto(worker.id, photo.file, photo.id, expectedPhotoId.current, purpose);
                 expectedPhotoId.current = id;
+                persistedWorker.current = { ...persistedWorker.current, [photoField]: id };
                 onSaved({ [photoField]: id });
             }
             onClose();
         } catch (failure) {
             setError(`${accountSaved ? '계좌정보는 저장됐지만 사진은 저장하지 못했습니다. 다시 저장을 눌러 주세요. ' : ''}${failure instanceof Error ? failure.message : '저장하지 못했습니다.'}`);
+        } finally { running.current = false; setBusy(false); }
+    };
+    const removeAccount = async () => {
+        if (running.current || analyzing || !worker.id || !canDelete) return;
+        running.current = true; setBusy(true); setError('');
+        try {
+            const updates = await deleteWorkerDirectPayAccount(persistedWorker.current);
+            onSaved(updates);
+            onClose();
+        } catch (failure) {
+            setError(failure instanceof Error ? failure.message : '직불용 계좌를 삭제하지 못했습니다. 다시 시도해 주세요.');
         } finally { running.current = false; setBusy(false); }
     };
     const close = () => {
@@ -150,6 +168,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
             {purpose === 'directPay' && <div className="my-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
                 <button type="button" disabled={busy || analyzing || !isCompleteBankAccount(basic)} onClick={() => void copyBasic()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">기본 계좌와 동일</button>
                 <p className="mt-2 text-xs text-indigo-800">기본 계좌정보와 등록된 사진을 함께 복사합니다. 이후 변경은 각각 저장합니다.</p>
+                <p className="mt-1 text-xs text-indigo-800">직불용 예금주는 작업자 이름과 같아야 저장할 수 있습니다. 이름의 공백은 제외하고 비교합니다.</p>
                 {!isCompleteBankAccount(basic) && <p className="mt-1 text-xs text-amber-800">기본 계좌의 은행·계좌번호·예금주를 먼저 입력해 주세요.</p>}
             </div>}
             <fieldset disabled={busy} className="mt-4 space-y-3">
@@ -158,6 +177,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
                     <input aria-label={`${label} ${{ bankName: '은행명', accountNumber: '계좌번호', accountHolder: '예금주' }[key]}`} value={fields[key]} disabled={analyzing} inputMode={key === 'accountNumber' ? 'numeric' : 'text'} autoComplete="off" maxLength={100}
                         onChange={event => setFields(previous => ({ ...previous, [key]: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" />
                     {key === 'accountNumber' && fields.accountNumber.trim() && !normalizeBankAccountFields(fields).accountNumber && <span role="alert" className="mt-1 block text-xs text-red-700">계좌번호는 앞자리 0을 포함한 숫자 6~20자리로 입력해 주세요. 공백과 하이픈은 저장할 때 제거됩니다.</span>}
+                    {key === 'accountHolder' && fields.accountHolder.trim() && holderError && <span role="alert" className="mt-1 block text-xs text-red-700">{holderError}</span>}
                 </label>)}
                 <div className="rounded-xl border border-slate-200 p-3">
                     <div className="mb-2 flex items-center justify-between gap-2"><span className="text-sm font-semibold">{label} 사진 · {copiedPhotoRequired ? '새 사진 필요' : photo ? '저장 대기' : expectedPhotoId.current ? '등록됨' : '미등록'}</span>
@@ -178,9 +198,17 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
             </fieldset>
             {(analyzing || notice) && <p role="status" className="mt-3 text-sm text-indigo-700">{analyzing ? 'Gemini가 사진에서 계좌정보를 읽고 있습니다…' : notice}</p>}
             {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
+            {confirmDelete && <div role="group" aria-label="직불용 계좌 삭제 확인" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
+                <p className="text-sm text-red-800">{worker.name}의 직불용 계좌정보와 등록된 통장사본을 삭제합니다. 기본 계좌는 유지됩니다.</p>
+                <div className="mt-3 flex justify-end gap-2">
+                    <button type="button" disabled={busy} onClick={() => setConfirmDelete(false)} className="rounded-lg border px-3 py-2 text-sm">삭제 취소</button>
+                    <button type="button" disabled={busy || analyzing} onClick={() => void removeAccount()} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">삭제 확인</button>
+                </div>
+            </div>}
             <div className="mt-5 flex justify-end gap-2">
+                {canDelete && !confirmDelete && <button type="button" disabled={busy || analyzing} onClick={() => { setError(''); setConfirmDelete(true); }} className="mr-auto rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 disabled:opacity-50">직불용 계좌 삭제</button>}
                 <button type="button" disabled={busy} onClick={close} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">취소</button>
-                <button type="button" disabled={busy || analyzing || invalidPhoto || copiedPhotoRequired || !isCompleteBankAccount(fields)} onClick={() => void save()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? '처리 중…' : `${label} 저장`}</button>
+                <button type="button" disabled={busy || analyzing || confirmDelete || invalidPhoto || copiedPhotoRequired || !!holderError || !isCompleteBankAccount(fields)} onClick={() => void save()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? '처리 중…' : `${label} 저장`}</button>
             </div>
         </Dialog.Content>
     </Dialog.Portal></Dialog.Root>;

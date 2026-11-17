@@ -78,6 +78,31 @@ test('원본 보존·권한·동시 변경·재시도·서버 전용 저장을 �
         assert.equal((await call({ action: 'readDirectPay', workerId: 'one' }) as any).photo.photoId, photoId);
         assert.equal((await bucket.file(bankPhotoPath('one', photoId, true)).exists())[0], true);
         assert.equal((await db.doc('workers/one').get()).data()!.accountNumber, 'new-number');
+        // Deleting a direct-pay account removes its original and all fields together, preserving the basic account.
+        await db.doc('workers/one').update({ directPayBankName: '직불은행', directPayAccountNumber: '001234567890', directPayAccountHolder: '다른예금주' });
+        const deletion = { action: 'deleteDirectPayAccount', workerId: 'one', expectedAccount: {
+            bankName: '직불은행', accountNumber: '001234567890', accountHolder: '다른예금주', photoId,
+        } };
+        await assert.rejects(call(deletion, 'ordinary'), denied('permission-denied'));
+        await assert.rejects(call(deletion, 'leader'), denied('permission-denied'));
+        await assert.rejects(call({ ...deletion, workerId: 'other' }), denied('permission-denied'));
+        await assert.rejects(call({ ...deletion, expectedAccount: { ...deletion.expectedAccount, accountNumber: 'stale' } }, 'office'), denied('aborted'));
+        await assert.rejects(call({ ...deletion, expectedAccount: undefined }), denied('invalid-argument'));
+        assert.equal((await db.doc('workers/one').get()).data()!.directPayBankPhotoId, photoId);
+        const basicBeforeDelete = (await db.doc('workers/one').get()).data()!;
+        assert.deepEqual(await call(deletion, 'office'), { deleted: true });
+        const deleted = (await db.doc('workers/one').get()).data()!;
+        for (const field of ['directPayBankName', 'directPayAccountNumber', 'directPayAccountHolder', 'directPayBankPhotoId']) assert.equal(deleted[field], '');
+        for (const field of ['bankName', 'accountNumber', 'accountHolder', 'bankPhotoId', 'fileNameSaved']) assert.equal(deleted[field], basicBeforeDelete[field]);
+        assert.equal((await bucket.file(bankPhotoPath('one', photoId, true)).exists())[0], false);
+        assert.equal((await bucket.file(bankPhotoPath('one', photoId)).exists())[0], true);
+        assert.deepEqual(await call({ action: 'readDirectPay', workerId: 'one' }), { photo: null });
+        await call(deletion, 'office');
+        assert.equal((await db.collection('audit_logs').where('action', '==', 'DELETE_ACCOUNT').get()).size, 1);
+        // An account without a photo is also removable; a failed old request cannot delete a new account.
+        await db.doc('workers/one').update({ directPayBankName: '새은행', directPayAccountNumber: '000111222333', directPayAccountHolder: '가상 원본' });
+        await assert.rejects(call(deletion, 'office'), denied('aborted'));
+        await call({ ...deletion, expectedAccount: { bankName: '새은행', accountNumber: '000111222333', accountHolder: '가상 원본', photoId: '' } }, 'office');
         await assert.rejects(call({ ...save, action: 'unknown' }), denied('invalid-argument'));
         await call({ ...save, workerId: 'two', photoId: 'c'.repeat(32) });
         // A real authenticated browser is still unable to read or overwrite this private namespace.

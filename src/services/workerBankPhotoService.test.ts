@@ -1,11 +1,25 @@
 import { httpsCallable } from 'firebase/functions';
 import { auth } from '../config/firebase';
-import { readWorkerBankPhoto, saveWorkerBankPhoto, validateWorkerBankPhoto } from './workerBankPhotoService';
+import { deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto, validateWorkerBankPhoto } from './workerBankPhotoService';
+import { invalidateWorkerCache } from '../utils/workerCacheRevision';
 jest.mock('../config/firebase', () => ({ auth: { currentUser: { uid: 'test' } }, functions: {} }));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
 jest.mock('./teamScopedReadService', () => ({ invalidateTeamScopedCache: jest.fn() }));
 jest.mock('../utils/workerCacheRevision', () => ({ invalidateWorkerCache: jest.fn() }));
 const call = jest.fn();
+test('삭제는 읽은 직불 계좌 버전을 보내며 성공한 뒤 캐시와 화면을 비운다', async () => {
+    call.mockResolvedValueOnce({ data: { deleted: true } });
+    expect(await deleteWorkerDirectPayAccount({ id: 'one', name: '검증', bankName: '기본은행', directPayBankName: '직불은행', directPayBankPhotoId: 'old' })).toEqual({
+        directPayBankName: '', directPayAccountNumber: '', directPayAccountHolder: '', directPayBankPhotoId: '',
+    });
+    expect(call).toHaveBeenCalledWith({ action: 'deleteDirectPayAccount', workerId: 'one', expectedAccount: { bankName: '직불은행', accountNumber: '', accountHolder: '', photoId: 'old' } });
+    expect(invalidateWorkerCache).toHaveBeenCalled();
+});
+test('삭제 실패 시 성공 결과나 캐시 무효화를 만들지 않는다', async () => {
+    call.mockRejectedValueOnce(new Error('동시 변경'));
+    await expect(deleteWorkerDirectPayAccount({ id: 'one', name: '검증' })).rejects.toThrow('동시 변경');
+    expect(invalidateWorkerCache).not.toHaveBeenCalled();
+});
 test('직불용 사진은 구버전 서버가 기본 사진으로 처리할 수 없는 별도 액션을 사용한다', async () => {
     call.mockResolvedValueOnce({ data: { photoId: 'new-direct' } }).mockResolvedValueOnce({ data: { photo: null } });
     const file = new File(['original-bytes'], 'raw.jpg', { type: 'image/jpeg' });

@@ -3,6 +3,7 @@ import AccountPhotoRegistrationModal from '../../components/accounts/AccountPhot
 import WorkerAccountRegistrationModal from '../../components/accounts/WorkerAccountRegistrationModal';
 import { hasMissingWorkerAccount, WorkerAccountPurpose, workerAccountPatch } from '../../utils/workerAccount';
 import { planWorkerAccountImport } from '../../utils/workerAccountImport';
+import { assertWorkerDirectPayAccount } from '../../utils/workerDirectPayAccount';
 import { workerAccountLabel } from '../../utils/workerAccount';
 import { BankAccountFields, isCompleteBankAccount, normalizeBankAccountFields } from '../../services/bankAccountPhotoService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -994,6 +995,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         const id = targetId.slice(separator + 1);
         if (kind === 'worker' || kind === 'workerDirectPay') {
             const updates = workerAccountPatch(fields, kind === 'workerDirectPay' ? 'directPay' : 'default');
+            assertWorkerDirectPayAccount(workers.find(worker => worker.id === id), updates);
             await manpowerService.updateWorker(id, updates);
             setWorkers(previous => previous.map(item => item.id === id ? { ...item, ...updates } : item));
         } else if (kind === 'team') {

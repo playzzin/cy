@@ -29,6 +29,7 @@ import WorkerModal from '../manpower/WorkerModal';
 import WorkerIdCardRegistrationModal from '../../components/manpower/WorkerIdCardRegistrationModal';
 import WorkerAccountSummary from '../../components/accounts/WorkerAccountSummary';
 import WorkerAccountRegistrationModal from '../../components/accounts/WorkerAccountRegistrationModal';
+import { assertWorkerDirectPayAccount } from '../../utils/workerDirectPayAccount';
 import type { WorkerAccountPurpose } from '../../utils/workerAccount';
 import { normalizeBankAccountFields } from '../../services/bankAccountPhotoService';
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
@@ -220,9 +221,10 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             handleWorkerChange(id, field, value);
         }
         try {
+            assertWorkerDirectPayAccount(workers.find(worker => worker.id === id), { [field]: value });
             await manpowerService.updateWorker(id, { [field]: value });
         } catch (error) {
-            console.error("Update failed", error);
+            alert(error instanceof Error ? error.message : '저장하지 못했습니다. 다시 시도해 주세요.');
             fetchWorkers(); // Revert on error
         }
     };

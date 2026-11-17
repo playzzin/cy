@@ -3,6 +3,17 @@ import { auth, functions } from '../config/firebase';
 import { invalidateWorkerCache } from '../utils/workerCacheRevision';
 import { invalidateTeamScopedCache } from './teamScopedReadService';
 import type { WorkerAccountPurpose } from '../utils/workerAccount';
+import type { Worker } from './manpowerService';
+import { clearedDirectPayAccount } from '../utils/workerDirectPayAccount';
+
+export const deleteWorkerDirectPayAccount = async (worker: Worker) => {
+    await call({ action: 'deleteDirectPayAccount', workerId: worker.id, expectedAccount: {
+        bankName: worker.directPayBankName || '', accountNumber: worker.directPayAccountNumber || '',
+        accountHolder: worker.directPayAccountHolder || '', photoId: worker.directPayBankPhotoId || '',
+    } });
+    invalidateWorkerCache(); invalidateTeamScopedCache();
+    return { ...clearedDirectPayAccount };
+};
 
 export const BANK_PHOTO_ACCEPT = 'image/jpeg,image/png,image/webp';
 export const validateWorkerBankPhoto = (file: File) => {
