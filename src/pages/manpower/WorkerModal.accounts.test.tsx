@@ -72,8 +72,8 @@ test.each(['기본 계좌', '직불용 계좌'])('%s 사진만 삭제는 계좌�
 
 test.each(['기본 계좌', '직불용 계좌'])('%s 계좌 삭제는 해당 정보와 사진만 제거한다', async label => {
     open(true); const dialog = within(openAccount(label));
-    fireEvent.click(dialog.getByRole('button', { name: `${label} 삭제`, exact: true }));
-    fireEvent.click(dialog.getByRole('button', { name: '삭제 확인', exact: true }));
+    fireEvent.click(dialog.getByRole('button', { name: `${label} 삭제` }));
+    fireEvent.click(dialog.getByRole('button', { name: '삭제 확인' }));
     fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(save).toHaveBeenCalledWith(expect.objectContaining(label === '기본 계좌'
@@ -84,7 +84,7 @@ test.each(['기본 계좌', '직불용 계좌'])('%s 계좌 삭제는 해당 정
 
 test('기존 사진 교체 후 취소하면 계좌와 사진을 변경하지 않는다', async () => {
     open(true); await attach('기본 계좌');
-    fireEvent.click(screen.getByRole('button', { name: '취소', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
     expect(close).toHaveBeenCalled(); expect(save).not.toHaveBeenCalled(); expect(saveWorkerBankPhoto).not.toHaveBeenCalled();
 });
 
