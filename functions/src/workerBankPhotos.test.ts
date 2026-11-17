@@ -103,6 +103,27 @@ test('원본 보존·권한·동시 변경·재시도·서버 전용 저장을 �
         await db.doc('workers/one').update({ directPayBankName: '새은행', directPayAccountNumber: '000111222333', directPayAccountHolder: '가상 원본' });
         await assert.rejects(call(deletion, 'office'), denied('aborted'));
         await call({ ...deletion, expectedAccount: { bankName: '새은행', accountNumber: '000111222333', accountHolder: '가상 원본', photoId: '' } }, 'office');
+        // Photo-only deletion preserves both account fields, the other purpose and the ID card.
+        await call({ ...directSave, photoId, expectedPhotoId: '' });
+        await db.doc('workers/one').update({ directPayBankName: '사진삭제은행', directPayAccountNumber: '0012345678', directPayAccountHolder: '가상 원본' });
+        for (const [action, field, otherField, isDirect] of [
+            ['deleteDirectPayPhoto', 'directPayBankPhotoId', 'bankPhotoId', true],
+            ['deletePhoto', 'bankPhotoId', 'directPayBankPhotoId', false],
+        ] as const) {
+            const request = { action, workerId: 'one', expectedPhotoId: photoId };
+            const before = (await db.doc('workers/one').get()).data()!;
+            await assert.rejects(call(request, 'ordinary'), denied('permission-denied'));
+            await assert.rejects(call(request, 'leader'), denied('permission-denied'));
+            await assert.rejects(call({ ...request, expectedPhotoId: nextId }, 'office'), denied('aborted'));
+            await assert.rejects(call({ ...request, expectedPhotoId: '' }, 'office'), denied('invalid-argument'));
+            assert.deepEqual(await call(request, 'office'), { deleted: true });
+            const after = (await db.doc('workers/one').get()).data()!;
+            assert.equal(after[field], '');
+            for (const key of ['bankName', 'accountNumber', 'accountHolder', 'directPayBankName', 'directPayAccountNumber', 'directPayAccountHolder', 'fileNameSaved', otherField]) assert.equal(after[key], before[key]);
+            assert.equal((await bucket.file(bankPhotoPath('one', photoId, isDirect)).exists())[0], false);
+            await call(request, 'office');
+        }
+        assert.equal((await db.collection('audit_logs').where('action', '==', 'DELETE_PHOTO').get()).size, 2);
         await assert.rejects(call({ ...save, action: 'unknown' }), denied('invalid-argument'));
         await call({ ...save, workerId: 'two', photoId: 'c'.repeat(32) });
         // A real authenticated browser is still unable to read or overwrite this private namespace.

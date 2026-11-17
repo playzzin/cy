@@ -59,8 +59,27 @@ async function authorize(transaction: FirebaseFirestore.Transaction, uid: string
 export async function handleWorkerBankPhotos(input: any, context: functions.https.CallableContext) {
     if (context.auth && isPreviewIdentity(context.auth.uid, context.auth.token)) fail('permission-denied', '미리보기에서는 계좌사진을 처리할 수 없습니다.');
     const { uid } = requireCallableAuth(context);
-    if (!validId(input?.workerId) || !['read', 'save', 'readDirectPay', 'saveDirectPay', 'deleteDirectPayAccount'].includes(input?.action)) fail('invalid-argument', '작업자와 요청을 확인해 주세요.');
+    if (!validId(input?.workerId) || !['read', 'save', 'readDirectPay', 'saveDirectPay', 'deleteDirectPayAccount', 'deletePhoto', 'deleteDirectPayPhoto'].includes(input?.action)) fail('invalid-argument', '작업자와 요청을 확인해 주세요.');
     const workerId: string = input.workerId, db = admin.firestore(), bucket = admin.storage().bucket();
+    if (input.action === 'deletePhoto' || input.action === 'deleteDirectPayPhoto') {
+        if (!photoIdValid(input.expectedPhotoId)) fail('invalid-argument', '삭제할 통장사본을 확인해 주세요.');
+        const directPay = input.action === 'deleteDirectPayPhoto';
+        const field = directPay ? 'directPayBankPhotoId' : 'bankPhotoId';
+        const updatedField = directPay ? 'directPayBankPhotoUpdatedAt' : 'bankPhotoUpdatedAt';
+        await db.runTransaction(async tx => {
+            const { ref, row, canWriteAccount } = await authorize(tx, uid, workerId);
+            if (!canWriteAccount) fail('permission-denied', '통장사본 삭제는 사무실의 계좌 관리 권한이 필요합니다.');
+            if (!row[field]) return; // A lost-response retry may finish original-file cleanup.
+            if (row[field] !== input.expectedPhotoId) fail('aborted', '다른 곳에서 통장사본을 변경했습니다. 새로고침 후 다시 확인해 주세요.');
+            tx.update(ref, { [field]: '', [updatedField]: admin.firestore.FieldValue.delete(), updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+            tx.create(db.collection('audit_logs').doc(), {
+                category: 'WORKER_BANK_PHOTO', action: 'DELETE_PHOTO', actorId: uid, targetId: workerId,
+                timestamp: new Date().toISOString(), details: JSON.stringify({ purpose: directPay ? 'directPay' : 'default', fileCount: 1 }),
+            });
+        });
+        await bucket.file(bankPhotoPath(workerId, input.expectedPhotoId, directPay)).delete({ ignoreNotFound: true }).catch(() => undefined);
+        return { deleted: true };
+    }
     if (input.action === 'deleteDirectPayAccount') {
         const keys = { bankName: 'directPayBankName', accountNumber: 'directPayAccountNumber', accountHolder: 'directPayAccountHolder', photoId: 'directPayBankPhotoId' } as const;
         if (!input.expectedAccount || Object.keys(keys).some(key => typeof input.expectedAccount[key] !== 'string')) fail('invalid-argument', '삭제할 직불용 계좌정보를 확인해 주세요.');

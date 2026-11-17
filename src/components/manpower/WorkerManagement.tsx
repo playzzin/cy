@@ -423,21 +423,13 @@ const WorkerManagement: React.FC = () => {
         }
     };
 
-    const handleSaveWorker = async (workerData: Omit<Worker, 'id'> | Partial<Worker>) => {
-        try {
-            if (currentWorker && currentWorker.id) {
-                await manpowerService.updateWorker(currentWorker.id, workerData);
-            } else {
-                await manpowerService.addWorker(workerData as Omit<Worker, 'id'>);
-            }
-            fetchWorkers();
-            setIsModalOpen(false);
-        } catch (error) {
-            console.error("Failed to save worker", error);
-            if (workerData.fileNameSaved) void recordIdentityDocumentLog({ action: currentWorker?.id ? 'worker_updated' : 'worker_created',
-                status: 'failure', workerId: currentWorker?.id, personNames: [workerData.name || ''], fileCount: 1, reason: 'processing_failed' });
-            alert("저장에 실패했습니다.");
+    const handleSaveWorker = async (workerData: Partial<Worker>, savedId?: string) => {
+        const id = savedId || currentWorker?.id;
+        if (id) {
+            await manpowerService.updateWorker(id, workerData);
+            return { id };
         }
+        return { id: await manpowerService.addWorker(workerData as Omit<Worker, 'id'>) };
     };
 
     const handleBankBookUpdate = async (updates: { workerId: string, bankName: string, accountNumber: string, accountHolder: string }[]) => {
@@ -1134,6 +1126,7 @@ const WorkerManagement: React.FC = () => {
                         isOpen={isModalOpen}
                         onClose={() => setIsModalOpen(false)}
                         onSave={handleSaveWorker}
+                        onSaved={() => { void fetchWorkers(); }}
                         initialData={currentWorker || { status: '재직' }}
                         teams={teams}
                         companies={companies}

@@ -6,6 +6,11 @@ import type { WorkerAccountPurpose } from '../utils/workerAccount';
 import type { Worker } from './manpowerService';
 import { clearedDirectPayAccount } from '../utils/workerDirectPayAccount';
 
+export const deleteWorkerBankPhoto = async (workerId: string, expectedPhotoId: string, purpose: WorkerAccountPurpose = 'default') => {
+    await call({ action: purpose === 'directPay' ? 'deleteDirectPayPhoto' : 'deletePhoto', workerId, expectedPhotoId });
+    invalidateWorkerCache(); invalidateTeamScopedCache();
+};
+
 export const deleteWorkerDirectPayAccount = async (worker: Worker) => {
     await call({ action: 'deleteDirectPayAccount', workerId: worker.id, expectedAccount: {
         bankName: worker.directPayBankName || '', accountNumber: worker.directPayAccountNumber || '',

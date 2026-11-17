@@ -51,3 +51,7 @@ it('다른 작업자나 신규 등록으로 전환하면 이전 지급 방식을
     rerender(<WorkerForm {...props} initialData={null} />);
     expect(screen.getByRole('radio', { name: '직불' })).toBeChecked();
 });
+
+jest.mock('../../services/aiSettingsService', () => ({ aiSettingsService: {} }));
+jest.mock('../../services/workerBankPhotoService', () => ({ saveWorkerBankPhoto: jest.fn(), deleteWorkerBankPhoto: jest.fn() }));
+jest.mock('../../services/manpowerService', () => ({ manpowerService: {} }));

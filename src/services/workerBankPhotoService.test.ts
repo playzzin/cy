@@ -1,12 +1,18 @@
 import { httpsCallable } from 'firebase/functions';
 import { auth } from '../config/firebase';
-import { deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto, validateWorkerBankPhoto } from './workerBankPhotoService';
+import { deleteWorkerBankPhoto, deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto, validateWorkerBankPhoto } from './workerBankPhotoService';
 import { invalidateWorkerCache } from '../utils/workerCacheRevision';
 jest.mock('../config/firebase', () => ({ auth: { currentUser: { uid: 'test' } }, functions: {} }));
 jest.mock('firebase/functions', () => ({ httpsCallable: jest.fn() }));
 jest.mock('./teamScopedReadService', () => ({ invalidateTeamScopedCache: jest.fn() }));
 jest.mock('../utils/workerCacheRevision', () => ({ invalidateWorkerCache: jest.fn() }));
 const call = jest.fn();
+test.each(['default', 'directPay'] as const)('%s 사진만 삭제할 때 사진 버전을 전송하고 계좌정보는 전송하지 않는다', async purpose => {
+    call.mockResolvedValueOnce({ data: { deleted: true } });
+    await deleteWorkerBankPhoto('one', 'old', purpose);
+    expect(call).toHaveBeenCalledWith({ action: purpose === 'directPay' ? 'deleteDirectPayPhoto' : 'deletePhoto', workerId: 'one', expectedPhotoId: 'old' });
+    expect(invalidateWorkerCache).toHaveBeenCalled();
+});
 test('삭제는 읽은 직불 계좌 버전을 보내며 성공한 뒤 캐시와 화면을 비운다', async () => {
     call.mockResolvedValueOnce({ data: { deleted: true } });
     expect(await deleteWorkerDirectPayAccount({ id: 'one', name: '검증', bankName: '기본은행', directPayBankName: '직불은행', directPayBankPhotoId: 'old' })).toEqual({

@@ -150,3 +150,7 @@ it('수동 외국인 선택을 해제하면 명의 검증을 복원하고 새 �
     expect(screen.getByRole('checkbox', { name: '외국인 작업자' })).not.toBeChecked();
     expect(screen.getByLabelText('주민·외국인등록번호')).toBeRequired();
 });
+
+jest.mock('../../services/aiSettingsService', () => ({ aiSettingsService: {} }));
+jest.mock('../../services/workerBankPhotoService', () => ({ saveWorkerBankPhoto: jest.fn(), deleteWorkerBankPhoto: jest.fn() }));
+jest.mock('../../services/manpowerService', () => ({ manpowerService: {} }));

@@ -19,7 +19,7 @@ beforeEach(() => { jest.clearAllMocks(); (geminiService.analyzeImage as jest.Moc
 afterEach(() => jest.restoreAllMocks());
 
 it.each([false, true])('uploads the recognized image before saving its Storage path (edit=%s)', async edit => {
-  const save = jest.fn().mockResolvedValue(undefined), close = jest.fn();
+  const save = jest.fn().mockResolvedValue({ id: 'fixture-worker' }), close = jest.fn();
   render(<WorkerModal isOpen onClose={close} onSave={save} teams={[]} companies={[]} positions={[]}
     initialData={edit ? { id: 'fixture-worker', ...fields } : null} />);
   fireEvent.change(screen.getByLabelText('AI 신분증 사진 선택'), { target: { files: [file] } });
@@ -27,7 +27,7 @@ it.each([false, true])('uploads the recognized image before saving its Storage p
   fireEvent.click(screen.getByRole('button', { name: edit ? '변경사항 저장' : '등록 완료' }));
   await waitFor(() => expect(save).toHaveBeenCalled());
   expect(uploadBytes).toHaveBeenCalledWith(expect.objectContaining({ fullPath: expect.stringMatching(/^id_cards\/\d+_fixture\.png$/) }), file);
-  expect(save).toHaveBeenCalledWith(expect.objectContaining({ ...fields, fileNameSaved: (uploadBytes as jest.Mock).mock.calls[0][0].fullPath }));
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ ...fields, fileNameSaved: (uploadBytes as jest.Mock).mock.calls[0][0].fullPath }), edit ? 'fixture-worker' : undefined);
   expect(close).toHaveBeenCalled();
 });
 
@@ -43,3 +43,7 @@ it('keeps the modal open and does not save a broken path after an upload failure
   expect(save).not.toHaveBeenCalled();
   expect(close).not.toHaveBeenCalled();
 });
+
+jest.mock('../../services/aiSettingsService', () => ({ aiSettingsService: {} }));
+jest.mock('../../services/workerBankPhotoService', () => ({ saveWorkerBankPhoto: jest.fn(), deleteWorkerBankPhoto: jest.fn() }));
+jest.mock('../../services/manpowerService', () => ({ manpowerService: {} }));

@@ -103,3 +103,7 @@ it('preserves unread fields and tells the user to review a partial result', asyn
   await waitFor(() => expect(showSuccessAlert).toHaveBeenCalledWith('인식 성공', expect.stringContaining('주민번호, 주소')));
   expect(screen.getByPlaceholderText('000000-0000000')).toHaveValue(result.idNumber);
 });
+
+jest.mock('../../services/aiSettingsService', () => ({ aiSettingsService: {} }));
+jest.mock('../../services/workerBankPhotoService', () => ({ saveWorkerBankPhoto: jest.fn(), deleteWorkerBankPhoto: jest.fn() }));
+jest.mock('../../services/manpowerService', () => ({ manpowerService: {} }));

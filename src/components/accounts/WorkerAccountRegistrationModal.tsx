@@ -6,18 +6,20 @@ import { analyzeBankAccountPhoto, isCompleteBankAccount, normalizeBankAccountFie
 import { getWorkerAccount, WorkerAccountPurpose, workerAccountLabel, workerAccountPatch, workerPhotoField } from '../../utils/workerAccount';
 import { directPayAccountHolderError } from '../../utils/workerDirectPayAccount';
 import { isForeignWorker } from '../../utils/workerForeignStatus';
+import type { WorkerPhotoDraft } from '../../services/workerRegistrationSave';
 
 interface Props {
     worker: Worker;
     purpose: WorkerAccountPurpose;
     onSaved: (updates: Partial<Worker>) => void;
     onClose: () => void;
+    draft?: { photo?: WorkerPhotoDraft; basicPhoto?: WorkerPhotoDraft; onApply: (updates: Partial<Worker>, photo: WorkerPhotoDraft | undefined) => void };
 }
 const newPhotoId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
 
-export default function WorkerAccountRegistrationModal({ worker, purpose, onSaved, onClose }: Props) {
+export default function WorkerAccountRegistrationModal({ worker, purpose, onSaved, onClose, draft }: Props) {
     const [fields, setFields] = useState(() => getWorkerAccount(worker, purpose));
-    const [photo, setPhoto] = useState<{ file: File; id: string } | null>(null);
+    const [photo, setPhoto] = useState<{ file: File; id: string } | null>(() => draft?.photo || null);
     const [preview, setPreview] = useState('');
     const [busy, setBusy] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
@@ -27,6 +29,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
     const [notice, setNotice] = useState('');
     const [invalidPhoto, setInvalidPhoto] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [confirmPhotoDelete, setConfirmPhotoDelete] = useState(false);
     const [copiedPhotoRequired, setCopiedPhotoRequired] = useState(false);
     const running = useRef(false);
     // A photo retry must not write the already-saved account over a later edit elsewhere.
@@ -38,7 +41,8 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
     const basic = getWorkerAccount(worker, 'default');
     const analysisFile = photo?.file ?? viewedPhoto;
     const holderError = purpose === 'directPay' ? directPayAccountHolderError(worker, fields.accountHolder) : '';
-    const canDelete = purpose === 'directPay' && Boolean(persistedWorker.current.directPayBankName || persistedWorker.current.directPayAccountNumber || persistedWorker.current.directPayAccountHolder || expectedPhotoId.current);
+    const canDelete = Boolean((draft || purpose === 'directPay') &&
+        (Object.values(getWorkerAccount(persistedWorker.current, purpose)).some(Boolean) || (draft && photo) || expectedPhotoId.current));
 
     useEffect(() => () => { analysisVersion.current += 1; }, []);
 
@@ -89,8 +93,9 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
         running.current = true; setBusy(true); setError('');
         try {
             // Fetch before changing the draft so a failed read cannot silently copy only half of it.
-            const file = worker.bankPhotoId ? await readWorkerBankPhoto(worker.id!, `${worker.name}_기본계좌`) : null;
-            if (worker.bankPhotoId && !file) throw new Error('기본 계좌사진이 변경되었습니다. 새로고침 후 다시 시도해 주세요.');
+            const file = draft?.basicPhoto !== undefined ? draft.basicPhoto?.file || null
+                : worker.bankPhotoId ? await readWorkerBankPhoto(worker.id!, `${worker.name}_기본계좌`) : null;
+            if (worker.bankPhotoId && draft?.basicPhoto === undefined && !file) throw new Error('기본 계좌사진이 변경되었습니다. 새로고침 후 다시 시도해 주세요.');
             const copiedPhoto = file ? { file, id: newPhotoId() } : null;
             setFields(basic);
             setPhoto(copiedPhoto);
@@ -120,7 +125,13 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
     useEffect(() => { const urls = viewedUrls.current; return () => urls.forEach(url => URL.revokeObjectURL(url)); }, []);
 
     const save = async () => {
-        if (running.current || analyzing || !worker.id || invalidPhoto || copiedPhotoRequired || holderError || !isCompleteBankAccount(fields)) return;
+        if (running.current || analyzing || (!worker.id && !draft) || invalidPhoto || copiedPhotoRequired || holderError || !isCompleteBankAccount(fields)) return;
+        if (draft) {
+            draft.onApply(workerAccountPatch(normalizeBankAccountFields(fields), purpose), photo || draft.photo);
+            onClose();
+            return;
+        }
+        if (!worker.id) return;
         running.current = true; setBusy(true); setError('');
         let accountSaved = savedAccount.current !== null;
         try {
@@ -146,7 +157,12 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
         } finally { running.current = false; setBusy(false); }
     };
     const removeAccount = async () => {
-        if (running.current || analyzing || !worker.id || !canDelete) return;
+        if (running.current || analyzing || (!worker.id && !draft) || !canDelete) return;
+        if (draft) {
+            draft.onApply({ ...workerAccountPatch({ bankName: '', accountNumber: '', accountHolder: '' }, purpose), [photoField]: '' }, null);
+            onClose();
+            return;
+        }
         running.current = true; setBusy(true); setError('');
         try {
             const updates = await deleteWorkerDirectPayAccount(persistedWorker.current);
@@ -165,7 +181,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
         <Dialog.Content className="fixed left-1/2 top-1/2 z-[101] max-h-[92dvh] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"
             onPointerDownOutside={event => event.preventDefault()} onEscapeKeyDown={event => { if (running.current) event.preventDefault(); }}>
             <Dialog.Title className="text-lg font-bold text-slate-900">{worker.name} · {label} 등록</Dialog.Title>
-            <Dialog.Description className="mt-2 text-sm text-slate-600">통장 사진을 선택하면 Gemini가 은행·계좌번호·예금주를 자동입력합니다. 내용을 확인한 뒤 저장해 주세요.</Dialog.Description>
+            <Dialog.Description className="mt-2 text-sm text-slate-600">통장 사진을 선택하면 Gemini가 은행·계좌번호·예금주를 자동입력합니다. {draft ? '입력 적용 후 작업자 저장을 누르면 계좌와 사진이 함께 저장됩니다.' : '내용을 확인한 뒤 저장해 주세요.'}</Dialog.Description>
             {purpose === 'directPay' && <div className="my-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
                 <button type="button" disabled={busy || analyzing || !isCompleteBankAccount(basic)} onClick={() => void copyBasic()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">기본 계좌와 동일</button>
                 <p className="mt-2 text-xs text-indigo-800">기본 계좌정보와 등록된 사진을 함께 복사합니다. 이후 변경은 각각 저장합니다.</p>
@@ -197,21 +213,29 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
                         {analyzing ? 'Gemini 분석 중…' : 'Gemini로 자동입력'}
                     </button>}
                     {preview && <img src={preview} alt={`${label} 사진 미리보기`} className="mt-3 max-h-56 w-full rounded-lg object-contain" />}
+                    {draft && (photo || expectedPhotoId.current) && <button type="button" disabled={analyzing} onClick={() => { setConfirmPhotoDelete(true); setConfirmDelete(false); }} className="mt-3 text-sm text-red-700 underline">통장사본만 삭제</button>}
                 </div>
             </fieldset>
             {(analyzing || notice) && <p role="status" className="mt-3 text-sm text-indigo-700">{analyzing ? 'Gemini가 사진에서 계좌정보를 읽고 있습니다…' : notice}</p>}
             {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
-            {confirmDelete && <div role="group" aria-label="직불용 계좌 삭제 확인" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
-                <p className="text-sm text-red-800">{worker.name}의 직불용 계좌정보와 등록된 통장사본을 삭제합니다. 기본 계좌는 유지됩니다.</p>
+            {confirmPhotoDelete && draft && <div role="group" aria-label="통장사본 삭제 확인" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
+                <p className="text-sm text-red-800">계좌정보는 유지하고 통장사본만 삭제합니다. 작업자 저장 시 반영됩니다.</p>
+                <div className="mt-3 flex justify-end gap-2">
+                    <button type="button" onClick={() => setConfirmPhotoDelete(false)} className="rounded-lg border px-3 py-2 text-sm">삭제 취소</button>
+                    <button type="button" onClick={() => { draft.onApply({ ...workerAccountPatch(fields, purpose), [photoField]: '' }, null); onClose(); }} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white">사진 삭제 확인</button>
+                </div>
+            </div>}
+            {confirmDelete && <div role="group" aria-label={`${label} 삭제 확인`} className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
+                <p className="text-sm text-red-800">{worker.name}의 {label}정보와 등록된 통장사본을 삭제합니다. {draft ? '작업자 저장 시 반영됩니다.' : '기본 계좌는 유지됩니다.'}</p>
                 <div className="mt-3 flex justify-end gap-2">
                     <button type="button" disabled={busy} onClick={() => setConfirmDelete(false)} className="rounded-lg border px-3 py-2 text-sm">삭제 취소</button>
                     <button type="button" disabled={busy || analyzing} onClick={() => void removeAccount()} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-50">삭제 확인</button>
                 </div>
             </div>}
             <div className="mt-5 flex justify-end gap-2">
-                {canDelete && !confirmDelete && <button type="button" disabled={busy || analyzing} onClick={() => { setError(''); setConfirmDelete(true); }} className="mr-auto rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 disabled:opacity-50">직불용 계좌 삭제</button>}
+                {canDelete && !confirmDelete && !confirmPhotoDelete && <button type="button" disabled={busy || analyzing} onClick={() => { setError(''); setConfirmDelete(true); }} className="mr-auto rounded-lg border border-red-300 px-3 py-2 text-sm text-red-700 disabled:opacity-50">{label} 삭제</button>}
                 <button type="button" disabled={busy} onClick={close} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">취소</button>
-                <button type="button" disabled={busy || analyzing || confirmDelete || invalidPhoto || copiedPhotoRequired || !!holderError || !isCompleteBankAccount(fields)} onClick={() => void save()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? '처리 중…' : `${label} 저장`}</button>
+                <button type="button" disabled={busy || analyzing || confirmDelete || confirmPhotoDelete || invalidPhoto || copiedPhotoRequired || !!holderError || !isCompleteBankAccount(fields)} onClick={() => void save()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{busy ? '처리 중…' : draft ? '입력 적용' : `${label} 저장`}</button>
             </div>
         </Dialog.Content>
     </Dialog.Portal></Dialog.Root>;
