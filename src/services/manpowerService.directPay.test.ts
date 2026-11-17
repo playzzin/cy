@@ -44,3 +44,25 @@ test('일치하는 직불 예금주와 다른 기본 예금주의 일괄 수정�
     expect(batch.update).toHaveBeenCalledWith({ id: 'one' }, expect.objectContaining({ directPayAccountHolder: '가상 작업자', accountHolder: '다른사람' }));
     expect(batch.commit).toHaveBeenCalledTimes(1);
 });
+
+test.each([{ idNumber: '000000-6000000' }, { isForeignWorker: true }])('외국인 신규·개별·일괄 저장에 같은 예외를 적용한다 (%j)', async classification => {
+    const foreign = { ...worker, ...classification, directPayAccountHolder: 'SYNTHETIC HOLDER' };
+    (workerFirestoreService.addWorker as jest.Mock).mockResolvedValueOnce('one');
+    await manpowerService.addWorker(foreign);
+    expect(workerFirestoreService.addWorker).toHaveBeenCalledWith(expect.objectContaining(foreign));
+    jest.mocked(manpowerService.getWorker).mockResolvedValue(foreign);
+    await manpowerService.updateWorker('one', { directPayAccountHolder: 'ANOTHER HOLDER' });
+    expect(workerFirestoreService.updateWorker).toHaveBeenCalledWith('one', expect.objectContaining({ directPayAccountHolder: 'ANOTHER HOLDER' }));
+    (getDoc as jest.Mock).mockResolvedValue({ exists: () => true, data: () => foreign });
+    const batch = { update: jest.fn(), commit: jest.fn().mockResolvedValue(undefined) };
+    (writeBatch as jest.Mock).mockReturnValue(batch);
+    await manpowerService.updateWorkersBatch(['one'], { directPayAccountHolder: 'ANOTHER HOLDER' });
+    expect(batch.commit).toHaveBeenCalledTimes(1);
+});
+
+test('외국인과 내국인의 혼합 일괄 변경은 내국인 불일치를 계속 거부한다', async () => {
+    (getDoc as jest.Mock).mockImplementation(async reference => ({ exists: () => true, data: () => reference.id === 'foreign'
+        ? { ...worker, id: 'foreign', isForeignWorker: true } : worker }));
+    await expect(manpowerService.updateWorkersBatch(['foreign', 'one'], { directPayAccountHolder: 'SYNTHETIC HOLDER' })).rejects.toThrow('예금주');
+    expect(writeBatch).not.toHaveBeenCalled();
+});

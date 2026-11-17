@@ -61,6 +61,34 @@ test('기본 계좌는 다른 예금주도 저장하며 직불용 삭제 버튼�
     expect(manpowerService.updateWorker).toHaveBeenCalledWith('one', expect.objectContaining({ accountHolder: '다른예금주' }));
 });
 
+test.each([
+    ['번호 자동 구분', '직접 입력'], ['번호 자동 구분', '사진 분석'], ['번호 자동 구분', '기본 계좌 복사'],
+    ['외국인 직접 선택', '직접 입력'], ['외국인 직접 선택', '사진 분석'], ['외국인 직접 선택', '기본 계좌 복사'],
+])('%s 외국인은 %s에서 다른 예금주로 직불계좌를 저장한다', async (classification, source) => {
+    open({ ...worker, accountHolder: 'SYNTHETIC HOLDER',
+        ...(classification === '번호 자동 구분' ? { idNumber: '000000-8000000' } : { isForeignWorker: true }) });
+    expect(screen.getByText(/외국인 작업자는 이름과 예금주가 달라도/)).toBeVisible();
+    if (source === '사진 분석') {
+        (analyzeBankAccountPhoto as jest.Mock).mockResolvedValueOnce({ ...analyzedAccount, accountHolder: 'SYNTHETIC HOLDER' });
+        fireEvent.change(screen.getByLabelText('직불용 계좌 사진 선택'), { target: { files: [file] } });
+        await screen.findByDisplayValue('SYNTHETIC HOLDER');
+    } else if (source === '기본 계좌 복사') {
+        await copy();
+    } else {
+        for (const [label, value] of [['은행명', '검증은행'], ['계좌번호', '001234567890'], ['예금주', 'SYNTHETIC HOLDER']]) {
+            fireEvent.change(screen.getByLabelText(`직불용 계좌 ${label}`), { target: { value } });
+        }
+    }
+    fireEvent.click(screen.getByRole('button', { name: '직불용 계좌 저장' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(manpowerService.updateWorker).toHaveBeenCalledWith('one', expect.objectContaining({ directPayAccountHolder: 'SYNTHETIC HOLDER' }));
+});
+
+test('외국인도 직불 예금주가 비어 있으면 저장하지 않는다', () => {
+    open({ ...worker, isForeignWorker: true, directPayBankName: '가상은행', directPayAccountNumber: '001234567890', directPayAccountHolder: '' });
+    expect(screen.getByRole('button', { name: '직불용 계좌 저장' })).toBeDisabled();
+});
+
 test('삭제는 재확인 후에만 실행하며 다른 예금주의 기존 직불 계좌도 삭제한다', async () => {
     const saved = { ...worker, directPayBankName: '직불은행', directPayAccountNumber: '001111222233', directPayAccountHolder: '다른예금주' };
     const cleared = { directPayBankName: '', directPayAccountNumber: '', directPayAccountHolder: '', directPayBankPhotoId: '' };

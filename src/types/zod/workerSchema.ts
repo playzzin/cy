@@ -9,6 +9,7 @@ export const WorkerSchema = z.object({
     uid: z.string().optional().nullable(),
     name: z.string().min(1, '\uC774\uB984\uC740 \uD544\uC218\uC785\uB2C8\uB2E4.'),
     idNumber: z.string().optional().nullable(),
+    isForeignWorker: z.boolean().optional().nullable(),
     address: z.string().optional().nullable(),
     contact: z.string().optional().nullable(),
     email: z.string().email('\uC62C\uBC14\uB978 \uC774\uBA54\uC77C \uD615\uC2DD\uC774 \uC544\uB2D9\uB2C8\uB2E4.').optional().nullable().or(z.literal('')),

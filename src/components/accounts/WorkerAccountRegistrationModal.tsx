@@ -5,6 +5,7 @@ import { BANK_PHOTO_ACCEPT, deleteWorkerDirectPayAccount, readWorkerBankPhoto, s
 import { analyzeBankAccountPhoto, isCompleteBankAccount, normalizeBankAccountFields } from '../../services/bankAccountPhotoService';
 import { getWorkerAccount, WorkerAccountPurpose, workerAccountLabel, workerAccountPatch, workerPhotoField } from '../../utils/workerAccount';
 import { directPayAccountHolderError } from '../../utils/workerDirectPayAccount';
+import { isForeignWorker } from '../../utils/workerForeignStatus';
 
 interface Props {
     worker: Worker;
@@ -36,7 +37,7 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
     const label = workerAccountLabel(purpose);
     const basic = getWorkerAccount(worker, 'default');
     const analysisFile = photo?.file ?? viewedPhoto;
-    const holderError = purpose === 'directPay' ? directPayAccountHolderError(worker.name, fields.accountHolder) : '';
+    const holderError = purpose === 'directPay' ? directPayAccountHolderError(worker, fields.accountHolder) : '';
     const canDelete = purpose === 'directPay' && Boolean(persistedWorker.current.directPayBankName || persistedWorker.current.directPayAccountNumber || persistedWorker.current.directPayAccountHolder || expectedPhotoId.current);
 
     useEffect(() => () => { analysisVersion.current += 1; }, []);
@@ -168,7 +169,9 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
             {purpose === 'directPay' && <div className="my-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
                 <button type="button" disabled={busy || analyzing || !isCompleteBankAccount(basic)} onClick={() => void copyBasic()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">기본 계좌와 동일</button>
                 <p className="mt-2 text-xs text-indigo-800">기본 계좌정보와 등록된 사진을 함께 복사합니다. 이후 변경은 각각 저장합니다.</p>
-                <p className="mt-1 text-xs text-indigo-800">직불용 예금주는 작업자 이름과 같아야 저장할 수 있습니다. 이름의 공백은 제외하고 비교합니다.</p>
+                <p className="mt-1 text-xs text-indigo-800">{isForeignWorker(worker)
+                    ? '외국인 작업자는 이름과 예금주가 달라도 저장할 수 있습니다. 예금주는 입력해 주세요.'
+                    : '내국인은 직불용 예금주가 작업자 이름과 같아야 저장할 수 있습니다. 외국인 여부는 작업자 등록·수정에서 확인해 주세요.'}</p>
                 {!isCompleteBankAccount(basic) && <p className="mt-1 text-xs text-amber-800">기본 계좌의 은행·계좌번호·예금주를 먼저 입력해 주세요.</p>}
             </div>}
             <fieldset disabled={busy} className="mt-4 space-y-3">

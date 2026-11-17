@@ -45,7 +45,7 @@ export function planWorkerAccountImport(rows: Row[], workers: Worker[]): WorkerA
             if (!isCompleteBankAccount(fields)) return { ...plan, updates: {}, error: `${purpose === 'directPay' ? '직불용' : '기본'} 은행·계좌번호(6~20자리)·예금주를 확인해 주세요.` };
             const normalized = normalizeBankAccountFields(fields);
             if (purpose === 'directPay') {
-                const error = directPayAccountHolderError(worker.name, normalized.accountHolder);
+                const error = directPayAccountHolderError(worker, normalized.accountHolder);
                 if (error) return { ...plan, updates: {}, error };
             }
             plan.accounts.push({ purpose, fields: normalized });

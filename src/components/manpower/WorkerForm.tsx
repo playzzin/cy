@@ -13,6 +13,7 @@ import SingleSelectPopover from '../common/SingleSelectPopover';
 import { prepareIdCardAnalysisImage } from '../../utils/idCardAnalysisImage';
 import { employmentToday, validateEmploymentPeriod } from '../../utils/workerEmploymentPeriod';
 import { assertWorkerDirectPayAccount } from '../../utils/workerDirectPayAccount';
+import { hasForeignRegistrationNumber, isForeignWorker } from '../../utils/workerForeignStatus';
 
 interface WorkerFormProps {
     initialData?: Worker | null;
@@ -37,7 +38,7 @@ const ACCOUNT_SECTIONS = [
     { label: '기본 계좌', description: '다른 사람 명의의 계좌도 등록할 수 있습니다.', fields: [
         { key: 'bankName', label: '은행명' }, { key: 'accountNumber', label: '계좌번호' }, { key: 'accountHolder', label: '예금주' },
     ] },
-    { label: '직불용 계좌', description: '작업자 이름과 예금주가 같아야 저장할 수 있습니다. 이름의 공백은 제외하고 비교합니다.', fields: [
+    { label: '직불용 계좌', description: '내국인은 작업자 이름과 예금주가 같아야 저장할 수 있습니다. 이름의 공백은 제외하고 비교합니다.', fields: [
         { key: 'directPayBankName', label: '은행명' }, { key: 'directPayAccountNumber', label: '계좌번호' }, { key: 'directPayAccountHolder', label: '예금주' },
     ] },
 ] as const;
@@ -173,6 +174,8 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         ).sort(compareTeamsByName);
     }, [companies, formData.companyId, isExternalCompanySelected, selectedCompany?.name, teams]);
     const canSelectTeam = Boolean(formData.companyId) || isExternalCompanySelected;
+    const foreignByNumber = hasForeignRegistrationNumber(formData.idNumber);
+    const foreignWorker = isForeignWorker(formData);
     const directPayErrorId = React.useId();
     const directPayError = React.useMemo(() => {
         try {
@@ -368,8 +371,8 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
             return;
         }
 
-        if (!finalData.name || !finalData.idNumber) {
-            await showErrorAlert('입력 오류', '이름과 주민번호는 필수입니다.');
+        if (!finalData.name?.trim() || (!finalData.idNumber?.trim() && !foreignWorker)) {
+            await showErrorAlert('입력 오류', '이름과 주민번호는 필수입니다. 외국인 작업자는 번호 없이 등록할 수 있습니다.');
             return;
         }
 
@@ -478,18 +481,28 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                 {isAnalyzing && <p role="status" className="mt-1 text-xs text-brand-600">신분증을 인식하고 있습니다...</p>}
                             </div>
                             <div className="hidden md:flex col-span-3 md:col-span-2 bg-slate-50 items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200 border-t md:border-t-0">
-                                주민번호
+                                주민·외국인번호
                             </div>
                             <div className="col-span-12 md:col-span-4 p-2 border-t md:border-t-0">
                                 <input
                                     type="text"
                                     name="idNumber"
+                                    aria-label="주민·외국인등록번호"
                                     value={formData.idNumber || ''}
                                     onChange={handleChange}
-                                    required
+                                    required={!foreignWorker}
                                     className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm placeholder:text-slate-300"
                                     placeholder="000000-0000000"
                                 />
+                                <label className="mt-2 flex items-center gap-2 text-sm font-medium text-slate-700">
+                                    <input type="checkbox" checked={foreignWorker} disabled={foreignByNumber}
+                                        onChange={event => setFormData(previous => ({ ...previous, isForeignWorker: event.target.checked }))}
+                                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                                    외국인 작업자
+                                </label>
+                                <p className="mt-1 text-xs text-slate-600">{foreignByNumber
+                                    ? '등록번호로 외국인이 자동 적용되었습니다.'
+                                    : '외국인등록번호로 자동 구분합니다. 번호가 없으면 외국인 작업자를 직접 선택해 주세요.'}</p>
                             </div>
                         </div>
 
@@ -827,7 +840,9 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                             <p className="text-xs text-slate-600">계좌정보를 입력한 뒤 아래 {isEditMode ? '변경사항 저장' : '등록 완료'} 버튼을 눌러 주세요.</p>
                             {ACCOUNT_SECTIONS.map(account => <fieldset key={account.label} className="min-w-0 rounded-lg border border-slate-200 px-3 pb-3">
                                 <legend className="px-1 font-bold text-slate-800">{account.label} 등록</legend>
-                                <p className="mb-3 text-xs text-slate-600">{account.description}</p>
+                                <p className="mb-3 text-xs text-slate-600">{account.label === '직불용 계좌' && foreignWorker
+                                    ? '외국인 작업자는 이름과 예금주가 달라도 저장할 수 있습니다. 예금주는 입력해 주세요.'
+                                    : account.description}</p>
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                                     {account.fields.map(field => <label key={field.key} className="min-w-0 text-xs font-semibold text-slate-700">
                                         {field.label}

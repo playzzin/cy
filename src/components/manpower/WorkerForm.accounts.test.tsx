@@ -107,3 +107,46 @@ it('다른 작업자와 신규 등록으로 전환하면 이전 계좌 입력을
     expect(screen.getByLabelText('직불용 계좌 은행명')).toHaveValue('');
     expect(screen.getByRole('button', { name: '등록 완료' })).toBeEnabled();
 });
+
+it('등록번호를 입력하면 외국인 예외를 자동 적용하고 내국인 번호로 바꾸면 검증한다', async () => {
+    render(<WorkerForm {...props} initialData={worker} isEditMode />);
+    change('직불용 계좌 예금주', 'SYNTHETIC HOLDER');
+    expect(screen.getByRole('button', { name: '변경사항 저장' })).toBeDisabled();
+    change('주민·외국인등록번호', '000000-7000000');
+    expect(screen.getByRole('checkbox', { name: '외국인 작업자' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '외국인 작업자' })).toBeDisabled();
+    expect(screen.getByText('등록번호로 외국인이 자동 적용되었습니다.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
+    await waitFor(() => expect(props.onSave).toHaveBeenCalledWith(expect.objectContaining({ idNumber: '000000-7000000', directPayAccountHolder: 'SYNTHETIC HOLDER' }), null));
+    change('주민·외국인등록번호', '000000-1000000');
+    expect(screen.getByRole('checkbox', { name: '외국인 작업자' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '변경사항 저장' })).toBeDisabled();
+});
+
+it('번호가 없는 외국인을 직접 선택해 다른 예금주로 신규 등록하고 재조회한다', async () => {
+    const { rerender } = render(<WorkerForm {...props} />);
+    fireEvent.change(screen.getByPlaceholderText('이름 입력'), { target: { value: 'SYNTHETIC WORKER' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '외국인 작업자' }));
+    expect(screen.getByLabelText('주민·외국인등록번호')).not.toBeRequired();
+    change('직불용 계좌 은행명', '가상은행');
+    change('직불용 계좌 계좌번호', '001234567890');
+    change('직불용 계좌 예금주', '다른표기');
+    fireEvent.click(screen.getByRole('button', { name: '등록 완료' }));
+    await waitFor(() => expect(props.onSave).toHaveBeenCalledWith(expect.objectContaining({ isForeignWorker: true, idNumber: '', directPayAccountHolder: '다른표기' }), null));
+    rerender(<WorkerForm {...props} isEditMode initialData={{ ...props.onSave.mock.calls[0][0], id: 'saved-foreign' }} />);
+    expect(screen.getByRole('checkbox', { name: '외국인 작업자' })).toBeChecked();
+    change('직불용 계좌 예금주', '');
+    expect(screen.getByRole('alert')).toHaveTextContent('예금주를 입력');
+    expect(screen.getByRole('button', { name: '변경사항 저장' })).toBeDisabled();
+});
+
+it('수동 외국인 선택을 해제하면 명의 검증을 복원하고 새 작업자에 선택을 남기지 않는다', () => {
+    const { rerender } = render(<WorkerForm {...props} isEditMode initialData={{ ...worker, isForeignWorker: true, directPayAccountHolder: '다른표기' }} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '외국인 작업자' }));
+    expect(screen.getByRole('button', { name: '변경사항 저장' })).toBeDisabled();
+    expect(screen.getByLabelText('주민·외국인등록번호')).toBeRequired();
+    fireEvent.click(screen.getByRole('checkbox', { name: '외국인 작업자' }));
+    rerender(<WorkerForm {...props} initialData={null} />);
+    expect(screen.getByRole('checkbox', { name: '외국인 작업자' })).not.toBeChecked();
+    expect(screen.getByLabelText('주민·외국인등록번호')).toBeRequired();
+});

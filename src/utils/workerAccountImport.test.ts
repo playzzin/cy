@@ -9,6 +9,12 @@ test('직불 예금주가 다르면 기본 계좌 변경도 포함된 행 전체
     expect(plan.error).toMatch('예금주는 작업자 이름과 같아야');
     expect(plan.updates).toEqual({});
 });
+
+test.each([{ idNumber: '000000-5000000' }, { isForeignWorker: true }])('외국인 계좌 가져오기는 다른 예금주를 허용한다 (%j)', classification => {
+    const [plan] = planWorkerAccountImport([{ id: 'one', '직불용 예금주': 'SYNTHETIC HOLDER' }], [{ ...worker, ...classification }]);
+    expect(plan.error).toBeUndefined();
+    expect(plan.updates).toMatchObject({ directPayAccountHolder: 'SYNTHETIC HOLDER' });
+});
 test('기존 양식은 기본 계좌만 갱신하고 직불용 계좌를 보존한다', () => {
     const [plan] = planWorkerAccountImport([{ id: 'one', 은행: '새기본은행', 계좌번호: '000-123-456789', 예금주: '새예금주' }], [worker]);
     expect(plan.error).toBeUndefined();

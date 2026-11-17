@@ -1,5 +1,12 @@
 import { WorkerSchema } from './workerSchema';
 
+it('외국인 직접 선택값을 저장·조회하고 잘못된 문자열 값은 거부한다', () => {
+    for (const isForeignWorker of [true, false, undefined, null]) {
+        expect(WorkerSchema.parse({ name: '가상작업자', isForeignWorker }).isForeignWorker).toBe(isForeignWorker);
+    }
+    expect(WorkerSchema.safeParse({ name: '가상작업자', isForeignWorker: 'true' }).success).toBe(false);
+});
+
 it('작업자 조회에서 기본계좌와 직불용 계좌를 각각 보존한다', () => {
     const result = WorkerSchema.parse({
         name: '가상작업자',
