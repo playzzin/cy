@@ -204,7 +204,7 @@ it.each(['worker', 'workerDirectPay', 'team', 'company', 'custom'] as const)('re
         directPayBankName: fields.bankName, directPayAccountNumber: fields.accountNumber, directPayAccountHolder: fields.accountHolder,
     } : fields);
     Object.values(writers).filter(writer => writer !== writers[kind]).forEach(writer => expect(writer).not.toHaveBeenCalled());
-    expect(screen.getByText('검증-recipient')).toBeVisible();
+    expect(screen.getByRole('row', { name: /검증-recipient/ })).toBeVisible();
 });
 
 const uploadAccountWorkbook = (sheets: Record<string, Record<string, unknown>[]>) => {
