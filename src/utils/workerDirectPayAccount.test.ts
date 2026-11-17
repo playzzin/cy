@@ -17,5 +17,6 @@ test('기본 계좌와 무관한 수정은 허용하고 불일치 계좌도 전�
     const legacy = { ...worker, directPayAccountHolder: '다른사람' };
     expect(() => assertWorkerDirectPayAccount(legacy, { bankName: '새은행', accountHolder: '타인' })).not.toThrow();
     expect(() => assertWorkerDirectPayAccount(legacy, { contact: 'test' })).not.toThrow();
+    expect(() => assertWorkerDirectPayAccount(legacy, { ...legacy, accountHolder: '타인기본예금주' })).not.toThrow();
     expect(() => assertWorkerDirectPayAccount(legacy, clearedDirectPayAccount)).not.toThrow();
 });

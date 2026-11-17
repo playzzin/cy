@@ -16,7 +16,8 @@ export function directPayAccountHolderError(name: unknown, holder: unknown): str
 export class WorkerDirectPayAccountError extends Error {}
 
 export function assertWorkerDirectPayAccount(before: Partial<Worker> | null | undefined, updates: Partial<Worker>): void {
-    if (![...accountKeys, 'name'].some(key => Object.prototype.hasOwnProperty.call(updates, key))) return;
+    if (![...accountKeys, 'name' as const].some(key =>
+        Object.prototype.hasOwnProperty.call(updates, key) && updates[key] !== before?.[key])) return;
     const next = { ...before, ...updates };
     // Full removal is allowed even for legacy accounts with a different holder.
     if (!accountKeys.some(key => text(next[key]))) return;
