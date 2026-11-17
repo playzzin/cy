@@ -17,6 +17,7 @@ import { SupportCancellationModal, type SupportCancellationFormValue } from '../
 import { SupportPageHeader } from '../../components/support/SupportPageHeader';
 import { SupportSegmentedTabs, type SupportSegmentedTabOption } from '../../components/support/SupportSegmentedTabs';
 import {
+    canRestoreCardStatus,
     createCardLifecycleOperationId,
     formatKoreanBusinessDate,
     isInactiveCardStatus,
@@ -399,10 +400,11 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
     };
 
     const handleRestoreUse = async (card: Card) => {
-        if (card.status !== 'SUSPENDED') return;
+        if (!canRestoreCardStatus(card.status)) return;
         const inFlightKey = `restore:${card.id}`;
         if (lifecycleInFlightRef.current.has(inFlightKey)) return;
-        const ok = window.confirm(`${card.name || card.maskedNumber || '카드'}의 카드 정지를 해제하고 다시 사용 가능으로 변경할까요?`);
+        const statusLabel = card.status === 'CLOSED' ? '해지' : '정지';
+        const ok = window.confirm(`${card.name || card.maskedNumber || '카드'}의 카드 ${statusLabel}를 해제하고 보관중 상태로 변경할까요? 배정·청구 대상은 다시 설정해 주세요.`);
         if (!ok) return;
 
         const operationId = createCardLifecycleOperationId('restore', card.id);
@@ -410,7 +412,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
         setRestoringCardId(card.id);
         try {
             const processedDate = formatKoreanBusinessDate();
-            await cardService.restoreSuspendedCard({
+            await cardService.restoreCardUse({
                 cardId: card.id,
                 effectiveDate: processedDate,
                 operationId,
@@ -419,13 +421,13 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                     resourceId: card.id,
                     resourceLabel: card.name || card.maskedNumber || '카드',
                     reason: 'OTHER',
-                    reasonLabel: '카드 정지 해제',
+                    reasonLabel: `카드 ${statusLabel} 해제`,
                     processedDate,
                     statusBefore: card.status,
                     statusAfter: 'AVAILABLE',
                     assigneeName: card.currentAssigneeName ?? undefined,
                     billingTargetName: card.billingTargetName || undefined,
-                    note: '분실·정지 카드를 다시 사용 가능 상태로 전환',
+                    note: `${statusLabel} 카드를 보관중 상태로 전환`,
                     snapshot: {
                         name: card.name,
                         issuer: card.issuer,
@@ -438,7 +440,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
             handleRefresh();
         } catch (error) {
             console.error('Failed to restore card status', error);
-            window.alert('카드 정지 해제 중 오류가 발생했습니다.');
+            window.alert(`카드 ${statusLabel} 해제 중 오류가 발생했습니다.`);
         } finally {
             lifecycleInFlightRef.current.delete(inFlightKey);
             setRestoringCardId(null);
