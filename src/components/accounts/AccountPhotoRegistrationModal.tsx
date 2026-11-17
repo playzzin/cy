@@ -1,3 +1,4 @@
+import { WorkerDirectPayAccountError } from '../../utils/workerDirectPayAccount';
 import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Camera, Loader2, Plus, Trash2, X } from 'lucide-react';
@@ -126,7 +127,7 @@ export default function AccountPhotoRegistrationModal({ targets, initialTargetId
                     const partial = onSavePhoto && savedFields.current.get(row.id) === accountKey;
                     updateRow(row.id, { error: partial
                         ? `계좌정보는 저장됐지만 통장사진은 저장하지 못했습니다. 다시 저장을 눌러 주세요. ${failure instanceof Error ? failure.message : ''}`
-                        : '저장하지 못했습니다. 연결 상태와 권한을 확인한 뒤 다시 저장해 주세요.' });
+                        : failure instanceof WorkerDirectPayAccountError ? failure.message : '저장하지 못했습니다. 연결 상태와 권한을 확인한 뒤 다시 저장해 주세요.' });
                 }
             }
             if (alive.current) {
@@ -155,7 +156,7 @@ export default function AccountPhotoRegistrationModal({ targets, initialTargetId
                     <button type="button" aria-label="계좌번호 등록 (사진 분석) 닫기" disabled={!!busy} onClick={close} className="rounded-lg p-2 text-slate-600 disabled:opacity-40"><X size={20} /></button>
                 </div>
                 <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-slate-50 p-4 sm:p-5">
-                    <p className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">등록할 사람·대상을 직접 선택하세요. 다른 사람 명의의 계좌도 등록할 수 있습니다. 계좌번호는 전체 표시되며, 저장하면 선택한 대상의 기존 계좌정보가 변경됩니다.</p>
+                    <p className="rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-900">등록할 사람·대상을 직접 선택하세요. 기본 계좌와 외국인 작업자의 직불용 계좌는 다른 예금주도 등록할 수 있습니다. 내국인의 직불용 계좌는 작업자 이름과 예금주가 같아야 합니다. 계좌번호는 전체 표시되며, 저장하면 선택한 대상의 기존 계좌정보가 변경됩니다.</p>
                     <input ref={input} type="file" multiple accept={BANK_ACCOUNT_PHOTO_ACCEPT} aria-label="계좌 사진 선택" className="hidden" disabled={!!busy}
                         onChange={event => { addFiles(Array.from(event.currentTarget.files || [])); event.currentTarget.value = ''; }} />
                     <button type="button" disabled={!!busy} onClick={() => input.current?.click()}

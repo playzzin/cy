@@ -25,6 +25,7 @@ import { resolveWorkerPayType, syncPayTypeFields } from '../utils/payType';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { devWorkers, updateDevWorker } from '../utils/devAdminFixtures';
 import { withEmploymentDates } from '../utils/workerEmploymentPeriod';
+import { assertWorkerDirectPayAccount } from '../utils/workerDirectPayAccount';
 
 export type { Worker };
 
@@ -234,6 +235,7 @@ export const manpowerService = {
 
     // Add a new worker
     addWorker: async (worker: any, _silent?: boolean): Promise<string> => {
+        assertWorkerDirectPayAccount(null, worker);
         const data = withEmploymentDates(null, syncWorkerSalaryFields(worker)) as Record<string, unknown>;
         const id = await workerFirestoreService.addWorker(data as any);
         cachedWorkers = null;
@@ -246,6 +248,7 @@ export const manpowerService = {
     updateWorker: async (id: string, updates: Partial<Worker>): Promise<void> => {
         if (isDevAdminSessionEnabled()) {
             const before = devWorkers.find((worker) => worker.id === id);
+            assertWorkerDirectPayAccount(before, updates);
             const snapshot = before ? { ...before } : null;
             updateDevWorker(id, updates);
             if (snapshot) await recordWorkerIdentityChange(snapshot, { ...snapshot, ...updates });
@@ -253,6 +256,7 @@ export const manpowerService = {
         }
 
         const before = await manpowerService.getWorker(id);
+        assertWorkerDirectPayAccount(before, updates);
         const normalizedUpdates = stripUndefinedFields(withEmploymentDates(before, syncWorkerSalaryFields(updates)) as Record<string, unknown>);
         await workerFirestoreService.updateWorker(id, normalizedUpdates);
         cachedWorkers = null;
@@ -541,7 +545,10 @@ export const manpowerService = {
             const snap = await getDoc(doc(db, 'workers', id));
             return snap.exists() ? snapshotWorker(id, snap.data()) : null;
         }));
-        preparedUpdates.forEach((entry, index) => { entry.updates = withEmploymentDates(beforeRows[index], entry.updates); });
+        preparedUpdates.forEach((entry, index) => {
+            assertWorkerDirectPayAccount(beforeRows[index], entry.updates);
+            entry.updates = withEmploymentDates(beforeRows[index], entry.updates);
+        });
         const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         preparedUpdates.forEach(({ id, updates: workerUpdates }) => {

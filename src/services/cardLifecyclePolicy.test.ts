@@ -15,15 +15,17 @@ describe('cardLifecyclePolicy', () => {
         expect(isInactiveCardStatus('ASSIGNED')).toBe(false);
     });
 
-    it('allows restore only from suspended status', () => {
+    it('allows restore from suspended and closed statuses', () => {
         expect(canRestoreCardStatus('SUSPENDED')).toBe(true);
-        expect(canRestoreCardStatus('CLOSED')).toBe(false);
-        expect(canRestoreCardStatus('AVAILABLE')).toBe(false);
+        expect(canRestoreCardStatus('CLOSED')).toBe(true);
         expect(() => assertCardCanBeRestored('SUSPENDED')).not.toThrow();
-        expect(() => assertCardCanBeRestored('CLOSED'))
-            .toThrow('card-restore-requires-suspended-status');
-        expect(() => assertCardCanBeRestored('AVAILABLE'))
-            .toThrow('card-restore-requires-suspended-status');
+        expect(() => assertCardCanBeRestored('CLOSED')).not.toThrow();
+    });
+
+    it.each(['AVAILABLE', 'ASSIGNED', null, undefined] as const)('refuses restore from %s', (status) => {
+        expect(canRestoreCardStatus(status)).toBe(false);
+        expect(() => assertCardCanBeRestored(status))
+            .toThrow('card-restore-requires-inactive-status');
     });
 
     it('blocks assignment and billing for inactive cards', () => {

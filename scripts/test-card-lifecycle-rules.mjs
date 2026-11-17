@@ -227,30 +227,51 @@ assert.equal((await getDoc(cardRef)).data()?.status, 'AVAILABLE');
 
 const closedCardId = 'closed-card';
 await adminDb.collection('cards').doc(closedCardId).set(baseCard('CLOSED'));
-await expectDenied('closed card restore', async () => {
-  const operationId = 'restore_closed-card_rules-test';
-  const blockedBatch = writeBatch(db);
-  blockedBatch.update(doc(db, 'cards', closedCardId), {
+await expectDenied('closed card restore without an audit log', async () => {
+  await updateDoc(doc(db, 'cards', closedCardId), {
     status: 'AVAILABLE',
-    lastLifecycleOperationId: operationId,
+    lastLifecycleOperationId: 'restore-without-log',
     lastLifecycleOperationType: 'RESTORE',
     lastLifecycleOperationAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  blockedBatch.set(doc(db, 'support_cancellation_logs', operationId), {
+});
+
+const restoreClosedCard = async (statusAfter, extraFields = {}) => {
+  const operationId = 'restore_closed-card_rules-test';
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'cards', closedCardId), {
+    status: statusAfter,
+    lastLifecycleOperationId: operationId,
+    lastLifecycleOperationType: 'RESTORE',
+    lastLifecycleOperationAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...extraFields,
+  });
+  batch.set(doc(db, 'support_cancellation_logs', operationId), {
     resourceType: 'card',
     resourceId: closedCardId,
     resourceLabel: '해지 카드',
     reason: 'OTHER',
-    reasonLabel: '카드 정지 해제',
+    reasonLabel: '카드 해지 해제',
     processedDate: '2026-08-19',
     statusBefore: 'CLOSED',
-    statusAfter: 'AVAILABLE',
-    note: '차단되어야 함',
+    statusAfter,
+    note: '해지 카드 복원 규칙 테스트',
     createdAt: serverTimestamp(),
   });
-  await blockedBatch.commit();
-});
+  await batch.commit();
+};
+await expectDenied('closed card restore directly to assigned', () => restoreClosedCard('ASSIGNED'));
+await expectDenied('closed card restore with stale assignment', () => restoreClosedCard('AVAILABLE', {
+  currentAssigneeId: 'team-1', currentAssigneeType: 'TEAM', currentAssigneeName: '테스트팀',
+}));
+await expectDenied('closed card restore with stale billing target', () => restoreClosedCard('AVAILABLE', {
+  billingTargetId: 'team-1', billingTargetType: 'TEAM', billingTargetName: '테스트팀',
+}));
+await restoreClosedCard('AVAILABLE');
+assert.equal((await getDoc(doc(db, 'cards', closedCardId))).data()?.status, 'AVAILABLE');
+assert.equal((await getDoc(doc(db, 'support_cancellation_logs', 'restore_closed-card_rules-test'))).data()?.statusBefore, 'CLOSED');
 
 const orphanTargetId = 'orphan-billing-target';
 await adminDb.collection('cardBillingTargets').doc(orphanTargetId).set({

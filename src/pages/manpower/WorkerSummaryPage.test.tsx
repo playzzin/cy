@@ -6,7 +6,7 @@ import { manpowerService } from '../../services/manpowerService';
 import html2canvas from 'html2canvas';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
-import { readWorkerBankPhoto, saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
+import { deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
 import { analyzeBankAccountPhoto } from '../../services/bankAccountPhotoService';
 import { supportTeamDocumentService } from '../../services/supportTeamDocumentService';
 
@@ -21,7 +21,7 @@ jest.mock('../../services/bankAccountPhotoService', () => ({
     ...jest.requireActual('../../services/bankAccountPhotoService'), analyzeBankAccountPhoto: jest.fn(),
 }));
 jest.mock('../../services/workerBankPhotoService', () => ({
-    ...jest.requireActual('../../services/workerBankPhotoService'), readWorkerBankPhoto: jest.fn(), saveWorkerBankPhoto: jest.fn(),
+    ...jest.requireActual('../../services/workerBankPhotoService'), deleteWorkerDirectPayAccount: jest.fn(), readWorkerBankPhoto: jest.fn(), saveWorkerBankPhoto: jest.fn(),
 }));
 jest.mock('../../services/teamService', () => ({
     teamService: { getTeams: async () => [
@@ -385,7 +385,7 @@ test('선택한 작업자별로 새 사진과 기존 원본을 분석하고 확�
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: jest.fn() });
     Object.defineProperty(window, 'crypto', { configurable: true, value: jest.requireActual('crypto').webcrypto });
     const file = new File(['synthetic'], 'bank.png', { type: 'image/png' });
-    const fields = { bankName: '검증은행', accountNumber: '000123456789', accountHolder: '검증예금주' };
+    const fields = { bankName: '검증은행', accountNumber: '000123456789', accountHolder: '가상가' };
     jest.mocked(analyzeBankAccountPhoto).mockResolvedValue(fields);
     jest.mocked(readWorkerBankPhoto).mockResolvedValue(file);
     jest.mocked(saveWorkerBankPhoto).mockImplementation(async (_id, _file, photoId) => photoId);
@@ -406,6 +406,7 @@ test('선택한 작업자별로 새 사진과 기존 원본을 분석하고 확�
     expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', file, expect.any(String), '', 'directPay');
     expect(screen.getByText('직불 계좌 등록됨 · 통장사본 등록됨')).toBeVisible();
 
+    jest.mocked(analyzeBankAccountPhoto).mockResolvedValue({ ...fields, accountHolder: '가상나' });
     fireEvent.click(screen.getByRole('button', { name: '가상나 직불용 계좌 등록/수정' }));
     fireEvent.click(screen.getByRole('button', { name: '등록된 사진 보기' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Gemini로 자동입력' }));
@@ -413,8 +414,25 @@ test('선택한 작업자별로 새 사진과 기존 원본을 분석하고 확�
     fireEvent.click(screen.getByRole('button', { name: '직불용 계좌 저장' }));
     await screen.findByRole('button', { name: '가상나 직불용 계좌 등록/수정' });
     expect(manpowerService.updateWorker).toHaveBeenLastCalledWith('two', {
-        directPayBankName: fields.bankName, directPayAccountNumber: fields.accountNumber, directPayAccountHolder: fields.accountHolder,
+        directPayBankName: fields.bankName, directPayAccountNumber: fields.accountNumber, directPayAccountHolder: '가상나',
     });
     expect(saveWorkerBankPhoto).toHaveBeenCalledTimes(1);
     expect(screen.getAllByText('직불 계좌 등록됨 · 통장사본 등록됨')).toHaveLength(2);
+});
+
+test('작업자 요약에서 직불용 계좌를 삭제하면 통장사본도 미등록으로 갱신한다', async () => {
+    jest.mocked(deleteWorkerDirectPayAccount).mockResolvedValue({ directPayBankName: '', directPayAccountNumber: '', directPayAccountHolder: '', directPayBankPhotoId: '' });
+    HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); };
+    await openPage();
+    fireEvent.click(screen.getByRole('checkbox', { name: '가상나 선택' }));
+    fireEvent.click(screen.getByRole('button', { name: '직불용 통장사본 등록' }));
+    fireEvent.click(screen.getByRole('button', { name: '가상나 직불용 계좌 등록/수정' }));
+    fireEvent.click(screen.getByRole('button', { name: '직불용 계좌 삭제' }));
+    expect(deleteWorkerDirectPayAccount).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '삭제 확인' }));
+    await screen.findByRole('button', { name: '가상나 직불용 계좌 등록/수정' });
+    expect(screen.getByText('직불 계좌 미등록 · 통장사본 미등록')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '직불용 통장사본 등록 닫기' }));
+    expect(within(screen.getByRole('row', { name: /가상나/ })).getByLabelText('직불용 통장사본 미등록')).toBeInTheDocument();
 });

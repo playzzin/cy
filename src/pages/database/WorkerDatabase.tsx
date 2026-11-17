@@ -29,6 +29,7 @@ import WorkerModal from '../manpower/WorkerModal';
 import WorkerIdCardRegistrationModal from '../../components/manpower/WorkerIdCardRegistrationModal';
 import WorkerAccountSummary from '../../components/accounts/WorkerAccountSummary';
 import WorkerAccountRegistrationModal from '../../components/accounts/WorkerAccountRegistrationModal';
+import { assertWorkerDirectPayAccount } from '../../utils/workerDirectPayAccount';
 import type { WorkerAccountPurpose } from '../../utils/workerAccount';
 import { normalizeBankAccountFields } from '../../services/bankAccountPhotoService';
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
@@ -220,9 +221,10 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             handleWorkerChange(id, field, value);
         }
         try {
+            assertWorkerDirectPayAccount(workers.find(worker => worker.id === id), { [field]: value });
             await manpowerService.updateWorker(id, { [field]: value });
         } catch (error) {
-            console.error("Update failed", error);
+            alert(error instanceof Error ? error.message : '저장하지 못했습니다. 다시 시도해 주세요.');
             fetchWorkers(); // Revert on error
         }
     };
@@ -854,34 +856,19 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         }
     };
 
-    const handleSaveWorker = async (workerData: Omit<Worker, 'id'> | Partial<Worker>) => {
-        try {
-            if (currentWorker && currentWorker.id) {
-                await manpowerService.updateWorker(currentWorker.id, workerData);
-            } else {
-                // 신규 등록 시 중복 체크
-                const name = (workerData as any).name;
-                const existingWorker = workers.find(w => w.name === name);
-
-                if (existingWorker) {
-                    if (window.confirm(`'${name}' 작업자가 이미 존재합니다.\n기존 정보를 업데이트하시겠습니까?`)) {
-                        await manpowerService.updateWorker(existingWorker.id!, workerData);
-                    } else {
-                        return; // 취소 시 중단
-                    }
-                } else {
-                    await manpowerService.addWorker(workerData as Omit<Worker, 'id'>);
-                }
-            }
-            fetchWorkers();
-            setIsModalOpen(false);
-        } catch (error) {
-            console.error("Failed to save worker", error);
-            if (workerData.fileNameSaved) void recordIdentityDocumentLog({ action: currentWorker?.id ? 'worker_updated' : 'worker_created',
-                status: 'failure', workerId: currentWorker?.id, personNames: [workerData.name || ''], fileCount: 1, reason: 'processing_failed' });
-            const message = error instanceof Error ? error.message : (typeof error === 'string' ? error : '저장에 실패했습니다.');
-            alert(message);
+    const handleSaveWorker = async (workerData: Partial<Worker>, savedId?: string) => {
+        const id = savedId || currentWorker?.id;
+        if (id) {
+            await manpowerService.updateWorker(id, workerData);
+            return { id };
         }
+        const existingWorker = workers.find(w => w.name === workerData.name);
+        if (existingWorker?.id) {
+            if (!window.confirm("'" + workerData.name + "' 작업자가 이미 존재합니다.\n기존 정보를 업데이트하시겠습니까?")) return null;
+            await manpowerService.updateWorker(existingWorker.id, workerData);
+            return { id: existingWorker.id, bankPhotoId: existingWorker.bankPhotoId, directPayBankPhotoId: existingWorker.directPayBankPhotoId };
+        }
+        return { id: await manpowerService.addWorker(workerData as Omit<Worker, 'id'>) };
     };
 
     const handleBankBookUpdate = async (updates: { workerId: string, bankName: string, accountNumber: string, accountHolder: string }[]) => {
@@ -1942,6 +1929,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                     isOpen={isModalOpen}
                     onClose={() => setIsModalOpen(false)}
                     onSave={handleSaveWorker}
+                    onSaved={() => { void fetchWorkers(); }}
                     initialData={currentWorker}
                     teams={teams}
                     companies={companies}

@@ -4,15 +4,26 @@ import type { Worker } from '../services/manpowerService';
 jest.mock('../services/aiSettingsService', () => ({ aiSettingsService: {} }));
 
 const worker: Worker = { id: 'one', name: '가상 작업자', teamName: '검증팀', bankName: '기본은행', accountNumber: '001234567890', accountHolder: '기본예금주', directPayBankName: '직불은행', directPayAccountNumber: '009876543210', directPayAccountHolder: '직불예금주' };
+test('직불 예금주가 다르면 기본 계좌 변경도 포함된 행 전체를 거부한다', () => {
+    const [plan] = planWorkerAccountImport([{ id: 'one', 은행: '변경은행', '직불용 예금주': '다른사람' }], [worker]);
+    expect(plan.error).toMatch('예금주는 작업자 이름과 같아야');
+    expect(plan.updates).toEqual({});
+});
+
+test.each([{ idNumber: '000000-5000000' }, { isForeignWorker: true }])('외국인 계좌 가져오기는 다른 예금주를 허용한다 (%j)', classification => {
+    const [plan] = planWorkerAccountImport([{ id: 'one', '직불용 예금주': 'SYNTHETIC HOLDER' }], [{ ...worker, ...classification }]);
+    expect(plan.error).toBeUndefined();
+    expect(plan.updates).toMatchObject({ directPayAccountHolder: 'SYNTHETIC HOLDER' });
+});
 test('기존 양식은 기본 계좌만 갱신하고 직불용 계좌를 보존한다', () => {
     const [plan] = planWorkerAccountImport([{ id: 'one', 은행: '새기본은행', 계좌번호: '000-123-456789', 예금주: '새예금주' }], [worker]);
     expect(plan.error).toBeUndefined();
     expect(plan.updates).toEqual({ bankName: '새기본은행', accountNumber: '000123456789', accountHolder: '새예금주' });
 });
 test('직불용 열만 있는 파일은 기본 계좌를 건드리지 않는다', () => {
-    const [plan] = planWorkerAccountImport([{ id: 'one', '직불용 은행': '새직불은행', '직불용 계좌번호': '000123456789', '직불용 예금주': '새직불예금주' }], [worker]);
+    const [plan] = planWorkerAccountImport([{ id: 'one', '직불용 은행': '새직불은행', '직불용 계좌번호': '000123456789', '직불용 예금주': '가상 작업자' }], [worker]);
     expect(plan.error).toBeUndefined();
-    expect(plan.updates).toEqual({ directPayBankName: '새직불은행', directPayAccountNumber: '000123456789', directPayAccountHolder: '새직불예금주' });
+    expect(plan.updates).toEqual({ directPayBankName: '새직불은행', directPayAccountNumber: '000123456789', directPayAccountHolder: '가상 작업자' });
 });
 test('누락된 열과 빈 셀은 저장된 정보를 삭제하지 않는다', () => {
     const [plan] = planWorkerAccountImport([{ id: 'one', 은행: '변경은행', 계좌번호: '', 예금주: '' }], [worker]);

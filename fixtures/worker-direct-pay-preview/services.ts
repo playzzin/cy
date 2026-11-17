@@ -2,9 +2,26 @@
 const key = 'worker-direct-pay-preview';
 const initial = [{ id: 'test-worker', name: '가상 작업자', teamId: 'test-team', teamName: '검증팀', companyId: 'test-company', companyName: '청연 검증회사', status: '재직', isActive: true, salaryModel: '일급제', bankName: '검증은행', accountNumber: '001234567890', accountHolder: '가상 예금주', bankPhotoId: 'basic-photo' }];
 const rows = () => JSON.parse(localStorage.getItem(key) || JSON.stringify(initial));
+const photoWorker = (id: string) => [...rows(), JSON.parse(localStorage.getItem('worker-form-accounts-preview') || 'null')].find(row => row?.id === id);
 export const manpowerService = {
     getWorkers: async () => rows(),
-    updateWorker: async (id: string, update: object) => localStorage.setItem(key, JSON.stringify(rows().map((row: any) => row.id === id ? { ...row, ...update } : row))),
+    updateWorker: async (id: string, update: object) => {
+        const form = JSON.parse(localStorage.getItem('worker-form-accounts-preview') || 'null');
+        if (form?.id === id) localStorage.setItem('worker-form-accounts-preview', JSON.stringify({ ...form, ...update }));
+        else localStorage.setItem(key, JSON.stringify(rows().map((row: any) => row.id === id ? { ...row, ...update } : row)));
+    },
+};
+export const deleteWorkerDirectPayAccount = async (worker: any) => {
+    const updates = { directPayBankName: '', directPayAccountNumber: '', directPayAccountHolder: '', directPayBankPhotoId: '' };
+    await manpowerService.updateWorker(worker.id, updates);
+    if (worker.directPayBankPhotoId) localStorage.removeItem(`${key}-photo-${worker.directPayBankPhotoId}`);
+    return updates;
+};
+export const deleteWorkerBankPhoto = async (id: string, expected: string, purpose: string) => {
+    const field = purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId';
+    if (photoWorker(id)?.[field] !== expected) throw new Error('사진이 변경되었습니다.');
+    await manpowerService.updateWorker(id, { [field]: '' });
+    localStorage.removeItem(`${key}-photo-${expected}`);
 };
 export const teamService = { getTeams: async () => [{ id: 'test-team', name: '검증팀', companyId: 'test-company', type: '시공팀', status: 'active' }] };
 export const companyService = { getCompanies: async () => [{ id: 'test-company', name: '청연 검증회사', status: 'active' }] };
@@ -30,7 +47,7 @@ export const storage = {};
 export const BANK_PHOTO_ACCEPT = 'image/jpeg,image/png,image/webp';
 export const validateWorkerBankPhoto = () => undefined;
 export const readWorkerBankPhoto = async (workerId: string, name: string, signal?: AbortSignal, purpose = 'default') => {
-    const worker = rows().find((row: any) => row.id === workerId);
+    const worker = photoWorker(workerId);
     if (!worker?.[purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId']) return null;
     const saved = localStorage.getItem(`${key}-photo-${worker[purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId']}`);
     if (saved) {
@@ -46,7 +63,7 @@ export const readWorkerBankPhoto = async (workerId: string, name: string, signal
 };
 export const saveWorkerBankPhoto = async (id: string, file: File, photoId: string, expected: string, purpose: string) => {
     const field = purpose === 'directPay' ? 'directPayBankPhotoId' : 'bankPhotoId';
-    const current = rows().find((row: any) => row.id === id)?.[field] || '';
+    const current = photoWorker(id)?.[field] || '';
     if (current !== expected && current !== photoId) throw new Error('사진이 변경되었습니다.');
     const data = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file);

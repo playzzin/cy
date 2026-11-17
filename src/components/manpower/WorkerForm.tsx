@@ -12,13 +12,19 @@ import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import SingleSelectPopover from '../common/SingleSelectPopover';
 import { prepareIdCardAnalysisImage } from '../../utils/idCardAnalysisImage';
 import { employmentToday, validateEmploymentPeriod } from '../../utils/workerEmploymentPeriod';
+import { assertWorkerDirectPayAccount } from '../../utils/workerDirectPayAccount';
+import { hasForeignRegistrationNumber, isForeignWorker } from '../../utils/workerForeignStatus';
+import WorkerAccountRegistrationModal from '../accounts/WorkerAccountRegistrationModal';
+import type { WorkerPhotoDrafts } from '../../services/workerRegistrationSave';
+import { getWorkerAccount, workerPhotoField, type WorkerAccountPurpose } from '../../utils/workerAccount';
+import { isCompleteBankAccount } from '../../services/bankAccountPhotoService';
 
 interface WorkerFormProps {
     initialData?: Worker | null;
     teams: Team[];
     companies: Company[];
     positions: Position[];
-    onSave: (worker: Omit<Worker, 'id'> | Partial<Worker>, file?: File | null) => Promise<void>;
+    onSave: (worker: Omit<Worker, 'id'> | Partial<Worker>, file?: File | null, photos?: WorkerPhotoDrafts) => Promise<void>;
     onCancel: () => void;
     isEditMode?: boolean;
 }
@@ -32,6 +38,14 @@ const EXTERNAL_TEAM_NAME = '외부팀';
 const EXTERNAL_TEAM_COMPANY_VALUE = '__EXTERNAL_TEAM__';
 const DAILY_PAY_TYPE = '일급제';
 const SUPPORT_PAY_TYPE = '지원팀';
+const ACCOUNT_SECTIONS = [
+    { purpose: 'default', label: '기본 계좌', description: '다른 사람 명의의 계좌도 등록할 수 있습니다.', fields: [
+        { key: 'bankName', label: '은행명' }, { key: 'accountNumber', label: '계좌번호' }, { key: 'accountHolder', label: '예금주' },
+    ] },
+    { purpose: 'directPay', label: '직불용 계좌', description: '내국인은 작업자 이름과 예금주가 같아야 저장할 수 있습니다. 이름의 공백은 제외하고 비교합니다.', fields: [
+        { key: 'directPayBankName', label: '은행명' }, { key: 'directPayAccountNumber', label: '계좌번호' }, { key: 'directPayAccountHolder', label: '예금주' },
+    ] },
+] as const;
 
 const compareTeamsByName = (a: Team, b: Team): number =>
     String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko', {
@@ -110,6 +124,10 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         bloodType: ''
     });
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [accountPurpose, setAccountPurpose] = useState<WorkerAccountPurpose | null>(null);
+    const [accountPhotos, setAccountPhotos] = useState<WorkerPhotoDrafts>({});
+    const [isSaving, setIsSaving] = useState(false);
+    const saveInFlight = useRef(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const aiInputRef = useRef<HTMLInputElement>(null);
     const analysisRequest = useRef(0);
@@ -164,6 +182,19 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         ).sort(compareTeamsByName);
     }, [companies, formData.companyId, isExternalCompanySelected, selectedCompany?.name, teams]);
     const canSelectTeam = Boolean(formData.companyId) || isExternalCompanySelected;
+    const foreignByNumber = hasForeignRegistrationNumber(formData.idNumber);
+    const foreignWorker = isForeignWorker(formData);
+    const incompletePhotoAccount = ACCOUNT_SECTIONS.find(account => accountPhotos[account.purpose] &&
+        !isCompleteBankAccount(getWorkerAccount(formData as Worker, account.purpose)));
+    const directPayErrorId = React.useId();
+    const directPayError = React.useMemo(() => {
+        try {
+            assertWorkerDirectPayAccount(initialData, formData);
+            return '';
+        } catch (error) {
+            return error instanceof Error ? error.message : '직불용 계좌의 예금주를 확인해 주세요.';
+        }
+    }, [initialData, formData]);
 
     // companyId가 변경되면 affiliationType을 동기화
     useEffect(() => {
@@ -180,6 +211,8 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         analysisInFlight.current = false;
         setIsAnalyzing(false);
         setSelectedFile(null);
+        setAccountPhotos({});
+        setAccountPurpose(null);
         if (initialData) {
             setFormData({
                 ...initialData,
@@ -340,7 +373,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (analysisInFlight.current) return;
+        if (analysisInFlight.current || saveInFlight.current || accountPurpose) return;
 
         let finalData = { ...formData };
 
@@ -350,51 +383,71 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
             return;
         }
 
-        if (!finalData.name || !finalData.idNumber) {
-            await showErrorAlert('입력 오류', '이름과 주민번호는 필수입니다.');
+        if (!finalData.name?.trim() || (!finalData.idNumber?.trim() && !foreignWorker)) {
+            await showErrorAlert('입력 오류', '이름과 주민번호는 필수입니다. 외국인 작업자는 번호 없이 등록할 수 있습니다.');
             return;
         }
 
-        // 새 팀 생성 로직 (팀장인 경우만)
-        if (isNewTeam && finalData.role === '팀장') {
-            if (!newTeamName.trim()) {
-                await showErrorAlert('입력 오류', '팀명을 입력해주세요.');
-                return;
-            }
-            try {
-                const newTeamId = await teamService.addTeam({
-                    name: newTeamName,
-                    type: affiliationType,
-                    companyId: finalData.companyId,
-                    companyName: finalData.companyName,
-                    leaderName: finalData.name,
-                    status: 'active'
-                } as any);
-
-                finalData.teamId = newTeamId;
-                finalData.teamName = newTeamName;
-                finalData.teamType = affiliationType;
-            } catch (err: any) {
-                await showErrorAlert('팀 생성 실패', err.message);
-                return;
-            }
+        if (directPayError) {
+            await showErrorAlert('직불용 계좌 확인', directPayError);
+            return;
+        }
+        if (incompletePhotoAccount) {
+            await showErrorAlert('계좌정보 확인', `${incompletePhotoAccount.label}의 은행명·계좌번호·예금주를 확인해 주세요.`);
+            return;
         }
 
-        const shouldUseExternalCompanyDefault =
-            affiliationType === PARTNER_COMPANY_TYPE &&
-            (!finalData.companyId || String(finalData.companyName ?? '').trim() === EXTERNAL_TEAM_NAME);
+        saveInFlight.current = true;
+        setIsSaving(true);
+        try {
 
-        if (shouldUseExternalCompanyDefault) {
-            finalData = {
-                ...finalData,
-                companyId: '',
-                companyName: EXTERNAL_TEAM_NAME,
-                payType: SUPPORT_PAY_TYPE,
-                salaryModel: SUPPORT_PAY_TYPE,
-            };
+            // 새 팀 생성 로직 (팀장인 경우만)
+            if (isNewTeam && finalData.role === '팀장') {
+                if (!newTeamName.trim()) {
+                    await showErrorAlert('입력 오류', '팀명을 입력해주세요.');
+                    return;
+                }
+                try {
+                    const newTeamId = await teamService.addTeam({
+                        name: newTeamName,
+                        type: affiliationType,
+                        companyId: finalData.companyId,
+                        companyName: finalData.companyName,
+                        leaderName: finalData.name,
+                        status: 'active'
+                    } as any);
+
+                    finalData.teamId = newTeamId;
+                    finalData.teamName = newTeamName;
+                    finalData.teamType = affiliationType;
+                    setFormData(previous => ({ ...previous, teamId: newTeamId, teamName: newTeamName, teamType: affiliationType }));
+                    setIsNewTeam(false);
+                } catch (err: any) {
+                    await showErrorAlert('팀 생성 실패', err.message);
+                    return;
+                }
+            }
+
+            const shouldUseExternalCompanyDefault =
+                affiliationType === PARTNER_COMPANY_TYPE &&
+                (!finalData.companyId || String(finalData.companyName ?? '').trim() === EXTERNAL_TEAM_NAME);
+
+            if (shouldUseExternalCompanyDefault) {
+                finalData = {
+                    ...finalData,
+                    companyId: '',
+                    companyName: EXTERNAL_TEAM_NAME,
+                    payType: SUPPORT_PAY_TYPE,
+                    salaryModel: SUPPORT_PAY_TYPE,
+                };
+            }
+
+            if (Object.keys(accountPhotos).length) await onSave(finalData, selectedFile, accountPhotos);
+            else await onSave(finalData, selectedFile);
+        } finally {
+            saveInFlight.current = false;
+            setIsSaving(false);
         }
-
-        await onSave(finalData, selectedFile);
     };
 
     return (
@@ -408,13 +461,13 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                     <span>{isEditMode ? '근로자 정보 수정' : '신규 근로자 등록'}</span>
                 </h3>
                 {!isEditMode && (
-                    <button type="button" onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition">
+                    <button type="button" disabled={isSaving} onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition">
                         <FontAwesomeIcon icon={faTimes} className="text-xl" />
                     </button>
                 )}
             </div>
 
-            <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
+            <fieldset disabled={isSaving} className="min-w-0 p-6 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
                 {/* 1. Basic Information */}
                 <section className="border border-slate-300 rounded-lg overflow-hidden shadow-sm">
                     <div className="bg-slate-800 px-4 py-2.5 flex items-center justify-between">
@@ -455,18 +508,28 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                 {isAnalyzing && <p role="status" className="mt-1 text-xs text-brand-600">신분증을 인식하고 있습니다...</p>}
                             </div>
                             <div className="hidden md:flex col-span-3 md:col-span-2 bg-slate-50 items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200 border-t md:border-t-0">
-                                주민번호
+                                주민·외국인번호
                             </div>
                             <div className="col-span-12 md:col-span-4 p-2 border-t md:border-t-0">
                                 <input
                                     type="text"
                                     name="idNumber"
+                                    aria-label="주민·외국인등록번호"
                                     value={formData.idNumber || ''}
                                     onChange={handleChange}
-                                    required
+                                    required={!foreignWorker}
                                     className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm placeholder:text-slate-300"
                                     placeholder="000000-0000000"
                                 />
+                                <label className="mt-2 flex items-center gap-2 text-sm font-medium text-slate-700">
+                                    <input type="checkbox" checked={foreignWorker} disabled={foreignByNumber}
+                                        onChange={event => setFormData(previous => ({ ...previous, isForeignWorker: event.target.checked }))}
+                                        className="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                                    외국인 작업자
+                                </label>
+                                <p className="mt-1 text-xs text-slate-600">{foreignByNumber
+                                    ? '등록번호로 외국인이 자동 적용되었습니다.'
+                                    : '외국인등록번호로 자동 구분합니다. 번호가 없으면 외국인 작업자를 직접 선택해 주세요.'}</p>
                             </div>
                         </div>
 
@@ -777,12 +840,12 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                     </div>
 
                     <div className="grid grid-cols-12 text-sm divide-y divide-slate-200 border-t border-slate-200">
-                        {/* Row 1: Salary Model & Bank Info */}
+                        {/* Salary model */}
                         <div className="col-span-12 grid grid-cols-12">
                             <div className="col-span-3 md:col-span-2 bg-slate-50 flex items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
                                 지급 구분
                             </div>
-                            <div className="col-span-9 md:col-span-4 p-2 border-r border-slate-200">
+                            <div className="col-span-9 md:col-span-10 p-2">
                                 <select
                                     name="payType"
                                     value={isPartnerAffiliation ? SUPPORT_PAY_TYPE : (formData.payType || DAILY_PAY_TYPE)}
@@ -798,32 +861,39 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                     <option value="가지급">가지급</option>
                                 </select>
                             </div>
-                            <div className="col-span-12 md:col-span-6 p-2 border-t md:border-t-0 grid grid-cols-3 gap-2">
-                                <input
-                                    type="text"
-                                    name="bankName"
-                                    value={formData.bankName || ''}
-                                    onChange={handleChange}
-                                    placeholder="은행명"
-                                    className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
-                                />
-                                <input
-                                    type="text"
-                                    name="accountNumber"
-                                    value={formData.accountNumber || ''}
-                                    onChange={handleChange}
-                                    placeholder="계좌번호"
-                                    className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
-                                />
-                                <input
-                                    type="text"
-                                    name="accountHolder"
-                                    value={formData.accountHolder || ''}
-                                    onChange={handleChange}
-                                    placeholder="예금주"
-                                    className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
-                                />
-                            </div>
+                        </div>
+
+                        <div className="col-span-12 space-y-4 p-4">
+                            <p className="text-xs text-slate-600">계좌정보를 입력한 뒤 아래 {isEditMode ? '변경사항 저장' : '등록 완료'} 버튼을 눌러 주세요.</p>
+                            {ACCOUNT_SECTIONS.map(account => <fieldset key={account.label} className="min-w-0 rounded-lg border border-slate-200 px-3 pb-3">
+                                <legend className="px-1 font-bold text-slate-800">{account.label} 등록</legend>
+                                <p className="mb-3 text-xs text-slate-600">{account.label === '직불용 계좌' && foreignWorker
+                                    ? '외국인 작업자는 이름과 예금주가 달라도 저장할 수 있습니다. 예금주는 입력해 주세요.'
+                                    : account.description}</p>
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                    {account.fields.map(field => <label key={field.key} className="min-w-0 text-xs font-semibold text-slate-700">
+                                        {field.label}
+                                        <input type="text" name={field.key} value={formData[field.key] || ''} onChange={handleChange}
+                                            aria-label={`${account.label} ${field.label}`} placeholder={field.label} maxLength={100} autoComplete="off"
+                                            inputMode={field.label === '계좌번호' ? 'numeric' : 'text'}
+                                            aria-invalid={field.key === 'directPayAccountHolder' && !!directPayError}
+                                            aria-describedby={field.key === 'directPayAccountHolder' && directPayError ? directPayErrorId : undefined}
+                                            className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm font-normal focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                                    </label>)}
+                                </div>
+                                {account.label === '직불용 계좌' && directPayError && <p id={directPayErrorId} role="alert" className="mt-2 text-sm text-red-700">{directPayError}</p>}
+                                <div className="mt-3 flex flex-wrap items-center gap-3">
+                                    <button type="button" aria-label={`${account.label} 통장사본 등록·수정`} disabled={isAnalyzing || !formData.name?.trim()}
+                                        onClick={() => setAccountPurpose(account.purpose)} className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 disabled:opacity-50">
+                                        통장사본 첨부·Gemini 등록
+                                    </button>
+                                    <span className="text-xs text-slate-600">{accountPhotos[account.purpose] === null ? '통장사본 삭제 대기'
+                                        : accountPhotos[account.purpose] ? '통장사본 저장 대기'
+                                        : formData[workerPhotoField(account.purpose)] ? '통장사본 등록됨' : '통장사본 미등록'}</span>
+                                </div>
+                                {!formData.name?.trim() && <p className="mt-1 text-xs text-slate-500">작업자 이름을 먼저 입력해 주세요.</p>}
+                                {incompletePhotoAccount?.purpose === account.purpose && <p role="alert" className="mt-2 text-sm text-red-700">사진을 저장하려면 은행명·계좌번호·예금주를 모두 확인해 주세요.</p>}
+                            </fieldset>)}
                         </div>
 
                         <div className="col-span-12 grid grid-cols-12">
@@ -898,12 +968,20 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                         </div>
                     </div>
                 </section>
-            </div>
+            </fieldset>
+
+            {accountPurpose && <WorkerAccountRegistrationModal worker={formData as Worker} purpose={accountPurpose}
+                onSaved={() => undefined} onClose={() => setAccountPurpose(null)}
+                draft={{ photo: accountPhotos[accountPurpose], basicPhoto: accountPhotos.default, onApply: (updates, photo) => {
+                    setFormData(previous => ({ ...previous, ...updates }));
+                    if (photo !== undefined) setAccountPhotos(previous => ({ ...previous, [accountPurpose]: photo }));
+                } }} />}
 
             {/* Footer */}
             <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
                 <button
                     type="button"
+                    disabled={isSaving}
                     onClick={onCancel}
                     className="px-5 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-white hover:border-slate-300 border border-transparent transition-all"
                 >
@@ -911,11 +989,11 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                 </button>
                 <button
                     type="submit"
-                    disabled={isAnalyzing}
-                    className="px-8 py-2.5 rounded-lg text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 shadow-lg hover:shadow-brand-500/30 transition-all transform hover:-translate-y-0.5 flex items-center gap-2"
+                    disabled={isSaving || isAnalyzing || !!accountPurpose || !!directPayError || !!incompletePhotoAccount}
+                    className="px-8 py-2.5 rounded-lg text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 shadow-lg hover:shadow-brand-500/30 transition-all transform hover:-translate-y-0.5 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <FontAwesomeIcon icon={faCheck} />
-                    <span>{isEditMode ? '변경사항 저장' : '등록 완료'}</span>
+                    <span>{isSaving ? '저장 중…' : isEditMode ? '변경사항 저장' : '등록 완료'}</span>
                 </button>
             </div>
         </form>

@@ -27,7 +27,7 @@ jest.mock('../../components/manpower/IdCardAnalysisModal', () => () => null);
 jest.mock('../../components/signatures/SignatureGeneratorModal', () => () => null);
 jest.mock('../manpower/WorkerModal', () => () => null);
 
-const fields = { bankName: '검증은행', accountNumber: '001234567890', accountHolder: '별도예금주' };
+const fields = { bankName: '검증은행', accountNumber: '001234567890', accountHolder: '검증작업자' };
 let workers: Worker[];
 
 beforeEach(() => {
@@ -134,7 +134,7 @@ it('supports changing the recipient and clears the list selection when reopening
 });
 
 it('관리 칸에는 간단한 상태 버튼만 표시하고 계좌 상세는 기본·직불용 열로 구분한다', async () => {
-    workers[0] = { ...workers[0], bankName: '기본은행', accountHolder: '기본예금주', directPayBankName: '직불은행', directPayAccountNumber: '001111222233', directPayAccountHolder: '직불예금주' };
+    workers[0] = { ...workers[0], bankName: '기본은행', accountHolder: '검증작업자', directPayBankName: '직불은행', directPayAccountNumber: '001111222233', directPayAccountHolder: '직불예금주' };
     render(<WorkerDatabase hideHeader />);
     const basic = await screen.findByRole('button', { name: '검증작업자 기본 계좌·사진 등록/수정' });
     const direct = screen.getByRole('button', { name: '검증작업자 직불용 계좌·사진 등록/수정' });
@@ -143,7 +143,7 @@ it('관리 칸에는 간단한 상태 버튼만 표시하고 계좌 상세는 �
     expect(direct).toHaveTextContent(/^직불용계좌$/);
     expect(direct).toHaveAttribute('title', '직불용 계좌: 계좌 등록됨 · 사진 미등록');
     const row = within(screen.getByRole('row', { name: /검증작업자/ }));
-    for (const [label, value] of [['기본 은행', '기본은행'], ['기본 계좌번호', '009876543210'], ['기본 예금주', '기본예금주'], ['직불용 은행', '직불은행'], ['직불용 계좌번호', '001111222233'], ['직불용 예금주', '직불예금주']]) {
+    for (const [label, value] of [['기본 은행', '기본은행'], ['기본 계좌번호', '009876543210'], ['기본 예금주', '검증작업자'], ['직불용 은행', '직불은행'], ['직불용 계좌번호', '001111222233'], ['직불용 예금주', '직불예금주']]) {
         expect(row.getByRole('cell', { name: label })).toHaveTextContent(value);
     }
     const management = row.getAllByRole('cell').slice(-1)[0];
@@ -156,7 +156,7 @@ it('관리 칸에는 간단한 상태 버튼만 표시하고 계좌 상세는 �
 });
 
 it('목록에서 동일 계좌와 사진을 직불용으로 복사해 저장하고 재조회해도 유지한다', async () => {
-    workers[0] = { ...workers[0], bankName: '기본은행', accountHolder: '기본예금주' };
+    workers[0] = { ...workers[0], bankName: '기본은행', accountHolder: '검증작업자' };
     const view = render(<WorkerDatabase hideHeader />);
     fireEvent.click(await screen.findByRole('button', { name: '검증작업자 직불용 계좌·사진 등록/수정' }));
     fireEvent.click(screen.getByRole('button', { name: '기본 계좌와 동일' }));
@@ -168,7 +168,7 @@ it('목록에서 동일 계좌와 사진을 직불용으로 복사해 저장하�
     expect(row.getByRole('cell', { name: '직불용 은행' })).toHaveTextContent('기본은행');
     expect(row.getByRole('cell', { name: '직불용 계좌번호' })).toHaveTextContent('009876543210');
     expect(row.getByRole('button', { name: '검증작업자 직불용 계좌·사진 등록/수정' })).toHaveAttribute('title', '직불용 계좌: 계좌 등록됨 · 사진 등록됨');
-    expect(manpowerService.updateWorker).toHaveBeenCalledWith('worker-a', { directPayBankName: '기본은행', directPayAccountNumber: '009876543210', directPayAccountHolder: '기본예금주' });
+    expect(manpowerService.updateWorker).toHaveBeenCalledWith('worker-a', { directPayBankName: '기본은행', directPayAccountNumber: '009876543210', directPayAccountHolder: '검증작업자' });
     expect(workers[0].bankPhotoId).toBe('a'.repeat(32)); expect(workers[1].directPayAccountNumber).toBeUndefined();
     view.unmount(); render(<WorkerDatabase hideHeader />);
     await screen.findByRole('button', { name: '검증작업자 직불용 계좌·사진 등록/수정' });
@@ -181,7 +181,7 @@ it('계좌가 없는 작업자도 기본 계좌를 등록하고 직불용 계좌
         fireEvent.click(await screen.findByRole('button', { name: `다른작업자 ${purpose}·사진 등록/수정` }));
         fireEvent.change(screen.getByLabelText(`${purpose} 은행명`), { target: { value: bank } });
         fireEvent.change(screen.getByLabelText(`${purpose} 계좌번호`), { target: { value: number } });
-        fireEvent.change(screen.getByLabelText(`${purpose} 예금주`), { target: { value: '별도예금주' } });
+        fireEvent.change(screen.getByLabelText(`${purpose} 예금주`), { target: { value: purpose === '직불용 계좌' ? '다른작업자' : '별도예금주' } });
         fireEvent.click(screen.getByRole('button', { name: `${purpose} 저장` }));
         await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
         const row = within(screen.getByRole('row', { name: /다른작업자/ }));
@@ -196,6 +196,7 @@ it('계좌가 없는 작업자도 기본 계좌를 등록하고 직불용 계좌
 
 it('직불용 계좌번호를 목록에서 수정하면 기본 계좌번호는 유지한다', async () => {
     workers[0].directPayAccountNumber = '001111222233';
+    workers[0].directPayAccountHolder = '검증작업자';
     render(<WorkerDatabase hideHeader />);
     await screen.findByRole('button', { name: '검증작업자 직불용 계좌·사진 등록/수정' });
     const row = within(screen.getByRole('row', { name: /검증작업자/ }));
@@ -212,6 +213,7 @@ it('목록에서 잘못된 계좌번호를 입력하면 저장하지 않고 기�
     const alert = jest.spyOn(window, 'alert').mockImplementation(() => undefined);
     try {
         workers[0].directPayAccountNumber = '001111222233';
+    workers[0].directPayAccountHolder = '검증작업자';
         render(<WorkerDatabase hideHeader />);
         await screen.findByRole('button', { name: '검증작업자 직불용 계좌·사진 등록/수정' });
         fireEvent.click(screen.getByText('001111222233'));
@@ -220,5 +222,24 @@ it('목록에서 잘못된 계좌번호를 입력하면 저장하지 않고 기�
         await screen.findByText('001111222233');
         expect(manpowerService.updateWorker).not.toHaveBeenCalled();
         expect(alert).toHaveBeenCalledWith(expect.stringContaining('숫자 6~20자리'));
+    } finally { alert.mockRestore(); }
+});
+
+it('목록에서 다른 직불 예금주를 입력하면 저장을 막고 기본 예금주는 허용한다', async () => {
+    const alert = jest.spyOn(window, 'alert').mockImplementation(() => undefined);
+    try {
+        workers[0] = { ...workers[0], directPayAccountHolder: '검증작업자', accountHolder: '기존예금주' };
+        render(<WorkerDatabase hideHeader />);
+        await screen.findByRole('button', { name: '검증작업자 직불용 계좌·사진 등록/수정' });
+        const row = within(screen.getByRole('row', { name: /검증작업자/ }));
+        fireEvent.click(within(row.getByRole('cell', { name: '직불용 예금주' })).getByText('검증작업자'));
+        fireEvent.change(screen.getByPlaceholderText('직불용 예금주'), { target: { value: '다른예금주' } });
+        fireEvent.click(screen.getByRole('button', { name: '확인' }));
+        await waitFor(() => expect(alert).toHaveBeenCalledWith(expect.stringContaining('예금주는 작업자 이름과 같아야')));
+        expect(manpowerService.updateWorker).not.toHaveBeenCalled();
+        fireEvent.click(within(row.getByRole('cell', { name: '기본 예금주' })).getByText('기존예금주'));
+        fireEvent.change(screen.getByPlaceholderText('기본 예금주'), { target: { value: '다른예금주' } });
+        fireEvent.click(screen.getByRole('button', { name: '확인' }));
+        await waitFor(() => expect(manpowerService.updateWorker).toHaveBeenCalledWith('worker-a', { accountHolder: '다른예금주' }));
     } finally { alert.mockRestore(); }
 });

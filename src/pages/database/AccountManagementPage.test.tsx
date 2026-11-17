@@ -181,10 +181,10 @@ it('미등록 필터에 직불용 계좌가 없는 작업자도 포함하고 직
     expect(screen.queryByText('검증-missing-direct')).not.toBeInTheDocument();
 });
 
-it.each(['worker', 'workerDirectPay', 'team', 'company', 'custom'] as const)('registers a photo to the selected %s without requiring the recipient name to equal the account holder', async kind => {
+it.each(['worker', 'workerDirectPay', 'team', 'company', 'custom'] as const)('registers a photo to the selected %s with holder matching required only for direct pay', async kind => {
     URL.createObjectURL = jest.fn(() => 'blob:synthetic-bank');
     URL.revokeObjectURL = jest.fn();
-    const fields = { bankName: '검증은행', accountNumber: '001234567890', accountHolder: '타인명의검증' };
+    const fields = { bankName: '검증은행', accountNumber: '001234567890', accountHolder: kind === 'workerDirectPay' ? '검증-recipient' : '타인명의검증' };
     (geminiService.analyzeBankBook as jest.Mock).mockResolvedValue(fields);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([worker('recipient')]);
     (accountDirectoryService.getEntries as jest.Mock).mockResolvedValue([{ id: 'custom-id', name: '검증 매입', category: 'purchase', status: 'active' }]);
@@ -204,7 +204,7 @@ it.each(['worker', 'workerDirectPay', 'team', 'company', 'custom'] as const)('re
         directPayBankName: fields.bankName, directPayAccountNumber: fields.accountNumber, directPayAccountHolder: fields.accountHolder,
     } : fields);
     Object.values(writers).filter(writer => writer !== writers[kind]).forEach(writer => expect(writer).not.toHaveBeenCalled());
-    expect(screen.getByText('검증-recipient')).toBeVisible();
+    expect(screen.getByRole('row', { name: /검증-recipient/ })).toBeVisible();
 });
 
 const uploadAccountWorkbook = (sheets: Record<string, Record<string, unknown>[]>) => {
@@ -231,13 +231,13 @@ it('직불용 엑셀을 미리본 뒤 반영하며 잘못된 ID의 행은 저장
         (manpowerService.getWorkers as jest.Mock).mockResolvedValue([worker('import', { teamName: '검증팀', bankName: '기본은행', accountNumber: '001234567890', accountHolder: '기본예금주' })]);
         await openPage();
         uploadAccountWorkbook({ 작업자계좌: [
-            { id: 'import', '직불용 은행': '직불은행', '직불용 계좌번호': '009876543210', '직불용 예금주': '직불예금주' },
+            { id: 'import', '직불용 은행': '직불은행', '직불용 계좌번호': '009876543210', '직불용 예금주': '검증-import' },
             { id: 'invalid', 이름: '검증-import', 팀명: '검증팀', 은행: '잘못된은행', 계좌번호: '001111222233', 예금주: '가상예금주' },
         ] });
         await screen.findByText('import / - · 직불용 계좌');
         expect(manpowerService.updateWorkersBatch).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole('button', { name: '미리보기 반영' }));
-        await waitFor(() => expect(manpowerService.updateWorkersBatch).toHaveBeenCalledWith([{ id: 'import', updates: { directPayBankName: '직불은행', directPayAccountNumber: '009876543210', directPayAccountHolder: '직불예금주' } }]));
+        await waitFor(() => expect(manpowerService.updateWorkersBatch).toHaveBeenCalledWith([{ id: 'import', updates: { directPayBankName: '직불은행', directPayAccountNumber: '009876543210', directPayAccountHolder: '검증-import' } }]));
         await waitFor(() => expect(screen.queryByRole('button', { name: '미리보기 반영' })).not.toBeInTheDocument());
     } finally { alert.mockRestore(); }
 });
@@ -253,4 +253,22 @@ it('여러 시트에 중복된 작업자와 숫자형 계좌번호만 있는 파
     expect(screen.getAllByText(/같은 작업자가 중복/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/텍스트 셀로 입력해 주세요/).length).toBeGreaterThan(0);
     expect(manpowerService.updateWorkersBatch).not.toHaveBeenCalled();
+});
+
+
+it('사진 분석으로 다른 예금주를 직불용에 저장하면 오류를 표시하고 쓰지 않는다', async () => {
+    URL.createObjectURL = jest.fn(() => 'blob:synthetic-bank');
+    URL.revokeObjectURL = jest.fn();
+    (geminiService.analyzeBankBook as jest.Mock).mockResolvedValue({ bankName: '검증은행', accountNumber: '001234567890', accountHolder: '다른예금주' });
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([worker('recipient')]);
+    await openPage();
+    fireEvent.click(screen.getByRole('button', { name: '계좌번호 등록 (사진 분석)' }));
+    fireEvent.change(screen.getByLabelText('계좌 사진 선택'), { target: { files: [new File(['synthetic'], 'bank.png', { type: 'image/png' })] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Gemini로 계좌 읽기' }));
+    await screen.findByDisplayValue('001234567890');
+    fireEvent.change(screen.getByLabelText('1번 등록할 사람·대상'), { target: { value: 'workerDirectPay:recipient' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '등록할 대상과 은행·전체 계좌번호·예금주를 확인했습니다.' }));
+    fireEvent.click(screen.getByRole('button', { name: '확인한 계좌 1건 저장' }));
+    await screen.findByText(/직불용 계좌의 예금주는 작업자 이름과 같아야/);
+    expect(manpowerService.updateWorker).not.toHaveBeenCalled();
 });

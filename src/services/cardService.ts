@@ -150,7 +150,7 @@ export const cardService = {
         return cardFirestoreService.transitionCardLifecycle(params);
     },
 
-    restoreSuspendedCard: async (params: {
+    restoreCardUse: async (params: {
         cardId: string;
         effectiveDate: string;
         operationId: string;

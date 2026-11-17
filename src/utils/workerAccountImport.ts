@@ -1,6 +1,7 @@
 import type { Worker } from '../services/manpowerService';
 import { isCompleteBankAccount, normalizeBankAccountFields, type BankAccountFields } from '../services/bankAccountPhotoService';
 import { getWorkerAccount, workerAccountPatch, type WorkerAccountPurpose } from './workerAccount';
+import { directPayAccountHolderError } from './workerDirectPayAccount';
 
 type Row = Record<string, unknown>;
 type AccountPreview = { purpose: WorkerAccountPurpose; fields: BankAccountFields };
@@ -43,6 +44,10 @@ export function planWorkerAccountImport(rows: Row[], workers: Worker[]): WorkerA
             if (!changed) continue;
             if (!isCompleteBankAccount(fields)) return { ...plan, updates: {}, error: `${purpose === 'directPay' ? '직불용' : '기본'} 은행·계좌번호(6~20자리)·예금주를 확인해 주세요.` };
             const normalized = normalizeBankAccountFields(fields);
+            if (purpose === 'directPay') {
+                const error = directPayAccountHolderError(worker, normalized.accountHolder);
+                if (error) return { ...plan, updates: {}, error };
+            }
             plan.accounts.push({ purpose, fields: normalized });
             Object.assign(plan.updates, workerAccountPatch(normalized, purpose));
         }
