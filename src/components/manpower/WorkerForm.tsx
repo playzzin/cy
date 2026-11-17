@@ -12,6 +12,7 @@ import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import SingleSelectPopover from '../common/SingleSelectPopover';
 import { prepareIdCardAnalysisImage } from '../../utils/idCardAnalysisImage';
 import { employmentToday, validateEmploymentPeriod } from '../../utils/workerEmploymentPeriod';
+import { assertWorkerDirectPayAccount } from '../../utils/workerDirectPayAccount';
 
 interface WorkerFormProps {
     initialData?: Worker | null;
@@ -32,6 +33,14 @@ const EXTERNAL_TEAM_NAME = '외부팀';
 const EXTERNAL_TEAM_COMPANY_VALUE = '__EXTERNAL_TEAM__';
 const DAILY_PAY_TYPE = '일급제';
 const SUPPORT_PAY_TYPE = '지원팀';
+const ACCOUNT_SECTIONS = [
+    { label: '기본 계좌', description: '다른 사람 명의의 계좌도 등록할 수 있습니다.', fields: [
+        { key: 'bankName', label: '은행명' }, { key: 'accountNumber', label: '계좌번호' }, { key: 'accountHolder', label: '예금주' },
+    ] },
+    { label: '직불용 계좌', description: '작업자 이름과 예금주가 같아야 저장할 수 있습니다. 이름의 공백은 제외하고 비교합니다.', fields: [
+        { key: 'directPayBankName', label: '은행명' }, { key: 'directPayAccountNumber', label: '계좌번호' }, { key: 'directPayAccountHolder', label: '예금주' },
+    ] },
+] as const;
 
 const compareTeamsByName = (a: Team, b: Team): number =>
     String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko', {
@@ -164,6 +173,15 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         ).sort(compareTeamsByName);
     }, [companies, formData.companyId, isExternalCompanySelected, selectedCompany?.name, teams]);
     const canSelectTeam = Boolean(formData.companyId) || isExternalCompanySelected;
+    const directPayErrorId = React.useId();
+    const directPayError = React.useMemo(() => {
+        try {
+            assertWorkerDirectPayAccount(initialData, formData);
+            return '';
+        } catch (error) {
+            return error instanceof Error ? error.message : '직불용 계좌의 예금주를 확인해 주세요.';
+        }
+    }, [initialData, formData]);
 
     // companyId가 변경되면 affiliationType을 동기화
     useEffect(() => {
@@ -352,6 +370,11 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
 
         if (!finalData.name || !finalData.idNumber) {
             await showErrorAlert('입력 오류', '이름과 주민번호는 필수입니다.');
+            return;
+        }
+
+        if (directPayError) {
+            await showErrorAlert('직불용 계좌 확인', directPayError);
             return;
         }
 
@@ -777,12 +800,12 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                     </div>
 
                     <div className="grid grid-cols-12 text-sm divide-y divide-slate-200 border-t border-slate-200">
-                        {/* Row 1: Salary Model & Bank Info */}
+                        {/* Salary model */}
                         <div className="col-span-12 grid grid-cols-12">
                             <div className="col-span-3 md:col-span-2 bg-slate-50 flex items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
                                 지급 구분
                             </div>
-                            <div className="col-span-9 md:col-span-4 p-2 border-r border-slate-200">
+                            <div className="col-span-9 md:col-span-10 p-2">
                                 <select
                                     name="payType"
                                     value={isPartnerAffiliation ? SUPPORT_PAY_TYPE : (formData.payType || DAILY_PAY_TYPE)}
@@ -798,32 +821,26 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                     <option value="가지급">가지급</option>
                                 </select>
                             </div>
-                            <div className="col-span-12 md:col-span-6 p-2 border-t md:border-t-0 grid grid-cols-3 gap-2">
-                                <input
-                                    type="text"
-                                    name="bankName"
-                                    value={formData.bankName || ''}
-                                    onChange={handleChange}
-                                    placeholder="은행명"
-                                    className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
-                                />
-                                <input
-                                    type="text"
-                                    name="accountNumber"
-                                    value={formData.accountNumber || ''}
-                                    onChange={handleChange}
-                                    placeholder="계좌번호"
-                                    className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
-                                />
-                                <input
-                                    type="text"
-                                    name="accountHolder"
-                                    value={formData.accountHolder || ''}
-                                    onChange={handleChange}
-                                    placeholder="예금주"
-                                    className="w-full border-slate-200 bg-white rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
-                                />
-                            </div>
+                        </div>
+
+                        <div className="col-span-12 space-y-4 p-4">
+                            <p className="text-xs text-slate-600">계좌정보를 입력한 뒤 아래 {isEditMode ? '변경사항 저장' : '등록 완료'} 버튼을 눌러 주세요.</p>
+                            {ACCOUNT_SECTIONS.map(account => <fieldset key={account.label} className="min-w-0 rounded-lg border border-slate-200 px-3 pb-3">
+                                <legend className="px-1 font-bold text-slate-800">{account.label} 등록</legend>
+                                <p className="mb-3 text-xs text-slate-600">{account.description}</p>
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                    {account.fields.map(field => <label key={field.key} className="min-w-0 text-xs font-semibold text-slate-700">
+                                        {field.label}
+                                        <input type="text" name={field.key} value={formData[field.key] || ''} onChange={handleChange}
+                                            aria-label={`${account.label} ${field.label}`} placeholder={field.label} maxLength={100} autoComplete="off"
+                                            inputMode={field.label === '계좌번호' ? 'numeric' : 'text'}
+                                            aria-invalid={field.key === 'directPayAccountHolder' && !!directPayError}
+                                            aria-describedby={field.key === 'directPayAccountHolder' && directPayError ? directPayErrorId : undefined}
+                                            className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm font-normal focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                                    </label>)}
+                                </div>
+                                {account.label === '직불용 계좌' && directPayError && <p id={directPayErrorId} role="alert" className="mt-2 text-sm text-red-700">{directPayError}</p>}
+                            </fieldset>)}
                         </div>
 
                         <div className="col-span-12 grid grid-cols-12">
@@ -911,8 +928,8 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                 </button>
                 <button
                     type="submit"
-                    disabled={isAnalyzing}
-                    className="px-8 py-2.5 rounded-lg text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 shadow-lg hover:shadow-brand-500/30 transition-all transform hover:-translate-y-0.5 flex items-center gap-2"
+                    disabled={isAnalyzing || !!directPayError}
+                    className="px-8 py-2.5 rounded-lg text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 shadow-lg hover:shadow-brand-500/30 transition-all transform hover:-translate-y-0.5 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <FontAwesomeIcon icon={faCheck} />
                     <span>{isEditMode ? '변경사항 저장' : '등록 완료'}</span>

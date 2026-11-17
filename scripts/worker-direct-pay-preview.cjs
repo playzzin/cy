@@ -20,7 +20,7 @@ const compiler = webpack({
 compiler.run(async (error, stats) => {
     if (error || stats.hasErrors()) { console.error(error || stats.toString('errors-only')); process.exitCode = 1; compiler.close(() => {}); return; }
     compiler.close(() => {});
-    const css = await require('postcss')([require('tailwindcss')({ content: [path.join(root, 'src/pages/database/AccountManagementPage.tsx'), path.join(root, 'src/pages/database/WorkerDatabase.tsx'), path.join(root, 'src/pages/manpower/WorkerSummaryPage.tsx'), path.join(root, 'src/components/accounts/*.tsx'), path.join(root, 'src/components/common/SingleSelectPopover.tsx')] })]).process('@tailwind base; @tailwind components; @tailwind utilities;', { from: undefined });
+    const css = await require('postcss')([require('tailwindcss')({ ...require(path.join(root, 'tailwind.config.js')), content: [path.join(fixture, '*.tsx'), path.join(root, 'src/components/manpower/WorkerForm.tsx'), path.join(root, 'src/pages/database/AccountManagementPage.tsx'), path.join(root, 'src/pages/database/WorkerDatabase.tsx'), path.join(root, 'src/pages/manpower/WorkerSummaryPage.tsx'), path.join(root, 'src/components/accounts/*.tsx'), path.join(root, 'src/components/common/SingleSelectPopover.tsx')] })]).process('@tailwind base; @tailwind components; @tailwind utilities;', { from: undefined });
     fs.writeFileSync(path.join(output, 'preview.css'), css.css);
     if (process.argv.includes('--build-only')) { console.log('Account preview built.'); return; }
     http.createServer((req, res) => {
