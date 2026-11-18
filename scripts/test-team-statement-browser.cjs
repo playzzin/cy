@@ -75,8 +75,8 @@ async function build() {
       assert.equal(await summary.getByText('270,000원', { exact: true }).isVisible(), true);
       assert.equal(await summary.getByText('610,000원', { exact: true }).isVisible(), true);
       const invoiceSummary = deductions.getByRole('table', { name: '대납청구금액 요약' });
-      assert.equal(await invoiceSummary.getByRole('row', { name: /^인력소개비 1명 1 120,000원/ }).isVisible(), true);
-      assert.equal(await invoiceSummary.getByRole('row', { name: /^청구금액 1명 1 100,000원/ }).isVisible(), true);
+      assert.equal(await invoiceSummary.getByRole('row', { name: /^인력소개비 1명 120,000원/ }).isVisible(), true);
+      assert.equal(await invoiceSummary.getByRole('row', { name: /^청구금액 1공수 100,000원/ }).isVisible(), true);
       assert.equal(await invoiceSummary.getByText('가상작업자 1', { exact: true }).count(), 0, '첫 화면에는 인원별 이름을 펼치지 않는다');
       assert.equal(await deductions.getByRole('group', { name: '소개비 포함 대납청구금액 합계' }).getByText('220,000원', { exact: true }).isVisible(), true);
       await invoiceSummary.scrollIntoViewIfNeeded();
@@ -183,7 +183,7 @@ async function build() {
       await address.getByRole('button', { name: /더상세/ }).click();
       assert.equal(await costs.count(), 0);
       assert.deepEqual(errors, []);
-      results.push({ width, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
+      results.push({ width, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
       await context.close();
     }
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));

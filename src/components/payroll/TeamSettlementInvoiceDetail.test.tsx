@@ -12,11 +12,11 @@ const item: TeamSettlementDeductionItem = { id: 'invoice', source: 'auto', origi
   ]
 };
 
-test('첫 화면에서 소개비 발생 인원·공수·합계와 소개비를 제외한 청구금액을 구분한다', () => {
+test('첫 화면에서 소개비 발생 인원과 청구 공수를 각각 금액과 함께 표시한다', () => {
   render(<TeamSettlementInvoiceDetail items={[item]} />);
   const table = within(screen.getByRole('table', { name: '대납청구금액 요약' }));
-  expect(table.getByRole('row', { name: /^인력소개비 2명 3\.5 180,000원/ })).toBeVisible();
-  expect(table.getByRole('row', { name: /^청구금액 3명 7 700,000원/ })).toBeVisible();
+  expect(table.getByRole('row', { name: /^인력소개비 2명 180,000원/ })).toBeVisible();
+  expect(table.getByRole('row', { name: /^청구금액 7공수 700,000원/ })).toBeVisible();
   expect(screen.getByRole('group', { name: '소개비 포함 대납청구금액 합계' })).toHaveTextContent('880,000원');
   expect(screen.queryByText('소개 인원 A')).not.toBeInTheDocument();
 });
@@ -38,9 +38,9 @@ test('상세를 누르면 해당 항목의 인원별 금액을 표시하고 다�
 
 test('내역이 없거나 소개비가 0원이어도 요약과 전체 합계를 표시한다', () => {
   const { rerender } = render(<TeamSettlementInvoiceDetail items={[]} />);
-  expect(screen.getByRole('row', { name: /^인력소개비 0명 0 0원/ })).toBeVisible();
+  expect(screen.getByRole('row', { name: /^인력소개비 0명 0원/ })).toBeVisible();
   expect(screen.getByRole('group', { name: '소개비 포함 대납청구금액 합계' })).toHaveTextContent('0원');
   rerender(<TeamSettlementInvoiceDetail items={[{ ...item, amount: 350000, invoiceDetails: [item.invoiceDetails![2]] }]} />);
-  expect(screen.getByRole('row', { name: /^인력소개비 0명 0 0원/ })).toBeVisible();
-  expect(screen.getByRole('row', { name: /^청구금액 1명 3\.5 350,000원/ })).toBeVisible();
+  expect(screen.getByRole('row', { name: /^인력소개비 0명 0원/ })).toBeVisible();
+  expect(screen.getByRole('row', { name: /^청구금액 3\.5공수 350,000원/ })).toBeVisible();
 });

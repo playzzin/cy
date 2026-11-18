@@ -727,8 +727,8 @@ it('공제의 인원별 청구금액·소개비가 대납청구서와 일치하�
   render(<TeamSettlementPage />);
   fireEvent.click(await screen.findByRole('button', { name: '8월' }));
   const table = await screen.findByRole('table', { name: '대납청구금액 요약' });
-  expect(within(table).getByRole('row', { name: /^인력소개비 1명 1 120,000원/ })).toBeVisible();
-  expect(within(table).getByRole('row', { name: /^청구금액 1명 1 100,000원/ })).toBeVisible();
+  expect(within(table).getByRole('row', { name: /^인력소개비 1명 120,000원/ })).toBeVisible();
+  expect(within(table).getByRole('row', { name: /^청구금액 1공수 100,000원/ })).toBeVisible();
   expect(within(table).queryByText('청구 검증자')).not.toBeInTheDocument();
   fireEvent.click(within(table).getByRole('button', { name: '인력소개비 상세' }));
   expect(within(screen.getByRole('table', { name: '인력소개비 인원별 금액' })).getByRole('row', { name: '청구 검증자 1 120,000원' })).toBeVisible();

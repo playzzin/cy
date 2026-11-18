@@ -26,19 +26,19 @@ export function TeamSettlementInvoiceDetail({ items }: { items: TeamSettlementDe
   return <div className="mt-2" role="region" aria-label="대납청구서 공제 내역">
     <div className="overflow-auto">
       <table aria-label="대납청구금액 요약" className="w-full border-collapse text-xs">
-        <colgroup><col style={{ width: '27%' }} /><col style={{ width: '12%' }} /><col style={{ width: '13%' }} /><col style={{ width: '31%' }} /><col style={{ width: '17%' }} /></colgroup>
+        <colgroup><col style={{ width: '28%' }} /><col style={{ width: '22%' }} /><col style={{ width: '33%' }} /><col style={{ width: '17%' }} /></colgroup>
         <thead><tr className="bg-slate-50 text-slate-600">
           <th scope="col" className="border px-2 py-2 text-left">항목</th>
-          <th scope="col" className="border px-1 py-2 text-right">인원</th>
-          <th scope="col" className="border px-1 py-2 text-right">공수</th>
+          <th scope="col" className="border px-1 py-2 text-right">인원/공수</th>
           <th scope="col" className="border px-2 py-2 text-right">금액</th>
           <th scope="col" className="border px-1 py-2 text-center">상세</th>
         </tr></thead>
         <tbody>{sections.map(section => <React.Fragment key={section.key}>
           <tr>
             <th scope="row" className="border px-2 py-2 text-left font-semibold">{section.title}</th>
-            <td className="border px-1 py-2 text-right">{section.rows.length}명</td>
-            <td className="border px-1 py-2 text-right">{manDays(section.rows.reduce((sum, row) => sum + row.manDay, 0))}</td>
+            <td className="border px-1 py-2 text-right">{section.key === 'fee'
+              ? `${section.rows.length}명`
+              : `${manDays(section.rows.reduce((sum, row) => sum + row.manDay, 0))}공수`}</td>
             <td className="border px-2 py-2 text-right font-bold">{money(section.amount)}</td>
             <td className="border px-1 py-2 text-center">
               <button type="button" aria-label={`${section.title} 상세`} aria-expanded={expanded === section.key} aria-controls={`${detailId}-${section.key}`}
@@ -47,7 +47,7 @@ export function TeamSettlementInvoiceDetail({ items }: { items: TeamSettlementDe
               </button>
             </td>
           </tr>
-          {expanded === section.key && <tr><td colSpan={5} className="border bg-slate-50 p-2">
+          {expanded === section.key && <tr><td colSpan={4} className="border bg-slate-50 p-2">
             <div id={`${detailId}-${section.key}`} role="region" aria-label={`${section.title} 인원별 상세`}>
               <div className="mb-2 font-semibold text-slate-700">{section.title} 인원별 금액</div>
               <table aria-label={`${section.title} 인원별 금액`} className="w-full border-collapse bg-white">
@@ -74,6 +74,6 @@ export function TeamSettlementInvoiceDetail({ items }: { items: TeamSettlementDe
     <div role="group" aria-label="소개비 포함 대납청구금액 합계" className="mt-2 flex flex-wrap justify-between gap-2 rounded border bg-slate-50 px-2 py-2 text-sm font-bold">
       <span>대납청구금액 합계</span><span>{money(amount)}</span>
     </div>
-    <p className="mt-2 text-xs text-slate-500">청구금액(소개비 제외) + 인력소개비 = 대납청구금액. 소개비 인원·공수는 소개비가 발생한 인원 기준입니다.</p>
+    <p className="mt-2 text-xs text-slate-500">청구금액(소개비 제외) + 인력소개비 = 대납청구금액. 소개비 인원은 소개비가 발생한 인원 기준입니다.</p>
   </div>;
 }
