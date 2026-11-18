@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
+import { useTeamSettlementAccordion } from '../../hooks/useTeamSettlementAccordion';
+import { TeamSettlementDisclosure } from '../../components/payroll/TeamSettlementDisclosure';
 import './TeamSettlementPage.css';
 import { useTeamSettlementAccess } from '../../hooks/useTeamSettlementAccess';
 import CompanyTeamSelector, { readCompanyTeamOrder } from '../../components/common/CompanyTeamSelector';
@@ -43,6 +45,7 @@ import {
 } from '../../utils/teamSettlementTransactionSummary';
 import { DEFAULT_SUPPORT_UNIT_PRICE } from '../../utils/teamSettlementSupportRateOverrides';
 import { formatTeamSettlementMemo } from '../../utils/teamSettlementMemo';
+import { groupTeamSettlementAdditions } from '../../utils/teamSettlementAdditionGroups';
 import { formatTeamSettlementCategory } from '../../utils/teamSettlementLabels';
 import { buildTeamSettlementExpenseEntries, compareTeamSettlementExpenses, getTeamSettlementExpenseDetail } from '../../utils/teamSettlementExpenses';
 import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
@@ -709,10 +712,7 @@ export const TeamSettlementPage: React.FC = () => {
     [doc?.sourceSnapshot, supportDetailRows]
   );
   const [laborExchangeSummary, setLaborExchangeSummary] = useState<TeamExchangeSummary | null>(null);
-  const [expandedLineIds, setExpandedLineIds] = useState<Set<string>>(() => new Set());
-  const [expandedSiteKeys, setExpandedSiteKeys] = useState<Set<string>>(() => new Set());
-  const [expandedDeductionIds, setExpandedDeductionIds] = useState<Set<string>>(() => new Set());
-  const [expandedExpenseDetailKeys, setExpandedExpenseDetailKeys] = useState<Set<string>>(() => new Set());
+  const accordion = useTeamSettlementAccordion(`${selectedTeamId}:${yearMonth}`);
   const [deductionSourceData, setDeductionSourceData] = useState<DeductionSourceData>(() => createEmptyDeductionSourceData());
   const [expenseSourceLoad, setExpenseSourceLoad] = useState<{ scope: string; status: 'loading' | 'ready' | 'error' }>({ scope: '', status: 'loading' });
   const [expenseSourceRevision, setExpenseSourceRevision] = useState(0);
@@ -1418,16 +1418,32 @@ export const TeamSettlementPage: React.FC = () => {
     return Array.from(byCode.values());
   }, [documentConfirmationIssues, sourceDataValidationIssues, supportRateMissingRows, expenseValidationMessages]);
 
-  const handleValidationIssueClick = useCallback((targetId?: string) => {
+  const handleValidationIssueClick = useCallback((targetId?: string, code?: string) => {
     if (!targetId) return;
-    const target = document.getElementById(targetId);
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    target.classList.add('ring-2', 'ring-rose-400', 'ring-offset-2');
-    window.setTimeout(() => {
-      target.classList.remove('ring-2', 'ring-rose-400', 'ring-offset-2');
-    }, 1800);
-  }, []);
+    if (code?.startsWith('expense-source:')) {
+      accordion.open(['validation']);
+      targetId = 'settlement-validation';
+    } else if (targetId === 'settlement-rate-validation' || /^(sales-amount:|purchase-amount:|support-rate:)/.test(code || '')) {
+      accordion.open(['missing']);
+      targetId = 'settlement-missing';
+    } else if (code?.startsWith('manual-addition:')) {
+      const itemId = code.slice('manual-addition:'.length);
+      const group = groupTeamSettlementAdditions(doc?.additions ?? [], expenseCategoryLabels).find(row => row.items.some(item => item.id === itemId));
+      if (group) accordion.open(['addition', group.key]);
+    } else if (targetId === 'settlement-source-validation') {
+      accordion.open(['validation', 'reports']);
+    } else if (targetId === 'settlement-validation') {
+      accordion.open(['validation']);
+    }
+    const destination = targetId;
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(destination);
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      target.classList.add('ring-2', 'ring-rose-400', 'ring-offset-2');
+      window.setTimeout(() => target.classList.remove('ring-2', 'ring-rose-400', 'ring-offset-2'), 1800);
+    });
+  }, [accordion.open, doc?.additions, expenseCategoryLabels]);
 
   const deductionGroups = useMemo<DeductionGroup[]>(() => {
     const deductionItems = doc?.deductions ?? [];
@@ -1468,6 +1484,8 @@ export const TeamSettlementPage: React.FC = () => {
 
     return groups.filter((group) => group.showWhenEmpty || group.items.length > 0);
   }, [doc]);
+
+  const additionGroups = useMemo(() => groupTeamSettlementAdditions(doc?.additions ?? [], expenseCategoryLabels), [doc?.additions, expenseCategoryLabels]);
 
   const updateDoc = useCallback((updater: (prev: TeamSettlementDocument) => TeamSettlementDocument) => {
     if (!canWrite || saveStateRef.current === 'saving') return;
@@ -1521,18 +1539,11 @@ export const TeamSettlementPage: React.FC = () => {
   }, [updateDoc]);
 
   const handleAddManualAddition = useCallback(() => {
-    updateDoc((prev) => {
-      const item: TeamSettlementAdditionItem = {
-        id: buildLocalId('addition_manual'),
-        source: 'manual',
-        origin: 'manual',
-        category: '수기',
-        amount: 0
-      };
-      const additions = prev.additions ?? [];
-      return { ...prev, additions: [...additions, item] };
-    });
-  }, [updateDoc]);
+    const item: TeamSettlementAdditionItem = { id: buildLocalId('addition_manual'), source: 'manual', origin: 'manual', category: '수기', amount: 0 };
+    updateDoc(prev => ({ ...prev, additions: [...(prev.additions ?? []), item] }));
+    const existing = additionGroups.find(group => group.category === '수기');
+    accordion.open(['addition', existing?.key ?? item.id]);
+  }, [updateDoc, additionGroups, accordion.open]);
 
   const persistCurrentDocument = useCallback(async (showSuccessToast = true): Promise<TeamSettlementDocument | null> => {
     if (!canWrite || !doc || doc.confirmedAt || saveStateRef.current === 'saving') return null;
@@ -1652,7 +1663,7 @@ export const TeamSettlementPage: React.FC = () => {
         icon: 'error',
         confirmButtonText: '첫 오류로 이동'
       });
-      handleValidationIssueClick(confirmationIssues[0]?.targetId);
+      handleValidationIssueClick(confirmationIssues[0]?.targetId, confirmationIssues[0]?.code);
       return;
     }
 
@@ -1780,42 +1791,6 @@ export const TeamSettlementPage: React.FC = () => {
       setSelectedTeamId(teamId);
     })();
   }, [confirmBeforeDiscard, selectedTeamId]);
-
-  const toggleLineExpanded = useCallback((id: string) => {
-    setExpandedLineIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleSiteExpanded = useCallback((key: string) => {
-    setExpandedSiteKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
-  const toggleDeductionExpanded = useCallback((id: string) => {
-    setExpandedDeductionIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const toggleExpenseDetailExpanded = useCallback((key: string) => {
-    setExpandedExpenseDetailKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
 
   const getSupportDirectionsForLine = useCallback((line: SettlementUnifiedLine): TeamSettlementSupportDetailRow['direction'][] => {
     if (line.origin === '내부지원간곳' || line.origin === '외부지원간곳' || line.origin === '내부지원온곳' || line.origin === '외부지원온곳') {
@@ -2292,6 +2267,30 @@ export const TeamSettlementPage: React.FC = () => {
       });
   }, [salesLines]);
 
+  const validationDisplay = useMemo(() => {
+    const unique = (issues: SourceDataValidationIssue[]) => [...new Map(issues.map(issue => [JSON.stringify([issue.targetId, issue.message]), issue])).values()];
+    const covered = new Set(settlementAmountMissingRows.map(row => `sales-amount:${row.key}`));
+    const normalize = (value: unknown) => String(value ?? '').replace(/\s+/g, '').trim();
+    confirmationIssues.forEach(issue => {
+      if (issue.code.startsWith('support-rate:')) covered.add(issue.code);
+      const direction = issue.code.startsWith('sales-amount:') ? '지원 매출' : issue.code.startsWith('purchase-amount:') ? '지원 매입' : '';
+      if (!direction) return;
+      const prefix = direction === '지원 매출' ? 'sales-amount:' : 'purchase-amount:';
+      const line = (direction === '지원 매출' ? doc?.sales : doc?.purchases)?.find(row => row.id === issue.code.slice(prefix.length));
+      if (line?.kind === '지원' && supportRateMissingRows.some(row => row.directionLabel === direction
+        && normalize(row.siteName) === normalize(line.siteName || '현장 미지정')
+        && normalize(row.counterTeamName) === normalize(line.counterTeamName || '-'))) covered.add(issue.code);
+    });
+    const missing = confirmationIssues.filter(issue => /^(sales-amount:|purchase-amount:|support-rate:)/.test(issue.code));
+    const missingCodes = new Set(missing.map(issue => issue.code));
+    const extraMissing = unique(missing.filter(issue => !covered.has(issue.code)));
+    const other = unique(confirmationIssues.filter(issue => !missingCodes.has(issue.code) && !issue.code.startsWith('expense-source:')));
+    const expense = [...new Set(expenseValidationMessages)];
+    const missingCount = supportRateMissingRows.length + settlementAmountMissingRows.length + extraMissing.length;
+    return { extraMissing, other, expense, missingCount, validationCount: other.length + expense.length,
+      totalCount: missingCount + other.length + expense.length };
+  }, [confirmationIssues, doc, expenseValidationMessages, settlementAmountMissingRows, supportRateMissingRows]);
+
   const purchaseSupportLinesMerged = useMemo(() => {
     return mergeSupportLines(purchaseLines.filter((x) => x.kind === '지원'));
   }, [mergeSupportLines, purchaseLines]);
@@ -2590,7 +2589,8 @@ export const TeamSettlementPage: React.FC = () => {
     const detailColSpan = (showKindColumn ? 6 : 5) + (showSupportRateColumn ? 1 : 0);
 
     return lines.map((line) => {
-      const isExpanded = expandedLineIds.has(line.id);
+      const linePath = ['transaction', `${line.direction}:${line.id}`];
+      const isExpanded = accordion.isOpen(linePath);
       const editableManual = canEdit && line.source === 'manual';
       const isMergedSupportLine = line.source === 'auto' && line.id.startsWith('merged_support:');
       const showSiteInsteadOfCounterTeam = line.kind === '도급' || line.kind === '직영';
@@ -2802,7 +2802,8 @@ export const TeamSettlementPage: React.FC = () => {
                 <button
                   type="button"
                   className={ghostButtonClassName}
-                  onClick={() => toggleLineExpanded(line.id)}
+                  aria-expanded={isExpanded}
+                  onClick={() => accordion.toggle(linePath)}
                 >
                   {isExpanded ? '닫기' : '상세'}
                 </button>
@@ -2913,7 +2914,7 @@ export const TeamSettlementPage: React.FC = () => {
                           <tbody>
                             {siteSummaries.map((site) => {
                               const siteKey = `${line.id}__${site.key}`;
-                              const isSiteExpanded = expandedSiteKeys.has(siteKey);
+                              const isSiteExpanded = accordion.isOpen([...linePath, siteKey]);
                               const workerKeySet = new Set(site.rows.map((r) => `${r.workerName}__${r.workerTeamName || ''}`));
                               const workerCount = workerKeySet.size;
                               const siteSupportUnitPrice = safeAverage(site.amount, site.manDay);
@@ -2979,7 +2980,8 @@ export const TeamSettlementPage: React.FC = () => {
                                       <button
                                         type="button"
                                         className={ghostButtonClassName}
-                                        onClick={() => toggleSiteExpanded(siteKey)}
+                                        aria-expanded={isSiteExpanded}
+                                        onClick={() => accordion.toggle([...linePath, siteKey])}
                                       >
                                         {isSiteExpanded ? '닫기' : '상세'}
                                       </button>
@@ -3077,7 +3079,7 @@ export const TeamSettlementPage: React.FC = () => {
       )}
 
       {group.key === 'payroll' && group.items.every(item => item.origin === 'daily_advance_invoice') ? (
-        <TeamSettlementInvoiceDetail key={`${doc?.teamId}:${doc?.yearMonth}`} items={group.items.filter(item => item.origin === 'daily_advance_invoice')} />
+        <TeamSettlementInvoiceDetail key={`${doc?.teamId}:${doc?.yearMonth}`} expandedKey={accordion.child(['invoice'])} onToggle={key => accordion.toggle(['invoice', key])} items={group.items.filter(item => item.origin === 'daily_advance_invoice')} />
       ) : <div className="mt-2 overflow-auto">
         <table data-compact="adjustment" className="w-full text-sm border-collapse">
           <thead>
@@ -3111,7 +3113,7 @@ export const TeamSettlementPage: React.FC = () => {
             item.origin === 'vehicle_billing' ||
             item.origin === 'card_billing'
           );
-        const isExpanded = canExpand && expandedDeductionIds.has(item.id);
+        const isExpanded = canExpand && accordion.isOpen(['deduction', item.id]);
         const detail = isExpanded ? getDeductionDetail(item) : null;
         return (
           <React.Fragment key={item.id}>
@@ -3170,7 +3172,8 @@ export const TeamSettlementPage: React.FC = () => {
                     <button
                       type="button"
                       className={ghostButtonClassName}
-                      onClick={() => toggleDeductionExpanded(item.id)}
+                      aria-expanded={isExpanded}
+                      onClick={() => accordion.toggle(['deduction', item.id])}
                     >
                       {isExpanded ? '닫기' : '상세'}
                     </button>
@@ -3272,7 +3275,7 @@ export const TeamSettlementPage: React.FC = () => {
                     )}
 
                     {detail.kind === 'accommodation_billing' && (
-                      <TeamSettlementAccommodationDetail key={`${doc?.teamId}:${doc?.yearMonth}`} detail={detail} addressStatus={accommodationAddressStatus} />
+                      <TeamSettlementAccommodationDetail key={`${doc?.teamId}:${doc?.yearMonth}`} detail={detail} addressStatus={accommodationAddressStatus} expandedKey={accordion.child(['deduction', item.id])} onToggle={key => accordion.toggle(['deduction', item.id, key])} />
                     )}
 
                     {detail.kind === 'vehicle_billing' && (
@@ -3402,7 +3405,7 @@ export const TeamSettlementPage: React.FC = () => {
                               ) : (
                                 detail.rows.map((row, idx) => {
                                   const hasMoreDetail = row.details.length > 0;
-                                  const isMoreDetailExpanded = expandedExpenseDetailKeys.has(row.key);
+                                  const isMoreDetailExpanded = accordion.isOpen(['deduction', item.id, row.key]);
                                   return (
                                     <React.Fragment key={`expense-aggregate-row-${row.key}-${idx}`}>
                                       <tr className="bg-white">
@@ -3416,7 +3419,8 @@ export const TeamSettlementPage: React.FC = () => {
                                             <button
                                               type="button"
                                               className={ghostButtonClassName}
-                                              onClick={() => toggleExpenseDetailExpanded(row.key)}
+                                              aria-expanded={isMoreDetailExpanded}
+                                              onClick={() => accordion.toggle(['deduction', item.id, row.key])}
                                             >
                                               {isMoreDetailExpanded ? '닫기' : '더상세'}
                                             </button>
@@ -3548,7 +3552,7 @@ export const TeamSettlementPage: React.FC = () => {
         confirmedAt={doc?.confirmedAt ?? null}
         updatedAt={doc?.updatedAt ?? null}
         isDirty={isDirty}
-        issueCount={doc ? confirmationIssues.length : 0}
+        issueCount={doc ? validationDisplay.totalCount : 0}
         saveState={saveState}
         loading={loadState.status === 'loading'}
         canWrite={canWrite}
@@ -3662,20 +3666,9 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
           </section>
 
-          <section
-            id="settlement-validation"
-            className={`scroll-mt-36 rounded-2xl border p-4 transition ${confirmationIssues.length > 0
-              ? 'border-rose-200 bg-rose-50'
-              : 'border-emerald-200 bg-emerald-50'
-              }`}
-            aria-label="정산 검증"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className={`text-sm font-black ${confirmationIssues.length > 0 ? 'text-rose-900' : 'text-emerald-900'}`}>
-                  정산 검증 {confirmationIssues.length > 0 ? `${confirmationIssues.length}건 확인 필요` : '완료'}
-                </div>
-                <div id="settlement-source-validation" className={`mt-1 text-xs font-semibold ${confirmationIssues.length > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+          <TeamSettlementDisclosure id="settlement-validation" title="정산 검증" count={validationDisplay.validationCount}
+            open={accordion.isOpen(['validation'])} onToggle={() => accordion.toggle(['validation'])}>
+                <div id="settlement-source-validation" className={`mt-1 text-xs font-semibold ${validationDisplay.validationCount > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
                   {doc.sourceSnapshot
                     ? `원천 기준 ${new Date(doc.sourceSnapshot.capturedAt).toLocaleString('ko-KR')} · 출력일보 ${doc.sourceSnapshot.dailyReports.length}건`
                     : '출력일보를 기준으로 정산합니다.'}
@@ -3687,23 +3680,15 @@ export const TeamSettlementPage: React.FC = () => {
                       ? '도급·직영 구분과 공수는 최신 일보 기준입니다. 일보 수정 후 새로고침하면 반영됩니다.'
                       : '저장된 정산 기준입니다. 일보 수정사항은 정산 담당자가 반영한 후 확인할 수 있습니다.'}
                 </div>
-              </div>
-              <span className={`rounded-full px-3 py-1 text-xs font-black ${confirmationIssues.length > 0
-                ? 'bg-rose-100 text-rose-800'
-                : 'bg-emerald-100 text-emerald-800'
-                }`}>
-                {confirmationIssues.length > 0 ? '확정 전 수정 필요' : '확정 가능'}
-              </span>
-            </div>
 
-            {confirmationIssues.length > 0 && (
+            {validationDisplay.other.length > 0 && (
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {confirmationIssues.map((issue, index) => (
+                {validationDisplay.other.map((issue, index) => (
                   <button
                     key={issue.code}
                     type="button"
                     className="flex items-start gap-2 rounded-xl border border-rose-200 bg-white px-3 py-2 text-left text-xs font-semibold text-rose-900 transition hover:border-rose-400 hover:bg-rose-100"
-                    onClick={() => handleValidationIssueClick(issue.targetId)}
+                    onClick={() => handleValidationIssueClick(issue.targetId, issue.code)}
                   >
                     <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white">
                       {index + 1}
@@ -3715,11 +3700,12 @@ export const TeamSettlementPage: React.FC = () => {
             )}
 
             {doc.sourceSnapshot && doc.sourceSnapshot.dailyReports.length > 0 && (
-              <details className="mt-3 rounded-xl border border-slate-200 bg-white/80">
-                <summary className="cursor-pointer select-none px-3 py-2 text-xs font-black text-slate-800">
+              <div className="mt-3 rounded-xl border border-slate-200 bg-white/80">
+                <button type="button" aria-expanded={accordion.isOpen(['validation', 'reports'])}
+                  onClick={() => accordion.toggle(['validation', 'reports'])} className="w-full cursor-pointer select-none px-3 py-2 text-left text-xs font-black text-slate-800">
                   정산 기준 출력일보 팀·현장 보기 ({doc.sourceSnapshot.dailyReports.length}건)
-                </summary>
-                <div className="max-h-64 overflow-auto border-t border-slate-200">
+                </button>
+                {accordion.isOpen(['validation', 'reports']) && <div className="max-h-64 overflow-auto border-t border-slate-200">
                   <table className="w-full min-w-[680px] border-collapse text-xs">
                     <thead className="sticky top-0 bg-slate-100 text-slate-700">
                       <tr>
@@ -3744,11 +3730,24 @@ export const TeamSettlementPage: React.FC = () => {
                       ))}
                     </tbody>
                   </table>
-                </div>
-              </details>
+                </div>}
+              </div>
             )}
-          </section>
+            <div role="status" aria-label="경비 원본 검증" className="team-settlement-page__expense-status mt-4 rounded-lg border p-3 text-xs">
+              {validationDisplay.expense.length ? (
+                <>
+                  <div className="font-bold text-rose-700">경비 확인 필요</div>
+                  <ul className="mt-1 list-inside list-disc">{validationDisplay.expense.map(message => <li key={message}>{message}</li>)}</ul>
+                  {expenseSourceResult.status === 'ready' && <p className="mt-2">저장 금액을 유지하고 있습니다. 원본과 수기 항목을 확인한 뒤 재집계해 주세요.</p>}
+                </>
+              ) : <span className="text-emerald-700">경비 원본과 저장 내역이 일치합니다.</span>}
+              <button type="button" className="mt-2 font-bold text-blue-700" onClick={() => setExpenseSourceRevision(value => value + 1)}>경비 원본 다시 조회</button>
+            </div>
+          </TeamSettlementDisclosure>
 
+          <TeamSettlementDisclosure id="settlement-missing" title="정산누락" count={validationDisplay.missingCount}
+            open={accordion.isOpen(['missing'])} onToggle={() => accordion.toggle(['missing'])}>
+            {validationDisplay.missingCount === 0 && <p className="text-sm text-emerald-800">누락된 정산 항목이 없습니다.</p>}
           {supportRateMissingRows.length > 0 && (
             <div id="settlement-rate-validation" className="scroll-mt-36 rounded-2xl border border-amber-200 bg-amber-50 p-4 transition">
               <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -3830,6 +3829,10 @@ export const TeamSettlementPage: React.FC = () => {
               </div>
             </div>
           )}
+            {validationDisplay.extraMissing.length > 0 && <ul className="mt-3 space-y-2 text-sm text-rose-900">
+              {validationDisplay.extraMissing.map(issue => <li key={issue.code}>{issue.message}</li>)}
+            </ul>}
+          </TeamSettlementDisclosure>
 
 
         </div>
@@ -4100,16 +4103,7 @@ export const TeamSettlementPage: React.FC = () => {
               </button>
             </div>
 
-            <div role="status" aria-label="경비 원본 검증" className="team-settlement-page__expense-status mt-4 rounded-lg border p-3 text-xs">
-              {expenseValidationMessages.length ? (
-                <>
-                  <div className="font-bold text-rose-700">경비 확인 필요</div>
-                  <ul className="mt-1 list-inside list-disc">{expenseValidationMessages.map(message => <li key={message}>{message}</li>)}</ul>
-                  {expenseSourceResult.status === 'ready' && <p className="mt-2">저장 금액을 유지하고 있습니다. 원본과 수기 항목을 확인한 뒤 재집계해 주세요.</p>}
-                </>
-              ) : <span className="text-emerald-700">경비 원본과 저장 내역이 일치합니다.</span>}
-              <button type="button" className="mt-2 font-bold text-blue-700" onClick={() => setExpenseSourceRevision(value => value + 1)}>경비 원본 다시 조회</button>
-            </div>
+
 
             <div className="mt-4 space-y-5">
               {deductionGroups.map(renderAdjustmentGroup)}
@@ -4133,7 +4127,27 @@ export const TeamSettlementPage: React.FC = () => {
               </div>
 
               <div className="mt-3 overflow-auto">
-                <table data-compact="adjustment" className="w-full text-sm border-collapse">
+                <table aria-label="추가 항목별 합계" className="w-full border-collapse text-sm">
+                  <thead><tr className="bg-slate-50 text-slate-600">
+                    <th scope="col" className="border px-2 py-2 text-left">항목</th>
+                    <th scope="col" className="border px-2 py-2 text-right">건수</th>
+                    <th scope="col" className="border px-2 py-2 text-right">금액</th>
+                    <th scope="col" className="border px-2 py-2">상세</th>
+                  </tr></thead>
+                  <tbody>{additionGroups.length === 0 ? <EmptySettlementTableRow colSpan={4} message="추가 항목이 없습니다." /> : additionGroups.map(additionGroup => {
+                    const expanded = accordion.isOpen(['addition', additionGroup.key]);
+                    return <React.Fragment key={additionGroup.key}>
+                      <tr>
+                        <th scope="row" className="border px-2 py-2 text-left font-medium">{additionGroup.category}</th>
+                        <td data-label="건수" className="border px-2 py-2 text-right">{additionGroup.items.length}건</td>
+                        <td data-label="금액" className="border px-2 py-2 text-right font-bold">{formatCurrency(additionGroup.amount)}원</td>
+                        <td data-label="상세" className="border px-2 py-2 text-center"><button type="button" className={ghostButtonClassName}
+                          aria-label={`${additionGroup.category} 상세`} aria-expanded={expanded}
+                          onClick={() => accordion.toggle(['addition', additionGroup.key])}>{expanded ? '닫기' : '상세'}</button></td>
+                      </tr>
+                      {expanded && <tr><td colSpan={4} className="border bg-slate-50 p-2">
+              <div className="mt-3 overflow-auto">
+                <table aria-label={`${additionGroup.category} 개별 내역`} data-compact="adjustment" className="w-full text-sm border-collapse">
                   <thead>
                     <tr className="bg-slate-50 text-slate-600">
                       <th scope="col" className="text-left px-2 py-2 border">구분</th>
@@ -4144,9 +4158,9 @@ export const TeamSettlementPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {(doc.additions ?? []).length === 0 ? (
+                    {additionGroup.items.length === 0 ? (
                       <EmptySettlementTableRow colSpan={5} message="추가 항목이 없습니다. 필요한 경우 수기 추가를 사용해 주세요." />
-                    ) : (doc.additions ?? []).map((item) => {
+                    ) : additionGroup.items.map((item) => {
                       const editableRow = canEdit && item.source === 'manual';
                       return (
                         <tr key={item.id} className={item.source === 'auto' ? 'bg-white' : 'bg-emerald-50'}>
@@ -4200,19 +4214,6 @@ export const TeamSettlementPage: React.FC = () => {
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 type="button"
-                                className={ghostButtonClassName}
-                                onClick={() => {
-                                  Swal.fire({
-                                    title: '추가 상세',
-                                    text: `항목: ${formatTeamSettlementCategory(item, expenseCategoryLabels)}\n금액: ${formatCurrency(safeNumber(item.amount))}원\n비고: ${String(item.memo ?? '') || '-'}`,
-                                    confirmButtonText: '닫기'
-                                  });
-                                }}
-                              >
-                                상세
-                              </button>
-                              <button
-                                type="button"
                                 className="px-2 py-1 rounded border bg-white text-slate-700 disabled:opacity-50"
                                 disabled={!editableRow}
                                 onClick={() => {
@@ -4230,6 +4231,11 @@ export const TeamSettlementPage: React.FC = () => {
                       );
                     })}
                   </tbody>
+                </table>
+              </div>
+                      </td></tr>}
+                    </React.Fragment>;
+                  })}</tbody>
                 </table>
               </div>
             </div>

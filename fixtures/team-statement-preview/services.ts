@@ -46,6 +46,8 @@ export const teamSettlementService = {
   getSupportSettlementDetailRows: empty,
   getTeamSettlement: async ({ yearMonth, teamId }: { yearMonth: string; teamId: string }) => {
     const first = teamId === 'team-a';
+    const validation = new URLSearchParams(window.location.search).has('validation');
+    const grouped = new URLSearchParams(window.location.search).has('grouped');
     const resolver = createDailyAdvanceRowResolver(workers, teams);
     const invoiceRows = buildDailyAdvanceStatementRows({
       entries: (await dailyReportService.getWorkerRows({ startDate: `${yearMonth}-01` })).map(row => resolver.resolveEntry(row).entry),
@@ -53,8 +55,14 @@ export const teamSettlementService = {
       recruiterFeeValues: buildStatementRecruiterFeeValueMap(fees(yearMonth))
     });
     const additions = [{ id: 'custom-claim', source: 'auto', origin: 'team_expense_claim', category: '경비 환급(custom_1700000000000_a1b2c3 - 장비 2대)', amount: first ? 50000 : 5000 }];
+    if (grouped) {
+      additions[0] = { ...additions[0], category: '경비 환급(식대 - 점심)', amount: 20000 };
+      additions.push({ ...additions[0], id: 'meal-evening', category: '경비 환급(식대 - 저녁)', amount: 30000 },
+        { ...additions[0], id: 'fuel', category: '경비 환급(유류 - 주유)', amount: 40000 });
+    }
     const amount = additions.reduce((sum, row) => sum + row.amount, 0);
     const sales = [{ id: 'sale', source: 'manual', origin: 'manual', kind: '직영', siteName: first ? '가상 현장 A' : '가상 현장 B', manDay: first ? 5 : 2, amount: first ? 1000000 : 400000, memo: '당월 작업 청구' }];
+    if (validation) sales.push({ ...sales[0], id: 'missing-sale', source: 'auto', origin: 'daily_report', siteName: '누락 확인 현장', amount: 0 });
     const purchases = [{ id: 'purchase', source: 'manual', origin: 'manual', kind: '지원', siteName: '가상 지원 현장', counterTeamName: '가상 지원팀', manDay: 1, amount: first ? 200000 : 100000 }];
     const deductions = [
       buildTeamSettlementInvoiceDeduction(yearMonth, teamId, invoiceRows),
@@ -69,7 +77,7 @@ export const teamSettlementService = {
       sales, purchases, deductions, additions, summary: { prevCarryover: first ? 20000 : 0, deposit: first ? 10000 : 0 },
       transactionMemo: '선택한 팀의 정산 내역을 확인해 주세요.\n대납청구서 금액을 공제합니다.',
       updatedAt: new Date().toISOString(), confirmedAt: null,
-      sourceSnapshot: { version: 2, capturedAt: new Date().toISOString(), dailyReports: [], supportDetails: [],
+      sourceSnapshot: { version: 2, capturedAt: new Date().toISOString(), dailyReports: validation ? [{ reportId: 'report-a', date: `${yearMonth}-01`, reportTeamId: teamId, reportTeamName: '검증팀 A', siteId: 'site-a', siteName: '검증 현장', responsibleTeamId: teamId, responsibleTeamName: '검증팀 A', teamAssignmentMissing: false, workerTeamIds: [teamId], workerTeamNames: ['검증팀 A'] }] : [], supportDetails: [],
         totals: { sales: sales[0].amount, purchases: purchases[0].amount, deductions: deductionAmount, additions: amount, net: sales[0].amount - purchases[0].amount - deductionAmount + amount } },
     };
   },

@@ -63,6 +63,7 @@ it('CEO 새로고침은 최신 일보 구분을 요청하고 정산 표를 도�
   const table = await screen.findByRole('table', { name: '도급/직영 매출' });
   const row = within(table).getByRole('row', { name: /구분 변경 검증 현장/ });
   expect(within(row).getByText('도급', { exact: true })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: /^정산 검증/ }));
   expect(screen.getByText(/도급·직영 구분과 공수는 최신 일보 기준입니다/)).toBeVisible();
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue({ ...saved,
     sales: [{ ...saved.sales[0], id: 'direct', kind: '직영' }]
@@ -173,6 +174,7 @@ it('03 추가에는 경비 구분 이름을 표시하고 내부 코드는 노출
   render(<TeamSettlementPage />);
   await screen.findByRole('button', { name: '대납청구서 보기' });
   const additions = screen.getByRole('region', { name: '추가 내역' });
+  fireEvent.click(await within(additions).findByRole('button', { name: '장비 대여 상세' }));
   await waitFor(() => expect(additions).toHaveTextContent('경비 환급(장비 대여 - 장비 2대)'));
   expect(additions).not.toHaveTextContent(key);
   expect(within(additions).getByRole('textbox', { name: '항목' })).toHaveValue('경비 환급(장비 대여 - 장비 2대)');
@@ -228,6 +230,7 @@ it('누락된 카드와 주고받는 경비를 알리고 조회만으로 저장 
   ]);
   render(<TeamSettlementPage />);
   fireEvent.click(await screen.findByRole('button', { name: '8월' }));
+  fireEvent.click(await screen.findByRole('button', { name: /^정산 검증/ }));
   const status = within(await screen.findByRole('status', { name: '경비 원본 검증' }));
   await waitFor(() => expect(status.getByText('카드비 낼 금액 1건이 저장 정산에 없습니다.')).toBeVisible());
   expect(status.getByText('경비 낼 금액 1건이 저장 정산에 없습니다.')).toBeVisible();
@@ -240,6 +243,7 @@ it('경비 조회 실패를 0원으로 처리하지 않고 재조회로 복구�
   const read = require('../../services/cardBillingService').cardBillingService.getBillingsByMonth;
   read.mockRejectedValue(new Error('unavailable'));
   render(<TeamSettlementPage />);
+  fireEvent.click(await screen.findByRole('button', { name: /^정산 검증/ }));
   const status = within(await screen.findByRole('status', { name: '경비 원본 검증' }));
   await waitFor(() => expect(status.getByText(/경비 원본 조회 또는 금액 검증에 실패/)).toBeVisible());
   expect(status.queryByText(/내역이 일치/)).not.toBeInTheDocument();
@@ -266,6 +270,7 @@ it('같은 차량의 청구 두 건을 상세에서 한 번씩만 합산해 차�
   require('../../services/vehicleBillingService').vehicleBillingService.getBillingsByMonth.mockResolvedValue(billings);
   render(<TeamSettlementPage />);
   fireEvent.click(await screen.findByRole('button', { name: '8월' }));
+  fireEvent.click(await screen.findByRole('button', { name: /^정산 검증/ }));
   await waitFor(() => expect(within(screen.getByRole('status', { name: '경비 원본 검증' })).getByText('경비 원본과 저장 내역이 일치합니다.')).toBeVisible());
   await screen.findByRole('group', { name: '경비 합계' });
   const row = getAdjustmentRow('차량 전체');
@@ -691,6 +696,7 @@ it('숙소 상세는 주소별 합계를 보여주고 더상세에서 전기·�
   }]);
   render(<TeamSettlementPage />);
   fireEvent.click(await screen.findByRole('button', { name: '8월' }));
+  fireEvent.click(await screen.findByRole('button', { name: /^정산 검증/ }));
   await waitFor(() => expect(within(screen.getByRole('status', { name: '경비 원본 검증' })).getByText('경비 원본과 저장 내역이 일치합니다.')).toBeVisible());
   fireEvent.click(within(getAdjustmentRow('숙소 전체')).getByRole('button', { name: '상세' }));
   const addresses = within(await screen.findByRole('region', { name: '숙소 주소별 상세' }));
@@ -760,6 +766,7 @@ it('03 추가의 총금액은 자동·수기 항목을 합산하고 금액 수�
   const additions = within(await screen.findByRole('region', { name: '추가 내역' }));
   const total = additions.getByRole('group', { name: '추가 총금액' });
   expect(total).toHaveTextContent('80,000원');
+  fireEvent.click(additions.getByRole('button', { name: '수기 추가 상세' }));
   const row = additions.getByRole('row', { name: /수기 수기 추가/ });
   const input = within(row).getByRole('textbox', { name: '금액' });
   await waitFor(() => expect(input).toBeEnabled());
@@ -767,11 +774,104 @@ it('03 추가의 총금액은 자동·수기 항목을 합산하고 금액 수�
   expect(total).toHaveTextContent('120,000원');
   fireEvent.click(within(row).getByRole('button', { name: '삭제' }));
   expect(total).toHaveTextContent('50,000원');
-  expect(additions.getAllByRole('textbox', { name: '금액' })).toHaveLength(1);
+  expect(additions.queryAllByRole('textbox', { name: '금액' })).toHaveLength(0);
 });
 
 it('추가 항목이 없을 때도 03 추가에 총금액 0원을 표시한다', async () => {
   render(<TeamSettlementPage />);
   const additions = within(await screen.findByRole('region', { name: '추가 내역' }));
   expect(additions.getByRole('group', { name: '추가 총금액' })).toHaveTextContent('0원');
+});
+
+
+it('정산누락과 정산검증은 상호 배타적으로 열고 동일한 누락·경비 오류를 한 번만 표시한다', async () => {
+  const saved = document();
+  saved.sales = [{ id: 'missing-sale', source: 'auto', origin: 'daily_report', kind: '직영', siteName: '누락 현장', manDay: 2, amount: 0 }];
+  saved.sourceSnapshot = undefined;
+  saved.deductions = [{ id: 'unknown-card', source: 'auto', origin: 'card_billing', category: '이전 카드', amount: 1000 }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  render(<TeamSettlementPage />);
+  const missing = await screen.findByRole('button', { name: '정산누락 1건 확인 필요' });
+  const validation = screen.getByRole('button', { name: /^정산 검증/ });
+  expect(missing).toHaveAttribute('aria-expanded', 'false');
+  expect(validation).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByText('정산금액 미입력')).not.toBeInTheDocument();
+  fireEvent.click(missing);
+  expect(screen.getAllByText('정산금액 미입력')).toHaveLength(1);
+  expect(screen.queryByText(/매출의 공수는 있지만/)).not.toBeInTheDocument();
+  fireEvent.click(validation);
+  expect(missing).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByText('정산금액 미입력')).not.toBeInTheDocument();
+  const status = await screen.findByRole('status', { name: '경비 원본 검증' });
+  await waitFor(() => expect(within(status).getByRole('listitem')).toBeVisible());
+  const message = within(status).getByRole('listitem').textContent!;
+  expect(screen.getAllByText(message)).toHaveLength(1);
+  expect(within(screen.getByRole('region', { name: '공제 내역' })).queryByRole('status')).not.toBeInTheDocument();
+  fireEvent.click(within(getAdjustmentRow('카드 전체')).getByRole('button', { name: '상세' }));
+  expect(validation).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('region', { name: '경비 상세' })).toBeVisible();
+});
+
+it('추가의 같은 항목은 합계를 묶고 상세에서 원래 내역을 보이며 다른 상세를 열면 닫힌다', async () => {
+  const saved = document();
+  saved.additions = [
+    { id: 'meal-a', source: 'auto', origin: 'team_expense_claim', category: '경비 환급(식대 - 점심)', amount: 20000 },
+    { id: 'meal-b', source: 'auto', origin: 'team_expense_claim', category: '경비 환급(식대 - 저녁)', amount: 30000 },
+    { id: 'fuel', source: 'auto', origin: 'team_expense_claim', category: '경비 환급(유류 - 주유)', amount: 40000 }
+  ];
+  const original = JSON.stringify(saved);
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  render(<TeamSettlementPage />);
+  const additions = within(await screen.findByRole('region', { name: '추가 내역' }));
+  expect(additions.getByRole('heading', { name: /03\s*추가/ })).toBeVisible();
+  expect(additions.getByRole('row', { name: /^식대 2건 50,000\s*원/ })).toBeVisible();
+  expect(additions.getByRole('group', { name: '추가 총금액' })).toHaveTextContent('90,000원');
+  expect(additions.queryByRole('textbox')).not.toBeInTheDocument();
+  fireEvent.click(additions.getByRole('button', { name: '식대 상세' }));
+  const meals = additions.getByRole('table', { name: '식대 개별 내역' });
+  expect(within(meals).getByDisplayValue('20,000')).toBeVisible();
+  expect(within(meals).getByDisplayValue('30,000')).toBeVisible();
+  fireEvent.click(additions.getByRole('button', { name: '유류 상세' }));
+  expect(additions.queryByRole('table', { name: '식대 개별 내역' })).not.toBeInTheDocument();
+  expect(additions.getByRole('table', { name: '유류 개별 내역' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: /^정산 검증/ }));
+  expect(additions.queryByRole('table', { name: '유류 개별 내역' })).not.toBeInTheDocument();
+  expect(within(screen.getByRole('region', { name: '정산 요약' })).getByText('-450,000원')).toBeVisible();
+  expect(JSON.stringify(saved)).toBe(original);
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
+it('누락 오류로 확정을 막고 첫 오류로 이동하면 접힌 정산누락을 연다', async () => {
+  const saved = document();
+  saved.confirmedAt = null;
+  saved.sourceSnapshot = undefined;
+  saved.sales = [{ id: 'missing', source: 'auto', origin: 'daily_report', kind: '직영', siteName: '확정 검증 현장', manDay: 1, amount: 0 }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  require('sweetalert2').fire.mockResolvedValue({ isConfirmed: true });
+  Element.prototype.scrollIntoView = jest.fn();
+  render(<TeamSettlementPage />);
+  const missing = await screen.findByRole('button', { name: '정산누락 1건 확인 필요' });
+  await waitFor(() => expect(screen.getByRole('button', { name: '저장 후 확정' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '저장 후 확정' }));
+  await waitFor(() => expect(missing).toHaveAttribute('aria-expanded', 'true'));
+  expect(require('sweetalert2').fire).toHaveBeenCalledWith(expect.objectContaining({ confirmButtonText: '첫 오류로 이동' }));
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
+
+it('지원단가 누락과 같은 지원건의 0원 오류는 한 번만 보여주고 다른 누락은 유지한다', async () => {
+  const saved = document();
+  saved.sourceSnapshot = undefined;
+  saved.purchases[0].amount = 0;
+  saved.purchases.push({ ...saved.purchases[0], id: 'unrelated', source: 'manual', origin: 'manual', siteName: '별도 누락 현장' });
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  require('../../services/laborExchangeService').laborExchangeService.getExchangeReport.mockResolvedValue([{
+    outgoing: { items: [] }, incoming: { items: [{ siteId: 'site', siteName: '담당 현장', workerTeamId: 'visitor', workerTeamName: '지원 방문팀', supportRate: 0, manDay: 2 }] }
+  }]);
+  render(<TeamSettlementPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '정산누락 2건 확인 필요' }));
+  const missing = within(screen.getByRole('region', { name: '정산누락' }));
+  expect(missing.getByText('현장 지원단가 미등록')).toBeVisible();
+  expect(missing.getAllByText(/매입의 공수는 있지만/)).toHaveLength(1);
+  expect(missing.getByText(/별도 누락 현장.*매입의 공수는 있지만/)).toBeVisible();
 });

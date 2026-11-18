@@ -2,11 +2,15 @@ import React, { useState } from 'react';
 import type { buildTeamSettlementAccommodationDetail } from '../../utils/teamSettlementAccommodationDetail';
 
 const money = (amount: number) => `${amount.toLocaleString('ko-KR')}원`;
-export function TeamSettlementAccommodationDetail({ detail, addressStatus }: {
+export function TeamSettlementAccommodationDetail({ detail, addressStatus, expandedKey, onToggle }: {
   detail: ReturnType<typeof buildTeamSettlementAccommodationDetail>;
   addressStatus: 'loading' | 'ready' | 'error';
+  expandedKey?: string | null;
+  onToggle?: (key: string) => void;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [localExpanded, setLocalExpanded] = useState<string | null>(null);
+  const expanded = expandedKey === undefined ? localExpanded : expandedKey;
+  const toggle = (key: string) => onToggle ? onToggle(key) : setLocalExpanded(previous => previous === key ? null : key);
   return <div role="region" aria-label="숙소 주소별 상세">
     <div className="text-sm font-semibold text-slate-800">숙소 주소별 합계</div>
     <p className="mt-1 text-xs text-slate-500">주소별 더상세에서 전기·가스·월세·공과금을 확인합니다.</p>
@@ -27,14 +31,14 @@ export function TeamSettlementAccommodationDetail({ detail, addressStatus }: {
             </td>
             <td data-label="합계" className="border px-2 py-2 text-right font-semibold">{money(row.amount)}</td>
             <td data-label="더상세" className="border px-2 py-2 text-center">
-              <button type="button" aria-label={`${row.address} ${row.names.join(' ')} 더상세`.replace(/\s+/g, ' ')} aria-expanded={expanded.has(row.key)}
+              <button type="button" aria-label={`${row.address} ${row.names.join(' ')} 더상세`.replace(/\s+/g, ' ')} aria-expanded={expanded === row.key}
                 className="rounded border bg-white px-2 py-1 text-slate-700"
-                onClick={() => setExpanded(previous => { const next = new Set(previous); if (next.has(row.key)) next.delete(row.key); else next.add(row.key); return next; })}>
-                {expanded.has(row.key) ? '닫기' : '더상세'}
+                onClick={() => toggle(row.key)}>
+                {expanded === row.key ? '닫기' : '더상세'}
               </button>
             </td>
           </tr>
-          {expanded.has(row.key) && <tr><td colSpan={3} className="border bg-slate-50 p-2">
+          {expanded === row.key && <tr><td colSpan={3} className="border bg-slate-50 p-2">
             {row.notes.map(note => <p key={note} className="mb-2 text-xs text-amber-700">{note}</p>)}
             <table aria-label={`${row.address} 비용 내역`} className="w-full border-collapse bg-white">
               <thead><tr className="text-slate-600">

@@ -5,8 +5,10 @@ const money = (value: number) => `${Math.round(value).toLocaleString('ko-KR')}�
 const manDays = (value: number) => value.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
 type InvoiceWorker = NonNullable<TeamSettlementDeductionItem['invoiceDetails']>[number];
 
-export function TeamSettlementInvoiceDetail({ items }: { items: TeamSettlementDeductionItem[] }) {
-  const [expanded, setExpanded] = useState<'fee' | 'claim' | null>(null);
+export function TeamSettlementInvoiceDetail({ items, expandedKey, onToggle }: { items: TeamSettlementDeductionItem[]; expandedKey?: string | null; onToggle?: (key: string) => void }) {
+  const [localExpanded, setLocalExpanded] = useState<string | null>(null);
+  const expanded = expandedKey === undefined ? localExpanded : expandedKey;
+  const toggle = (key: string) => onToggle ? onToggle(key) : setLocalExpanded(previous => previous === key ? null : key);
   const detailId = useId();
   const workers = new Map<string, InvoiceWorker>();
   items.flatMap(item => item.invoiceDetails ?? []).forEach(row => {
@@ -42,7 +44,7 @@ export function TeamSettlementInvoiceDetail({ items }: { items: TeamSettlementDe
             <td className="border px-2 py-2 text-right font-bold">{money(section.amount)}</td>
             <td className="border px-1 py-2 text-center">
               <button type="button" aria-label={`${section.title} 상세`} aria-expanded={expanded === section.key} aria-controls={`${detailId}-${section.key}`}
-                className="rounded border bg-white px-2 py-1 text-slate-700" onClick={() => setExpanded(previous => previous === section.key ? null : section.key)}>
+                className="rounded border bg-white px-2 py-1 text-slate-700" onClick={() => toggle(section.key)}>
                 {expanded === section.key ? '닫기' : '상세'}
               </button>
             </td>
