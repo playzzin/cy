@@ -9,7 +9,7 @@ export function buildTeamSettlementInvoiceDeduction(yearMonth: string, teamId: s
     invoiceAmount: row.selectedAmount + row.recruiterFee
   }));
   return {
-    id: `daily_advance_invoice:${yearMonth}:${teamId}`, source: 'auto', origin: 'daily_advance_invoice', category: '대납청구금액',
+    id: `daily_advance_invoice:${yearMonth}:${teamId}`, source: 'auto', origin: 'daily_advance_invoice', category: '대납청구비',
     amount: Math.round(invoiceDetails.reduce((sum, row) => sum + row.invoiceAmount, 0)), invoiceDetails,
     memo: `대납청구서 ${rows.length}명 · 인력소개비 포함`
   };

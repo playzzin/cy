@@ -508,17 +508,17 @@ const getDeductionDisplayOriginLabel = (item: DeductionDisplayItem): string => {
 
 const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
   {
-    key: 'payroll',
-    title: '대납청구금액',
-    description: '대납청구서 인원별 청구금액 공제',
-    origins: ['daily_advance_invoice', 'monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'],
-    showWhenEmpty: true
-  },
-  {
     key: 'office_expense',
     title: '사무실비',
     description: '도급·직영 공수 기준 사무실비',
     origins: ['office_expense'],
+    showWhenEmpty: true
+  },
+  {
+    key: 'payroll',
+    title: '대납청구비',
+    description: '대납청구서 인원별 청구금액 공제',
+    origins: ['daily_advance_invoice', 'monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'],
     showWhenEmpty: true
   },
   {
@@ -4096,7 +4096,7 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">02</span>공제</h2>
-                <div className="text-xs text-slate-500 mt-0.5">대납청구금액·사무실비·경비 구분</div>
+                <div className="text-xs text-slate-500 mt-0.5">사무실비·대납청구비·경비 구분</div>
               </div>
               <button type="button" className={addButtonClassName} onClick={handleAddManualDeduction} disabled={!canEdit}>
                 + 수기 공제

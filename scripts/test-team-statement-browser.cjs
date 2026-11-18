@@ -60,7 +60,7 @@ async function build() {
       const page = await context.newPage();
       await page.goto(`${origin}/payroll/team-settlement`);
       const deductions = page.getByRole('region', { name: '공제 내역' });
-      const payrollHeader = deductions.getByRole('group', { name: '대납청구금액 합계', exact: true });
+      const payrollHeader = deductions.getByRole('group', { name: '대납청구비 합계', exact: true });
       const preview = payrollHeader.getByRole('button', { name: '대납청구서 보기' });
       await preview.waitFor();
       const validationToggle = page.getByRole('button', { name: /^정산 검증/ });
@@ -84,11 +84,11 @@ async function build() {
       const summary = page.getByRole('region', { name: '정산 요약' });
       assert.equal(await summary.getByText('270,000원', { exact: true }).isVisible(), true);
       assert.equal(await summary.getByText('610,000원', { exact: true }).isVisible(), true);
-      const invoiceSummary = deductions.getByRole('table', { name: '대납청구금액 요약' });
+      const invoiceSummary = deductions.getByRole('table', { name: '대납청구비 요약' });
       assert.equal(await invoiceSummary.getByRole('row', { name: /^인력소개비 1명 120,000원/ }).isVisible(), true);
       assert.equal(await invoiceSummary.getByRole('row', { name: /^청구금액 1공수 100,000원/ }).isVisible(), true);
       assert.equal(await invoiceSummary.getByText('가상작업자 1', { exact: true }).count(), 0, '첫 화면에는 인원별 이름을 펼치지 않는다');
-      assert.equal(await deductions.getByRole('group', { name: '소개비 포함 대납청구금액 합계' }).getByText('220,000원', { exact: true }).isVisible(), true);
+      assert.equal(await deductions.getByRole('group', { name: '소개비 포함 대납청구비 합계' }).getByText('220,000원', { exact: true }).isVisible(), true);
       await invoiceSummary.scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(output, `invoice-summary-${width}.png`) });
       await invoiceSummary.getByRole('button', { name: '인력소개비 상세' }).click();

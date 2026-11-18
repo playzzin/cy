@@ -27,7 +27,7 @@ export function TeamSettlementInvoiceDetail({ items, expandedKey, onToggle }: { 
   ];
   return <div className="mt-2" role="region" aria-label="대납청구서 공제 내역">
     <div className="overflow-auto">
-      <table aria-label="대납청구금액 요약" className="w-full border-collapse text-xs">
+      <table aria-label="대납청구비 요약" className="w-full border-collapse text-xs">
         <colgroup><col style={{ width: '28%' }} /><col style={{ width: '22%' }} /><col style={{ width: '33%' }} /><col style={{ width: '17%' }} /></colgroup>
         <thead><tr className="bg-slate-50 text-slate-600">
           <th scope="col" className="border px-2 py-2 text-left">항목</th>
@@ -73,9 +73,9 @@ export function TeamSettlementInvoiceDetail({ items, expandedKey, onToggle }: { 
         </React.Fragment>)}</tbody>
       </table>
     </div>
-    <div role="group" aria-label="소개비 포함 대납청구금액 합계" className="mt-2 flex flex-wrap justify-between gap-2 rounded border bg-slate-50 px-2 py-2 text-sm font-bold">
-      <span>대납청구금액 합계</span><span>{money(amount)}</span>
+    <div role="group" aria-label="소개비 포함 대납청구비 합계" className="mt-2 flex flex-wrap justify-between gap-2 rounded border bg-slate-50 px-2 py-2 text-sm font-bold">
+      <span>대납청구비 합계</span><span>{money(amount)}</span>
     </div>
-    <p className="mt-2 text-xs text-slate-500">청구금액(소개비 제외) + 인력소개비 = 대납청구금액. 소개비 인원은 소개비가 발생한 인원 기준입니다.</p>
+    <p className="mt-2 text-xs text-slate-500">청구금액(소개비 제외) + 인력소개비 = 대납청구비. 소개비 인원은 소개비가 발생한 인원 기준입니다.</p>
   </div>;
 }
