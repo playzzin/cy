@@ -9,6 +9,7 @@ import { getTeamScopedRows } from './teamScopedReadService';
 import { accommodationBillingService } from './accommodationBillingService';
 import { cardBillingService } from './cardBillingService';
 import { companyService } from './companyService';
+import { manpowerService } from './manpowerService';
 import { dailyReportService } from './dailyReportService';
 import { dailyAdvanceStatementRecruiterFeeService } from './dailyAdvanceStatementRecruiterFeeService';
 import { siteService, type Site } from './siteService';
@@ -39,7 +40,8 @@ import { prepareTeamSettlementManualSales, unlockTeamSettlementManualSales } fro
 import { mergeTeamSettlementSales } from '../utils/teamSettlementSalesMerge';
 import { compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
 import { buildTeamSettlementExpenseEntries } from '../utils/teamSettlementExpenses';
-import { buildTeamSettlementRecruiterFeeDeductions } from '../utils/teamSettlementRecruiterFees';
+import { buildTeamSettlementInvoiceDeduction } from '../utils/teamSettlementInvoice';
+import { createDailyAdvanceRowResolver, buildDailyAdvanceStatementRows, buildStatementRecruiterFeeValueMap } from '../utils/dailyAdvanceStatement';
 import { calculateTeamSettlementOfficeExpense, TEAM_SETTLEMENT_OFFICE_RATES } from '../utils/teamSettlementOfficeExpense';
 
 export type {
@@ -939,7 +941,9 @@ export const teamSettlementService = {
       vehicleDocs,
       cardDocs,
       teamExpenseClaims,
-      statementRecruiterFees
+      statementRecruiterFees,
+      statementWorkerRows,
+      statementWorkers
     ] = await Promise.all([
       siteService.getSites(),
       teamService.getTeams(),
@@ -952,7 +956,9 @@ export const teamSettlementService = {
       vehicleBillingService.getBillingsByMonth(params.yearMonth, { throwOnError: true }),
       cardBillingService.getBillingsByMonth(params.yearMonth),
       teamExpenseLedgerService.getClaimsByMonth(params.yearMonth),
-      dailyAdvanceStatementRecruiterFeeService.getFeesByMonth(params.yearMonth)
+      dailyAdvanceStatementRecruiterFeeService.getFeesByMonth(params.yearMonth),
+      dailyReportService.getWorkerRows({ startDate: period.startDate, endDate: period.endDate }),
+      manpowerService.getWorkers()
     ]);
 
     const matchesTeam = (value: unknown): boolean => {
@@ -1458,89 +1464,22 @@ export const teamSettlementService = {
       memo: officeExpense.memo
     };
 
-    const getWorkerTeamId = (r: (typeof workerRows)[number]): string => {
-      const v = r.workerTeamId ? String(r.workerTeamId) : (r.teamId ? String(r.teamId) : '');
-      return v.trim();
-    };
-
-    const normalizeSalaryModel = (r: (typeof workerRows)[number]): string => {
-      const raw = typeof r.salaryModel === 'string' ? r.salaryModel : (typeof r.payType === 'string' ? r.payType : '');
-      const trimmed = String(raw ?? '').trim();
-      if (!trimmed) return '일급제';
-      if (trimmed.includes('용역')) return '용역팀';
-      if (trimmed.includes('월급')) return '월급제';
-      if (trimmed.includes('일급') || trimmed.includes('일당')) return '일급제';
-      return trimmed;
-    };
-
-    const teamWorkerRows = workerRows.filter((r) => {
-      const workerTeamId = getWorkerTeamId(r);
-      return workerTeamId ? matchesTeam(workerTeamId) : false;
+    const statementResolver = createDailyAdvanceRowResolver(statementWorkers, teams);
+    const statementTeamKey = String(teams.find(team => team.id === params.teamId || team.legacyId === params.teamId)?.id || params.teamId);
+    const statementRows = buildDailyAdvanceStatementRows({
+      entries: statementWorkerRows.map(row => statementResolver.resolveEntry(row).entry),
+      month: params.yearMonth, teamKey: statementTeamKey,
+      lastDay: Number(period.endDate.slice(-2)),
+      recruiterFeeValues: buildStatementRecruiterFeeValueMap(statementRecruiterFees)
     });
-
-    const buildPayrollDeduction = (params2: {
-      origin: 'daily_wage_payroll' | 'monthly_wage_payroll' | 'service_team_payroll';
-      category: string;
-      salaryModel: '일급제' | '월급제' | '용역팀';
-      rows: (typeof workerRows)[number][];
-    }): TeamSettlementDeductionItem | null => {
-      const manDay = roundManDay(params2.rows.reduce((sum, r) => sum + (Number.isFinite(r.manDay) ? r.manDay : 0), 0));
-      const amount = Math.round(params2.rows.reduce((sum, r) => sum + (Number.isFinite(r.amount) ? r.amount : 0), 0));
-      if (amount <= 0 && manDay <= 0) return null;
-
-      const workerIdSet = new Set(params2.rows.map((r) => String(r.workerId)).filter((v) => v.trim().length > 0));
-
-      return {
-        id: `payroll:${params2.origin}:${params.yearMonth}:${params.teamId}`,
-        source: 'auto',
-        origin: params2.origin,
-        category: params2.category,
-        amount,
-        memo: `${params2.salaryModel} ${workerIdSet.size}명 / 총공수 ${manDay}`
-      };
-    };
-
-    const dailyWageRows = teamWorkerRows.filter((r) => normalizeSalaryModel(r) === '일급제');
-    const monthlyWageRows = teamWorkerRows.filter((r) => normalizeSalaryModel(r) === '월급제');
-    const serviceTeamRows = workerRows.filter((r) =>
-      normalizeSalaryModel(r) === '용역팀' &&
-      isSelectedTeamDirectWorkRow(r)
-    );
-
-    const dailyWageDeduction = buildPayrollDeduction({
-      origin: 'daily_wage_payroll',
-      category: '일급제 급여',
-      salaryModel: '일급제',
-      rows: dailyWageRows
-    });
-
-    const monthlyWageDeduction = buildPayrollDeduction({
-      origin: 'monthly_wage_payroll',
-      category: '월급제 급여',
-      salaryModel: '월급제',
-      rows: monthlyWageRows
-    });
-
-    const serviceTeamDeduction = buildPayrollDeduction({
-      origin: 'service_team_payroll',
-      category: '용역팀 급여',
-      salaryModel: '용역팀',
-      rows: serviceTeamRows
-    });
+    const invoiceDeduction = buildTeamSettlementInvoiceDeduction(params.yearMonth, params.teamId, statementRows);
 
     const nowIso = new Date().toISOString();
     const sales = [...dailyReportSales, ...supportFeeSales];
     const purchases = [...supportFeePurchases];
     const deductions = [
       officeExpenseDeduction,
-      ...(dailyWageDeduction ? [dailyWageDeduction] : []),
-      ...(monthlyWageDeduction ? [monthlyWageDeduction] : []),
-      ...(serviceTeamDeduction ? [serviceTeamDeduction] : []),
-      ...buildTeamSettlementRecruiterFeeDeductions({
-        ...params,
-        fees: statementRecruiterFees,
-        workerNames: new Map(workerRows.filter(row => row.workerId && row.workerName).map(row => [String(row.workerId).trim(), String(row.workerName).trim()]))
-      }),
+      invoiceDeduction,
       ...expenseEntries.filter(entry => entry.direction === 'deduction').map(entry => entry.item as TeamSettlementDeductionItem)
     ];
     const additions = expenseEntries.filter(entry => entry.direction === 'addition').map(entry => entry.item as TeamSettlementAdditionItem);

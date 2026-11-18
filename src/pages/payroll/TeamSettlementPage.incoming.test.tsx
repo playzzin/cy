@@ -17,7 +17,7 @@ jest.mock('../../services/companyService', () => ({ companyService: { getCompani
 // The leader's ordinary report query has no visiting workers or other teams.
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportWorkerRowsByRange: jest.fn().mockResolvedValue([]), getWorkerRows: jest.fn().mockResolvedValue([]) } }));
 jest.mock('../../services/dailyAdvanceWorkbookProfileService', () => ({ dailyAdvanceWorkbookProfileService: { getProfiles: async () => [] } }));
-jest.mock('../../services/dailyAdvanceStatementRecruiterFeeService', () => ({ dailyAdvanceStatementRecruiterFeeService: { getFeesByMonth: async () => [], subscribeFeesByMonth: () => () => {} } }));
+jest.mock('../../services/dailyAdvanceStatementRecruiterFeeService', () => ({ dailyAdvanceStatementRecruiterFeeService: { getFeesByMonth: jest.fn().mockResolvedValue([]), subscribeFeesByMonth: () => () => {} } }));
 jest.mock('../../services/storageService', () => ({ storageService: {} }));
 jest.mock('html2canvas', () => jest.fn());
 jest.mock('../../services/teamSettlementService', () => ({ teamSettlementService: {
@@ -29,7 +29,7 @@ jest.mock('../../services/laborExchangeService', () => ({ laborExchangeService: 
 jest.mock('../../services/supportRateService', () => ({ supportRateService: { getAllSiteRates: jest.fn().mockResolvedValue([]) } }));
 jest.mock('../../services/accommodationBillingService', () => ({ accommodationBillingService: { getBillingDocuments: jest.fn().mockResolvedValue([]) } }));
 jest.mock('../../services/accommodationAssignmentService', () => ({ accommodationAssignmentService: { getAllAssignments: jest.fn().mockResolvedValue([]) } }));
-jest.mock('../../services/accommodationService', () => ({ accommodationService: { getMonthlyLedger: jest.fn().mockResolvedValue([]) } }));
+jest.mock('../../services/accommodationService', () => ({ accommodationService: { getMonthlyLedger: jest.fn().mockResolvedValue([]), getAccommodations: jest.fn().mockResolvedValue([]) } }));
 jest.mock('../../services/vehicleBillingService', () => ({ vehicleBillingService: { getBillingsByMonth: jest.fn().mockResolvedValue([]) } }));
 jest.mock('../../services/vehicleService', () => ({ vehicleService: { getVehicles: jest.fn().mockResolvedValue([]), getExpensesByMonth: jest.fn().mockResolvedValue([]) } }));
 jest.mock('../../services/cardBillingService', () => ({ cardBillingService: { getBillingsByMonth: jest.fn().mockResolvedValue([]) } }));
@@ -83,6 +83,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(useTeamSettlementAccess).mockReturnValue({ loading: false, canWrite: true });
   jest.mocked(teamExpenseCategoryService.getCategories).mockResolvedValue([]);
+  require('../../services/dailyAdvanceStatementRecruiterFeeService').dailyAdvanceStatementRecruiterFeeService.getFeesByMonth.mockResolvedValue([]);
   localStorage.clear();
   for (const name of ['dailyReportService', 'laborExchangeService', 'supportRateService',
     'accommodationBillingService', 'accommodationAssignmentService', 'accommodationService',
@@ -667,5 +668,74 @@ it('사무실비 저장 금액이 계산과 달라도 차액을 표시해 행 �
   expect(amounts).toEqual([40000, 0, -5000]);
   expect(amounts.reduce((sum, amount) => sum + amount, 0)).toBe(35000);
   expect(within(screen.getByRole('region', { name: '정산 요약' })).getByText('225,000원')).toBeVisible();
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
+
+it('숙소 상세는 주소별 합계를 보여주고 더상세에서 전기·가스·월세·공과금을 구분한다', async () => {
+  const saved = document();
+  saved.deductions = [{ id: 'accommodation_billing:2026-08:room-bill', source: 'auto', origin: 'accommodation_billing', category: '숙소비 (조회팀)', amount: 950000 }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  require('../../services/accommodationService').accommodationService.getAccommodations.mockResolvedValue([
+    { id: 'room-a', name: '검증 101호', address: '검증시 첫길 1 101호' },
+    { id: 'room-b', name: '검증 201호', address: '검증시 둘길 2 201호' }
+  ]);
+  require('../../services/accommodationBillingService').accommodationBillingService.getBillingDocuments.mockResolvedValue([{
+    id: 'room-bill', yearMonth: '2026-08', teamId: 'own', teamName: '조회팀', issuedToType: 'team', status: 'confirmed', lineItems: [
+      { id: 'utility-a-rent', label: '검증 101호 월세', amount: 500000, targetField: 'accommodation', sourceType: 'utility_ledger', sourceAccommodationId: 'room-a' },
+      { id: 'utility-a-electricity', label: '검증 101호 전기세', amount: 30000, targetField: 'electricity', sourceType: 'utility_ledger', sourceAccommodationId: 'room-a' },
+      { id: 'utility-a-gas', label: '검증 101호 가스비', amount: 20000, targetField: 'gas', sourceType: 'utility_ledger', sourceAccommodationId: 'room-a' },
+      { id: 'utility-a-maintenance', label: '검증 101호 관리비', amount: 100000, targetField: 'accommodation', sourceType: 'utility_ledger', sourceAccommodationId: 'room-a' },
+      { id: 'utility-b-rent', label: '검증 201호 월세', amount: 300000, targetField: 'accommodation', sourceType: 'utility_ledger', sourceAccommodationId: 'room-b' }
+    ]
+  }]);
+  render(<TeamSettlementPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '8월' }));
+  await waitFor(() => expect(within(screen.getByRole('status', { name: '경비 원본 검증' })).getByText('경비 원본과 저장 내역이 일치합니다.')).toBeVisible());
+  fireEvent.click(within(getAdjustmentRow('숙소 전체')).getByRole('button', { name: '상세' }));
+  const addresses = within(await screen.findByRole('region', { name: '숙소 주소별 상세' }));
+  const first = addresses.getByRole('row', { name: /검증시 첫길 1 101호/ });
+  expect(within(first).getByText('650,000원')).toBeVisible();
+  expect(addresses.getByText('300,000원')).toBeVisible();
+  expect(addresses.queryByRole('table', { name: '검증시 첫길 1 101호 비용 내역' })).not.toBeInTheDocument();
+  fireEvent.click(within(first).getByRole('button', { name: /더상세/ }));
+  const costs = within(addresses.getByRole('table', { name: '검증시 첫길 1 101호 비용 내역' }));
+  for (const [category, amount] of [['전기', '30,000원'], ['가스', '20,000원'], ['월세', '500,000원'], ['공과금', '100,000원']]) {
+    expect(within(costs.getByRole('row', { name: new RegExp('^' + category + ' ') })).getByRole('cell', { name: amount })).toBeVisible();
+  }
+  expect(addresses.getByText('950,000원')).toBeVisible();
+  expect(costs.queryByText('검증 201호 월세')).not.toBeInTheDocument();
+  fireEvent.click(within(first).getByRole('button', { name: /더상세/ }));
+  expect(addresses.queryByRole('table', { name: '검증시 첫길 1 101호 비용 내역' })).not.toBeInTheDocument();
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
+
+
+it('공제의 인원별 청구금액·소개비가 대납청구서와 일치하고 소개비를 한 번만 차감한다', async () => {
+  const saved = document();
+  saved.sales = [{ id: 'sale', source: 'manual', origin: 'manual', kind: '직영', siteName: '검증 현장', manDay: 1, amount: 1000000 }];
+  saved.purchases = [];
+  saved.deductions = [{ id: 'invoice', source: 'auto', origin: 'daily_advance_invoice', category: '대납청구금액', amount: 220000,
+    invoiceDetails: [{ workerId: 'person', workerName: '청구 검증자', manDay: 1, claimAmount: 100000, recruiterFee: 120000, invoiceAmount: 220000 }] }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  require('../../services/dailyReportService').dailyReportService.getWorkerRows.mockResolvedValue([
+    { reportId: 'r', workerId: 'person', workerName: '청구 검증자', teamId: 'own', workerTeamId: 'own', date: '2026-08-01', manDay: 1, unitPrice: 100000, amount: 90000, salaryModel: '일급제' }
+  ]);
+  require('../../services/dailyAdvanceStatementRecruiterFeeService').dailyAdvanceStatementRecruiterFeeService.getFeesByMonth.mockResolvedValue([
+    { month: '2026-08', teamKey: 'own', workerId: 'person', amount: 120000 }
+  ]);
+  render(<TeamSettlementPage />);
+  fireEvent.click(await screen.findByRole('button', { name: '8월' }));
+  const table = await screen.findByRole('table', { name: '인원별 대납청구 공제' });
+  expect(within(table).getByRole('row', { name: '청구 검증자 120,000원 220,000원' })).toBeVisible();
+  expect(within(screen.getByRole('region', { name: '정산 요약' })).getByText('780,000원')).toBeVisible();
+  expect(screen.queryByDisplayValue('일급제 급여')).not.toBeInTheDocument();
+  const preview = screen.getByRole('button', { name: '대납청구서 보기' });
+  await waitFor(() => expect(preview).toBeEnabled());
+  fireEvent.click(preview);
+  const dialog = await screen.findByRole('dialog', { name: '조회팀 청구서' });
+  expect(await within(dialog).findByRole('row', { name: /^1 청구 검증자/ })).toBeVisible();
+  expect(within(dialog).getByLabelText('인력소개비 합계')).toHaveTextContent('120,000원');
+  expect(within(dialog).getByLabelText('청구금액 합계')).toHaveTextContent('220,000원');
   expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
 });

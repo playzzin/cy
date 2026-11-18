@@ -39,6 +39,7 @@ export const TeamSettlementDeductionOriginSchema = z.enum([
   'monthly_wage_payroll',
   'service_team_payroll',
   'daily_advance_recruiter_fee',
+  'daily_advance_invoice',
   'team_expense_claim',
   'vehicle_billing',
   'card_billing',
@@ -87,6 +88,14 @@ export const TeamSettlementDeductionItemSchema = z.object({
   origin: TeamSettlementDeductionOriginSchema,
   category: z.string().min(1),
   amount: NonNegativeNumberSchema,
+  invoiceDetails: z.array(z.object({
+    workerId: z.string().min(1),
+    workerName: z.string().min(1),
+    manDay: NonNegativeNumberSchema,
+    claimAmount: NonNegativeNumberSchema,
+    recruiterFee: NonNegativeNumberSchema,
+    invoiceAmount: NonNegativeNumberSchema
+  })).optional(),
   recruiterFeeDetails: z.array(z.object({
     workerId: z.string().min(1),
     workerName: z.string().min(1),

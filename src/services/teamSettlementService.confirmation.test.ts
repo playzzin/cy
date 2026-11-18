@@ -95,7 +95,7 @@ describe('teamSettlementService confirmation freshness', () => {
     await expect(teamSettlementService.unconfirmTeamSettlement({ yearMonth: '2026-08', teamId: 'team-1' })).rejects.toThrow('save-failed');
   });
 
-  it('도급·직영은 공수만 가져오고 작업자 급여는 매입에만 반영하며 지원정산 금액을 가져오지 않는다', async () => {
+  it('도급·직영은 공수만 가져오고 급여 대신 대납청구 금액만 공제한다', async () => {
     jest.spyOn(manpowerService, 'getWorkers').mockResolvedValue([]);
     // 현장 마스터와 일보 구분이 반대여도 일보 행의 구분으로 정산한다.
     jest.spyOn(siteService, 'getSites').mockResolvedValue([
@@ -110,6 +110,7 @@ describe('teamSettlementService confirmation freshness', () => {
       { siteId: 'support', siteName: '지원 현장', siteType: '지원', responsibleTeamId: 'team-1', manDay: 20, amount: 0 },
       { siteId: 'other', siteName: '다른 팀 현장', siteType: '도급', responsibleTeamId: 'team-2', manDay: 50, amount: 0 }
     ] as never);
+    jest.spyOn(dailyReportService, 'getWorkerRows').mockResolvedValue([{ workerId: 'daily', workerName: '청구 작업자', teamId: 'team-1', salaryModel: '일급제', date: '2026-09-01', manDay: 2, unitPrice: 100000, amount: 90000 } as any]);
     jest.spyOn(dailyReportService, 'getReportsByRange').mockResolvedValue([]);
     jest.spyOn(supportRateService, 'getAllSiteRates').mockResolvedValue([]);
     jest.spyOn(teamSettlementService, 'getSupportRateOverrides').mockResolvedValue({ supportTeamRates: {}, supportAggregateRates: {}, supportSiteRates: {}, teamRates: {}, aggregateRates: {}, siteRates: {} });
@@ -129,9 +130,9 @@ describe('teamSettlementService confirmation freshness', () => {
     ]);
     expect(result.deductions).toEqual([
       expect.objectContaining({ origin: 'office_expense', amount: 140000, officeExpenseRates: { contract: 10000, direct: 5000 } }),
-      expect.objectContaining({ origin: 'daily_wage_payroll', amount: 3200000 })
+      expect.objectContaining({ origin: 'daily_advance_invoice', amount: 200000 })
     ]);
-    expect(result.sourceSnapshot?.totals).toEqual({ sales: 0, purchases: 0, deductions: 3340000, additions: 0, net: -3340000 });
+    expect(result.sourceSnapshot?.totals).toEqual({ sales: 0, purchases: 0, deductions: 340000, additions: 0, net: -340000 });
     expect(result.sourceSnapshot?.manualContractDirectAmounts).toBe(true);
     expect(allocations).not.toHaveBeenCalled();
   });
@@ -186,10 +187,12 @@ describe('teamSettlementService confirmation freshness', () => {
   });
 
   it('fails closed when the vehicle billing source cannot be read', async () => {
+    jest.spyOn(manpowerService, 'getWorkers').mockResolvedValue([]);
     jest.spyOn(siteService, 'getSites').mockResolvedValue([]);
     jest.spyOn(teamService, 'getTeams').mockResolvedValue([]);
     jest.spyOn(companyService, 'getCompanies').mockResolvedValue([]);
     jest.spyOn(dailyReportService, 'getReportWorkerRowsByRange').mockResolvedValue([]);
+    jest.spyOn(dailyReportService, 'getWorkerRows').mockResolvedValue([]);
     jest.spyOn(dailyReportService, 'getReportsByRange').mockResolvedValue([]);
     jest.spyOn(supportRateService, 'getAllSiteRates').mockResolvedValue([]);
     jest.spyOn(teamSettlementService, 'getSupportRateOverrides').mockResolvedValue({

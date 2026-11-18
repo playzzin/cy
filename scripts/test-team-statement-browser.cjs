@@ -65,21 +65,17 @@ async function build() {
       await preview.waitFor();
       assert.equal(await preview.evaluate(button => getComputedStyle(button).backgroundColor), 'rgb(37, 99, 235)');
       const buttonBounds = await preview.boundingBox();
-      const amountBounds = await payrollHeader.getByText('420,000원', { exact: true }).boundingBox();
+      const amountBounds = await payrollHeader.getByText('220,000원', { exact: true }).boundingBox();
       assert.ok(buttonBounds && amountBounds && buttonBounds.x + buttonBounds.width <= amountBounds.x , '대납청구서 버튼은 공제의 청구금액 앞에 표시된다');
       assert.equal(await page.locator('#settlement-additions').getByRole('button', { name: '대납청구서 보기' }).count(), 0);
       const purchases = page.getByRole('region', { name: '매입 내역' });
       assert.doesNotMatch(await purchases.innerText(), /급여|인력소개비|대납청구서/);
       assert.equal(await page.getByLabel('매입 - 200,000원 (1공수)', { exact: true }).isVisible(), true);
       const summary = page.getByRole('region', { name: '정산 요약' });
-      assert.equal(await summary.getByText('470,000원', { exact: true }).isVisible(), true);
-      assert.equal(await summary.getByText('410,000원', { exact: true }).isVisible(), true);
-      const feeRow = deductions.getByRole('row', { name: /급여 인력소개비/ });
-      assert.equal(await feeRow.getByRole('textbox', { name: '금액' }).inputValue(), '120,000');
-      await feeRow.getByRole('button', { name: '상세', exact: true }).click();
-      const feeDetails = page.getByRole('table', { name: '인력소개비 상세 내역' });
-      assert.match(await feeDetails.innerText(), /가상작업자 1/);
-      assert.match(await feeDetails.innerText(), /120,000원/);
+      assert.equal(await summary.getByText('270,000원', { exact: true }).isVisible(), true);
+      assert.equal(await summary.getByText('610,000원', { exact: true }).isVisible(), true);
+      const feeDetails = deductions.getByRole('table', { name: '인원별 대납청구 공제' });
+      assert.equal(await feeDetails.getByRole('row', { name: '가상작업자 1 120,000원 220,000원', exact: true }).isVisible(), true);
       await feeDetails.scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(output, `recruiter-fee-${width}.png`) });
       assert.doesNotMatch(await page.locator('#settlement-additions').innerText(), /인력소개비|custom_/);
@@ -98,7 +94,7 @@ async function build() {
       const cells = await invoiceRow.getByRole('cell').allTextContents();
       assert.equal(cells[cells.length - 2].trim(), '120,000');
       assert.equal(cells[cells.length - 1].trim(), '220,000');
-      assert.doesNotMatch(await invoice.innerText(), /가상작업자 2|가상 현장 A|410,000원/);
+      assert.doesNotMatch(await invoice.innerText(), /가상작업자 2|가상 현장 A|610,000원/);
       assert.equal(await invoice.getByRole('button', { name: '화면복사' }).isEnabled(), true);
       assert.equal(await invoice.getByRole('button', { name: '인력소개비 저장' }).count(), 0);
       assert.equal(await invoice.evaluate(node => node.scrollWidth <= node.clientWidth), true, '모바일 청구서 전체가 가로 화면 안에 표시된다');
@@ -144,8 +140,26 @@ async function build() {
       await page.getByRole('button', { name: '수기 매출 삭제', exact: true }).click();
       assert.equal(await sales.locator('input[value="삭제 검증 현장"]').count(), 0);
       assert.equal(await sales.locator('input[value="가상 현장 A"]').count(), 1);
+      await page.goto(`${origin}/payroll/team-settlement?accommodation=1`);
+      const roomRow = page.getByRole('row', { name: /숙소 숙소 전체/ });
+      await roomRow.getByRole('button', { name: '상세', exact: true }).click();
+      const accommodation = page.getByRole('region', { name: '숙소 주소별 상세' });
+      const address = accommodation.getByRole('row', { name: /검증시 첫길 1 101호/ });
+      await address.getByText('650,000원', { exact: true }).waitFor();
+      assert.equal(await accommodation.getByText('300,000원', { exact: true }).isVisible(), true);
+      assert.equal(await accommodation.getByText('950,000원', { exact: true }).isVisible(), true);
+      await address.getByRole('button', { name: /더상세/ }).click();
+      const costs = accommodation.getByRole('table', { name: '검증시 첫길 1 101호 비용 내역' });
+      for (const [category, amount] of [['전기', '30,000원'], ['가스', '20,000원'], ['월세', '500,000원'], ['공과금', '100,000원']]) {
+        assert.equal(await costs.getByRole('row', { name: new RegExp('^' + category + ' ') }).getByRole('cell', { name: amount, exact: true }).isVisible(), true);
+      }
+      await costs.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(output, `accommodation-${width}.png`) });
+      assert.equal(await costs.evaluate(table => table.scrollWidth <= table.clientWidth + 1), true, '주소별 비용 표가 모바일 폭 안에 표시된다');
+      await address.getByRole('button', { name: /더상세/ }).click();
+      assert.equal(await costs.count(), 0);
       assert.deepEqual(errors, []);
-      results.push({ width, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementTotalUnchanged: true, workerFeeDetails: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
+      results.push({ width, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
       await context.close();
     }
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
