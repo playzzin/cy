@@ -32,6 +32,7 @@ interface ExpenseLedgerDetailBoardProps {
   selectedItemKey?: ExpenseLedgerDetailItemKey;
   fitWidth?: boolean;
   centerContent?: boolean;
+  excludePersonalFromTotals?: boolean;
 }
 
 export type ExpenseLedgerDetailItemKey =
@@ -154,7 +155,8 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
   showTeamColumn = false,
   selectedItemKey,
   fitWidth = false,
-  centerContent = false
+  centerContent = false,
+  excludePersonalFromTotals = false
 }) => {
   const teamSectionHeaderStyle: React.CSSProperties = {
     backgroundColor: hexToRgba(color, 0.15),
@@ -169,6 +171,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       id: string;
       teamName: string;
       address: string;
+      personal: boolean;
       rent: number;
       privateRoom: number;
       electricity: number;
@@ -194,11 +197,13 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
         const address = getAccommodationAddress(item.label, doc.memo);
         const team = doc.teamName || '팀 미지정';
         const groupId = item.sourceAccommodationId || `${doc.id}-${normalizeGroupKey(address) || index}`;
-        const key = `${normalizeGroupKey(team)}-${normalizeGroupKey(groupId)}`;
+        const recipientKey = isPersonalBilling ? `worker:${doc.issuedToWorkerId || doc.issuedToWorkerName || doc.id}` : 'team';
+        const key = `${normalizeGroupKey(team)}-${normalizeGroupKey(groupId)}-${recipientKey}`;
         const row = rowMap.get(key) ?? {
           id: key,
           teamName: team,
           address,
+          personal: isPersonalBilling,
           rent: 0,
           privateRoom: 0,
           electricity: 0,
@@ -488,7 +493,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
           ? focusedCardRows.length
           : focusedClaimRows.length;
     const focusedTotal = accommodationDetail
-      ? focusedAccommodationRows.reduce((sum, row) => sum + toAmount(row[accommodationDetail.amountKey]), selectedItemKey === 'accommodation' ? accommodationAdjustmentTotal : 0)
+      ? focusedAccommodationRows.reduce((sum, row) => sum + (excludePersonalFromTotals && row.personal ? 0 : toAmount(row[accommodationDetail.amountKey])), selectedItemKey === 'accommodation' ? accommodationAdjustmentTotal : 0)
       : vehicleDetail
         ? focusedVehicleRows.reduce((sum, row) => sum + toAmount(row[vehicleDetail.amountKey]), 0)
         : selectedItemKey === 'card'
@@ -512,6 +517,9 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
               {teamName} {focusedTitle} 상세내역
             </div>
             <div className={fitWidth ? 'mt-0.5 text-xs font-bold leading-snug text-slate-600' : 'mt-0.5 text-sm font-bold text-slate-600'}>{focusedDescription}</div>
+            {excludePersonalFromTotals && accommodationDetail && focusedAccommodationRows.some(row => row.personal) && (
+              <p className="mt-1 text-xs font-medium text-slate-600">개인청구 금액은 참고용이며 팀 합계에서 제외됩니다.</p>
+            )}
           </div>
           <div className={fitWidth ? 'flex min-w-0 items-center justify-center gap-3' : 'flex shrink-0 items-center gap-3 sm:text-right'}>
             <span className="rounded-full border border-slate-300 bg-white/80 px-2.5 py-1 text-xs font-black text-slate-600">
@@ -738,6 +746,9 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
           style={teamSectionHeaderStyle}
         >
           {teamName} 숙소 상세내역
+          {excludePersonalFromTotals && accommodationRows.some(row => row.personal) && (
+            <p className="mt-1 text-xs font-medium text-slate-600">개인청구 금액은 참고용이며 팀 합계에서 제외됩니다.</p>
+          )}
         </div>
         {adjustmentDetails}
         <div className={tableViewportClass}>
@@ -783,17 +794,17 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
             {(accommodationRows.length > 0 || accommodationAdjustments.length > 0) && (
               <tfoot>
                 <tr className="border-t-2 border-slate-300 bg-slate-50">
-                  <td colSpan={showTeamColumn ? 2 : 1} className="border border-slate-200 px-2 py-2 text-center font-black">총 합계</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.rent, accommodationAdjustmentTotal))}</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.privateRoom, 0))}</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.electricity, 0))}</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.gas, 0))}</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.water, 0))}</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.internet, 0))}</td>
-                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.other, 0))}</td>
+                  <td colSpan={showTeamColumn ? 2 : 1} className="border border-slate-200 px-2 py-2 text-center font-black">{excludePersonalFromTotals ? '팀 합계' : '총 합계'}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.filter(row => !excludePersonalFromTotals || !row.personal).reduce((sum, row) => sum + row.rent, accommodationAdjustmentTotal))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.filter(row => !excludePersonalFromTotals || !row.personal).reduce((sum, row) => sum + row.privateRoom, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.filter(row => !excludePersonalFromTotals || !row.personal).reduce((sum, row) => sum + row.electricity, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.filter(row => !excludePersonalFromTotals || !row.personal).reduce((sum, row) => sum + row.gas, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.filter(row => !excludePersonalFromTotals || !row.personal).reduce((sum, row) => sum + row.water, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.filter(row => !excludePersonalFromTotals || !row.personal).reduce((sum, row) => sum + row.internet, 0))}</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right font-bold tabular-nums">{formatCurrency(accommodationRows.filter(row => !excludePersonalFromTotals || !row.personal).reduce((sum, row) => sum + row.other, 0))}</td>
                   <td className="border border-slate-200 px-2 py-2" />
                   <td className="border border-slate-200 px-2 py-2" />
-                  <td className="border border-slate-200 bg-red-50 px-2 py-2 text-right font-black tabular-nums text-red-600">{formatCurrency(accommodationRows.reduce((sum, row) => sum + row.total, accommodationAdjustmentTotal))}</td>
+                  <td className="border border-slate-200 bg-red-50 px-2 py-2 text-right font-black tabular-nums text-red-600">{formatCurrency(accommodationRows.filter(row => !excludePersonalFromTotals || !row.personal).reduce((sum, row) => sum + row.total, accommodationAdjustmentTotal))}</td>
                 </tr>
               </tfoot>
             )}

@@ -114,13 +114,19 @@ const resolveBillingTargetForDate = (
         };
     }
 
-    if (card.billingTargetType && (card.billingTargetId || card.billingTargetName)) {
+    const snapshotStart = parseYmdDate(card.billingTargetStartDate ?? undefined);
+    const snapshotEnd = parseYmdDate(card.billingTargetEndDate ?? undefined);
+    if (!targets.length && card.billingTargetType && (card.billingTargetId || card.billingTargetName)
+        && (!snapshotStart || date >= snapshotStart) && (!snapshotEnd || date <= snapshotEnd)) {
         return {
             targetType: card.billingTargetType,
             targetId: normalizeKey(card.billingTargetId) || normalizeKey(card.billingTargetName),
             targetName: normalizeKey(card.billingTargetName)
         };
     }
+
+    const defaultStart = parseYmdDate(card.billingStartDate ?? undefined);
+    if (defaultStart && date < defaultStart) return {};
 
     if (assignment) {
         return {
@@ -159,7 +165,11 @@ export const cardBillingService = {
             cardService.listAllCardBillingTargets(card.id).catch(() => [] as CardBillingTargetRecord[])
         ]);
 
-        const lineItems = transactions.map((tx) => ({
+        const lineItems = transactions.filter(tx => {
+            const date = parseYmdDate(tx.date);
+            const start = parseYmdDate(card.billingStartDate ?? undefined);
+            return !start || !date || date >= start || Boolean(findBillingTargetForDate(billingTargets, date));
+        }).map((tx) => ({
             id: tx.id,
             label: `${tx.merchant || 'Unknown'} - ${tx.date}`,
             amount: tx.amount,
@@ -274,7 +284,7 @@ export const cardBillingService = {
         };
 
         const firstBillingTargetStart = minIsoDate(...billingTargets.map((target) => target.startDate));
-        const billingStartDate = maxIsoDate(DEFAULT_SUPPORT_BILLING_START_DATE, firstBillingTargetStart);
+        const billingStartDate = maxIsoDate(DEFAULT_SUPPORT_BILLING_START_DATE, minIsoDate(firstBillingTargetStart, card.billingStartDate));
         if (!isSupportBillingMonthEnabled(yearMonth, billingStartDate)) return [];
 
         const grouped = new Map<string, CardBillingDocument>();
@@ -297,6 +307,7 @@ export const cardBillingService = {
             const targetType = resolvedTarget.targetType;
             const targetId = resolvedTarget.targetId;
             const targetName = resolvedTarget.targetName;
+            if (!targetId) return;
             const targetWorker = targetType === 'WORKER' ? findWorker(targetId) : undefined;
 
             const billingTeamId = targetType === 'TEAM' || targetType === 'OFFICE'

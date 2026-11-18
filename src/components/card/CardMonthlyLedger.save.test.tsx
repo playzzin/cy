@@ -354,3 +354,18 @@ it('unexpected builder throw preserves ledger outcome without inventing a failed
     expect(cardBillingService.replaceDraftBilling).not.toHaveBeenCalled();
   } finally { builder.mockRestore(); }
 });
+
+it('uses the saved 2027 billing start for the monthly row and excludes earlier transactions', async () => {
+  window.sessionStorage.setItem('cy.support-management.year-month', '2027-01');
+  jest.mocked(cardService.listAllCardBillingTargets).mockResolvedValue([]);
+  const datedCard: Card = { ...card, billingStartDate: '2027-01-15' };
+  transactions = [
+    { id: 'before', cardId: card.id, cardLabel: card.name, date: '2027-01-14', yearMonth: '2027-01', merchant: '이전', category: 'OTHER', amount: 10000 },
+    { id: 'after', cardId: card.id, cardLabel: card.name, date: '2027-01-15', yearMonth: '2027-01', merchant: '이후', category: 'OTHER', amount: 20000 }
+  ];
+  render(<CardMonthlyLedger cards={[datedCard]} teams={teams} loadingCards={false} />);
+  await screen.findByText('시험카드 (0000)');
+  await waitFor(() => expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+  await waitFor(() => expect(buildCardLedgerWorkbook).toHaveBeenCalledWith(expect.anything(), [expect.objectContaining({ total: 20000 })]));
+});

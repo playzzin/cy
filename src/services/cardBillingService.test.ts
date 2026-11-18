@@ -74,6 +74,41 @@ describe('cardBillingService.generateAssignmentBillings', () => {
         mockedManpowerService.getWorkers.mockResolvedValue([]);
     });
 
+    it('applies a saved 2027 billing start without dropping older explicit billing history', async () => {
+        const card = { ...baseCard, billingStartDate: '2027-01-15' };
+        mockedCardService.getAssignmentHistory.mockResolvedValue([]);
+        mockedCardService.getTransactionsByCard.mockResolvedValue([
+            buildTx('before-start', '2027-01-14', 10000),
+            buildTx('at-start', '2027-01-15', 20000)
+        ]);
+        let billings = await cardBillingService.generateAssignmentBillings(card, '2027-01');
+        expect(billings).toHaveLength(1);
+        expect(billings[0].lineItems.map(item => item.id)).toEqual(['at-start']);
+        mockedCardService.listAllCardBillingTargets.mockResolvedValue([{
+            id: 'old-target', cardId: card.id, cardLabel: card.name,
+            targetId: 'old-team', targetType: 'TEAM', targetName: '이전팀',
+            startDate: '2026-01-01', endDate: '2026-12-31'
+        }]);
+        mockedCardService.getTransactionsByCard.mockResolvedValue([buildTx('historical', '2026-12-31', 30000)]);
+        billings = await cardBillingService.generateAssignmentBillings(card, '2026-12');
+        expect(billings[0]).toMatchObject({ teamId: 'old-team', totalAmount: 30000 });
+    });
+
+    it('does not apply a new billing snapshot before its saved start date', async () => {
+        mockedCardService.getAssignmentHistory.mockResolvedValue([]);
+        mockedCardService.listAllCardBillingTargets.mockResolvedValue([{
+            id: 'new', cardId: baseCard.id, cardLabel: baseCard.name,
+            targetId: 'new-team', targetName: '새팀', targetType: 'TEAM', startDate: '2027-01-15'
+        }]);
+        mockedCardService.getTransactionsByCard.mockResolvedValue([
+            buildTx('before', '2027-01-14', 10000), buildTx('after', '2027-01-15', 20000)
+        ]);
+        const bills = await cardBillingService.generateAssignmentBillings({
+            ...baseCard, billingTargetType: 'TEAM', billingTargetId: 'new-team', billingTargetName: '새팀', billingTargetStartDate: '2027-01-15'
+        }, '2027-01');
+        expect(bills.map(bill => [bill.teamId, bill.totalAmount])).toEqual([['team-current', 10000], ['new-team', 20000]]);
+    });
+
     it('does not charge a transaction outside known assignment history to the current assignee', async () => {
         const assignments: CardAssignmentRecord[] = [{
             id: 'assignment-1',

@@ -92,7 +92,7 @@ describe('ExpenseLedgerDetailBoard', () => {
       ],
     };
 
-    render(
+    const { rerender } = render(
       <ExpenseLedgerDetailBoard
         teamName="이재욱팀"
         color="#64748b"
@@ -110,6 +110,24 @@ describe('ExpenseLedgerDetailBoard', () => {
     expect(screen.getAllByText('34,780').length).toBeGreaterThan(0);
     expect(screen.getAllByText('414,780').length).toBeGreaterThan(0);
     expect(screen.getByText('개인청구')).toBeTruthy();
+    expect(screen.getByRole('row', { name: /총 합계/ })).toHaveTextContent('414,780');
+
+    rerender(
+      <ExpenseLedgerDetailBoard
+        teamName="가상팀"
+        color="#64748b"
+        accommodationDocs={[accommodationDoc, {
+          ...accommodationDoc, id: 'shared', issuedToType: 'team', issuedToWorkerId: '', issuedToWorkerName: '',
+          lineItems: [{ ...accommodationDoc.lineItems[0], amount: 1000 }]
+        }]}
+        vehicleDocs={[]} cardDocs={[]} receivableClaims={[]} payableClaims={[]} otherClaims={[]}
+        showClaims={false} excludePersonalFromTotals
+      />
+    );
+    expect(screen.getByRole('row', { name: /팀 합계/ })).toHaveTextContent('1,000');
+    expect(screen.getByRole('row', { name: /팀 합계/ })).not.toHaveTextContent('414,780');
+    expect(screen.getByText('414,780')).toBeTruthy();
+    expect(screen.getByText('개인청구 금액은 참고용이며 팀 합계에서 제외됩니다.')).toBeTruthy();
   });
 
   test('선택한 세부 항목을 가로 스크롤 없는 맞춤 폭 상세표로 표시한다', () => {

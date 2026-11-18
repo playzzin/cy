@@ -8,7 +8,7 @@ import { Team } from '../../services/teamService';
 import { OfficeStaff, officeStaffService } from '../../services/officeStaffService';
 import { toast, showConfirmAlert } from '../../utils/swal';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
-import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
+import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 import { BillingMode, BillingModeSelector, BillingStatusSummary } from '../support/BillingModeSelector';
 import BillingPeriodTimeline, { BillingPeriodTimelineItem } from '../support/BillingPeriodTimeline';
 import { isInactiveCardStatus } from '../../services/cardLifecyclePolicy';
@@ -32,7 +32,8 @@ interface CardBillingTargetManagerProps {
 }
 
 const DEFAULT_BILLING_START_DATE = '2026-01-01';
-const getDefaultBillingStartDate = () => toShortYearDateInputValue(DEFAULT_BILLING_START_DATE) || '26-01-01';
+const toBillingDateInputValue = (value?: string | null): string => value ? normalizeTypedDateInput(value) || value : '';
+const getDefaultBillingStartDate = () => DEFAULT_BILLING_START_DATE;
 const OFFICE_TARGET_ID = '__office__';
 const OFFICE_TARGET_NAME = '사무실';
 const TARGET_GROUPS = ['청연이엔지 소속팀', '작업자', '사무실', '사무실직원'];
@@ -76,7 +77,7 @@ const getLatestTargetRecord = (records: CardBillingTargetRecord[]): CardBillingT
         })[0]
 );
 
-const displayDate = (value?: string | null): string => toShortYearDateInputValue(value) || '';
+const displayDate = (value?: string | null): string => toBillingDateInputValue(value) || '';
 const toDateText = (date: Date): string => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -154,19 +155,19 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     const [billingMode, setBillingMode] = useState<BillingMode>(initialSplitMode ? 'split' : 'same');
 
     const handleTargetStartDateChange = (value: string) => {
-        setTargetStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
+        setTargetStartDate(formatTypedDateInput(value, { yearDigits: 4 }));
     };
 
     const handleTargetEndDateChange = (value: string) => {
-        setTargetEndDate(formatTypedDateInput(value, { yearDigits: 2 }));
+        setTargetEndDate(formatTypedDateInput(value, { yearDigits: 4 }));
     };
 
     const normalizeTargetStartDate = () => {
-        setTargetStartDate((prev) => toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev);
+        setTargetStartDate((prev) => toBillingDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev);
     };
 
     const normalizeTargetEndDate = () => {
-        setTargetEndDate((prev) => prev ? (toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev) : '');
+        setTargetEndDate((prev) => prev ? (toBillingDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev) : '');
     };
 
     useEffect(() => {
@@ -385,7 +386,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
     ), [selectedTargetRecords, targetOptionsByKey]);
     const selectedTargetColor = selectedTarget?.color ? normalizeHexColor(selectedTarget.color) : '#64748b';
     const showTargetSelector = billingMode !== 'same';
-    const showTargetDateFields = Boolean(selectedCard && (billingMode === 'split' || editingTargetRecordId));
+    const showTargetDateFields = Boolean(selectedCard);
     const canUseSameMode = Boolean(selectedCard && (
         selectedCard.currentAssigneeName ||
         selectedCardHasExplicitBillingTarget
@@ -462,7 +463,8 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             cardId: card.id,
             closeRecords,
             deleteIds,
-            clearSnapshot: true
+            clearSnapshot: true,
+            billingStartDate: effectiveDate
         });
     };
 
@@ -479,7 +481,9 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
         setSaving(true);
         try {
             if (!target) {
-                await applySameBillingTarget(card);
+                const effectiveDate = normalizeTypedDateInput(startDate);
+                if (!effectiveDate) throw new Error('청구 시작일을 올바른 날짜로 입력해주세요.');
+                await applySameBillingTarget(card, effectiveDate);
                 setEditingTargetRecordId(null);
                 toast.success(card.currentAssigneeName ? '기준일 이후 카드 청구를 기본 청구로 변경했습니다.' : '기준일 이후 별도청구를 해제했습니다.');
             } else {
@@ -530,6 +534,11 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             toast.error('정지·해지 카드의 청구대상은 변경할 수 없습니다.');
             return;
         }
+        const normalizedStartDate = normalizeTypedDateInput(targetStartDate);
+        if (!normalizedStartDate || normalizedStartDate < DEFAULT_BILLING_START_DATE) {
+            toast.error('청구 시작일은 2026-01-01 이후의 올바른 날짜로 입력해주세요.');
+            return;
+        }
         if (billingMode === 'same') {
             if (!canUseSameMode) {
                 toast.error('사용자 배정 또는 별도 청구대상이 있어야 기본 청구로 변경할 수 있습니다.');
@@ -538,13 +547,13 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             const result = await showConfirmAlert(
                 '카드 청구',
                 selectedCard.currentAssigneeName
-                    ? `${selectedCard.name} 카드의 26-01-01 이후 별도 청구를 종료하고 기본 청구로 변경할까요?`
-                    : `${selectedCard.name} 카드의 26-01-01 이후 별도 청구대상 설정을 해제할까요?`
+                    ? `${selectedCard.name} 카드의 ${normalizedStartDate}부터 배정자에게 청구할까요? 이전 청구 이력은 유지됩니다.`
+                    : `${selectedCard.name} 카드의 ${normalizedStartDate} 이후 별도 청구대상 설정을 해제할까요?`
             );
             if (!result.isConfirmed) return;
 
             try {
-                await saveBillingTarget(selectedCard, null);
+                await saveBillingTarget(selectedCard, null, normalizedStartDate);
             } catch (error) {
                 console.error(error);
                 toast.error('카드 청구 처리에 실패했습니다.');
@@ -559,11 +568,6 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             toast.error('기간 시작일을 입력해주세요.');
             return;
         }
-        const normalizedStartDate = normalizeTypedDateInput(targetStartDate) ?? DEFAULT_BILLING_START_DATE;
-        if (!normalizedStartDate) {
-            toast.error('기간 시작일을 올바른 날짜로 입력해주세요.');
-            return;
-        }
         let normalizedEndDate = '';
         if (targetEndDate) {
             const parsedEndDate = normalizeTypedDateInput(targetEndDate);
@@ -573,8 +577,8 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             }
             normalizedEndDate = parsedEndDate;
         }
-        setTargetStartDate(toShortYearDateInputValue(normalizedStartDate));
-        setTargetEndDate(toShortYearDateInputValue(normalizedEndDate));
+        setTargetStartDate(toBillingDateInputValue(normalizedStartDate));
+        setTargetEndDate(toBillingDateInputValue(normalizedEndDate));
 
         if (normalizedEndDate && normalizedEndDate < normalizedStartDate) {
             toast.error('청구 종료일은 시작일보다 빠를 수 없습니다.');
@@ -586,7 +590,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             return;
         }
         if (billingMode === 'split' && !latestRecord && !editingTargetRecordId && normalizedStartDate <= DEFAULT_BILLING_START_DATE) {
-            toast.error('기간 시작일은 기본 청구 시작일(26-01-01)보다 뒤여야 합니다.');
+            toast.error('기간 시작일은 기본 청구 시작일(2026-01-01)보다 뒤여야 합니다.');
             return;
         }
 
@@ -675,11 +679,11 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
         }
         setSelectedCardId(card.id);
         const latestRecord = getLatestTargetRecord(targetRecordsByCardId.get(normalizeKey(card.id)) ?? []);
-        const hasExplicitTarget = Boolean(latestRecord || (card.billingTargetType && card.billingTargetId));
+        const hasExplicitTarget = Boolean((latestRecord && (!card.billingStartDate || !latestRecord.endDate || latestRecord.endDate >= card.billingStartDate)) || (card.billingTargetType && card.billingTargetId));
         const nextBillingMode: BillingMode = initialSplitMode ? 'split' : (hasExplicitTarget ? 'custom' : 'same');
         setBillingMode(nextBillingMode);
-        setTargetStartDate(nextBillingMode === 'custom' && latestRecord ? (displayDate(latestRecord.startDate) || getDefaultBillingStartDate()) : getDefaultBillingStartDate());
-        setTargetEndDate('');
+        setTargetStartDate(nextBillingMode === 'custom' && latestRecord ? (displayDate(latestRecord.startDate) || getDefaultBillingStartDate()) : (displayDate(card.billingStartDate) || getDefaultBillingStartDate()));
+        setTargetEndDate(nextBillingMode === 'custom' ? displayDate(latestRecord?.endDate) : '');
         setEditingTargetRecordId(null);
         const targetKey = latestRecord
             ? getTargetOptionKey(latestRecord.targetType, latestRecord.targetId)
@@ -730,7 +734,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
             return;
         }
 
-        setTargetStartDate(getDefaultBillingStartDate());
+        setTargetStartDate(displayDate(selectedCard?.billingStartDate) || getDefaultBillingStartDate());
     };
 
     const pickCardById = (cardId: string) => {
@@ -848,7 +852,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                         },
                                         {
                                             label: '청구 시작일',
-                                            value: displayDate(latestSelectedTargetRecord?.startDate) || '26-01-01',
+                                            value: displayDate(billingMode === 'same' ? selectedCard.billingStartDate : latestSelectedTargetRecord?.startDate) || DEFAULT_BILLING_START_DATE,
                                             tone: 'amber'
                                         }
                                     ]}
@@ -859,7 +863,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                 value={billingMode}
                                 onChange={handleBillingModeChange}
                                 sameLabel={selectedCard?.currentAssigneeName ? '배정자에게 청구' : '별도청구 해제'}
-                                sameDescription={selectedCard?.currentAssigneeName ? '카드 사용자와 같은 대상에게 비용 청구' : '26-01-01 이후 별도청구 해제'}
+                                sameDescription={selectedCard?.currentAssigneeName ? '카드 사용자와 같은 대상에게 비용 청구' : '입력한 시작일 이후 별도청구 해제'}
                                 customLabel="다른 대상에게 청구"
                                 customDescription="사용자와 다른 팀/사람에게 비용 청구"
                                 disabled={!selectedCard}
@@ -919,15 +923,15 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                 </div>
                             )}
 
-                            {showTargetSelector && (
+                            {selectedCard && (
                                 <details
-                                    open={billingMode === 'split' || Boolean(editingTargetRecordId)}
+                                    open
                                     className="rounded-xl border border-slate-200 bg-white"
                                 >
                                     <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5">
                                         <span className="min-w-0">
-                                            <span className="block text-sm font-extrabold text-slate-700">고급 설정</span>
-                                            <span className="mt-0.5 block text-xs font-semibold text-slate-400">월중 변경이나 특정 기간 청구가 필요할 때만 사용합니다.</span>
+                                            <span className="block text-sm font-extrabold text-slate-700">청구 기간</span>
+                                            <span className="mt-0.5 block text-xs font-semibold text-slate-400">시작일을 수정한 뒤 위의 저장 버튼을 눌러주세요.</span>
                                         </span>
                                         <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
                                             billingMode === 'split' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'
@@ -936,7 +940,7 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                         </span>
                                     </summary>
                                     <div className="space-y-3 border-t border-slate-100 p-3">
-                                        {!editingTargetRecordId && (
+                                        {showTargetSelector && !editingTargetRecordId && (
                                             <button
                                                 type="button"
                                                 onClick={() => handleBillingModeChange(billingMode === 'split' ? 'custom' : 'split')}
@@ -958,25 +962,29 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                         {showTargetDateFields && (
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                 <div>
-                                                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                                                    <label htmlFor="card-billing-start-date" className="block text-xs font-bold text-slate-600 mb-1">
                                                         {billingMode === 'split' ? '기간 시작일' : '청구 시작일'}
                                                     </label>
                                                     <input
+                                                        id="card-billing-start-date"
+                                                        disabled={targetRecordsLoading || saving}
                                                         type="text"
                                                         inputMode="numeric"
                                                         maxLength={10}
-                                                        placeholder="YY-MM-DD"
+                                                        placeholder="YYYY-MM-DD"
                                                         value={targetStartDate}
                                                         onChange={(event) => handleTargetStartDateChange(event.target.value)}
                                                         onBlur={normalizeTargetStartDate}
                                                         className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
                                                     />
                                                 </div>
-                                                <div>
-                                                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                                                {showTargetSelector && <div>
+                                                    <label htmlFor="card-billing-end-date" className="block text-xs font-bold text-slate-600 mb-1">
                                                         {billingMode === 'split' ? '기간 종료일' : '청구 종료일'}
                                                     </label>
                                                     <input
+                                                        id="card-billing-end-date"
+                                                        disabled={targetRecordsLoading || saving}
                                                         type="text"
                                                         inputMode="numeric"
                                                         maxLength={10}
@@ -986,9 +994,9 @@ export const CardBillingTargetManager: React.FC<CardBillingTargetManagerProps> =
                                                         onBlur={normalizeTargetEndDate}
                                                         className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
                                                     />
-                                                </div>
+                                                </div>}
                                                 <div className="sm:col-span-2 text-[11px] font-semibold text-slate-400">
-                                                    기본 청구 시작일은 26-01-01입니다. 월중 변경은 필요한 달만 거래일 기준으로 나눕니다.
+                                                    연도가 바뀌어도 저장한 시작일은 유지됩니다. 2027년 시작일도 입력할 수 있으며, 월중 변경은 거래일 기준으로 나눕니다.
                                                 </div>
                                             </div>
                                         )}

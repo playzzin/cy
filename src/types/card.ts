@@ -24,6 +24,7 @@ export interface Card {
     billingTargetName?: string | null;
     billingTargetStartDate?: string | null;
     billingTargetEndDate?: string | null;
+    billingStartDate?: string | null;
     lastLifecycleOperationId?: string | null;
     lastLifecycleOperationType?: 'CANCEL' | 'RESTORE' | null;
     lastLifecycleOperationAt?: Timestamp | null;

@@ -1,6 +1,7 @@
 import { cardFirestoreService } from './cardFirestoreService';
 import type { CardLifecycleTransitionResult } from './cardFirestoreService';
 import type { CreateSupportCancellationLogInput } from '../types/supportCancellationLog';
+import { normalizeTypedDateInput } from '../utils/typedDateInput';
 import {
     assertCardCanBeAssignedOrBilled,
     assertCardCanBeRestored,
@@ -96,12 +97,16 @@ export const cardService = {
         closeRecords?: Array<{ id: string; endDate: string }>;
         deleteIds?: string[];
         clearSnapshot?: boolean;
+        billingStartDate?: string;
         snapshot?: Pick<CardBillingTargetRecord, 'targetId' | 'targetType' | 'targetName' | 'startDate' | 'endDate'> | null;
     }): Promise<void> => {
         if ((params.upserts ?? []).some((record) => record.cardId !== params.cardId)) {
             throw new Error('billing-target-card-mismatch');
         }
-        if ((params.upserts ?? []).length > 0 || Boolean(params.snapshot)) {
+        if (params.billingStartDate !== undefined && normalizeTypedDateInput(params.billingStartDate) !== params.billingStartDate) {
+            throw new Error('card-billing-start-date-invalid');
+        }
+        if ((params.upserts ?? []).length > 0 || Boolean(params.snapshot) || params.billingStartDate !== undefined) {
             const card = await cardFirestoreService.getCard(params.cardId);
             if (!card) throw new Error('card-not-found');
             assertCardCanBeAssignedOrBilled(card.status);

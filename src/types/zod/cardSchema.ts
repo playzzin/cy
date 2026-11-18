@@ -32,6 +32,7 @@ export const CardSchema = z.object({
     billingTargetName: z.string().nullable().optional(),
     billingTargetStartDate: z.string().nullable().optional(),
     billingTargetEndDate: z.string().nullable().optional(),
+    billingStartDate: z.string().nullable().optional(),
     memo: z.string().nullable().optional(),
     legacyId: z.string().optional(),
 });

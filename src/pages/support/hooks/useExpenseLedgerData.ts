@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { calculateTeamAverageExpense } from '../../../features/team-expense-average/teamExpenseAverage';
 import { accommodationBillingService } from '../../../services/accommodationBillingService';
+import { accommodationBillingTargetService } from '../../../services/accommodationBillingTargetService';
 import { cardBillingService } from '../../../services/cardBillingService';
 import { cardService } from '../../../services/cardService';
 import { companyService } from '../../../services/companyService';
@@ -29,6 +30,7 @@ import {
 import { normalizeVehicleExpenseType } from '../../../utils/vehicleExpenseType';
 import { getHistoricalAttendedSiteOptions } from '../../../utils/dailyReportHistoricalSite';
 import { getAccommodationExpenseBucket, isAccommodationAdjustmentClaim } from '../../../utils/accommodationExpenseClassification';
+import { resolveExpenseLedgerBillingTargets } from '../../../utils/expenseLedgerBillingTargets';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import type { Card, CardBillingTargetRecord, CardBillingTargetType } from '../../../types/card';
 import type { CardBillingDocument } from '../../../types/cardBilling';
@@ -573,6 +575,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   const [dailyReports, setDailyReports] = useState<DailyReport[]>([]);
   const [dailyReportsError, setDailyReportsError] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [billingTargetReviewCount, setBillingTargetReviewCount] = useState(0);
 
   const generation = useRef(0);
   const loadData = useCallback(async () => {
@@ -580,6 +583,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
     setAccommodationDocs([]); setVehicleDocs([]); setCardDocs([]); setClaims([]); setDailyReports([]);
     setLoading(true);
     setDailyReportsError(false);
+    setBillingTargetReviewCount(0);
     try {
       const monthStart = `${yearMonth}-01`;
       const monthEnd = `${yearMonth}-31`;
@@ -592,7 +596,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
             return [] as DailyReport[];
           })
         : Promise.resolve([] as DailyReport[]);
-      const [teamList, siteList, accommodationList, vehicleList, cardBillingList, claimList, companyList, cardMasterList, cardBillingTargetList, categoryList, dailyReportList] = await Promise.all([
+      const [teamList, siteList, accommodationList, vehicleList, cardBillingList, claimList, companyList, cardMasterList, cardBillingTargetList, categoryList, dailyReportList, accommodationTargetList] = await Promise.all([
         teamService.getTeams(),
         siteService.getSites(),
         accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, forExpenseLedger: true }),
@@ -601,15 +605,13 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         teamExpenseLedgerService.getClaimsByMonth(yearMonth),
         companyService.getCompanies(),
         cardService.getCards(),
-        cardService.listAllCardBillingTargets().catch((error) => {
-          console.warn('[useExpenseLedgerData] card billing targets load failed', error);
-          return [] as CardBillingTargetRecord[];
-        }),
+        cardService.listAllCardBillingTargets(),
         teamExpenseCategoryService.getCategories({ includeInactive: true }).catch((error) => {
           console.warn('[useExpenseLedgerData] expense categories load failed', error);
           return DEFAULT_TEAM_EXPENSE_CATEGORIES;
         }),
-        dailyReportsPromise
+        dailyReportsPromise,
+        accommodationBillingTargetService.listTargets()
       ]);
 
       if (sequence !== generation.current) return;
@@ -633,9 +635,17 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       setTeams(appendOfficeAssignmentTeam(filteredTeams, teamList));
       setSites(siteList);
       const supportBillingEnabled = isSupportBillingMonthEnabled(yearMonth);
-      setAccommodationDocs(supportBillingEnabled ? accommodationList : []);
+      const resolvedBillings = resolveExpenseLedgerBillingTargets({
+        accommodationDocs: supportBillingEnabled ? accommodationList : [],
+        cardDocs: supportBillingEnabled ? cardBillingList : [],
+        accommodationTargets: accommodationTargetList,
+        cardTargets: cardBillingTargetList,
+        teams: teamList
+      });
+      setAccommodationDocs(resolvedBillings.accommodationDocs);
       setVehicleDocs(supportBillingEnabled ? vehicleList : []);
-      setCardDocs(supportBillingEnabled ? cardBillingList : []);
+      setCardDocs(resolvedBillings.cardDocs);
+      setBillingTargetReviewCount(resolvedBillings.reviewCount);
       setCards(cardMasterList);
       setCardBillingTargets(cardBillingTargetList);
       setClaims(claimList);
@@ -1078,6 +1088,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   ])), [summaries, teams, dailyReports, yearMonth, dailyReportsError, includeDailyReports]);
 
   return {
+    billingTargetReviewCount,
     teamAverageExpenses,
     dailyReportsError,
     loading,

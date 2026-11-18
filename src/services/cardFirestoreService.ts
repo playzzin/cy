@@ -644,6 +644,7 @@ export const cardFirestoreService = {
         closeRecords?: Array<{ id: string; endDate: string }>;
         deleteIds?: string[];
         clearSnapshot?: boolean;
+        billingStartDate?: string;
         snapshot?: Pick<CardBillingTargetRecord, 'targetId' | 'targetType' | 'targetName' | 'startDate' | 'endDate'> | null;
     }): Promise<void> {
         const validatedUpserts = (params.upserts ?? []).map((record) => {
@@ -657,7 +658,7 @@ export const cardFirestoreService = {
         await runTransaction(db, async (transaction) => {
             const cardSnapshot = await transaction.get(cardRef);
             if (!cardSnapshot.exists()) throw new Error('card-not-found');
-            if (validatedUpserts.length > 0 || Boolean(params.snapshot)) {
+            if (validatedUpserts.length > 0 || Boolean(params.snapshot) || params.billingStartDate !== undefined) {
                 assertCardCanBeAssignedOrBilled(cardSnapshot.data().status as CardStatus);
             }
 
@@ -681,6 +682,7 @@ export const cardFirestoreService = {
             });
 
             const cardUpdates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+            if (params.billingStartDate !== undefined) cardUpdates.billingStartDate = params.billingStartDate;
             if (params.snapshot) {
                 cardUpdates.billingTargetId = params.snapshot.targetId;
                 cardUpdates.billingTargetType = params.snapshot.targetType;

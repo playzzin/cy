@@ -7,6 +7,7 @@ import { applyAccommodationExpensePeriod } from '../../../utils/accommodationExp
 import type { Accommodation } from '../../../types/accommodation';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 
+jest.mock('../../../services/accommodationBillingTargetService', () => ({ accommodationBillingTargetService: { listTargets: async () => [] } }));
 jest.mock('../../../services/dailyReportService', () => ({ dailyReportService: { getReports: jest.fn() } }));
 
 beforeEach(() => {

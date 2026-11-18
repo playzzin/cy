@@ -160,3 +160,17 @@ describe('cardService inactive-card guards', () => {
         });
     });
 });
+
+it('validates and atomically forwards a saved billing start for an active card', async () => {
+    jest.clearAllMocks();
+    mockedFirestore.getCard.mockResolvedValue(buildCard('ASSIGNED'));
+    const change = { cardId: 'card-3909', billingStartDate: '2027-01-15', clearSnapshot: true };
+    await cardService.applyCardBillingTargetChanges(change);
+    expect(mockedFirestore.applyCardBillingTargetChanges).toHaveBeenCalledWith(change);
+    mockedFirestore.applyCardBillingTargetChanges.mockClear();
+    await expect(cardService.applyCardBillingTargetChanges({ ...change, billingStartDate: '2027-02-30' })).rejects.toThrow('card-billing-start-date-invalid');
+    expect(mockedFirestore.applyCardBillingTargetChanges).not.toHaveBeenCalled();
+    mockedFirestore.getCard.mockResolvedValue(buildCard('CLOSED'));
+    await expect(cardService.applyCardBillingTargetChanges(change)).rejects.toThrow('inactive-card-operation-blocked');
+    expect(mockedFirestore.applyCardBillingTargetChanges).not.toHaveBeenCalled();
+});

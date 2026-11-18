@@ -520,7 +520,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 .filter((target) => normalizeKey(target.cardId) === cardId)
                 .map((target) => target.startDate)
         );
-        const billingStartDate = maxIsoDate(DEFAULT_SUPPORT_BILLING_START_DATE, firstBillingTargetStart);
+        const billingStartDate = maxIsoDate(DEFAULT_SUPPORT_BILLING_START_DATE, minIsoDate(firstBillingTargetStart, card.billingStartDate));
         if (!isSupportBillingMonthEnabled(yearMonth, billingStartDate)) return [];
 
         type AssignmentTimelineEntry = {
@@ -595,6 +595,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 targetName: string;
             }
         ): CardLedgerSegment | null => {
+            if (!billingTarget) {
+                const defaultStart = parseYmdDate(card.billingStartDate);
+                if (defaultStart) segmentStart = maxDate(segmentStart, defaultStart);
+            }
             const overlapDays = inclusiveDays(segmentStart, segmentEnd);
             if (overlapDays <= 0) return null;
 
@@ -704,11 +708,18 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     endDate: addDays(firstChangeInMonth.startDate, -1)
                 }
                 : null;
+            const defaultStart = parseYmdDate(card.billingStartDate);
+            const defaultEntry: BillingTimelineEntry[] = defaultStart
+                && defaultStart >= monthRange.monthStart && defaultStart <= monthRange.monthEnd
+                && !targetRanges.some(entry => entry.startDate && entry.startDate <= defaultStart && (!entry.endDate || entry.endDate >= defaultStart))
+                ? [{ target: null, startDate: defaultStart, endDate: monthRange.monthEnd }]
+                : [];
             const timelineEntries = [
                 ...(activeAtMonthStart ? [{ ...activeAtMonthStart, target: activeAtMonthStart.target } as BillingTimelineEntry] : []),
                 ...(fallbackEntry ? [fallbackEntry] : []),
-                ...changesInMonth.map((entry) => ({ ...entry, target: entry.target } as BillingTimelineEntry))
-            ].filter((entry, index, entries) => (
+                ...changesInMonth.map((entry) => ({ ...entry, target: entry.target } as BillingTimelineEntry)),
+                ...defaultEntry
+            ].sort((a, b) => (a.startDate?.getTime() ?? 0) - (b.startDate?.getTime() ?? 0)).filter((entry, index, entries) => (
                 index === 0 || targetIdentityKey(entry) !== targetIdentityKey(entries[index - 1])
             ));
             const shouldSplitByBillingTarget = new Set(timelineEntries.map(targetIdentityKey)).size > 1;
@@ -768,11 +779,14 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         // 표시한다. 이후 달에는 빈 행을 만들지 않는다.
         if (card.status === 'SUSPENDED' || card.status === 'CLOSED') return [];
 
+        const defaultStart = parseYmdDate(card.billingStartDate);
+        const fallbackStart = defaultStart ? maxDate(monthRange.monthStart, defaultStart) : monthRange.monthStart;
+        if (fallbackStart > monthRange.monthEnd) return [];
         return [{
             id: `unassigned-${card.id}`,
-            startDate: formatYmdDate(monthRange.monthStart),
+            startDate: formatYmdDate(fallbackStart),
             endDate: formatYmdDate(monthRange.monthEnd),
-            overlapDays: monthRange.daysInMonth
+            overlapDays: inclusiveDays(fallbackStart, monthRange.monthEnd)
         }];
     }, [monthRange, resolveAssigneeTeam, teamByAnyId, teamByName, workerByAnyId, workerByName, yearMonth]);
 
@@ -830,6 +844,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         return start && end && txDate.getTime() >= start.getTime() && txDate.getTime() <= end.getTime();
                     })
                     : undefined;
+                if (!targetRow && txDate && cardRows[0]?.card.billingStartDate) {
+                    const defaultStart = parseYmdDate(cardRows[0].card.billingStartDate);
+                    if (defaultStart && txDate < defaultStart) return undefined;
+                }
                 return targetRow ?? cardRows[0];
             };
             originalTxRowIdsRef.current = new Map(txs.map(tx => [tx.id, findTransactionRow(tx)?.id ?? '']));

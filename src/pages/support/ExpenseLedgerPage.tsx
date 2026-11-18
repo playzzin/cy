@@ -96,8 +96,9 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
     selectedRawDocs,
     rawDocs,
     teamAverageExpenses = {},
-    dailyReportsError
-  } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope, true, true);
+    dailyReportsError,
+    billingTargetReviewCount = 0
+  } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope, true);
 
   const draftCount =
     statusCounts.accommodationDraft +
@@ -221,6 +222,11 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
         {!loading && dailyReportsError && (
           <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             공수 데이터를 불러오지 못해 평균경비를 계산할 수 없습니다. 새로고침해 주세요.
+          </p>
+        )}
+        {!loading && billingTargetReviewCount > 0 && (
+          <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            청구대상 확인이 필요한 청구서가 {billingTargetReviewCount}건 있습니다. 기간 분할을 변경했다면 해당 월 원장을 다시 저장해 주세요. 확정·정산된 청구서는 기존 청구대상을 유지합니다.
           </p>
         )}
         {!loading && !dailyReportsError && summaries.length > 0 && (
@@ -369,6 +375,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
             <section className="min-h-[600px] bg-slate-50">
               {loading ? loadingDetailState : (
                 <ExpenseLedgerDetailBoard
+                  excludePersonalFromTotals
                   teamName="전체 팀"
                   color="#64748b"
                   accommodationDocs={rawDocs.accommodationDocs}
@@ -462,6 +469,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
                           className="min-w-0 border-b border-slate-300 bg-slate-50 p-2.5 shadow-inner"
                         >
                           <ExpenseLedgerDetailBoard
+                            excludePersonalFromTotals
                             teamName={selectedSummary?.teamName || '팀 미지정'}
                             color={selectedSummary?.color || '#cbd5e1'}
                             accommodationDocs={selectedRawDocs.accommodationDocs}
@@ -518,6 +526,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
 
               {loading ? loadingDetailState : (
                 <ExpenseLedgerDetailBoard
+                  excludePersonalFromTotals
                   teamName={selectedSummary?.teamName || '팀 미지정'}
                   color={selectedSummary?.color || '#cbd5e1'}
                   accommodationDocs={selectedRawDocs.accommodationDocs}
