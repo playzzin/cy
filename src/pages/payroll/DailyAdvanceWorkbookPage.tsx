@@ -1,4 +1,7 @@
 
+import ResponsiveDetailDialog from '../../components/common/ResponsiveDetailDialog';
+import { StatementRecruiterFeeDates } from '../../components/payroll/StatementRecruiterFeeDates';
+import { normalizeStatementRecruiterFeeDates } from '../../utils/statementRecruiterFeeDates';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import html2canvas from 'html2canvas';
@@ -14,7 +17,7 @@ import {
   faTable,
   faUsers,
 } from '@fortawesome/free-solid-svg-icons';
-import { buildDailyAdvanceStatementRows, buildStatementRecruiterFeeKey, buildStatementRecruiterFeeValueMap, createDailyAdvanceRowResolver, getReportAmountForEntry } from '../../utils/dailyAdvanceStatement';
+import { buildDailyAdvanceStatementRows, buildStatementRecruiterFeeKey, buildStatementRecruiterFeeValueMap, buildStatementRecruiterFeeDateMap, createDailyAdvanceRowResolver, getReportAmountForEntry } from '../../utils/dailyAdvanceStatement';
 import { dailyReportService } from '../../services/dailyReportService';
 import {
   dailyAdvanceWorkbookProfileService,
@@ -1163,6 +1166,10 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
   const [activeTab, setActiveTab] = useState<WorkbookTabKey>(statementPreview ? 'statement' : 'workers');
   const [manDayDrafts, setManDayDrafts] = useState<Record<string, string>>({});
   const [statementRecruiterFeeValues, setStatementRecruiterFeeValues] = useState<Record<string, number>>({});
+  const [statementRecruiterFeeDates, setStatementRecruiterFeeDates] = useState<Record<string, string[]>>({});
+  const [statementRecruiterFeeDateDrafts, setStatementRecruiterFeeDateDrafts] = useState<Record<string, string[]>>({});
+  const [feeDateEditorKey, setFeeDateEditorKey] = useState<string | null>(null);
+  useEffect(() => { setFeeDateEditorKey(null); }, [month, selectedTeamKey, activeTab]);
   const [statementRecruiterFeeDrafts, setStatementRecruiterFeeDrafts] = useState<Record<string, string>>({});
   const [entries, setEntries] = useState<WorkbookEntry[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
@@ -1544,6 +1551,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
       setTeams(teamRows);
       setProfiles(nextProfiles);
       setStatementRecruiterFeeValues(nextStatementRecruiterFeeValues);
+      setStatementRecruiterFeeDates(buildStatementRecruiterFeeDateMap(statementRecruiterFeeRows));
       setLoadWarningMessage(warnings.join(' '));
     } catch (error) {
       console.error('Failed to load daily advance workbook data:', error);
@@ -1572,6 +1580,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
       (feeRows) => {
         const nextValues = buildStatementRecruiterFeeValueMap(feeRows);
         setStatementRecruiterFeeValues(nextValues);
+        setStatementRecruiterFeeDates(buildStatementRecruiterFeeDateMap(feeRows));
       },
       (error) => {
         console.warn('Failed to subscribe statement recruiter fees:', error);
@@ -1836,8 +1845,8 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
 
   const statementRows = useMemo(() => buildDailyAdvanceStatementRows({
     entries: statementEntries, month, teamKey: statementTeamKey, lastDay: statementLastDay,
-    recruiterFeeValues: statementRecruiterFeeValues, manDayDrafts
-  }), [manDayDrafts, month, statementEntries, statementLastDay, statementRecruiterFeeValues, statementTeamKey]);
+    recruiterFeeValues: statementRecruiterFeeValues, recruiterFeeDates: statementRecruiterFeeDates, manDayDrafts
+  }), [manDayDrafts, month, statementEntries, statementLastDay, statementRecruiterFeeValues, statementRecruiterFeeDates, statementTeamKey]);
 
   useLayoutEffect(() => {
     if (!statementPreview || loading || loadErrorMessage || loadWarningMessage) return;
@@ -2201,10 +2210,11 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
       .filter((storageKey) => {
         const draftValue = statementRecruiterFeeDrafts[storageKey];
         const baselineValue = statementRecruiterFeeValues[storageKey] || 0;
-        if (draftValue === undefined) return false;
-        return parseMoneyInput(draftValue) !== baselineValue;
+        const dateDraft = statementRecruiterFeeDateDrafts[storageKey];
+        return (draftValue !== undefined && parseMoneyInput(draftValue) !== baselineValue)
+          || (dateDraft !== undefined && JSON.stringify(dateDraft) !== JSON.stringify(statementRecruiterFeeDates[storageKey] || []));
       });
-  }, [month, statementRecruiterFeeDrafts, statementRecruiterFeeValues, statementRows, statementTeamKey]);
+  }, [month, statementRecruiterFeeDrafts, statementRecruiterFeeValues, statementRecruiterFeeDateDrafts, statementRecruiterFeeDates, statementRows, statementTeamKey]);
 
   const handleStatementRecruiterFeeDraftChange = useCallback((storageKey: string, value: string) => {
     setStatementRecruiterFeeDrafts((prev) => ({
@@ -2219,6 +2229,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     setSavingStatementRecruiterFees(true);
     try {
       const nextValues = { ...statementRecruiterFeeValues };
+      const nextDates = { ...statementRecruiterFeeDates };
       const feesToSave: DailyAdvanceStatementRecruiterFee[] = [];
       const dirtyKeySet = new Set(statementRecruiterFeeDirtyKeys);
 
@@ -2232,6 +2243,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
           : parseMoneyInput(draftValue);
 
         nextValues[storageKey] = Math.max(0, nextValue);
+        nextDates[storageKey] = normalizeStatementRecruiterFeeDates(month, statementRecruiterFeeDateDrafts[storageKey] ?? statementRecruiterFeeDates[storageKey]);
 
         feesToSave.push({
           key: storageKey,
@@ -2239,6 +2251,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
           teamKey: statementTeamKey,
           workerId: row.workerId,
           amount: nextValue,
+          chargeDates: nextDates[storageKey],
         });
       });
 
@@ -2255,6 +2268,12 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
         );
       }
       setStatementRecruiterFeeValues(nextValues);
+      setStatementRecruiterFeeDates(nextDates);
+      setStatementRecruiterFeeDateDrafts(previous => {
+        const next = { ...previous };
+        feesToSave.forEach(fee => { if (fee.key) delete next[fee.key]; });
+        return next;
+      });
       setStatementRecruiterFeeDrafts((prev) => {
         const nextDrafts = { ...prev };
         feesToSave.forEach((fee) => {
@@ -2280,6 +2299,8 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     statementRecruiterFeeDirtyKeys,
     statementRecruiterFeeDrafts,
     statementRecruiterFeeValues,
+    statementRecruiterFeeDates,
+    statementRecruiterFeeDateDrafts,
     statementRows,
     statementTeamKey,
   ]);
@@ -2665,7 +2686,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
               {`${getMonthTitle(month)} ${statementTeamOption?.name || ''} 청구서`.trim()}
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              {statementPreview ? '대납출력부의 일자별 공수·노무금액과 저장된 인력소개비를 포함한 팀 청구서입니다.' : '일보 작업자 단가 기준으로 노무금액을 계산하며, 인력소개비는 이 청구서 화면에서 입력 후 저장합니다.'}
+              {statementPreview ? '대납출력부의 일자별 공수·노무금액과 저장된 인력소개비를 포함한 팀 청구서입니다.' : '일보 작업자 단가 기준으로 노무금액을 계산하며, 인력소개비와 실제 청구한 발생일은 이 화면에서 지정 후 저장합니다.'}
             </div>
             {statementPreview && <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
               <div aria-label="인력소개비 합계"><dt className="text-xs text-slate-600">인력소개비 합계</dt><dd className="font-black text-amber-800">{formatCurrency(statementRows.reduce((sum, row) => sum + row.recruiterFee, 0))}원</dd></div>
@@ -2768,10 +2789,11 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
                 const recruiterFee = recruiterFeeDraft === undefined
                   ? row.recruiterFee
                   : parseMoneyInput(recruiterFeeDraft);
+                const chargeDates = statementPreview ? row.recruiterFeeDates || [] : statementRecruiterFeeDateDrafts[storageKey] ?? row.recruiterFeeDates ?? [];
                 const totalInvoiceAmount = row.selectedAmount + recruiterFee;
 
                 return (
-                  <tr key={row.workerId || row.workerName} className="odd:bg-white even:bg-[#faf8ef]">
+                  <React.Fragment key={row.workerId || row.workerName}><tr className="odd:bg-white even:bg-[#faf8ef]">
                     <td className="border border-[#e3dcc4] px-3 py-2 text-center">{index + 1}</td>
                     <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.workerName}</td>
                     {row.days.map((value, dayIndex) => (
@@ -2793,12 +2815,26 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
                         onChange={(event) => handleStatementRecruiterFeeDraftChange(storageKey, event.target.value)}
                         className="w-full rounded border border-[#d7cfb5] px-2 py-1 text-right outline-none focus:border-[#948A54]"
                         placeholder="0"
+                        aria-label={`${row.workerName} 인력소개비`}
+                        disabled={savingStatementRecruiterFees}
                       />}
+                      {statementPreview ? <div className="mt-1 text-[10px] text-slate-600" title={chargeDates.join(', ')}>{chargeDates.length ? `발생 ${chargeDates.length}일` : recruiterFee > 0 ? '발생일 미지정' : ''}</div>
+                        : <button type="button" aria-label={`${row.workerName} 소개비 발생일 지정`} aria-expanded={feeDateEditorKey === storageKey}
+                          disabled={savingStatementRecruiterFees} className="mt-1 rounded border border-sky-200 bg-sky-50 px-1 py-1 text-xs text-sky-800"
+                          onClick={() => setFeeDateEditorKey(previous => previous === storageKey ? null : storageKey)}>{chargeDates.length ? `발생 ${chargeDates.length}일` : '발생일 지정'}</button>}
                     </td>
                     <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#7a2c2c]">
                       {formatCurrency(totalInvoiceAmount)}
                     </td>
                   </tr>
+                  {!statementPreview && feeDateEditorKey === storageKey && <ResponsiveDetailDialog open
+                    title={`${row.workerName} 소개비 발생일`} description="소개비를 실제 청구한 날짜를 지정합니다."
+                    onOpenChange={open => { if (!open) setFeeDateEditorKey(null); }}>
+                    <StatementRecruiterFeeDates month={month} workerName={row.workerName} dates={chargeDates} disabled={savingStatementRecruiterFees}
+                      onChange={dates => setStatementRecruiterFeeDateDrafts(previous => ({ ...previous, [storageKey]: dates }))} />
+                    <div className="mt-3 text-right"><button type="button" className="rounded bg-sky-600 px-4 py-2 text-sm font-bold text-white" onClick={() => setFeeDateEditorKey(null)}>선택 완료</button></div>
+                  </ResponsiveDetailDialog>}
+                  </React.Fragment>
                 );
               })
             )}

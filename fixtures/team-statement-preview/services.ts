@@ -1,6 +1,7 @@
 // Synthetic data only. The browser harness blocks every nonlocal request.
+import { filterTeamSettlementAccommodationBillings } from '../../src/utils/teamSettlementAccommodationScope';
 import { buildTeamSettlementExpenseEntries } from '../../src/utils/teamSettlementExpenses';
-import { createDailyAdvanceRowResolver, buildDailyAdvanceStatementRows, buildStatementRecruiterFeeValueMap } from '../../src/utils/dailyAdvanceStatement';
+import { createDailyAdvanceRowResolver, buildDailyAdvanceStatementRows, buildStatementRecruiterFeeValueMap, buildStatementRecruiterFeeDateMap } from '../../src/utils/dailyAdvanceStatement';
 import { buildTeamSettlementInvoiceDeduction } from '../../src/utils/teamSettlementInvoice';
 const teams = [
   { id: 'team-a', name: '검증팀 A', companyId: 'company', companyName: '검증회사', type: '시공팀', color: '#2563eb' },
@@ -11,7 +12,8 @@ if (new URLSearchParams(window.location.search).has('many')) {
   for (let index = 0; index < 39; index++) workers.push({ ...workers[0], id: `many-worker-${index}`, name: `가상추가인원 ${index + 1}` });
 }
 const empty = async () => [];
-const fees = (month: string) => workers.map((worker, index) => ({ month, teamKey: worker.teamId, workerId: worker.id, amount: index === 0 ? 120000 : 30000 }));
+const fees = (month: string) => workers.map((worker, index) => ({ month, teamKey: worker.teamId, workerId: worker.id, amount: index === 0 ? 120000 : 30000, chargeDates: [`${month}-01`, `${month}-03`],
+  ...(JSON.parse(localStorage.getItem('synthetic-fee-date-edits') || '{}')[`${month}:${worker.teamId}:${worker.id}`] || {}) }));
 const accommodationDocs = (yearMonth: string) => new URLSearchParams(window.location.search).has('accommodation') ? [{
   id: 'room-bill', yearMonth, teamId: 'team-a', teamName: '검증팀 A', issuedToType: 'team' as const,
   issuedToWorkerId: '', issuedToWorkerName: '', status: 'confirmed' as const,
@@ -20,13 +22,24 @@ const accommodationDocs = (yearMonth: string) => new URLSearchParams(window.loca
     { id: 'utility-a-electricity', label: '검증 101호 전기세', amount: 30000, targetField: 'electricity' as const, sourceType: 'utility_ledger' as const, sourceAccommodationId: 'room-a' },
     { id: 'utility-a-gas', label: '검증 101호 가스비', amount: 20000, targetField: 'gas' as const, sourceType: 'utility_ledger' as const, sourceAccommodationId: 'room-a' },
     { id: 'utility-a-maintenance', label: '검증 101호 관리비', amount: 100000, targetField: 'accommodation' as const, sourceType: 'utility_ledger' as const, sourceAccommodationId: 'room-a' },
+    { id: 'utility-personal-rent', label: '개인 301호 월세', amount: 990000, targetField: 'accommodation' as const, sourceType: 'utility_ledger' as const, sourceAccommodationId: 'room-personal' },
+    { id: 'utility-other-rent', label: '다른팀 401호 월세', amount: 880000, targetField: 'accommodation' as const, sourceType: 'utility_ledger' as const, sourceAccommodationId: 'room-other' },
     { id: 'utility-b-rent', label: '검증 201호 월세', amount: 300000, targetField: 'accommodation' as const, sourceType: 'utility_ledger' as const, sourceAccommodationId: 'room-b' }
   ]
 }] : [];
 export const accommodationService = { getAccommodations: async () => [
+  { id: 'room-personal', name: '개인 301호', address: '검증시 첫길 1' },
+  { id: 'room-other', name: '다른팀 401호', address: '검증시 첫길 1' },
   { id: 'room-a', name: '검증 101호', address: '검증시 첫길 1' },
   { id: 'room-b', name: '검증 201호', address: '검증시 첫길 1' }
 ] };
+export async function getTeamSettlementAccommodationBillings(yearMonth: string) {
+  return filterTeamSettlementAccommodationBillings(accommodationDocs(yearMonth), { teams, rooms: await accommodationService.getAccommodations(), assignments: [], targets: [
+    ...['room-a', 'room-b'].map(accommodationId => ({ id: accommodationId, accommodationId, targetType: 'team' as const, teamId: 'team-a' })),
+    { id: 'personal', accommodationId: 'room-personal', targetType: 'worker', workerId: 'worker-0' },
+    { id: 'other', accommodationId: 'room-other', targetType: 'team', teamId: 'team-b' }
+  ] });
+}
 export const useTeamSettlementAccess = () => ({ loading: false, canWrite: new URLSearchParams(window.location.search).has('edit') });
 export const teamService = { getTeams: async () => teams };
 export const companyService = { getCompaniesByType: async () => [{ id: 'company', name: '검증회사' }] };
@@ -40,6 +53,11 @@ export const dailyReportService = {
 };
 export const dailyAdvanceWorkbookProfileService = { getProfiles: empty };
 export const dailyAdvanceStatementRecruiterFeeService = {
+  saveFees: async (rows: ReturnType<typeof fees>) => {
+    const stored = JSON.parse(localStorage.getItem('synthetic-fee-date-edits') || '{}');
+    rows.forEach(row => { stored[`${row.month}:${row.teamKey}:${row.workerId}`] = row; });
+    localStorage.setItem('synthetic-fee-date-edits', JSON.stringify(stored));
+  },
   getFeesByMonth: async (month: string) => fees(month),
   subscribeFeesByMonth: (month: string, onRows: (rows: ReturnType<typeof fees>) => void) => { onRows(fees(month)); return () => {}; },
 };
@@ -55,7 +73,7 @@ export const teamSettlementService = {
     const invoiceRows = buildDailyAdvanceStatementRows({
       entries: (await dailyReportService.getWorkerRows({ startDate: `${yearMonth}-01` })).map(row => resolver.resolveEntry(row).entry),
       month: yearMonth, teamKey: teamId, lastDay: new Date(Number(yearMonth.slice(0, 4)), Number(yearMonth.slice(-2)), 0).getDate(),
-      recruiterFeeValues: buildStatementRecruiterFeeValueMap(fees(yearMonth))
+      recruiterFeeValues: buildStatementRecruiterFeeValueMap(fees(yearMonth)), recruiterFeeDates: buildStatementRecruiterFeeDateMap(fees(yearMonth))
     });
     const additions = [{ id: 'custom-claim', source: 'auto', origin: 'team_expense_claim', category: '경비 환급(custom_1700000000000_a1b2c3 - 장비 2대)', amount: first ? 50000 : 5000 }];
     if (grouped) {
@@ -71,7 +89,7 @@ export const teamSettlementService = {
       buildTeamSettlementInvoiceDeduction(yearMonth, teamId, invoiceRows),
       { id: 'expense', source: 'manual', origin: 'manual', category: '공제 경비', amount: first ? 50000 : 10000, memo: '당월 경비 정산' },
       ...buildTeamSettlementExpenseEntries({ yearMonth, matchesTeam: id => id === teamId,
-        accommodationDocs: accommodationDocs(yearMonth), vehicleDocs: [], cardDocs: [], teamExpenseClaims: []
+        accommodationDocs: await getTeamSettlementAccommodationBillings(yearMonth), vehicleDocs: [], cardDocs: [], teamExpenseClaims: []
       }).map(entry => entry.item),
     ];
     const deductionAmount = deductions.reduce((sum, row) => sum + row.amount, 0);

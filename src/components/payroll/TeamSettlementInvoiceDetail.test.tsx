@@ -6,8 +6,8 @@ import type { TeamSettlementDeductionItem } from '../../types/teamSettlement';
 
 const item: TeamSettlementDeductionItem = { id: 'invoice', source: 'auto', origin: 'daily_advance_invoice', category: '대납청구비', amount: 880000,
   invoiceDetails: [
-    { workerId: 'a', workerName: '소개 인원 A', manDay: 1.5, claimAmount: 150000, recruiterFee: 120000, invoiceAmount: 270000 },
-    { workerId: 'b', workerName: '소개 인원 B', manDay: 2, claimAmount: 200000, recruiterFee: 60000, invoiceAmount: 260000 },
+    { workerId: 'a', workerName: '소개 인원 A', recruiterFeeDates: ['2026-11-01', '2026-11-03'], manDay: 1.5, claimAmount: 150000, recruiterFee: 120000, invoiceAmount: 270000 },
+    { workerId: 'b', workerName: '소개 인원 B', recruiterFeeDates: ['2026-11-02'], manDay: 2, claimAmount: 200000, recruiterFee: 60000, invoiceAmount: 260000 },
     { workerId: 'c', workerName: '소개비 없는 인원', manDay: 3.5, claimAmount: 350000, recruiterFee: 0, invoiceAmount: 350000 }
   ]
 };
@@ -26,7 +26,10 @@ test('상세를 누르면 해당 항목의 인원별 금액을 표시하고 다�
   const fee = screen.getByRole('button', { name: '인력소개비 상세' });
   fireEvent.click(fee);
   const fees = within(screen.getByRole('table', { name: '인력소개비 인원별 금액' }));
-  expect(fees.getByRole('row', { name: '소개 인원 A 1.5 120,000원' })).toBeVisible();
+  expect(fees.getByRole('columnheader', { name: '발생일수' })).toBeVisible();
+  expect(fees.queryByRole('columnheader', { name: '공수' })).not.toBeInTheDocument();
+  expect(fees.getByRole('row', { name: '소개 인원 A 2일 11/01, 11/03 120,000원' })).toBeVisible();
+  expect(fees.getByRole('row', { name: '합계 3일 지정된 발생일 기준 180,000원' })).toBeVisible();
   expect(fees.queryByText('소개비 없는 인원')).not.toBeInTheDocument();
   expect(fee).toHaveAttribute('aria-expanded', 'true');
   fireEvent.click(screen.getByRole('button', { name: '청구금액 상세' }));
@@ -43,4 +46,10 @@ test('내역이 없거나 소개비가 0원이어도 요약과 전체 합계를 
   rerender(<TeamSettlementInvoiceDetail items={[{ ...item, amount: 350000, invoiceDetails: [item.invoiceDetails![2]] }]} />);
   expect(screen.getByRole('row', { name: /^인력소개비 0명 0원/ })).toBeVisible();
   expect(screen.getByRole('row', { name: /^청구금액 3\.5공수 350,000원/ })).toBeVisible();
+});
+
+test('발생일을 지정하지 않은 과거 소개비는 공수로 추측하지 않는다', () => {
+  render(<TeamSettlementInvoiceDetail items={[{ ...item, invoiceDetails: [{ ...item.invoiceDetails![0], recruiterFeeDates: undefined }] }]} />);
+  fireEvent.click(screen.getByRole('button', { name: '인력소개비 상세' }));
+  expect(within(screen.getByRole('table', { name: '인력소개비 인원별 금액' })).getByRole('row', { name: '소개 인원 A 미지정 발생일 지정 필요 120,000원' })).toBeVisible();
 });

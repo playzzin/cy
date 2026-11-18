@@ -5,6 +5,7 @@ import type { TeamSettlementDeductionItem } from '../types/teamSettlement';
 export function buildTeamSettlementInvoiceDeduction(yearMonth: string, teamId: string, rows: DailyAdvanceStatementRow[]): TeamSettlementDeductionItem {
   const invoiceDetails = rows.map(row => ({
     workerId: row.workerId || row.workerName || 'unknown', workerName: row.workerName || '작업자명 미확인',
+    recruiterFeeDates: row.recruiterFeeDates || [],
     manDay: row.totalManDay, claimAmount: row.selectedAmount, recruiterFee: row.recruiterFee,
     invoiceAmount: row.selectedAmount + row.recruiterFee
   }));

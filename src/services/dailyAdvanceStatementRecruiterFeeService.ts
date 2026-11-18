@@ -11,6 +11,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { normalizeStatementRecruiterFeeDates } from '../utils/statementRecruiterFeeDates';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 
 export interface DailyAdvanceStatementRecruiterFee {
@@ -19,6 +20,7 @@ export interface DailyAdvanceStatementRecruiterFee {
   teamKey: string;
   workerId: string;
   amount: number;
+  chargeDates?: string[];
   updatedAt?: any;
 }
 
@@ -43,6 +45,7 @@ const mapFeeDoc = (
     teamKey,
     workerId,
     amount: typeof data.amount === 'number' ? data.amount : 0,
+    chargeDates: normalizeStatementRecruiterFeeDates(safeMonth, data.chargeDates),
     updatedAt: data.updatedAt,
   };
 };
@@ -99,6 +102,7 @@ export const dailyAdvanceStatementRecruiterFeeService = {
           teamKey,
           workerId,
           amount,
+          ...(fee.chargeDates === undefined ? {} : { chargeDates: normalizeStatementRecruiterFeeDates(month, fee.chargeDates) }),
           updatedAt: Timestamp.now(),
         }),
         { merge: true }

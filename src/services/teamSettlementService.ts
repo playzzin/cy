@@ -6,7 +6,7 @@ import {
   type UpdateSystemConfigVariables
 } from '../services/firestoreCrudCompat';
 import { getTeamScopedRows } from './teamScopedReadService';
-import { accommodationBillingService } from './accommodationBillingService';
+import { getTeamSettlementAccommodationBillings } from './teamSettlementAccommodationService';
 import { cardBillingService } from './cardBillingService';
 import { companyService } from './companyService';
 import { manpowerService } from './manpowerService';
@@ -41,7 +41,7 @@ import { mergeTeamSettlementSales } from '../utils/teamSettlementSalesMerge';
 import { compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
 import { buildTeamSettlementExpenseEntries } from '../utils/teamSettlementExpenses';
 import { buildTeamSettlementInvoiceDeduction } from '../utils/teamSettlementInvoice';
-import { createDailyAdvanceRowResolver, buildDailyAdvanceStatementRows, buildStatementRecruiterFeeValueMap } from '../utils/dailyAdvanceStatement';
+import { createDailyAdvanceRowResolver, buildDailyAdvanceStatementRows, buildStatementRecruiterFeeValueMap, buildStatementRecruiterFeeDateMap } from '../utils/dailyAdvanceStatement';
 import { calculateTeamSettlementOfficeExpense, TEAM_SETTLEMENT_OFFICE_RATES } from '../utils/teamSettlementOfficeExpense';
 
 export type {
@@ -952,7 +952,7 @@ export const teamSettlementService = {
       dailyReportService.getReportsByRange(period.startDate, period.endDate),
       supportRateService.getAllSiteRates(),
       this.getSupportRateOverrides(params.yearMonth),
-      accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: params.yearMonth, strict: true }),
+      getTeamSettlementAccommodationBillings(params.yearMonth),
       vehicleBillingService.getBillingsByMonth(params.yearMonth, { throwOnError: true }),
       cardBillingService.getBillingsByMonth(params.yearMonth),
       teamExpenseLedgerService.getClaimsByMonth(params.yearMonth),
@@ -1470,7 +1470,8 @@ export const teamSettlementService = {
       entries: statementWorkerRows.map(row => statementResolver.resolveEntry(row).entry),
       month: params.yearMonth, teamKey: statementTeamKey,
       lastDay: Number(period.endDate.slice(-2)),
-      recruiterFeeValues: buildStatementRecruiterFeeValueMap(statementRecruiterFees)
+      recruiterFeeValues: buildStatementRecruiterFeeValueMap(statementRecruiterFees),
+      recruiterFeeDates: buildStatementRecruiterFeeDateMap(statementRecruiterFees)
     });
     const invoiceDeduction = buildTeamSettlementInvoiceDeduction(params.yearMonth, params.teamId, statementRows);
 

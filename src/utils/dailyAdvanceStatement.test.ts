@@ -1,4 +1,4 @@
-import { buildDailyAdvanceStatementRows, buildStatementRecruiterFeeValueMap, createDailyAdvanceRowResolver, getReportAmountForEntry } from './dailyAdvanceStatement';
+import { buildDailyAdvanceStatementRows, buildStatementRecruiterFeeValueMap, buildStatementRecruiterFeeDateMap, createDailyAdvanceRowResolver, getReportAmountForEntry } from './dailyAdvanceStatement';
 import { buildTeamSettlementInvoiceDeduction } from './teamSettlementInvoice';
 import { TeamSettlementDeductionItemSchema } from '../types/teamSettlement';
 import type { DailyReportWorkerRow } from '../services/dailyReportService';
@@ -45,4 +45,14 @@ test('청구서의 수정 공수와 단가가 없는 일보의 금액 환산을 
   expect(build([report()], { [key]: '1.5' })[0]).toMatchObject({ totalManDay: 1.5, selectedAmount: 150000 });
   expect(getReportAmountForEntry({ reportUnitPrice: 0, manDay: 2, workerAmount: 180000, claimUnitPrice: 0 }, 1.5)).toBe(135000);
   expect(getReportAmountForEntry({ reportUnitPrice: 0, manDay: 0, workerAmount: 0, claimUnitPrice: 100000 }, 0.5)).toBe(50000);
+});
+
+test('소개비 발생일은 근무공수·근무일수와 무관하게 직접 지정한 날짜만 전달한다', () => {
+  const rows = buildDailyAdvanceStatementRows({ entries: [report({ manDay: 1.5 }), report({ date: '2026-08-02', manDay: 0.5 })].map(row => resolver.resolveEntry(row).entry),
+    month: '2026-08', teamKey: 'current-team', lastDay: 31, recruiterFeeValues: feeValues,
+    recruiterFeeDates: buildStatementRecruiterFeeDateMap([{ month: '2026-08', teamKey: 'current-team', workerId: 'current-worker', amount: 120000,
+      chargeDates: ['2026-08-07', '2026-08-07', '2026-09-01', '2026-08-32'] }]) });
+  const deduction = buildTeamSettlementInvoiceDeduction('2026-08', 'current-team', rows);
+  expect(deduction).toMatchObject({ amount: 320000, invoiceDetails: [{ manDay: 2, recruiterFeeDates: ['2026-08-07'], recruiterFee: 120000 }] });
+  expect(TeamSettlementDeductionItemSchema.parse(deduction).invoiceDetails![0].recruiterFeeDates).toEqual(['2026-08-07']);
 });

@@ -18,7 +18,7 @@ import {
 import { TeamSettlementAccommodationDetail } from '../../components/payroll/TeamSettlementAccommodationDetail';
 import { buildTeamSettlementAccommodationDetail, type AccommodationAddressReference } from '../../utils/teamSettlementAccommodationDetail';
 import { accommodationService } from '../../services/accommodationService';
-import { accommodationBillingService } from '../../services/accommodationBillingService';
+import { getTeamSettlementAccommodationBillings } from '../../services/teamSettlementAccommodationService';
 import { cardBillingService } from '../../services/cardBillingService';
 import { companyService } from '../../services/companyService';
 import { dailyReportService, type DailyReportWorkerRow } from '../../services/dailyReportService';
@@ -936,7 +936,7 @@ export const TeamSettlementPage: React.FC = () => {
       if (!selectedTeamId || !yearMonth) return;
       try {
         const [accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims] = await Promise.all([
-          accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, strict: true }),
+          getTeamSettlementAccommodationBillings(yearMonth),
           vehicleBillingService.getBillingsByMonth(yearMonth, { throwOnError: true }),
           cardBillingService.getBillingsByMonth(yearMonth),
           teamExpenseLedgerService.getClaimsByMonth(yearMonth)

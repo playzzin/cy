@@ -94,6 +94,7 @@ export const TeamSettlementDeductionItemSchema = z.object({
     manDay: NonNegativeNumberSchema,
     claimAmount: NonNegativeNumberSchema,
     recruiterFee: NonNegativeNumberSchema,
+    recruiterFeeDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
     invoiceAmount: NonNegativeNumberSchema
   })).optional(),
   recruiterFeeDetails: z.array(z.object({

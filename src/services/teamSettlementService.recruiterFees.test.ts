@@ -36,7 +36,7 @@ test('청구서 금액만 공제하고 인원별 청구액·소개비를 원본�
   expect(dailyAdvanceStatementRecruiterFeeService.getFeesByMonth).toHaveBeenCalledWith(scope.yearMonth);
   expect(result.additions).toEqual([]);
   expect(result.deductions).toContainEqual(expect.objectContaining({ category: '대납청구비', amount: 220000,
-    invoiceDetails: [{ workerId: 'worker-a', workerName: '가상인력', manDay: 1, claimAmount: 100000, recruiterFee: 120000, invoiceAmount: 220000 }] }));
+    invoiceDetails: [{ workerId: 'worker-a', workerName: '가상인력', recruiterFeeDates: [], manDay: 1, claimAmount: 100000, recruiterFee: 120000, invoiceAmount: 220000 }] }));
   expect(result.sourceSnapshot?.totals).toMatchObject({ deductions: 220000, additions: 0, net: -220000 });
   expect(TeamSettlementDocumentSchema.safeParse(result).success).toBe(true);
 });

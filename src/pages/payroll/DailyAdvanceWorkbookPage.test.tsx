@@ -223,6 +223,32 @@ describe('대납출력부', () => {
     expect(screen.queryByRole('button', { name: /인력소개비 저장/ })).not.toBeInTheDocument();
   });
 
+  it('실제 소개비 청구일만 선택·해제하고 금액을 바꾸지 않아도 날짜를 저장한다', async () => {
+    const alert = jest.spyOn(window, 'alert').mockImplementation(() => {});
+    try {
+      jest.mocked(dailyAdvanceStatementRecruiterFeeService.getFeesByMonth).mockResolvedValue([{ month: fixtureMonth, teamKey: 'team-a', workerId: 'a', amount: 120000, chargeDates: [`${fixtureMonth}-03`] }]);
+      await openDailyTeams();
+      fireEvent.click(screen.getByRole('button', { name: '검증팀 A 선택' }));
+      fireEvent.click(screen.getByRole('button', { name: '청구서' }));
+      fireEvent.click(screen.getByRole('button', { name: '검증가 소개비 발생일 지정' }));
+      const dialog = within(screen.getByRole('dialog', { name: '검증가 소개비 발생일' }));
+      expect(dialog.getByRole('button', { name: `${fixtureMonth}-03 소개비 발생일` })).toHaveAttribute('aria-pressed', 'true');
+      fireEvent.click(dialog.getByRole('button', { name: `${fixtureMonth}-03 소개비 발생일` }));
+      fireEvent.click(dialog.getByRole('button', { name: `${fixtureMonth}-05 소개비 발생일` }));
+      fireEvent.click(dialog.getByRole('button', { name: '선택 완료' }));
+      expect(screen.getByRole('button', { name: '검증가 소개비 발생일 지정' })).toHaveTextContent('발생 1일');
+      fireEvent.click(screen.getByRole('button', { name: '인력소개비 저장 (1)' }));
+      await waitFor(() => expect(dailyAdvanceStatementRecruiterFeeService.saveFees).toHaveBeenCalledWith([
+        expect.objectContaining({ month: fixtureMonth, teamKey: 'team-a', workerId: 'a', amount: 120000, chargeDates: [`${fixtureMonth}-05`] })
+      ]));
+      await waitFor(() => expect(screen.queryByRole('button', { name: '인력소개비 저장 (1)' })).not.toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: '검증팀 B 선택' }));
+      expect(screen.getByRole('button', { name: '검증나 소개비 발생일 지정' })).toHaveTextContent('발생일 지정');
+      fireEvent.click(screen.getByRole('button', { name: '검증팀 A 선택' }));
+      expect(screen.getByRole('button', { name: '검증가 소개비 발생일 지정' })).toHaveTextContent('발생 1일');
+    } finally { alert.mockRestore(); }
+  });
+
   it('팀을 전환해도 소개비 초안이 섞이지 않고 선택한 팀의 소개비만 저장한다', async () => {
     const alert = jest.spyOn(window, 'alert').mockImplementation(() => {});
     try {

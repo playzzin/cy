@@ -1,3 +1,4 @@
+import { normalizeStatementRecruiterFeeDates } from './statementRecruiterFeeDates';
 import type { DailyReportWorkerRow } from '../services/dailyReportService';
 import type { Worker } from '../services/manpowerService';
 import type { Team } from '../services/teamService';
@@ -18,6 +19,9 @@ export const buildStatementRecruiterFeeValueMap = (fees: DailyAdvanceStatementRe
     if (key) result[key] = Math.max(0, statementNumber(fee.amount));
     return result;
   }, {});
+
+export const buildStatementRecruiterFeeDateMap = (fees: DailyAdvanceStatementRecruiterFee[]): Record<string, string[]> =>
+  Object.fromEntries(fees.map(fee => [fee.key || buildStatementRecruiterFeeKey(fee.month, fee.teamKey, fee.workerId), normalizeStatementRecruiterFeeDates(fee.month, fee.chargeDates)]));
 
 export type DailyAdvanceStatementEntry = {
   key: string; workerId: string; workerName: string; teamId: string; teamKey: string; teamName: string;
@@ -76,11 +80,11 @@ export function createDailyAdvanceRowResolver(workers: Worker[], teams: Team[]) 
 
 export type DailyAdvanceStatementRow = {
   workerId: string; workerName: string; idNumber: string; address: string; salaryType: string;
-  days: number[]; totalManDay: number; recruiterFee: number; selectedAmount: number;
+  days: number[]; totalManDay: number; recruiterFee: number; selectedAmount: number; recruiterFeeDates?: string[];
 };
 export function buildDailyAdvanceStatementRows(params: {
   entries: DailyAdvanceStatementEntry[]; month: string; teamKey: string; lastDay: number;
-  recruiterFeeValues: Record<string, number>; manDayDrafts?: Record<string, string>;
+  recruiterFeeValues: Record<string, number>; recruiterFeeDates?: Record<string, string[]>; manDayDrafts?: Record<string, string>;
 }): DailyAdvanceStatementRow[] {
   const rows = new Map<string, DailyAdvanceStatementRow>();
   params.entries.filter(entry => entry.teamKey === params.teamKey && entry.salaryType === '일급제').forEach(entry => {
@@ -88,6 +92,7 @@ export function buildDailyAdvanceStatementRows(params: {
     if (!rows.has(key)) rows.set(key, {
       workerId: entry.workerId, workerName: entry.workerName, idNumber: entry.idNumber || '', address: entry.address || '', salaryType: entry.salaryType,
       days: Array.from({ length: params.lastDay }, () => 0), totalManDay: 0, selectedAmount: 0,
+      recruiterFeeDates: normalizeStatementRecruiterFeeDates(params.month, params.recruiterFeeDates?.[buildStatementRecruiterFeeKey(params.month, params.teamKey, entry.workerId)]),
       recruiterFee: entry.recruiterFee || params.recruiterFeeValues[buildStatementRecruiterFeeKey(params.month, params.teamKey, entry.workerId)] || 0
     });
     const target = rows.get(key)!;
