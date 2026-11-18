@@ -75,6 +75,20 @@
 .team-settlement-page__selectors > section { border: 1px solid var(--settlement-line); border-radius: 8px; box-shadow: none; }
 .team-settlement-page .team-settlement-page__month-picker button[aria-pressed="true"] { background: var(--settlement-accent); border-color: var(--settlement-accent); color: var(--settlement-accent-contrast); }
 .team-settlement-page .team-settlement-page__overview { margin-top: 12px; }
+.team-settlement-page__summary-equation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.team-settlement-page__summary-term { display: flex; min-width: 0; gap: 6px; align-items: stretch; }
+.team-settlement-page__summary-term--adjustments,
+.team-settlement-page__summary-term--final { grid-column: 1 / -1; }
+.team-settlement-page__summary-operator { flex: 0 0 16px; align-self: center; text-align: center; font-size: 22px; font-weight: 800; color: var(--settlement-muted); }
+.team-settlement-page__summary-term--final > .team-settlement-page__summary-operator { color: var(--settlement-accent); }
+.team-settlement-page__summary-amount { font-size: 18px; line-height: 1.3; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (min-width: 1024px) {
+  .team-settlement-page__summary-equation { display: flex; }
+  .team-settlement-page__summary-term { flex: 1; }
+  .team-settlement-page__summary-term--final { flex: 1.2; }
+  .team-settlement-page__summary-amount { font-size: clamp(14px, 1.3vw, 19px); }
+}
+
 .team-settlement-page .team-settlement-page__summary-card,
 .team-settlement-page .team-settlement-page__final-card { min-height: 64px; border: 1px solid var(--settlement-line); border-radius: 7px; box-shadow: none; background: #fff; }
 .team-settlement-page .team-settlement-page__summary-card { background: var(--settlement-accent-soft); border-color: var(--settlement-accent-border); }

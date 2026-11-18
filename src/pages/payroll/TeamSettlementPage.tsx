@@ -3644,35 +3644,37 @@ export const TeamSettlementPage: React.FC = () => {
 
       {doc && (
         <div className="team-settlement-page__overview mt-4 space-y-4">
-          <section className="grid grid-cols-2 gap-2 lg:grid-cols-5" aria-label="정산 요약">
-            <div className="team-settlement-page__final-card col-span-2 flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-md lg:col-span-1">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-black">최종 정산</div>
-                <div className="rounded-full border border-current/30 bg-white/15 px-2 py-0.5 text-[11px] font-black">
-                  {doc.confirmedAt ? '확정' : '미확정'}
+          <section aria-label="정산 요약">
+            <p className="sr-only">매출 − 매입 − 공제 + 추가{totals.prevCarryover !== 0 || totals.deposit !== 0 ? ' + 이월·입금' : ''} = 최종 정산</p>
+            <div className="team-settlement-page__summary-equation">
+              {[
+                { key: 'sales', label: '매출 합계', amount: totals.salesTotal, operator: '' },
+                { key: 'purchases', label: '매입 합계', amount: totals.purchasesTotal, operator: '−' },
+                { key: 'deductions', label: '공제 합계', amount: totals.deductionsTotal, operator: '−' },
+                { key: 'additions', label: '추가 합계', amount: totals.additionsTotal, operator: '+' },
+                ...(totals.prevCarryover !== 0 || totals.deposit !== 0 ? [{ key: 'adjustments', label: '이월·입금', amount: totals.prevCarryover + totals.deposit, operator: '+' }] : [])
+              ].map(term => (
+                <div key={term.key} className={`team-settlement-page__summary-term ${term.key === 'adjustments' ? 'team-settlement-page__summary-term--adjustments' : ''}`}>
+                  {term.operator && <span aria-hidden="true" className="team-settlement-page__summary-operator">{term.operator}</span>}
+                  <div className="team-settlement-page__summary-card flex min-w-0 flex-1 flex-col justify-between rounded-xl border px-3 py-2.5">
+                    <div className="text-xs font-bold text-slate-600">{term.label}</div>
+                    <div className="team-settlement-page__summary-amount mt-1 font-black text-slate-950">{formatCurrency(term.amount)}원</div>
+                    {term.key === 'adjustments' && <div className="mt-1 text-[11px] text-slate-500">이월 {formatCurrency(totals.prevCarryover)}원 · 입금 {formatCurrency(totals.deposit)}원</div>}
+                  </div>
+                </div>
+              ))}
+              <div className="team-settlement-page__summary-term team-settlement-page__summary-term--final">
+                <span aria-hidden="true" className="team-settlement-page__summary-operator">=</span>
+                <div className="team-settlement-page__final-card flex min-w-0 flex-1 flex-col justify-between rounded-xl border px-3 py-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-black">최종 정산</div>
+                    <div className="rounded-full border border-current/30 bg-white/15 px-2 py-0.5 text-[11px] font-black">
+                      {doc.confirmedAt ? '확정' : '미확정'}
+                    </div>
+                  </div>
+                  <div className="team-settlement-page__summary-amount mt-1 font-black">{formatCurrency(totals.net)}원</div>
                 </div>
               </div>
-              <div className="mt-1 truncate text-xl font-black tracking-tight sm:text-2xl">{formatCurrency(totals.net)}원</div>
-            </div>
-
-            <div className="team-settlement-page__summary-card flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-sm">
-              <div className="text-xs font-bold text-slate-600">매출 합계</div>
-              <div className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">{formatCurrency(totals.salesTotal)}원</div>
-            </div>
-
-            <div className="team-settlement-page__summary-card flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-sm">
-              <div className="text-xs font-bold text-slate-600">매입 합계</div>
-              <div className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">{formatCurrency(totals.purchasesTotal)}원</div>
-            </div>
-
-            <div className="team-settlement-page__summary-card flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-sm">
-              <div className="text-xs font-bold text-slate-600">공제 합계</div>
-              <div className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">{formatCurrency(totals.deductionsTotal)}원</div>
-            </div>
-
-            <div className="team-settlement-page__summary-card flex min-h-[76px] flex-col justify-between rounded-xl border px-3 py-2.5 shadow-sm">
-              <div className="text-xs font-bold text-slate-600">추가 합계</div>
-              <div className="mt-1 truncate text-lg font-black text-slate-950 sm:text-xl">{formatCurrency(totals.additionsTotal)}원</div>
             </div>
           </section>
 

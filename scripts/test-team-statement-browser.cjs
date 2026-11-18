@@ -82,6 +82,8 @@ async function build() {
       assert.doesNotMatch(await purchases.innerText(), /급여|인력소개비|대납청구서/);
       assert.equal(await page.getByLabel('매입 - 200,000원 (1공수)', { exact: true }).isVisible(), true);
       const summary = page.getByRole('region', { name: '정산 요약' });
+      await summary.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(output, `settlement-equation-${width}.png`) });
       assert.equal(await summary.getByText('270,000원', { exact: true }).isVisible(), true);
       assert.equal(await summary.getByText('610,000원', { exact: true }).isVisible(), true);
       const invoiceSummary = deductions.getByRole('table', { name: '대납청구비 요약' });
