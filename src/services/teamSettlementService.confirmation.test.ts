@@ -21,6 +21,10 @@ jest.mock('../config/firebase', () => ({
   storage: {}
 }));
 
+jest.mock('./dailyAdvanceStatementRecruiterFeeService', () => ({
+  dailyAdvanceStatementRecruiterFeeService: { getFeesByMonth: async () => [] }
+}));
+
 jest.mock('../utils/swal', () => ({
   toast: {
     error: jest.fn(),

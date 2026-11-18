@@ -10,6 +10,7 @@ import { accommodationBillingService } from './accommodationBillingService';
 import { cardBillingService } from './cardBillingService';
 import { companyService } from './companyService';
 import { dailyReportService } from './dailyReportService';
+import { dailyAdvanceStatementRecruiterFeeService } from './dailyAdvanceStatementRecruiterFeeService';
 import { siteService, type Site } from './siteService';
 import { supportRateService } from './supportRateService';
 import { teamExpenseLedgerService } from './teamExpenseLedgerService';
@@ -38,6 +39,7 @@ import { prepareTeamSettlementManualSales, unlockTeamSettlementManualSales } fro
 import { mergeTeamSettlementSales } from '../utils/teamSettlementSalesMerge';
 import { compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
 import { buildTeamSettlementExpenseEntries } from '../utils/teamSettlementExpenses';
+import { buildTeamSettlementRecruiterFeeDeductions } from '../utils/teamSettlementRecruiterFees';
 import { calculateTeamSettlementOfficeExpense, TEAM_SETTLEMENT_OFFICE_RATES } from '../utils/teamSettlementOfficeExpense';
 
 export type {
@@ -936,7 +938,8 @@ export const teamSettlementService = {
       accommodationDocs,
       vehicleDocs,
       cardDocs,
-      teamExpenseClaims
+      teamExpenseClaims,
+      statementRecruiterFees
     ] = await Promise.all([
       siteService.getSites(),
       teamService.getTeams(),
@@ -948,7 +951,8 @@ export const teamSettlementService = {
       accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: params.yearMonth, strict: true }),
       vehicleBillingService.getBillingsByMonth(params.yearMonth, { throwOnError: true }),
       cardBillingService.getBillingsByMonth(params.yearMonth),
-      teamExpenseLedgerService.getClaimsByMonth(params.yearMonth)
+      teamExpenseLedgerService.getClaimsByMonth(params.yearMonth),
+      dailyAdvanceStatementRecruiterFeeService.getFeesByMonth(params.yearMonth)
     ]);
 
     const matchesTeam = (value: unknown): boolean => {
@@ -1532,6 +1536,11 @@ export const teamSettlementService = {
       ...(dailyWageDeduction ? [dailyWageDeduction] : []),
       ...(monthlyWageDeduction ? [monthlyWageDeduction] : []),
       ...(serviceTeamDeduction ? [serviceTeamDeduction] : []),
+      ...buildTeamSettlementRecruiterFeeDeductions({
+        ...params,
+        fees: statementRecruiterFees,
+        workerNames: new Map(workerRows.filter(row => row.workerId && row.workerName).map(row => [String(row.workerId).trim(), String(row.workerName).trim()]))
+      }),
       ...expenseEntries.filter(entry => entry.direction === 'deduction').map(entry => entry.item as TeamSettlementDeductionItem)
     ];
     const additions = expenseEntries.filter(entry => entry.direction === 'addition').map(entry => entry.item as TeamSettlementAdditionItem);

@@ -21,7 +21,7 @@ jest.mock('../../services/dailyAdvanceWorkbookProfileService', () => ({
 }));
 jest.mock('../../services/dailyAdvanceStatementRecruiterFeeService', () => ({
   dailyAdvanceStatementRecruiterFeeService: {
-    getFeesByMonth: async () => [],
+    getFeesByMonth: jest.fn(),
     subscribeFeesByMonth: () => () => {},
     saveFees: jest.fn().mockResolvedValue(undefined),
   },
@@ -78,6 +78,7 @@ const openDailyTeams = async () => {
 describe('대납출력부', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(dailyAdvanceStatementRecruiterFeeService.getFeesByMonth).mockResolvedValue([]);
     window.localStorage.clear();
     (teamSettlementService.getTeamDisplayOrder as jest.Mock).mockResolvedValue([]);
     (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue(fixtureRows);
@@ -91,6 +92,42 @@ describe('대납출력부', () => {
       { id: 'team-b', name: '검증팀 B', type: '용역' },
       { id: 'team-daily', name: '일급팀' },
     ]);
+  });
+
+  it('팀청구 미리보기는 지정한 월·팀의 대납출력부 청구서를 만들고 소개비를 별도로 보여주며 청구액에 포함한다', async () => {
+    jest.mocked(dailyAdvanceStatementRecruiterFeeService.getFeesByMonth).mockResolvedValue([
+      { month: fixtureMonth, teamKey: 'team-daily', workerId: 'daily', amount: 120000 },
+      { month: fixtureMonth, teamKey: 'team-a', workerId: 'a', amount: 999000 },
+    ]);
+    (dailyReportService.getWorkerRows as jest.Mock).mockImplementation(async (params?: { startDate?: string }) => {
+      if (params?.startDate !== '2026-02-01') throw new Error('선택 월 밖의 근무 이력 조회 실패');
+      return fixtureRows;
+    });
+    render(<DailyAdvanceWorkbookPage statementContext={{ month: fixtureMonth, teamId: 'team-daily', teamName: '일급팀' }} />);
+    const row = await screen.findByRole('row', { name: /^1 일급검증/ });
+    const cells = within(row).getAllByRole('cell');
+    expect(cells[cells.length - 2]).toHaveTextContent('120,000');
+    expect(cells[cells.length - 1]).toHaveTextContent('1,020,000');
+    expect(screen.getByLabelText('인력소개비 합계')).toHaveTextContent('120,000원');
+    expect(screen.getByLabelText('청구금액 합계')).toHaveTextContent('1,020,000원');
+    expect(screen.getByText('2026년 2월 일급팀 청구서')).toBeVisible();
+    expect(screen.queryByText('검증가')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /인력소개비 저장/ })).not.toBeInTheDocument();
+    expect(dailyAdvanceStatementRecruiterFeeService.saveFees).not.toHaveBeenCalled();
+    expect(dailyReportService.getWorkerRows).toHaveBeenCalledWith({ startDate: '2026-02-01', endDate: '2026-02-28' });
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+    const workbook = (XLSX.writeFile as jest.Mock).mock.calls[0][0] as XLSX.WorkBook;
+    const exported = XLSX.utils.sheet_to_json(workbook.Sheets['청구서'], { header: 1 });
+    expect(JSON.stringify(exported)).toContain('120000');
+    expect(JSON.stringify(exported)).toContain('1020000');
+  });
+
+  it('대납출력부에 내역이 없는 팀도 지정한 팀의 빈 청구서를 보여주고 다른 팀으로 바꾸지 않는다', async () => {
+    render(<DailyAdvanceWorkbookPage statementContext={{ month: fixtureMonth, teamId: 'empty-team', teamName: '자료없는 팀' }} />);
+    expect(await screen.findByText('2026년 2월 자료없는 팀 청구서')).toBeVisible();
+    expect(screen.getByText('청구서로 만들 데이터가 없습니다.')).toBeVisible();
+    expect(screen.queryByText('일급검증')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('인력소개비 합계')).toHaveTextContent('0원');
   });
 
   it('같은 날 여러 일보와 소수 공수를 합산하고 일급제는 제외하며 선택한 팀만 집계한다', async () => {

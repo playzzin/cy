@@ -6,6 +6,7 @@ import CompanyTeamSelector, { readCompanyTeamOrder } from '../../components/comm
 import { applySupportTeamOrder } from '../../utils/supportTeamOrder';
 import { calculateTeamSettlementOfficeExpense, LEGACY_TEAM_SETTLEMENT_OFFICE_RATES } from '../../utils/teamSettlementOfficeExpense';
 import { TeamSettlementOfficeExpenseDetail } from '../../components/payroll/TeamSettlementOfficeExpenseDetail';
+import TeamWorkbookStatementDialog from '../../components/payroll/TeamWorkbookStatementDialog';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import {
   TeamSettlementWorkspaceHeader,
@@ -17,6 +18,7 @@ import { companyService } from '../../services/companyService';
 import { dailyReportService, type DailyReportWorkerRow } from '../../services/dailyReportService';
 import { laborExchangeService, type LaborExchangeItem, type TeamExchangeSummary } from '../../services/laborExchangeService';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
+import { teamExpenseCategoryService } from '../../services/teamExpenseCategoryService';
 import { teamService, type Team } from '../../services/teamService';
 import { teamSettlementService, type TeamSettlementSupportDetailRow } from '../../services/teamSettlementService';
 import { vehicleBillingService } from '../../services/vehicleBillingService';
@@ -37,6 +39,7 @@ import {
 } from '../../utils/teamSettlementTransactionSummary';
 import { DEFAULT_SUPPORT_UNIT_PRICE } from '../../utils/teamSettlementSupportRateOverrides';
 import { formatTeamSettlementMemo } from '../../utils/teamSettlementMemo';
+import { formatTeamSettlementCategory } from '../../utils/teamSettlementLabels';
 import { buildTeamSettlementExpenseEntries, compareTeamSettlementExpenses, getTeamSettlementExpenseDetail } from '../../utils/teamSettlementExpenses';
 import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
 import type { CardBillingDocument } from '../../types/cardBilling';
@@ -357,6 +360,7 @@ const formatPurchaseOrigin = (origin: TeamSettlementPurchaseItem['origin']): str
 
 const formatAdditionOrigin = (origin: TeamSettlementAdditionItem['origin']): string => {
   if (origin === 'team_expense_claim') return '경비';
+  if (origin === 'daily_advance_recruiter_fee') return '청구서';
   if (origin === 'manual') return '수기';
   return '수기';
 };
@@ -364,7 +368,7 @@ const formatAdditionOrigin = (origin: TeamSettlementAdditionItem['origin']): str
 const formatDeductionOrigin = (origin: TeamSettlementDeductionItem['origin']): string => {
   if (origin === 'team_expense_claim') return '경비';
   if (origin === 'office_expense') return '사무실비';
-  if (origin === 'daily_wage_payroll' || origin === 'monthly_wage_payroll' || origin === 'service_team_payroll') return '급여';
+  if (origin === 'daily_wage_payroll' || origin === 'monthly_wage_payroll' || origin === 'service_team_payroll' || origin === 'daily_advance_recruiter_fee') return '급여';
   if (origin === 'accommodation_billing') return '숙소';
   if (origin === 'vehicle_billing') return '차량';
   if (origin === 'card_billing') return '카드';
@@ -395,7 +399,8 @@ type DeductionDisplayItem = TeamSettlementDeductionItem & {
 const PAYROLL_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
   monthly_wage_payroll: 1,
   daily_wage_payroll: 2,
-  service_team_payroll: 3
+  service_team_payroll: 3,
+  daily_advance_recruiter_fee: 4
 };
 
 const isPayrollItem = (item: TeamSettlementDeductionItem): boolean => (
@@ -508,7 +513,7 @@ const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
     key: 'payroll',
     title: '급여',
     description: '월급제·일급제·용역팀 급여 매입',
-    origins: ['monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll'],
+    origins: ['monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'],
     showWhenEmpty: true
   },
   {
@@ -655,6 +660,16 @@ export const TeamSettlementPage: React.FC = () => {
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
   const [yearMonth, setYearMonth] = useState<string>(buildDefaultYearMonth());
   const [doc, setDoc] = useState<TeamSettlementDocument | null>(null);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [expenseCategoryLabels, setExpenseCategoryLabels] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    teamExpenseCategoryService.getCategories({ includeInactive: true })
+      .then(rows => { if (!cancelled) setExpenseCategoryLabels(new Map(rows.map(row => [row.id, row.label]))); })
+      .catch(() => { /* Known internal codes fall back to 기타 without changing saved data. */ });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => { setInvoiceOpen(false); }, [selectedTeamId, yearMonth]);
   const transactionMemoRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const textarea = transactionMemoRef.current;
@@ -968,6 +983,8 @@ export const TeamSettlementPage: React.FC = () => {
   );
 
   const selectedTeamName = selectedTeam?.name ?? '';
+  const canPreviewInvoice = Boolean(doc && loadState.status === 'idle'
+    && doc.yearMonth === yearMonth && doc.teamId === selectedTeamId);
   const teamSettlementAccentStyle = useMemo(
     () => getTeamSettlementAccentStyle(selectedTeam?.color),
     [selectedTeam?.color]
@@ -1878,6 +1895,7 @@ export const TeamSettlementPage: React.FC = () => {
     (item: DeductionDisplayItem):
       | ({ kind: 'office_expense'; savedAmount: number } & ReturnType<typeof calculateTeamSettlementOfficeExpense>)
       | { kind: 'payroll'; rows: Array<{ workerId: string; workerName: string; manDay: number; amount: number }>; totalManDay: number; totalAmount: number }
+      | { kind: 'recruiter_fee'; rows: NonNullable<TeamSettlementDeductionItem['recruiterFeeDetails']>; totalAmount: number }
       | {
         kind: 'accommodation_billing';
         mode: 'document' | 'ledger';
@@ -1952,6 +1970,10 @@ export const TeamSettlementPage: React.FC = () => {
           memo: item.officeExpenseKind ? `${item.officeExpenseKind} ${item.memo}` : detail.memo,
           savedAmount: item.amount
         };
+      }
+
+      if (item.origin === 'daily_advance_recruiter_fee') {
+        return { kind: 'recruiter_fee', rows: item.recruiterFeeDetails ?? [], totalAmount: item.amount };
       }
 
       if (
@@ -2778,7 +2800,23 @@ export const TeamSettlementPage: React.FC = () => {
             <tr className={summaryRowClassName}>
               <td className="px-3 py-3 border" colSpan={detailColSpan}>
                 <div className="rounded-lg border bg-white p-3">
-                  <div className="text-sm font-semibold text-slate-800">{lineIsSupportOrigin ? '인력교류 상세' : '출력 상세'}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-slate-800">{lineIsSupportOrigin ? '인력교류 상세' : '출력 상세'}</div>
+                    {line.direction === 'sales' && line.source === 'manual' && (
+                      <button
+                        type="button"
+                        aria-label="수기 매출 삭제"
+                        className="rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!editableManual}
+                        onClick={() => updateDoc(prev => ({
+                          ...prev,
+                          sales: prev.sales.filter(item => item.id !== line.id || item.source !== 'manual')
+                        }))}
+                      >
+                        삭제
+                      </button>
+                    )}
+                  </div>
                   <div className="text-sm text-slate-500 mt-1">
                     {detail.length > 0
                       ? `총 ${detail.length}건 / ${siteSummaries.length}개 현장`
@@ -2998,7 +3036,18 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
           )}
         </div>
-        <div className="text-right">
+        <div className="flex items-center gap-2 text-right">
+          {group.key === 'payroll' && (
+            <button
+              type="button"
+              onClick={() => setInvoiceOpen(true)}
+              disabled={!canPreviewInvoice}
+              className={`team-settlement-page__statement-button ${primaryButtonClassName}`}
+              title="대납출력부에서 현재 팀과 월의 청구서를 만듭니다"
+            >
+              대납청구서 보기
+            </button>
+          )}
           <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
         </div>
       </div>
@@ -3037,6 +3086,7 @@ export const TeamSettlementPage: React.FC = () => {
             item.origin === 'daily_wage_payroll' ||
             item.origin === 'monthly_wage_payroll' ||
             item.origin === 'service_team_payroll' ||
+            item.origin === 'daily_advance_recruiter_fee' ||
             item.origin === 'team_expense_claim' ||
             item.origin === 'accommodation_billing' ||
             item.origin === 'vehicle_billing' ||
@@ -3053,7 +3103,7 @@ export const TeamSettlementPage: React.FC = () => {
               <td data-label="항목" className="px-2 py-2 border">
                 <input aria-label="항목"
                   className="team-settlement-page__readonly-input w-full border rounded px-2 py-1"
-                  value={item.category}
+                  value={formatTeamSettlementCategory(item, expenseCategoryLabels)}
                   disabled={!editableRow}
                   onChange={(e) => {
                     const next = e.target.value;
@@ -3063,7 +3113,7 @@ export const TeamSettlementPage: React.FC = () => {
                     }));
                   }}
                 />
-                {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.category) || '—'}</span>}
+                {(!editableRow) && <span className="team-settlement-page__readonly-value">{formatTeamSettlementCategory(item, expenseCategoryLabels) || '—'}</span>}
               </td>
               <td data-label="금액" className="px-2 py-2 border text-right">
                 <CurrencyInput aria-label="금액"
@@ -3129,6 +3179,24 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className={`rounded-lg border bg-white p-3 ${group.key === 'expense' ? 'team-settlement-page__expense-expanded-detail' : ''}`}>
                     {detail.kind === 'office_expense' && (
                       <TeamSettlementOfficeExpenseDetail detail={detail} />
+                    )}
+
+                    {detail.kind === 'recruiter_fee' && (
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">인력소개비 상세</div>
+                        <p className="mt-1 text-xs text-slate-500">청구서에 저장한 작업자별 소개비를 급여에 합산해 차감합니다.</p>
+                        <table aria-label="인력소개비 상세 내역" className="mt-3 w-full text-xs border-collapse">
+                          <thead><tr className="bg-slate-50 text-slate-600">
+                            <th scope="col" className="border px-2 py-2 text-left">작업자</th>
+                            <th scope="col" className="border px-2 py-2 text-right">인력소개비</th>
+                          </tr></thead>
+                          <tbody>{detail.rows.length ? detail.rows.map(row => <tr key={row.workerId}>
+                            <td data-label="작업자" className="border px-2 py-2">{row.workerName}</td>
+                            <td data-label="인력소개비" className="border px-2 py-2 text-right">{formatCurrency(row.amount)}원</td>
+                          </tr>) : <tr><td colSpan={2} className="border px-2 py-3 text-slate-500">저장된 상세내역이 없습니다. 재집계하면 작업자별 소개비가 반영됩니다.</td></tr>}</tbody>
+                          <tfoot><tr className="font-bold"><th scope="row" className="border px-2 py-2 text-left">소개비 합계</th><td className="border px-2 py-2 text-right">{formatCurrency(detail.totalAmount)}원</td></tr></tfoot>
+                        </table>
+                      </div>
                     )}
 
                     {detail.kind === 'payroll' && (
@@ -3885,7 +3953,7 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="team-settlement-page__transaction-section-title text-sm font-semibold text-slate-700">도급/직영</div>
                     <button type="button" className={addButtonClassName} onClick={() => handleAddManualSale('직영')} disabled={!canEdit}>
-                      + 수기 직영 매출
+                      + 수기 도급/직영 매출
                     </button>
                   </div>
                   <p className="mt-1 text-xs text-slate-500">공수만 자동집계하며, 금액은 직접 입력합니다.</p>
@@ -4080,15 +4148,17 @@ export const TeamSettlementPage: React.FC = () => {
               {deductionGroups.filter(group => group.key !== 'payroll').map(renderAdjustmentGroup)}
             </div>
 
-            <div id="settlement-additions" className="mt-6 scroll-mt-36">
+            <div id="settlement-additions" role="region" aria-label="추가 내역" className="mt-6 scroll-mt-36">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">03</span>추가</h2>
                   <div className="text-xs text-slate-500 mt-0.5">공제와 반대로 (+) 더해지는 항목</div>
                 </div>
-                <button type="button" className={addButtonClassName} onClick={handleAddManualAddition} disabled={!canEdit}>
-                  + 수기 추가
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className={addButtonClassName} onClick={handleAddManualAddition} disabled={!canEdit}>
+                    + 수기 추가
+                  </button>
+                </div>
               </div>
 
               <div className="mt-3 overflow-auto">
@@ -4113,7 +4183,7 @@ export const TeamSettlementPage: React.FC = () => {
                           <td data-label="항목" className="px-2 py-2 border">
                             <input aria-label="항목"
                               className="team-settlement-page__readonly-input w-full border rounded px-2 py-1"
-                              value={item.category}
+                              value={formatTeamSettlementCategory(item, expenseCategoryLabels)}
                               disabled={!editableRow}
                               onChange={(e) => {
                                 const next = e.target.value;
@@ -4123,7 +4193,7 @@ export const TeamSettlementPage: React.FC = () => {
                                 }));
                               }}
                             />
-                            {(!editableRow) && <span className="team-settlement-page__readonly-value">{(item.category) || '—'}</span>}
+                            {(!editableRow) && <span className="team-settlement-page__readonly-value">{formatTeamSettlementCategory(item, expenseCategoryLabels) || '—'}</span>}
                           </td>
                           <td data-label="금액" className="px-2 py-2 border text-right">
                             <CurrencyInput aria-label="금액"
@@ -4163,11 +4233,7 @@ export const TeamSettlementPage: React.FC = () => {
                                 onClick={() => {
                                   Swal.fire({
                                     title: '추가 상세',
-                                    html: `<div style="text-align:left; font-size:12px;">
-                                      <div><b>항목</b>: ${String(item.category ?? '')}</div>
-                                      <div style="margin-top:4px;"><b>금액</b>: ${formatCurrency(safeNumber(item.amount))}원</div>
-                                      <div style="margin-top:4px;"><b>비고</b>: ${String(item.memo ?? '') || '-'}</div>
-                                    </div>`,
+                                    text: `항목: ${formatTeamSettlementCategory(item, expenseCategoryLabels)}\n금액: ${formatCurrency(safeNumber(item.amount))}원\n비고: ${String(item.memo ?? '') || '-'}`,
                                     confirmButtonText: '닫기'
                                   });
                                 }}
@@ -4308,6 +4374,10 @@ export const TeamSettlementPage: React.FC = () => {
           </section>
         </div>
       )}
+      {invoiceOpen && canPreviewInvoice && doc && <TeamWorkbookStatementDialog
+        context={{ month: yearMonth, teamId: selectedTeamId, teamName: selectedTeamName || doc.teamName, companyName: selectedTeam?.companyName }}
+        onClose={() => setInvoiceOpen(false)}
+      />}
     </div>
   );
 };

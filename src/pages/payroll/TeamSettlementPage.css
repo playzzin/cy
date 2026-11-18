@@ -43,6 +43,7 @@
 }
 .team-settlement-page .team-settlement-page__workspace-actions { gap: 6px; }
 .team-settlement-page .team-settlement-page__workspace-actions button,
+.team-settlement-page .team-settlement-page__statement-button,
 .team-settlement-page .team-settlement-page__add-button {
   min-height: 32px;
   padding: 6px 10px;
@@ -55,6 +56,7 @@
   white-space: nowrap;
 }
 .team-settlement-page .team-settlement-page__workspace-actions button:hover:enabled,
+.team-settlement-page .team-settlement-page__statement-button:hover:enabled,
 .team-settlement-page .team-settlement-page__add-button:hover:enabled { background: var(--settlement-accent-hover); }
 .team-settlement-page .team-settlement-page__workspace-actions .team-settlement-page__refresh { background: #fff; color: var(--settlement-accent-dark); border-color: var(--settlement-accent-border); }
 .team-settlement-page .team-settlement-page__workspace-actions .team-settlement-page__refresh:hover:enabled { background: var(--settlement-accent-soft); }

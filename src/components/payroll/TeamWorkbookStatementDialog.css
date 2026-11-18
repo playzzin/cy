@@ -1,0 +1,15 @@
+.cy-detail-dialog.team-workbook-statement-dialog {
+  inset: 0 0 0 auto;
+  transform: none;
+  width: calc(100vw - 24px);
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 16px 0 0 16px;
+}
+.team-workbook-statement-dialog .cy-detail-dialog__body { flex: 1; background: #fbf8ee; padding: 12px; }
+.team-workbook-statement-dialog .team-workbook-statement-table { font-size: clamp(10px, .85vw, 13px); }
+.team-workbook-statement-dialog .team-workbook-statement-table :is(th, td) { padding-left: 2px; padding-right: 2px; }
+@media (max-width: 640px) {
+  .cy-detail-dialog.team-workbook-statement-dialog { width: 100%; border-radius: 0; }
+  .team-workbook-statement-dialog .cy-detail-dialog__body { padding: 10px; }
+}

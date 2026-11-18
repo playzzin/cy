@@ -1175,12 +1175,15 @@ const buildTeamOptionsFromEntries = (sourceEntries: WorkbookEntry[], teams: Team
   return Array.from(optionMap.values()).sort((left, right) => left.name.localeCompare(right.name, 'ko'));
 };
 
-const DailyAdvanceWorkbookPage: React.FC = () => {
-  const currentMonth = getCurrentMonth();
+export type DailyAdvanceStatementContext = { month: string; teamId: string; teamName: string; companyName?: string };
+
+const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatementContext }> = ({ statementContext }) => {
+  const statementPreview = Boolean(statementContext);
+  const currentMonth = statementContext?.month || getCurrentMonth();
   const [month, setMonth] = useState(currentMonth);
   const [selectedDate, setSelectedDate] = useState(monthToPeriod(currentMonth).endDate);
-  const [selectedTeamKey, setSelectedTeamKey] = useState('ALL');
-  const [activeTab, setActiveTab] = useState<WorkbookTabKey>('workers');
+  const [selectedTeamKey, setSelectedTeamKey] = useState(statementContext?.teamId || 'ALL');
+  const [activeTab, setActiveTab] = useState<WorkbookTabKey>(statementPreview ? 'statement' : 'workers');
   const [manDayDrafts, setManDayDrafts] = useState<Record<string, string>>({});
   const [statementRecruiterFeeValues, setStatementRecruiterFeeValues] = useState<Record<string, number>>({});
   const [statementRecruiterFeeDrafts, setStatementRecruiterFeeDrafts] = useState<Record<string, string>>({});
@@ -1198,7 +1201,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const copyInFlightRef = useRef(false);
   const activeTabCaptureRef = useRef<HTMLDivElement | null>(null);
   const [isGoyunjungMode, setIsGoyunjungMode] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
+    if (statementPreview || typeof window === 'undefined') return false;
     return window.localStorage.getItem(GOYUNJUNG_MODE_STORAGE_KEY) === 'true';
   });
   const goyunjungImagePathsRef = useRef<string[]>([]);
@@ -1208,7 +1211,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const goyunjungCurrentPathRef = useRef('');
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (statementPreview || typeof window === 'undefined') return;
 
     try {
       const raw = window.localStorage.getItem(DAILY_ADVANCE_STATEMENT_RECRUITER_FEE_STORAGE_KEY);
@@ -1225,7 +1228,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     } catch (error) {
       console.warn('Failed to load statement recruiter fees:', error);
     }
-  }, []);
+  }, [statementPreview]);
 
   useEffect(() => {
     if (!selectedDate.startsWith(month)) {
@@ -1394,7 +1397,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         .getFeesByMonth(month)
         .catch((error) => {
           console.warn('Failed to load statement recruiter fees:', error);
-          warnings.push('청구서 인력소개비 저장값을 불러오지 못해 이 브라우저의 기존 저장값만 표시했습니다.');
+          warnings.push(statementPreview ? '청구서 인력소개비 저장값을 불러오지 못했습니다.' : '청구서 인력소개비 저장값을 불러오지 못해 이 브라우저의 기존 저장값만 표시했습니다.');
           return [] as DailyAdvanceStatementRecruiterFee[];
         });
 
@@ -1408,7 +1411,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
       const nextStatementRecruiterFeeValues =
         buildStatementRecruiterFeeValueMap(statementRecruiterFeeRows);
-      const legacyStatementRecruiterFeeValues = readLegacyStatementRecruiterFeeValues();
+      const legacyStatementRecruiterFeeValues = statementPreview ? {} : readLegacyStatementRecruiterFeeValues();
       const legacyFeesToMigrate: DailyAdvanceStatementRecruiterFee[] = [];
       Object.entries(legacyStatementRecruiterFeeValues).forEach(([key, amount]) => {
         if (!key.startsWith(`${month}__`) || amount <= 0 || nextStatementRecruiterFeeValues[key] !== undefined) return;
@@ -1472,7 +1475,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         if (stableId) serviceWorkerStableIds.add(stableId);
       });
 
-      if (serviceWorkerStableIds.size > 0) {
+      if (!statementPreview && serviceWorkerStableIds.size > 0) {
         try {
           // 2. 전체 히스토리를 가져옴 (조회 월 말일까지)
           // startDate를 넣지 않으면 서비스가 endDate 하루만 조회하므로 누적 근무일 계산이 깨진다.
@@ -1628,7 +1631,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [month]);
+  }, [month, statementPreview]);
 
   useEffect(() => {
     setManDayDrafts((prev) => {
@@ -1713,7 +1716,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   }, []);
 
   // 청구서와 다른 시트가 항상 같은 팀 선택을 사용한다.
-  const statementTeamKey = statementTeamOptions.some((option) => option.key === selectedTeamKey)
+  const statementTeamKey = statementContext
+    ? String(teams.find(team => team.id === statementContext.teamId || team.legacyId === statementContext.teamId)?.id || statementContext.teamId)
+    : statementTeamOptions.some((option) => option.key === selectedTeamKey)
     ? selectedTeamKey
     : '';
 
@@ -1885,8 +1890,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   }, [filteredEntries, manDayDrafts]);
 
   const statementTeamOption = useMemo(
-    () => statementTeamOptions.find((option) => option.key === statementTeamKey) || null,
-    [statementTeamKey, statementTeamOptions]
+    () => statementTeamOptions.find((option) => option.key === statementTeamKey) || (statementContext ? {
+      key: statementTeamKey,
+      name: statementContext.teamName,
+      team: teams.find(team => team.id === statementTeamKey) || null,
+      isServiceTeam: false,
+    } : null),
+    [statementTeamKey, statementTeamOptions, statementContext, teams]
   );
 
   const getStatementAmount = useCallback(
@@ -1908,6 +1918,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     () => Array.from({ length: statementLastDay }, (_, index) => index + 1),
     [statementLastDay]
   );
+  const statementDayColumnStyle: React.CSSProperties = statementPreview
+    ? { width: `${60 / statementLastDay}%` }
+    : DAILY_ADVANCE_DAY_COLUMN_STYLE;
 
   const statementRows = useMemo(() => {
     const rowMap = new Map<
@@ -2764,19 +2777,23 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               {`${getMonthTitle(month)} ${statementTeamOption?.name || ''} 청구서`.trim()}
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              일보 작업자 단가 기준으로 노무금액을 계산하며, 인력소개비는 이 청구서 화면에서 입력 후 저장합니다.
+              {statementPreview ? '대납출력부의 일자별 공수·노무금액과 저장된 인력소개비를 포함한 팀 청구서입니다.' : '일보 작업자 단가 기준으로 노무금액을 계산하며, 인력소개비는 이 청구서 화면에서 입력 후 저장합니다.'}
             </div>
+            {statementPreview && <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+              <div aria-label="인력소개비 합계"><dt className="text-xs text-slate-600">인력소개비 합계</dt><dd className="font-black text-amber-800">{formatCurrency(statementRows.reduce((sum, row) => sum + row.recruiterFee, 0))}원</dd></div>
+              <div aria-label="청구금액 합계"><dt className="text-xs text-slate-600">청구금액 합계 (소개비 포함)</dt><dd className="font-black text-[#7a2c2c]">{formatCurrency(statementRows.reduce((sum, row) => sum + row.selectedAmount + row.recruiterFee, 0))}원</dd></div>
+            </dl>}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg border border-[#d5ccb0] bg-white px-3 py-3 shadow-sm">
-            <button
+            {!statementPreview && <button
               type="button"
               onClick={handleSaveStatementRecruiterFees}
               disabled={savingStatementRecruiterFees}
               className="rounded-lg bg-amber-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               인력소개비 저장{statementRecruiterFeeDirtyKeys.length > 0 ? ` (${statementRecruiterFeeDirtyKeys.length})` : ''}
-            </button>
+            </button>}
             <button
               type="button"
               onClick={handleDownloadStatementExcel}
@@ -2794,7 +2811,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           <div className="rounded-lg border border-[#d5ccb0] p-4" style={{ backgroundColor: COLORS.orange }}>
             <div className="text-xs font-bold text-[#4A452A]">회사</div>
             <div className="mt-2 text-base font-black text-[#1E1C11]">
-              {statementTeamOption?.team?.companyName || filteredEntries.find(e => e.teamKey === statementTeamKey)?.companyName || '청연이엔지'}
+              {statementTeamOption?.team?.companyName || statementContext?.companyName || filteredEntries.find(e => e.teamKey === statementTeamKey)?.companyName || '청연이엔지'}
             </div>
           </div>
           <div className="rounded-lg border border-[#d5ccb0] p-4" style={{ backgroundColor: COLORS.orange }}>
@@ -2810,18 +2827,19 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
       <div className="overflow-x-auto">
         <table
-          className="table-fixed border-collapse text-sm"
-          style={{ minWidth: 64 + 132 + statementDayNumbers.length * DAILY_ADVANCE_DAY_COLUMN_WIDTH + 92 + 132 + 148 }}
+          aria-label="팀 대납청구 내역"
+          className={`table-fixed border-collapse text-sm${statementPreview ? ' team-workbook-statement-table' : ''}`}
+          style={statementPreview ? { width: '100%', minWidth: 900 } : { minWidth: 64 + 132 + statementDayNumbers.length * DAILY_ADVANCE_DAY_COLUMN_WIDTH + 92 + 132 + 148 }}
         >
           <colgroup>
-            <col style={{ width: 64, minWidth: 64 }} />
-            <col style={{ width: 132, minWidth: 132 }} />
+            <col style={statementPreview ? { width: '4%' } : { width: 64, minWidth: 64 }} />
+            <col style={statementPreview ? { width: '9%' } : { width: 132, minWidth: 132 }} />
             {statementDayNumbers.map((day) => (
-              <col key={`statement-col-${day}`} style={DAILY_ADVANCE_DAY_COLUMN_STYLE} />
+              <col key={`statement-col-${day}`} style={statementDayColumnStyle} />
             ))}
-            <col style={{ width: 92, minWidth: 92 }} />
-            <col style={{ width: 132, minWidth: 132 }} />
-            <col style={{ width: 148, minWidth: 148 }} />
+            <col style={statementPreview ? { width: '5%' } : { width: 92, minWidth: 92 }} />
+            <col style={statementPreview ? { width: '10%' } : { width: 132, minWidth: 132 }} />
+            <col style={statementPreview ? { width: '12%' } : { width: 148, minWidth: 148 }} />
           </colgroup>
           <thead>
             <tr style={{ backgroundColor: COLORS.darkBrown }} className="text-white">
@@ -2831,7 +2849,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 <th
                   key={day}
                   className="date-header-cell border border-[#d5ccb0] px-0 py-2 text-center font-bold tabular-nums whitespace-nowrap"
-                  style={{ ...DATE_HEADER_CELL_STYLE, ...DAILY_ADVANCE_DAY_COLUMN_STYLE }}
+                  style={{ ...DATE_HEADER_CELL_STYLE, ...statementDayColumnStyle }}
                 >
                   {day}
                 </th>
@@ -2872,7 +2890,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                       <td
                         key={`${row.workerId}-${dayIndex}`}
                         className="border border-[#e3dcc4] px-0 py-2 text-center align-middle tabular-nums whitespace-nowrap"
-                        style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
+                        style={statementDayColumnStyle}
                       >
                         {value ? formatNumber(value) : '-'}
                       </td>
@@ -2881,13 +2899,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                       {formatNumber(row.totalManDay)}
                     </td>
                     <td className="border border-[#e3dcc4] px-2 py-2 text-right">
-                      <input
+                      {statementPreview ? <span>{formatCurrency(recruiterFee)}</span> : <input
                         type="text"
                         value={recruiterFeeDraft ?? (recruiterFee ? String(recruiterFee) : '')}
                         onChange={(event) => handleStatementRecruiterFeeDraftChange(storageKey, event.target.value)}
                         className="w-full rounded border border-[#d7cfb5] px-2 py-1 text-right outline-none focus:border-[#948A54]"
                         placeholder="0"
-                      />
+                      />}
                     </td>
                     <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#7a2c2c]">
                       {formatCurrency(totalInvoiceAmount)}
@@ -2905,7 +2923,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   <td
                     key={`statement-total-${index}`}
                     className="border border-[#d5ccb0] px-0 py-2 text-center font-black tabular-nums whitespace-nowrap"
-                    style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
+                    style={statementDayColumnStyle}
                   >
                     {value ? formatNumber(value) : '-'}
                   </td>
@@ -3339,6 +3357,17 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const tabPanelClassName = isGoyunjungMode
     ? 'space-y-4 rounded-xl border border-white/45 bg-white/25 p-5 shadow-sm'
     : 'space-y-4 rounded-xl border border-[#d9cfb2] bg-[#fbf8ee] p-5 shadow-sm';
+
+  if (statementPreview) return <section className="daily-advance-workbook space-y-3" aria-label="대납출력부 팀 청구서">
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <button type="button" className="rounded-lg border bg-white px-3 py-2 text-sm font-bold" onClick={() => void loadData()} disabled={loading || copyingTab !== null}>새로고침</button>
+      <button type="button" className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-bold text-white" onClick={() => void handleCopyActiveTab()}
+        disabled={loading || copyingTab !== null || Boolean(loadErrorMessage || loadWarningMessage) || !statementRows.length}>화면복사</button>
+    </div>
+    {loading ? <p role="status" className="p-6 text-center">대납출력부 청구서를 만드는 중입니다.</p>
+      : loadErrorMessage || loadWarningMessage ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{loadErrorMessage || loadWarningMessage} 새로고침 후 다시 확인해 주세요.</p>
+        : <div ref={activeTabCaptureRef} data-daily-advance-capture-root="true">{renderStatementTab()}</div>}
+  </section>;
 
   return (
     <div className={`daily-advance-workbook relative min-h-screen overflow-x-hidden ${isGoyunjungMode ? 'goyunjung-mode' : ''}`}>
