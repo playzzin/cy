@@ -113,7 +113,7 @@ async function expandOriginalDetails(siteName: string) {
   expect(await screen.findByText('작업자 상세 (' + siteName + ')')).toBeVisible();
 }
 
-it('소개비는 급여에서 차감하며 대납청구서는 현재 팀의 대납출력부 청구서를 연다', async () => {
+it('소개비는 공제의 청구금액에 포함하며 대납청구서는 현재 팀의 대납출력부 청구서를 연다', async () => {
   const saved = document();
   saved.confirmedAt = null;
   saved.sales = [{ id: 'sale', source: 'manual', origin: 'manual', kind: '직영', siteName: '청구 현장', amount: 1000000, manDay: 5 }];
@@ -128,9 +128,17 @@ it('소개비는 급여에서 차감하며 대납청구서는 현재 팀의 대�
   render(<TeamSettlementPage />);
   const preview = await screen.findByRole('button', { name: '대납청구서 보기' });
   await waitFor(() => expect(preview).toBeEnabled());
-  expect(within(screen.getByRole('group', { name: '급여 합계' })).getByRole('button', { name: '대납청구서 보기' })).toBe(preview);
+  expect(within(screen.getByRole('group', { name: '청구금액 합계' })).getByRole('button', { name: '대납청구서 보기' })).toBe(preview);
+  const deductions = screen.getByRole('region', { name: '공제 내역' });
+  expect(within(deductions).getByRole('button', { name: '대납청구서 보기' })).toBe(preview);
+  expect(within(screen.getByRole('region', { name: '매입 내역' })).queryByRole('button', { name: '대납청구서 보기' })).not.toBeInTheDocument();
   expect(within(screen.getByRole('region', { name: '추가 내역' })).queryByRole('button', { name: '대납청구서 보기' })).not.toBeInTheDocument();
-  const row = screen.getByRole('row', { name: /급여 인력소개비/ });
+  expect(within(screen.getByRole('group', { name: '청구금액 합계' })).getByText('220,000원')).toBeVisible();
+  const summary = screen.getByRole('region', { name: '정산 요약' });
+  expect(within(summary).getByText('540,000원')).toBeVisible();
+  expect(within(summary).getByText('270,000원')).toBeVisible();
+  expect(within(summary).getByText('220,000원')).toBeVisible();
+  const row = within(deductions).getByRole('row', { name: /급여 인력소개비/ });
   expect(within(row).getByRole('textbox', { name: '금액' })).toHaveValue('120,000');
   expect(within(row).getByRole('button', { name: '삭제' })).toBeDisabled();
   expect(screen.getByRole('region', { name: '추가 내역' })).not.toHaveTextContent('인력소개비');
@@ -386,7 +394,7 @@ it('기존 상세 안에서 오류를 알리고 재시도로 작업자 상세를
   expect(await screen.findByText('방문 작업자 A')).toBeVisible();
 });
 
-it('급여 세 종류를 매입 지원 아래에 표시하고 중복 차감 없이 매입 합계에 포함한다', async () => {
+it('급여 세 종류를 02 공제의 청구금액으로 옮겨 매입에서 제외하고 정산금은 유지한다', async () => {
   const saved = document();
   saved.sales = [{ id: 'sale', source: 'manual', origin: 'manual', kind: '직영',
     siteName: '검증 현장', manDay: 10, amount: 5000000 }];
@@ -408,31 +416,33 @@ it('급여 세 종류를 매입 지원 아래에 표시하고 중복 차감 없�
   ]);
   render(<TeamSettlementPage />);
   const purchases = await screen.findByRole('region', { name: '매입 내역' });
-  const payroll = within(purchases).getByRole('heading', { name: '급여' });
-  const support = within(purchases).getByText('지원', { exact: true });
-  expect(support.compareDocumentPosition(payroll) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(within(purchases).getByText('3,300,000원')).toBeVisible();
-  for (const category of ['월급제 급여', '일급제 급여', '용역팀 급여']) {
-    expect(within(purchases).getByDisplayValue(category)).toBeDisabled();
-  }
+  expect(within(purchases).queryByRole('heading', { name: '급여' })).not.toBeInTheDocument();
+  expect(within(purchases).queryByRole('heading', { name: '청구금액' })).not.toBeInTheDocument();
   const deductions = screen.getByRole('region', { name: '공제 내역' });
-  expect(within(deductions).queryByText('급여', { exact: true })).not.toBeInTheDocument();
+  const charge = within(deductions).getByRole('heading', { name: '청구금액' });
+  const office = within(deductions).getByRole('heading', { name: '사무실비' });
+  expect(charge.compareDocumentPosition(office) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(deductions).getByText('3,300,000원')).toBeVisible();
+  for (const category of ['월급제 급여', '일급제 급여', '용역팀 급여']) {
+    expect(within(purchases).queryByDisplayValue(category)).not.toBeInTheDocument();
+    expect(within(deductions).getByDisplayValue(category)).toBeDisabled();
+  }
   expect(within(deductions).getByDisplayValue('기타 차감')).toBeVisible();
-  expect(screen.getByLabelText('매입 - 3,840,000원 (2공수)')).toBeVisible();
+  expect(screen.getByLabelText('매입 - 540,000원 (2공수)')).toBeVisible();
   const summary = screen.getByRole('region', { name: '정산 요약' });
-  expect(within(summary).getByText('3,840,000원')).toBeVisible();
-  expect(within(summary).getByText('60,000원')).toBeVisible();
+  expect(within(summary).getByText('540,000원')).toBeVisible();
+  expect(within(summary).getByText('3,360,000원')).toBeVisible();
   expect(within(summary).getByText('1,420,000원')).toBeVisible();
   for (const [category, workerName, manDay, wage, total] of [
     ['월급제 급여', '월급 검증자', '2.0', '500,000원', '1,000,000'],
     ['일급제 급여', '일급 검증자', '4.0', '500,000원', '2,000,000'],
     ['용역팀 급여', '용역 검증자', '2.0', '150,000원', '300,000']
   ]) {
-    const row = within(purchases).getAllByRole('row')
+    const row = within(deductions).getAllByRole('row')
       .find(candidate => within(candidate).queryByDisplayValue(category))!;
     fireEvent.click(within(row).getByRole('button', { name: '상세' }));
-    expect(within(purchases).getByText('급여 상세')).toBeVisible();
-    const detail = within(purchases).getByRole('table', { name: '급여 상세 내역' });
+    expect(within(deductions).getByText('급여 상세')).toBeVisible();
+    const detail = within(deductions).getByRole('table', { name: '급여 상세 내역' });
     expect(within(detail).getAllByRole('columnheader').map(header => header.textContent)).toEqual(['작업자', '공수', '급여', '총급여']);
     const workerRow = await within(detail).findByRole('row', { name: new RegExp('^' + workerName + ' ') });
     expect(within(workerRow).getAllByRole('cell').map(cell => cell.textContent)).toEqual([workerName, manDay, wage, total]);
@@ -577,16 +587,17 @@ it('쓰꾸미의 중복 현장 합계와 집계 대상은 유지하고 매출에
   expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
 });
 
-it('급여가 없는 정산도 매입에 빈 급여 영역을 유지한다', async () => {
+it('급여가 없어도 02 공제에서 0원 청구금액과 청구서 보기 버튼을 표시한다', async () => {
   render(<TeamSettlementPage />);
   const purchases = await screen.findByRole('region', { name: '매입 내역' });
-  expect(within(purchases).getByText('급여', { exact: true })).toBeVisible();
-  expect(within(purchases).getByText('내역 없음')).toBeVisible();
+  expect(within(purchases).queryByText('급여', { exact: true })).not.toBeInTheDocument();
   expect(screen.getByLabelText('매입 - 540,000원 (2공수)')).toBeVisible();
-  expect(screen.getByRole('region', { name: '공제 내역' })).not.toHaveTextContent('급여');
+  const charges = within(screen.getByRole('region', { name: '공제 내역' })).getByRole('group', { name: '청구금액 합계' });
+  expect(within(charges).getByText('0원')).toBeVisible();
+  expect(within(charges).getByRole('button', { name: '대납청구서 보기' })).toBeVisible();
 });
 
-it('급여와 경비 상단은 제목과 총액만 표시하고 표의 구분 및 상세는 유지한다', async () => {
+it('청구금액과 경비 상단에 합계를 표시하고 표의 구분 및 상세는 유지한다', async () => {
   const saved = document();
   saved.deductions = [
     { id: 'monthly', source: 'auto', origin: 'monthly_wage_payroll', category: '월급제 급여', amount: 1000000 },
@@ -599,7 +610,7 @@ it('급여와 경비 상단은 제목과 총액만 표시하고 표의 구분 �
   ];
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
   render(<TeamSettlementPage />);
-  expect(within(await screen.findByRole('group', { name: '급여 합계' })).getByText('3,300,000원', { exact: true })).toBeVisible();
+  expect(within(await screen.findByRole('group', { name: '청구금액 합계' })).getByText('3,300,000원', { exact: true })).toBeVisible();
   expect(screen.getByRole('group', { name: '경비 합계' })).toHaveTextContent(/^경비750,000원$/);
   for (const category of ['월급제 급여', '일급제 급여', '용역팀 급여', '숙소 전체', '차량 전체', '카드 전체']) {
     const row = getAdjustmentRow(category);

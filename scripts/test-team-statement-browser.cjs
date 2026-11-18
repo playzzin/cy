@@ -59,15 +59,22 @@ async function build() {
       context.on('page', page => page.on('pageerror', error => errors.push(error.message)));
       const page = await context.newPage();
       await page.goto(`${origin}/payroll/team-settlement`);
-      const payrollHeader = page.getByRole('group', { name: '급여 합계' });
+      const deductions = page.getByRole('region', { name: '공제 내역' });
+      const payrollHeader = deductions.getByRole('group', { name: '청구금액 합계' });
       const preview = payrollHeader.getByRole('button', { name: '대납청구서 보기' });
       await preview.waitFor();
       assert.equal(await preview.evaluate(button => getComputedStyle(button).backgroundColor), 'rgb(37, 99, 235)');
       const buttonBounds = await preview.boundingBox();
       const amountBounds = await payrollHeader.getByText('420,000원', { exact: true }).boundingBox();
-      assert.ok(buttonBounds && amountBounds && buttonBounds.x + buttonBounds.width <= amountBounds.x && Math.abs(buttonBounds.y + buttonBounds.height / 2 - amountBounds.y - amountBounds.height / 2) < 2, '대납청구서 버튼은 급여 합계 금액 앞의 같은 줄에 표시된다');
+      assert.ok(buttonBounds && amountBounds && buttonBounds.x + buttonBounds.width <= amountBounds.x , '대납청구서 버튼은 공제의 청구금액 앞에 표시된다');
       assert.equal(await page.locator('#settlement-additions').getByRole('button', { name: '대납청구서 보기' }).count(), 0);
-      const feeRow = page.locator('#settlement-purchase-payroll').getByRole('row', { name: /급여 인력소개비/ });
+      const purchases = page.getByRole('region', { name: '매입 내역' });
+      assert.doesNotMatch(await purchases.innerText(), /급여|인력소개비|대납청구서/);
+      assert.equal(await page.getByLabel('매입 - 200,000원 (1공수)', { exact: true }).isVisible(), true);
+      const summary = page.getByRole('region', { name: '정산 요약' });
+      assert.equal(await summary.getByText('470,000원', { exact: true }).isVisible(), true);
+      assert.equal(await summary.getByText('410,000원', { exact: true }).isVisible(), true);
+      const feeRow = deductions.getByRole('row', { name: /급여 인력소개비/ });
       assert.equal(await feeRow.getByRole('textbox', { name: '금액' }).inputValue(), '120,000');
       await feeRow.getByRole('button', { name: '상세', exact: true }).click();
       const feeDetails = page.getByRole('table', { name: '인력소개비 상세 내역' });
@@ -138,7 +145,7 @@ async function build() {
       assert.equal(await sales.locator('input[value="삭제 검증 현장"]').count(), 0);
       assert.equal(await sales.locator('input[value="가상 현장 A"]').count(), 1);
       assert.deepEqual(errors, []);
-      results.push({ width, feePayrollDeduction: true, workerFeeDetails: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
+      results.push({ width, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementTotalUnchanged: true, workerFeeDetails: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
       await context.close();
     }
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));

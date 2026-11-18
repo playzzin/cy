@@ -403,10 +403,6 @@ const PAYROLL_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem
   daily_advance_recruiter_fee: 4
 };
 
-const isPayrollItem = (item: TeamSettlementDeductionItem): boolean => (
-  PAYROLL_DEDUCTION_ORIGIN_ORDER[item.origin] !== undefined
-);
-
 const EXPENSE_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
   accommodation_billing: 1,
   vehicle_billing: 2,
@@ -503,17 +499,17 @@ const getDeductionDisplayOriginLabel = (item: DeductionDisplayItem): string => {
 
 const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
   {
+    key: 'payroll',
+    title: '청구금액',
+    description: '급여와 인력소개비 청구 공제',
+    origins: ['monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'],
+    showWhenEmpty: true
+  },
+  {
     key: 'office_expense',
     title: '사무실비',
     description: '도급·직영 공수 기준 사무실비',
     origins: ['office_expense'],
-    showWhenEmpty: true
-  },
-  {
-    key: 'payroll',
-    title: '급여',
-    description: '월급제·일급제·용역팀 급여 매입',
-    origins: ['monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'],
     showWhenEmpty: true
   },
   {
@@ -1077,10 +1073,6 @@ export const TeamSettlementPage: React.FC = () => {
     const salesContract = summarize(sales.filter((line) => line.kind === '도급'));
     const salesDirect = summarize(sales.filter((line) => line.kind === '직영'));
     const purchaseSupport = summarize(purchases.filter((line) => line.kind === '지원'));
-    // Stored payroll rows remain compatible with existing settlement documents.
-    const payrollAmount = (doc?.deductions ?? []).filter(isPayrollItem)
-      .reduce((sum, item) => sum + safeNumber(item.amount), 0);
-    const purchasesTotal = summarize(purchases);
 
     return {
       salesSupport,
@@ -1088,14 +1080,14 @@ export const TeamSettlementPage: React.FC = () => {
       salesDirect,
       purchaseSupport,
       salesTotal: summarize(sales),
-      purchasesTotal: { ...purchasesTotal, amount: purchasesTotal.amount + payrollAmount }
+      purchasesTotal: summarize(purchases)
     };
   }, [doc]);
 
   const totals = useMemo(() => {
     const salesTotal = transactionSectionTotals.salesTotal.amount;
     const purchasesTotal = transactionSectionTotals.purchasesTotal.amount;
-    const deductionsTotal = (doc?.deductions ?? []).filter(item => !isPayrollItem(item))
+    const deductionsTotal = (doc?.deductions ?? [])
       .reduce((sum, x) => sum + safeNumber(x.amount), 0);
     const additionsTotal = (doc?.additions ?? []).reduce((sum, x) => sum + safeNumber(x.amount), 0);
     const prevCarryover = safeNumber(doc?.summary?.prevCarryover ?? 0);
@@ -3028,7 +3020,7 @@ export const TeamSettlementPage: React.FC = () => {
   };
 
   const renderAdjustmentGroup = (group: DeductionGroup) => (
-    <div key={group.key} className="team-settlement-page__adjustment-group border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
+    <div key={group.key} id={group.key === 'payroll' ? 'settlement-invoice-deduction' : undefined} className="team-settlement-page__adjustment-group border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
       <div role="group" aria-label={`${group.title} 합계`} className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-bold text-slate-800">{group.title}</h3>
@@ -3048,7 +3040,10 @@ export const TeamSettlementPage: React.FC = () => {
               대납청구서 보기
             </button>
           )}
-          <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
+          <div>
+            <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
+            {group.key === 'payroll' && <div className="text-[11px] text-slate-500">인력소개비 포함</div>}
+          </div>
         </div>
       </div>
 
@@ -3184,7 +3179,7 @@ export const TeamSettlementPage: React.FC = () => {
                     {detail.kind === 'recruiter_fee' && (
                       <div>
                         <div className="text-sm font-semibold text-slate-800">인력소개비 상세</div>
-                        <p className="mt-1 text-xs text-slate-500">청구서에 저장한 작업자별 소개비를 급여에 합산해 차감합니다.</p>
+                        <p className="mt-1 text-xs text-slate-500">청구서에 저장한 작업자별 소개비입니다. 청구금액에 포함되어 공제됩니다.</p>
                         <table aria-label="인력소개비 상세 내역" className="mt-3 w-full text-xs border-collapse">
                           <thead><tr className="bg-slate-50 text-slate-600">
                             <th scope="col" className="border px-2 py-2 text-left">작업자</th>
@@ -4041,9 +4036,6 @@ export const TeamSettlementPage: React.FC = () => {
                     <span className="font-extrabold text-orange-900">{formatManDay1(transactionSectionTotals.purchaseSupport.manDay)}공</span>
                   </div>
                 </div>
-                <div id="settlement-purchase-payroll" className="mt-6">
-                  {deductionGroups.filter(group => group.key === 'payroll').map(renderAdjustmentGroup)}
-                </div>
               </div>
             </div>
 
@@ -4126,7 +4118,7 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">02</span>공제</h2>
-                <div className="text-xs text-slate-500 mt-0.5">사무실비·차량·숙소·카드·경비 구분</div>
+                <div className="text-xs text-slate-500 mt-0.5">청구금액·인력소개비·사무실비·경비 구분</div>
               </div>
               <button type="button" className={addButtonClassName} onClick={handleAddManualDeduction} disabled={!canEdit}>
                 + 수기 공제
@@ -4145,7 +4137,7 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
 
             <div className="mt-4 space-y-5">
-              {deductionGroups.filter(group => group.key !== 'payroll').map(renderAdjustmentGroup)}
+              {deductionGroups.map(renderAdjustmentGroup)}
             </div>
 
             <div id="settlement-additions" role="region" aria-label="추가 내역" className="mt-6 scroll-mt-36">
