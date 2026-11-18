@@ -740,12 +740,12 @@ it('공제의 인원별 청구금액·소개비가 대납청구서와 일치하�
   fireEvent.click(await screen.findByRole('button', { name: '8월' }));
   const table = await screen.findByRole('table', { name: '대납청구비 요약' });
   expect(within(table).getByRole('row', { name: /^인력소개비 1명 120,000원/ })).toBeVisible();
-  expect(within(table).getByRole('row', { name: /^청구금액 1공수 100,000원/ })).toBeVisible();
+  expect(within(table).getByRole('row', { name: /^일급제 1공수 100,000원/ })).toBeVisible();
   expect(within(table).queryByText('청구 검증자')).not.toBeInTheDocument();
   fireEvent.click(within(table).getByRole('button', { name: '인력소개비 상세' }));
   expect(within(screen.getByRole('table', { name: '인력소개비 인원별 금액' })).getByRole('row', { name: '청구 검증자 미지정 발생일 지정 필요 120,000원' })).toBeVisible();
-  fireEvent.click(within(table).getByRole('button', { name: '청구금액 상세' }));
-  expect(within(screen.getByRole('table', { name: '청구금액 인원별 금액' })).getByRole('row', { name: '청구 검증자 1 100,000원' })).toBeVisible();
+  fireEvent.click(within(table).getByRole('button', { name: '일급제 상세' }));
+  expect(within(screen.getByRole('table', { name: '일급제 인원별 금액' })).getByRole('row', { name: '청구 검증자 1 100,000원' })).toBeVisible();
   expect(screen.getByRole('group', { name: '소개비 포함 대납청구비 합계' })).toHaveTextContent('220,000원');
   expect(within(screen.getByRole('region', { name: '정산 요약' })).getByText('780,000원')).toBeVisible();
   expect(screen.queryByDisplayValue('일급제 급여')).not.toBeInTheDocument();
