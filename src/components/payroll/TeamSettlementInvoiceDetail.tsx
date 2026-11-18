@@ -24,12 +24,12 @@ export function TeamSettlementInvoiceDetail({ items, expandedKey, onToggle }: { 
   const rows = [...workers.values()].sort((a, b) => a.workerName.localeCompare(b.workerName, 'ko'));
   const dailyRows = rows.filter(row => row.invoiceType !== 'service');
   const serviceRows = rows.filter(row => row.invoiceType === 'service');
-  const feeRows = dailyRows.filter(row => row.recruiterFee > 0);
+  const feeRows = rows.filter(row => row.recruiterFee > 0);
   const amount = items.reduce((sum, item) => sum + item.amount, 0);
   const sections = [
     { key: 'fee' as const, title: '인력소개비', rows: feeRows, amount: feeRows.reduce((sum, row) => sum + row.recruiterFee, 0), value: (row: InvoiceWorker) => row.recruiterFee },
-    { key: 'claim' as const, title: '청구금액', rows: dailyRows, amount: dailyRows.reduce((sum, row) => sum + row.claimAmount, 0), value: (row: InvoiceWorker) => row.claimAmount },
-    { key: 'service' as const, title: '용역비', rows: serviceRows, amount: serviceRows.reduce((sum, row) => sum + row.invoiceAmount, 0), value: (row: InvoiceWorker) => row.invoiceAmount }
+    { key: 'claim' as const, title: '일급제', rows: dailyRows, amount: dailyRows.reduce((sum, row) => sum + row.claimAmount, 0), value: (row: InvoiceWorker) => row.claimAmount },
+    { key: 'service' as const, title: '용역비', rows: serviceRows, amount: serviceRows.reduce((sum, row) => sum + row.claimAmount, 0), value: (row: InvoiceWorker) => row.claimAmount }
   ];
   return <div className="mt-2" role="region" aria-label="대납청구서 공제 내역">
     <div className="overflow-auto">
@@ -45,7 +45,7 @@ export function TeamSettlementInvoiceDetail({ items, expandedKey, onToggle }: { 
           <tr>
             <th scope="row" className="border px-2 py-2 text-left font-semibold">{section.title}</th>
             <td className="border px-1 py-2 text-right">{section.key === 'fee'
-              ? `${section.rows.length}명`
+              ? `${new Set(section.rows.map(row => row.workerId)).size}명`
               : `${manDays(section.rows.reduce((sum, row) => sum + row.manDay, 0))}공수`}</td>
             <td className="border px-2 py-2 text-right font-bold">{money(section.amount)}</td>
             <td className="border px-1 py-2 text-center">
@@ -58,25 +58,21 @@ export function TeamSettlementInvoiceDetail({ items, expandedKey, onToggle }: { 
           {expanded === section.key && <tr><td colSpan={4} className="border bg-slate-50 p-2">
             <div id={`${detailId}-${section.key}`} role="region" aria-label={`${section.title} 인원별 상세`}>
               <div className="mb-2 font-semibold text-slate-700">{section.title} 인원별 금액</div>
-              {section.key === 'service' && <p className="mb-2 text-xs text-slate-500">용역비는 용역 청구서의 인력소개비를 포함한 금액입니다.</p>}
               <table aria-label={`${section.title} 인원별 금액`} className="w-full border-collapse bg-white">
                 <thead><tr className="text-slate-600">
                   <th scope="col" className="border px-2 py-2 text-left">이름</th>
                   <th scope="col" className="border px-2 py-2 text-right">{section.key === 'fee' ? '발생일수' : '공수'}</th>
-                  {section.key === 'service' && <th scope="col" className="border px-2 py-2 text-right">포함 소개비</th>}
                   {section.key === 'fee' && <th scope="col" className="border px-2 py-2 text-left">발생일</th>}
                   <th scope="col" className="border px-2 py-2 text-right">{section.title}</th>
                 </tr></thead>
-                <tbody>{section.rows.length ? section.rows.map(row => <tr key={row.workerId}>
-                  <td className="border px-2 py-2">{row.workerName}</td>
+                <tbody>{section.rows.length ? section.rows.map(row => <tr key={`${row.invoiceType || 'daily'}:${row.workerId}`}>
+                  <td className="border px-2 py-2">{row.workerName}{section.key === 'fee' && serviceRows.length > 0 && <span className="ml-1 text-slate-500">({row.invoiceType === 'service' ? '용역' : '일급제'})</span>}</td>
                   <td className="border px-2 py-2 text-right">{section.key === 'fee' ? uniqueDates(row.recruiterFeeDates).length ? `${uniqueDates(row.recruiterFeeDates).length}일` : '미지정' : manDays(row.manDay)}</td>
-                  {section.key === 'service' && <td className="border px-2 py-2 text-right">{money(row.recruiterFee)}</td>}
                   {section.key === 'fee' && <td className="border px-2 py-2 text-left break-words">{uniqueDates(row.recruiterFeeDates).map(date => date.slice(5).replace('-', '/')).join(', ') || '발생일 지정 필요'}</td>}
                   <td className="border px-2 py-2 text-right">{money(section.value(row))}</td>
-                </tr>) : <tr><td colSpan={section.key === 'claim' ? 3 : 4} className="border px-2 py-3 text-center text-slate-500">내역 없음</td></tr>}</tbody>
+                </tr>) : <tr><td colSpan={section.key === 'fee' ? 4 : 3} className="border px-2 py-3 text-center text-slate-500">내역 없음</td></tr>}</tbody>
                 <tfoot><tr className="bg-slate-50 font-bold"><th scope="row" className="border px-2 py-2 text-left">합계</th>
                   <td className="border px-2 py-2 text-right">{section.key === 'fee' ? `${section.rows.reduce((sum, row) => sum + uniqueDates(row.recruiterFeeDates).length, 0)}일` : manDays(section.rows.reduce((sum, row) => sum + row.manDay, 0))}</td>
-                  {section.key === 'service' && <td className="border px-2 py-2 text-right">{money(section.rows.reduce((sum, row) => sum + row.recruiterFee, 0))}</td>}
                   {section.key === 'fee' && <td className="border px-2 py-2 text-left">{section.rows.some(row => !row.recruiterFeeDates?.length) ? `미지정 ${section.rows.filter(row => !row.recruiterFeeDates?.length).length}명` : '지정된 발생일 기준'}</td>}
                   <td className="border px-2 py-2 text-right">{money(section.amount)}</td>
                 </tr></tfoot>
@@ -89,6 +85,6 @@ export function TeamSettlementInvoiceDetail({ items, expandedKey, onToggle }: { 
     <div role="group" aria-label="소개비 포함 대납청구비 합계" className="mt-2 flex flex-wrap justify-between gap-2 rounded border bg-slate-50 px-2 py-2 text-sm font-bold">
       <span>대납청구비 합계</span><span>{money(amount)}</span>
     </div>
-    <p className="mt-2 text-xs text-slate-500">청구금액(소개비 제외) + 인력소개비 + 용역비(용역 소개비 포함) = 대납청구비. 소개비 인원은 소개비가 발생한 인원 기준이며, 발생일수는 청구서에서 별도로 지정한 날짜만 셉니다.</p>
+    <p className="mt-2 text-xs text-slate-500">일급제 + 용역비 + 인력소개비 = 대납청구비. 일급제와 용역비에는 소개비가 포함되지 않습니다. 소개비 인원은 중복 없이 세며, 일급제 발생일은 지정한 청구일, 용역 발생일은 용역 청구서의 소개비 부과일 기준입니다.</p>
   </div>;
 }

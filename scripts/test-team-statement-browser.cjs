@@ -93,7 +93,7 @@ async function build() {
       assert.equal(await summary.getByText('610,000원', { exact: true }).isVisible(), true);
       const invoiceSummary = deductions.getByRole('table', { name: '대납청구비 요약' });
       assert.equal(await invoiceSummary.getByRole('row', { name: /^인력소개비 1명 120,000원/ }).isVisible(), true);
-      assert.equal(await invoiceSummary.getByRole('row', { name: /^청구금액 1공수 100,000원/ }).isVisible(), true);
+      assert.equal(await invoiceSummary.getByRole('row', { name: /^일급제 1공수 100,000원/ }).isVisible(), true);
       assert.equal(await invoiceSummary.getByText('가상작업자 1', { exact: true }).count(), 0, '첫 화면에는 인원별 이름을 펼치지 않는다');
       assert.equal(await deductions.getByRole('group', { name: '소개비 포함 대납청구비 합계' }).getByText('220,000원', { exact: true }).isVisible(), true);
       await invoiceSummary.scrollIntoViewIfNeeded();
@@ -105,11 +105,11 @@ async function build() {
       assert.equal(await feeDetails.getByRole('columnheader', { name: '공수', exact: true }).count(), 0);
       await feeDetails.scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(output, `recruiter-fee-${width}.png`) });
-      await invoiceSummary.getByRole('button', { name: '청구금액 상세' }).click();
-      const claimDetails = deductions.getByRole('table', { name: '청구금액 인원별 금액' });
+      await invoiceSummary.getByRole('button', { name: '일급제 상세' }).click();
+      const claimDetails = deductions.getByRole('table', { name: '일급제 인원별 금액' });
       assert.equal(await claimDetails.getByRole('row', { name: '가상작업자 1 1 100,000원', exact: true }).isVisible(), true);
       assert.equal(await feeDetails.count(), 0);
-      await invoiceSummary.getByRole('button', { name: '청구금액 상세' }).click();
+      await invoiceSummary.getByRole('button', { name: '일급제 상세' }).click();
       assert.equal(await claimDetails.count(), 0);
       await invoiceSummary.getByRole('button', { name: '인력소개비 상세' }).click();
       await validationToggle.click();
@@ -316,10 +316,11 @@ async function build() {
       await serviceButton.waitFor();
       assert.equal(await serviceButton.evaluate(button => getComputedStyle(button).backgroundColor), 'rgb(37, 99, 235)');
       const serviceSummary = page.getByRole('table', { name: '대납청구비 요약' });
-      assert.equal(await serviceSummary.getByRole('row', { name: /^용역비 1공수 160,000원/ }).isVisible(), true);
+      assert.equal(await serviceSummary.getByRole('row', { name: /^용역비 1공수 100,000원/ }).isVisible(), true);
+      assert.equal(await serviceSummary.getByRole('row', { name: /^인력소개비 2명 180,000원/ }).isVisible(), true);
       assert.equal(await page.getByRole('region', { name: '정산 요약' }).getByText('450,000원', { exact: true }).isVisible(), true);
       await serviceSummary.getByRole('button', { name: '용역비 상세' }).click();
-      assert.equal(await page.getByRole('table', { name: '용역비 인원별 금액' }).getByRole('row', { name: '가상용역 1 1 60,000원 160,000원' }).isVisible(), true);
+      assert.equal(await page.getByRole('table', { name: '용역비 인원별 금액' }).getByRole('row', { name: '가상용역 1 1 100,000원' }).isVisible(), true);
       await serviceSummary.scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(output, `service-invoice-summary-${width}.png`) });
       await serviceButton.click();
@@ -327,7 +328,9 @@ async function build() {
       await serviceInvoice.getByText('가상용역 1', { exact: true }).waitFor();
       assert.doesNotMatch(await serviceInvoice.innerText(), /가상용역 2|가상작업자/);
       const serviceCells = await serviceInvoice.getByRole('row', { name: /^일자별 공수합계/ }).getByRole('cell').allTextContents();
-      assert.deepEqual(serviceCells.slice(-4).map(value => value.trim()), ['1', '60,000', '160,000', '']);
+      assert.deepEqual(serviceCells.slice(-3).map(value => value.trim()), ['1', '60,000', '160,000']);
+      assert.match(await serviceInvoice.getByLabel('노무비 합계').innerText(), /100,000원/);
+      assert.match(await serviceInvoice.getByLabel('인력소개비 합계', { exact: true }).innerText(), /60,000원/);
       await fitWithinContent();
       const serviceTable = serviceInvoice.getByRole('table', { name: '용역비 청구 내역' });
       assert.equal(await serviceTable.evaluate(table => table.parentElement.scrollWidth <= table.parentElement.clientWidth + 1), true);
@@ -337,10 +340,10 @@ async function build() {
       const serviceDownloadEvent = page.waitForEvent('download');
       await serviceInvoice.getByRole('button', { name: '엑셀 다운로드' }).click();
       const serviceDownload = await serviceDownloadEvent;
-      assert.match(serviceDownload.suggestedFilename(), /용역팀.*\.xlsx$/);
+      assert.match(serviceDownload.suggestedFilename(), /용역비청구서.*\.xlsx$/);
       const serviceWorkbook = require('xlsx-js-style').readFile(await serviceDownload.path());
-      const serviceExcelRows = require('xlsx-js-style').utils.sheet_to_json(serviceWorkbook.Sheets['용역팀'], { header: 1 });
-      assert.deepEqual(serviceExcelRows.at(-1).slice(-4), [1, 60000, 160000, '']);
+      const serviceExcelRows = require('xlsx-js-style').utils.sheet_to_json(serviceWorkbook.Sheets['청구서'], { header: 1 });
+      assert.deepEqual(serviceExcelRows.at(-1).slice(-3), [1, 60000, 160000]);
       await serviceInvoice.getByRole('button', { name: '상세 닫기' }).click();
       await page.getByRole('button', { name: '검증팀 B 선택' }).click();
       await serviceButton.click();
@@ -348,7 +351,7 @@ async function build() {
       await serviceInvoice.getByText('가상용역 2', { exact: true }).waitFor();
       assert.doesNotMatch(await serviceInvoice.innerText(), /가상용역 1|가상작업자/);
       assert.deepEqual(errors, []);
-      results.push({ width, serviceInvoiceDeductionAndDetails: true, serviceInvoiceFitsContent: true, serviceInvoiceExcel: true, serviceInvoiceTeamScope: true, statementFitsContentWidthAndHeight: true, fullSizeInvoiceCopy: true, grossTransactionTotal: true, exclusivePageAccordions: true, deduplicatedValidation: true, nestedAddressAccordion: true, accommodationRoomCount: true, explicitRecruiterFeeChargeDates: true, combinedAccommodationAddress: true, excludesPersonalAndOtherTeamAccommodation: true, accommodationRoomsAtSameAddress: true, groupedAdditions: true, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
+      results.push({ width, serviceInvoiceDeductionAndDetails: true, separateDailyAndServiceFees: true, matchingInvoiceFormat: true, serviceInvoiceFitsContent: true, serviceInvoiceExcel: true, serviceInvoiceTeamScope: true, statementFitsContentWidthAndHeight: true, fullSizeInvoiceCopy: true, grossTransactionTotal: true, exclusivePageAccordions: true, deduplicatedValidation: true, nestedAddressAccordion: true, accommodationRoomCount: true, explicitRecruiterFeeChargeDates: true, combinedAccommodationAddress: true, excludesPersonalAndOtherTeamAccommodation: true, accommodationRoomsAtSameAddress: true, groupedAdditions: true, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
       await context.close();
     }
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));

@@ -135,7 +135,7 @@ describe('대납출력부', () => {
     jest.mocked(dailyReportService.getWorkerRows).mockImplementation(async params => (params?.startDate === '1900-01-01' ? [...history, ...fixtureRows] : fixtureRows) as any);
     jest.mocked(teamService.getTeams).mockResolvedValue([{ id: 'team-a', legacyId: 'old-a', name: '검증팀 A' }] as any);
     render(<DailyAdvanceWorkbookPage statementContext={{ month: fixtureMonth, teamId: 'old-a', teamName: '검증팀 A', kind: 'service' }} />);
-    expect(await screen.findByText('2026-02 검증팀 A 용역비 청구서')).toBeVisible();
+    expect(await screen.findByText('2026년 2월 검증팀 A 용역비 청구서')).toBeVisible();
     expect(screen.queryByText('검증나')).not.toBeInTheDocument();
     expect(screen.queryByText('일급검증')).not.toBeInTheDocument();
     const cells = totalCells();
@@ -143,13 +143,16 @@ describe('대납출력부', () => {
     expect(cells[30]).toHaveTextContent('60,000');
     expect(cells[31]).toHaveTextContent('310,000');
     fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
-    const rows = XLSX.utils.sheet_to_json<Array<string | number>>(exportedSheet(), { header: 1 });
-    expect(rows[rows.length - 1].slice(-4)).toEqual([2.5, 60000, 310000, '']);
+    const workbook = (XLSX.writeFile as jest.Mock).mock.calls[0][0] as XLSX.WorkBook;
+    const rows = XLSX.utils.sheet_to_json<Array<string | number>>(workbook.Sheets['청구서'], { header: 1 });
+    expect(rows[rows.length - 1].slice(-3)).toEqual([2.5, 60000, 310000]);
+    expect(screen.getByLabelText('노무비 합계')).toHaveTextContent('250,000원');
+    expect(screen.getByLabelText('인력소개비 합계')).toHaveTextContent('60,000원');
   });
 
   it('용역 내역이 없는 팀은 다른 팀 자료로 바뀌지 않는다', async () => {
     render(<DailyAdvanceWorkbookPage statementContext={{ month: fixtureMonth, teamId: 'empty-team', teamName: '빈 팀', kind: 'service' }} />);
-    expect(await screen.findByText(/용역팀 데이터가 없습니다/)).toBeVisible();
+    expect(await screen.findByText('청구서로 만들 데이터가 없습니다.')).toBeVisible();
     expect(screen.queryByText('검증가')).not.toBeInTheDocument();
     expect(screen.queryByText('검증나')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '화면복사' })).toBeDisabled();

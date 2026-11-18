@@ -1772,8 +1772,8 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
 
   const statementEntries = useMemo(() => {
     if (!statementTeamKey) return [];
-    return dailyWageEntries.filter((entry) => entry.teamKey === statementTeamKey);
-  }, [dailyWageEntries, statementTeamKey]);
+    return (servicePreview ? serviceTeamEntries : dailyWageEntries).filter(entry => entry.teamKey === statementTeamKey);
+  }, [dailyWageEntries, serviceTeamEntries, servicePreview, statementTeamKey]);
 
   const statementLastDay = useMemo(() => monthToPeriod(month).lastDay, [month]);
   const statementDayNumbers = useMemo(
@@ -1784,10 +1784,17 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     ? { width: `${60 / statementLastDay}%` }
     : DAILY_ADVANCE_DAY_COLUMN_STYLE;
 
-  const statementRows = useMemo(() => buildDailyAdvanceStatementRows({
+  const serviceRows = useMemo(() => buildDailyAdvanceServiceRows(filteredEntries, getEntryManDay), [filteredEntries, getEntryManDay]);
+
+  const statementRows = useMemo(() => servicePreview ? serviceRows.map(row => ({
+    workerId: row.workerId, workerName: row.workerName, idNumber: row.idNumber, address: '', salaryType: '용역팀',
+    days: statementDayNumbers.map(day => row.entriesByDay[day]?.manDay || 0), totalManDay: row.totalManDay,
+    recruiterFee: row.totalRecruiterFee, selectedAmount: row.totalClaimAmount,
+    recruiterFeeDates: Object.values(row.entriesByDay).filter(entry => entry.recruiterFee > 0).map(entry => entry.date).sort()
+  })) : buildDailyAdvanceStatementRows({
     entries: statementEntries, month, teamKey: statementTeamKey, lastDay: statementLastDay,
     recruiterFeeValues: statementRecruiterFeeValues, recruiterFeeDates: statementRecruiterFeeDates, manDayDrafts
-  }), [manDayDrafts, month, statementEntries, statementLastDay, statementRecruiterFeeValues, statementRecruiterFeeDates, statementTeamKey]);
+  }), [manDayDrafts, month, statementEntries, statementLastDay, statementRecruiterFeeValues, statementRecruiterFeeDates, statementTeamKey, servicePreview, serviceRows, statementDayNumbers]);
 
   useLayoutEffect(() => {
     if (!statementPreview || loading || loadErrorMessage || loadWarningMessage) return;
@@ -1821,8 +1828,6 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     });
     return totals;
   }, [manDayDrafts, statementEntries, statementLastDay]);
-
-  const serviceRows = useMemo(() => buildDailyAdvanceServiceRows(filteredEntries, getEntryManDay), [filteredEntries, getEntryManDay]);
 
   const serviceTotals = useMemo(() => ({
     days: statementDayNumbers.map((day) =>
@@ -1913,7 +1918,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     ];
 
     downloadAoaAsExcel(
-      `${month}_${statementTeamOption?.name || '청구서'}_청구서_${getTodayStamp()}`,
+      `${month}_${statementTeamOption?.name || '청구서'}_${servicePreview ? '용역비청구서' : '청구서'}_${getTodayStamp()}`,
       '청구서',
       rows,
       [8, 16, ...statementDayNumbers.map(() => DAILY_ADVANCE_DAY_EXCEL_WIDTH), 9, 12, 14],
@@ -1955,6 +1960,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     statementEntries,
     statementTeamOption?.name,
     statementTeamOption?.team?.companyName,
+    servicePreview,
   ]);
 
   const handleDownloadServiceTeamExcel = useCallback(() => {
@@ -2565,12 +2571,13 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <div className="text-lg font-black text-[#4A452A]">
-              {`${getMonthTitle(month)} ${statementTeamOption?.name || ''} 청구서`.trim()}
+              {`${getMonthTitle(month)} ${statementTeamOption?.name || ''} ${servicePreview ? '용역비 청구서' : '청구서'}`.trim()}
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              {statementPreview ? '대납출력부의 일자별 공수·노무금액과 저장된 인력소개비를 포함한 팀 청구서입니다.' : '일보 작업자 단가 기준으로 노무금액을 계산하며, 인력소개비와 실제 청구한 발생일은 이 화면에서 지정 후 저장합니다.'}
+              {servicePreview ? '대납출력부 용역팀의 노무금액과 인력소개비를 구분한 청구서입니다. 소개비는 최초 5개 근무일에 하루 60,000원씩 자동 부과합니다.' : statementPreview ? '대납출력부의 일자별 공수·노무금액과 저장된 인력소개비를 포함한 팀 청구서입니다.' : '일보 작업자 단가 기준으로 노무금액을 계산하며, 인력소개비와 실제 청구한 발생일은 이 화면에서 지정 후 저장합니다.'}
             </div>
             {statementPreview && <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
+              <div aria-label="노무비 합계"><dt className="text-xs text-slate-600">{servicePreview ? '용역비' : '일급제'} (소개비 제외)</dt><dd className="font-black text-slate-800">{formatCurrency(statementRows.reduce((sum, row) => sum + row.selectedAmount, 0))}원</dd></div>
               <div aria-label="인력소개비 합계"><dt className="text-xs text-slate-600">인력소개비 합계</dt><dd className="font-black text-amber-800">{formatCurrency(statementRows.reduce((sum, row) => sum + row.recruiterFee, 0))}원</dd></div>
               <div aria-label="청구금액 합계"><dt className="text-xs text-slate-600">청구금액 합계 (소개비 포함)</dt><dd className="font-black text-[#7a2c2c]">{formatCurrency(statementRows.reduce((sum, row) => sum + row.selectedAmount + row.recruiterFee, 0))}원</dd></div>
             </dl>}
@@ -2618,7 +2625,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
 
       <div className="overflow-x-auto">
         <table
-          aria-label="팀 대납청구 내역"
+          aria-label={servicePreview ? '용역비 청구 내역' : '팀 대납청구 내역'}
           className={`table-fixed border-collapse text-sm${statementPreview ? ' team-workbook-statement-table' : ''}`}
           style={statementPreview ? { width: '100%', minWidth: 900 } : { minWidth: 64 + 132 + statementDayNumbers.length * DAILY_ADVANCE_DAY_COLUMN_WIDTH + 92 + 132 + 148 }}
         >
@@ -2986,38 +2993,37 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
       <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-[#d5ccb0] bg-blue-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
           <div>
-          <div className="text-sm font-black text-blue-900">{servicePreview ? `${month} ${statementContext?.teamName} 용역비 청구서` : '용역팀 정산 관리 (인력소개비 자동계산)'}</div>
+          <div className="text-sm font-black text-blue-900">용역팀 정산 관리 (인력소개비 자동계산)</div>
           <div className="text-xs text-blue-700">
             작업자별 첫 근무일부터 근무일 기준 5일간 일 60,000원, 최대 300,000원의 소개비를 자동 부과합니다.
           </div>
         </div>
 
-          {!servicePreview && <button
+          <button
             type="button"
             onClick={handleDownloadServiceTeamExcel}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700"
           >
             <FontAwesomeIcon icon={faDownload} />
             <span>엑셀 다운로드</span>
-          </button>}
+          </button>
         </div>
 
         <div className="overflow-x-auto">
           <table
-            aria-label="용역비 청구 내역"
-            className={`table-fixed border-collapse text-sm ${servicePreview ? 'team-workbook-statement-table team-workbook-service-table w-full' : ''}`}
-            style={{ minWidth: servicePreview ? 0 : 120 + 120 + statementDayNumbers.length * DAILY_ADVANCE_DAY_COLUMN_WIDTH + 92 + 132 + 148 + 180 }}
+            className="table-fixed border-collapse text-sm"
+            style={{ minWidth: 120 + 120 + statementDayNumbers.length * DAILY_ADVANCE_DAY_COLUMN_WIDTH + 92 + 132 + 148 + 180 }}
           >
             <colgroup>
-              <col style={servicePreview ? { width: '7%' } : { width: 120, minWidth: 120 }} />
-              <col style={servicePreview ? { width: '7%' } : { width: 120, minWidth: 120 }} />
+              <col style={{ width: 120, minWidth: 120 }} />
+              <col style={{ width: 120, minWidth: 120 }} />
               {statementDayNumbers.map((day) => (
-                <col key={`service-col-${day}`} style={servicePreview ? undefined : DAILY_ADVANCE_DAY_COLUMN_STYLE} />
+                <col key={`service-col-${day}`} style={DAILY_ADVANCE_DAY_COLUMN_STYLE} />
               ))}
-              <col style={servicePreview ? { width: '5%' } : { width: 92, minWidth: 92 }} />
-              <col style={servicePreview ? { width: '9%' } : { width: 132, minWidth: 132 }} />
-              <col style={servicePreview ? { width: '10%' } : { width: 148, minWidth: 148 }} />
-              <col style={servicePreview ? { width: '12%' } : { width: 180, minWidth: 180 }} />
+              <col style={{ width: 92, minWidth: 92 }} />
+              <col style={{ width: 132, minWidth: 132 }} />
+              <col style={{ width: 148, minWidth: 148 }} />
+              <col style={{ width: 180, minWidth: 180 }} />
             </colgroup>
             <thead>
               <tr style={{ backgroundColor: COLORS.blue }} className="text-white">
@@ -3037,7 +3043,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
                   <th
                     key={day}
                     className="date-header-cell h-12 border border-white/20 px-0 py-2 text-center font-bold align-middle tabular-nums whitespace-nowrap"
-                    style={servicePreview ? undefined : { ...DATE_HEADER_CELL_STYLE, ...DAILY_ADVANCE_DAY_COLUMN_STYLE }}
+                    style={{ ...DATE_HEADER_CELL_STYLE, ...DAILY_ADVANCE_DAY_COLUMN_STYLE }}
                   >
                     {day}
                   </th>
@@ -3077,7 +3083,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
                         <td
                           key={day}
                           className={`h-12 border border-[#e3dcc4] px-0 py-2 text-center align-middle tabular-nums whitespace-nowrap ${isIntroFeeDay ? 'bg-blue-100 font-bold text-blue-700' : ''}`}
-                          style={servicePreview ? undefined : DAILY_ADVANCE_DAY_COLUMN_STYLE}
+                          style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
                           title={isIntroFeeDay ? `누적 ${entry?.cumulativeCount}일차` : ''}
                         >
                           {entry ? formatNumber(entry.manDay) : '-'}
@@ -3110,7 +3116,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
                     <td
                       key={`service-total-${index}`}
                       className="h-12 border border-[#d5ccb0] px-0 py-2 text-center font-black align-middle tabular-nums whitespace-nowrap"
-                      style={servicePreview ? undefined : DAILY_ADVANCE_DAY_COLUMN_STYLE}
+                      style={DAILY_ADVANCE_DAY_COLUMN_STYLE}
                     >
                       {value ? formatNumber(value) : '-'}
                     </td>
@@ -3170,8 +3176,8 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     <div className="team-workbook-statement-preview__toolbar">
       <button type="button" className="rounded-lg border bg-white px-3 py-2 text-sm font-bold" onClick={() => void loadData()} disabled={loading || copyingTab !== null}>새로고침</button>
       <button type="button" className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-bold text-white" onClick={() => void handleCopyActiveTab()}
-        disabled={loading || copyingTab !== null || Boolean(loadErrorMessage || loadWarningMessage) || !(servicePreview ? serviceRows : statementRows).length}>화면복사</button>
-      <button type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white" onClick={servicePreview ? handleDownloadServiceTeamExcel : handleDownloadStatementExcel} disabled={loading || Boolean(loadErrorMessage || loadWarningMessage)}>엑셀 다운로드</button>
+        disabled={loading || copyingTab !== null || Boolean(loadErrorMessage || loadWarningMessage) || !statementRows.length}>화면복사</button>
+      <button type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white" onClick={handleDownloadStatementExcel} disabled={loading || Boolean(loadErrorMessage || loadWarningMessage)}>엑셀 다운로드</button>
       <button type="button" aria-pressed={statementFit} className="rounded-lg border bg-white px-3 py-2 text-sm font-bold" onClick={() => setStatementFit(true)}>전체 맞춤</button>
       <button type="button" aria-pressed={!statementFit} className="rounded-lg border bg-white px-3 py-2 text-sm font-bold" onClick={() => setStatementFit(false)}>100%</button>
       <span aria-label="청구서 배율" className="text-xs text-slate-600">{Math.round(statementScale * 100)}%</span>
@@ -3181,7 +3187,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
         : <div ref={statementViewportRef} className="team-workbook-statement-preview__viewport" aria-label="청구서 표시 영역">
           <div className="team-workbook-statement-preview__canvas" style={{ width: statementLayout.width * statementScale, height: statementLayout.height * statementScale }}>
             <div ref={activeTabCaptureRef} data-daily-advance-capture-root="true" data-statement-preview-paper="true" className="team-workbook-statement-preview__paper"
-              style={{ width: statementLayout.width, transform: `scale(${statementScale})` }}>{servicePreview ? renderServiceTeamTab() : renderStatementTab()}</div>
+              style={{ width: statementLayout.width, transform: `scale(${statementScale})` }}>{renderStatementTab()}</div>
           </div>
         </div>}
   </section>;
