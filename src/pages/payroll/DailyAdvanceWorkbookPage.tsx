@@ -26,6 +26,7 @@ import {
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { teamService, type Team } from '../../services/teamService';
 import { storageService } from '../../services/storageService';
+import CompanyTeamSelector from '../../components/common/CompanyTeamSelector';
 import { toast } from '../../utils/swal';
 import { renderDayLookupCanvas } from './utils/dayLookupImage';
 import {
@@ -1179,7 +1180,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const [month, setMonth] = useState(currentMonth);
   const [selectedDate, setSelectedDate] = useState(monthToPeriod(currentMonth).endDate);
   const [selectedTeamKey, setSelectedTeamKey] = useState('ALL');
-  const [statementTeamKey, setStatementTeamKey] = useState('');
   const [activeTab, setActiveTab] = useState<WorkbookTabKey>('workers');
   const [manDayDrafts, setManDayDrafts] = useState<Record<string, string>>({});
   const [statementRecruiterFeeValues, setStatementRecruiterFeeValues] = useState<Record<string, number>>({});
@@ -1702,20 +1702,28 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     [dailyWageEntries, teams]
   );
 
+  const selectableTeams = useMemo(() => teamOptions.map((option) => ({
+    id: option.key,
+    name: option.name,
+    color: option.team?.color,
+  })), [teamOptions]);
+
+  const handleTeamSelect = useCallback((teamId: string | null) => {
+    setSelectedTeamKey(teamId || 'ALL');
+  }, []);
+
+  // 청구서와 다른 시트가 항상 같은 팀 선택을 사용한다.
+  const statementTeamKey = statementTeamOptions.some((option) => option.key === selectedTeamKey)
+    ? selectedTeamKey
+    : '';
+
   useEffect(() => {
+    // 청구서는 공통 선택기가 회사 공통 순서의 첫 팀을 선택한다.
+    if (activeTab === 'statement') return;
     if (selectedTeamKey !== 'ALL' && !teamOptions.some((option) => option.key === selectedTeamKey)) {
       setSelectedTeamKey('ALL');
     }
-
-    if (!statementTeamOptions.length) {
-      setStatementTeamKey('');
-      return;
-    }
-
-    if (!statementTeamKey || !statementTeamOptions.some((option) => option.key === statementTeamKey)) {
-      setStatementTeamKey(statementTeamOptions[0].key);
-    }
-  }, [selectedTeamKey, statementTeamKey, statementTeamOptions, teamOptions]);
+  }, [activeTab, selectedTeamKey, teamOptions]);
 
   const filteredEntries = useMemo(() => {
     let result = activeBaseEntries;
@@ -2741,7 +2749,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     </div>
   );
 
-  const renderStatementTab = () => (
+  const renderStatementTab = () => !statementTeamKey ? (
+    <div role="status" className="rounded-xl border border-dashed border-[#d5ccb0] bg-white px-4 py-12 text-center text-sm text-slate-500">
+      {statementTeamOptions.length === 0
+        ? '선택한 조회월에 청구서로 만들 데이터가 없습니다.'
+        : '위 팀 필터에서 청구서를 확인할 팀을 선택해주세요.'}
+    </div>
+  ) : (
     <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
       <div className="border-b border-[#d5ccb0] px-4 py-4" style={{ backgroundColor: COLORS.paleYellow }}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -3619,7 +3633,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         </div>
 
         <div className={filterPanelClassName}>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[160px_160px_minmax(180px,1fr)_minmax(180px,1fr)_auto]">
+          <div className="grid gap-4 sm:grid-cols-[160px_160px_1fr]">
             <label className="space-y-2 text-sm">
               <div className="font-bold text-[#4A452A]">조회월</div>
               <input
@@ -3644,43 +3658,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               />
             </label>
 
-            <label className="space-y-2 text-sm">
-              <div className="font-bold text-[#4A452A]">팀 필터</div>
-              <select
-                value={selectedTeamKey}
-                onChange={(event) => setSelectedTeamKey(event.target.value)}
-                disabled={copyingTab !== null}
-                className="w-full rounded-md border border-[#d7cfb5] px-3 py-2 outline-none focus:border-[#948A54]"
-              >
-                <option value="ALL">전체 팀</option>
-                {teamOptions.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="space-y-2 text-sm">
-              <div className="font-bold text-[#4A452A]">청구서 팀</div>
-              <select
-                value={statementTeamKey}
-                onChange={(event) => setStatementTeamKey(event.target.value)}
-                disabled={copyingTab !== null}
-                className="w-full rounded-md border border-[#d7cfb5] px-3 py-2 outline-none focus:border-[#948A54]"
-              >
-                {statementTeamOptions.length === 0 ? (
-                  <option value="">팀 없음</option>
-                ) : (
-                  statementTeamOptions.map((option) => (
-                    <option key={option.key} value={option.key}>
-                      {option.name}
-                    </option>
-                  ))
-                )}
-              </select>
-            </label>
-
             <div className="flex items-end justify-end">
               <button
                 type="button"
@@ -3693,6 +3670,22 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               </button>
             </div>
           </div>
+
+          <fieldset disabled={copyingTab !== null} className="mt-4 min-w-0">
+            <CompanyTeamSelector
+              internalTeams={selectableTeams}
+              selectedTeamId={selectedTeamKey === 'ALL' ? '' : selectedTeamKey}
+              onChange={handleTeamSelect}
+              onMissingSelection={handleTeamSelect}
+              allowAllTeams={activeTab !== 'statement'}
+              ariaLabel="팀 필터"
+              appearance="advance"
+              compact
+            />
+          </fieldset>
+          {activeTab === 'statement' && (
+            <p className="mt-2 text-xs text-slate-500">선택한 팀의 청구서를 표시합니다. 팀을 바꾸면 청구서와 엑셀 다운로드에 함께 적용됩니다.</p>
+          )}
 
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             <div className="rounded-lg border border-[#d7cfb5] px-4 py-3 text-sm text-slate-600">

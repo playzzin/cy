@@ -1,16 +1,21 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import * as XLSX from 'xlsx-js-style';
 import DailyAdvanceWorkbookPage from './DailyAdvanceWorkbookPage';
 import { renderDayLookupCanvas } from './utils/dayLookupImage';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService } from '../../services/manpowerService';
 import { teamService } from '../../services/teamService';
+import { teamSettlementService } from '../../services/teamSettlementService';
+import { dailyAdvanceStatementRecruiterFeeService } from '../../services/dailyAdvanceStatementRecruiterFeeService';
 
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getWorkerRows: jest.fn() } }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: jest.fn() } }));
+jest.mock('../../services/teamSettlementService', () => ({
+  teamSettlementService: { getTeamDisplayOrder: jest.fn() },
+}));
 jest.mock('../../services/dailyAdvanceWorkbookProfileService', () => ({
   dailyAdvanceWorkbookProfileService: { getProfiles: async () => [] },
 }));
@@ -18,6 +23,7 @@ jest.mock('../../services/dailyAdvanceStatementRecruiterFeeService', () => ({
   dailyAdvanceStatementRecruiterFeeService: {
     getFeesByMonth: async () => [],
     subscribeFeesByMonth: () => () => {},
+    saveFees: jest.fn().mockResolvedValue(undefined),
   },
 }));
 jest.mock('../../services/storageService', () => ({ storageService: {} }));
@@ -51,10 +57,29 @@ const exportedSheet = () => {
   return workbook.Sheets['용역팀'];
 };
 
+const openDailyTeams = async () => {
+  (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue(
+    fixtureRows.slice(0, 4).map(row => ({ ...row, salaryModel: '일급제' }))
+  );
+  (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
+    { id: 'a', name: '검증가', teamId: 'team-a', salaryModel: '일급제' },
+    { id: 'b', name: '검증나', teamId: 'team-b', salaryModel: '일급제' },
+  ]);
+  (teamService.getTeams as jest.Mock).mockResolvedValue([
+    { id: 'team-a', name: '검증팀 A', color: '#2563eb' },
+    { id: 'team-b', name: '검증팀 B', color: '#16a34a' },
+  ]);
+  render(<DailyAdvanceWorkbookPage />);
+  await screen.findByText('검증가');
+  fireEvent.change(screen.getByLabelText('조회월'), { target: { value: fixtureMonth } });
+  await screen.findByText('검증가');
+};
+
 describe('대납출력부', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     window.localStorage.clear();
+    (teamSettlementService.getTeamDisplayOrder as jest.Mock).mockResolvedValue([]);
     (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue(fixtureRows);
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([
       { id: 'a', name: '검증가', teamId: 'team-a', salaryModel: '용역팀' },
@@ -79,7 +104,7 @@ describe('대납출력부', () => {
     expect(cells[30]).toHaveTextContent('180,000');
     expect(cells[31]).toHaveTextContent('530,000');
 
-    fireEvent.change(screen.getByLabelText('팀 필터'), { target: { value: 'team-a' } });
+    fireEvent.click(screen.getByRole('button', { name: '검증팀 A 선택' }));
     const filtered = totalCells();
     expect(filtered[1]).toHaveTextContent(/^1.5$/);
     expect(filtered[29]).toHaveTextContent(/^2.5$/);
@@ -98,7 +123,7 @@ describe('대납출력부', () => {
     expect(sheet['!merges']).toContainEqual({ s: { r: 3, c: 0 }, e: { r: 3, c: 1 } });
     expect(sheet.A4.s.fill.fgColor.rgb).toBe('E6B9B8');
 
-    fireEvent.change(screen.getByLabelText('팀 필터'), { target: { value: 'team-b' } });
+    fireEvent.click(screen.getByRole('button', { name: '검증팀 B 선택' }));
     fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
     const filteredRows = XLSX.utils.sheet_to_json<Array<string | number>>(exportedSheet(), { header: 1 });
     expect(filteredRows[filteredRows.length - 1]).toEqual([
@@ -113,6 +138,77 @@ describe('대납출력부', () => {
     expect(screen.queryByText('일자별 공수합계')).not.toBeInTheDocument();
   });
 
+  it('색상 팀 버튼의 선택을 청구서와 다른 시트, 엑셀에서 함께 사용한다', async () => {
+    await openDailyTeams();
+    expect(screen.queryByLabelText('청구서 팀')).not.toBeInTheDocument();
+    const teamB = screen.getByRole('button', { name: '검증팀 B 선택' });
+    expect(teamB.style.getPropertyValue('--advance-team-color')).toBe('#16a34a');
+    fireEvent.click(teamB);
+    fireEvent.click(screen.getByRole('button', { name: '청구서' }));
+    expect(teamB).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('2026년 2월 검증팀 B 청구서')).toBeInTheDocument();
+    expect(screen.getByText('검증나')).toBeInTheDocument();
+    expect(screen.queryByText('검증가')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '전체 보기' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+    const [book, filename] = (XLSX.writeFile as jest.Mock).mock.calls[0];
+    const rows = XLSX.utils.sheet_to_json<Array<string | number>>(book.Sheets['청구서'], { header: 1 });
+    expect(filename).toContain('검증팀_B');
+    expect(rows[0][0]).toContain('검증팀 B');
+    expect(rows[2][1]).toBe('검증나');
+    expect(rows[rows.length - 1].slice(-3)).toEqual([0.5, 0, 100000]);
+    expect(rows.flat()).not.toContain('검증가');
+
+    fireEvent.click(screen.getByRole('button', { name: '검증팀 A 선택' }));
+    expect(screen.getByText('2026년 2월 검증팀 A 청구서')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '인원DB' }));
+    expect(screen.getByText('검증가')).toBeInTheDocument();
+    expect(screen.queryByText('검증나')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '전체 보기' }));
+    expect(screen.getByText('검증나')).toBeInTheDocument();
+  });
+
+  it('전체 팀에서 청구서를 열면 회사 공통 순서의 첫 팀을 선택한다', async () => {
+    (teamSettlementService.getTeamDisplayOrder as jest.Mock).mockResolvedValue(['team-b', 'team-a']);
+    await openDailyTeams();
+    fireEvent.click(screen.getByRole('button', { name: '청구서' }));
+    await screen.findByText('2026년 2월 검증팀 B 청구서');
+    const buttons = within(screen.getByRole('group', { name: '팀 선택' })).getAllByRole('button');
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['검증팀 B 선택', '검증팀 A 선택']);
+    expect(buttons[0]).toHaveAttribute('aria-pressed', 'true');
+
+    (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([]);
+    fireEvent.change(screen.getByLabelText('조회월'), { target: { value: '2026-03' } });
+    await screen.findByText('선택한 조회월에 청구서로 만들 데이터가 없습니다.');
+    expect(screen.queryByText('검증나')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '엑셀 다운로드' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /인력소개비 저장/ })).not.toBeInTheDocument();
+  });
+
+  it('팀을 전환해도 소개비 초안이 섞이지 않고 선택한 팀의 소개비만 저장한다', async () => {
+    const alert = jest.spyOn(window, 'alert').mockImplementation(() => {});
+    try {
+      await openDailyTeams();
+      fireEvent.click(screen.getByRole('button', { name: '검증팀 A 선택' }));
+      fireEvent.click(screen.getByRole('button', { name: '청구서' }));
+      fireEvent.change(screen.getByPlaceholderText('0'), { target: { value: '12000' } });
+      fireEvent.click(screen.getByRole('button', { name: '검증팀 B 선택' }));
+      expect(screen.getByPlaceholderText('0')).toHaveValue('');
+      fireEvent.change(screen.getByPlaceholderText('0'), { target: { value: '34000' } });
+      fireEvent.click(screen.getByRole('button', { name: /인력소개비 저장/ }));
+      await waitFor(() => expect(dailyAdvanceStatementRecruiterFeeService.saveFees).toHaveBeenCalledWith([
+        expect.objectContaining({ month: fixtureMonth, teamKey: 'team-b', workerId: 'b', amount: 34000 }),
+      ]));
+      await waitFor(() => expect(alert).toHaveBeenCalledWith('청구서 인력소개비를 저장했습니다.'));
+      fireEvent.click(screen.getByRole('button', { name: '검증팀 A 선택' }));
+      expect(screen.getByPlaceholderText('0')).toHaveValue('12000');
+      expect(screen.getByRole('button', { name: '인력소개비 저장 (1)' })).toBeInTheDocument();
+    } finally {
+      alert.mockRestore();
+    }
+  });
+
   it('일자별조회 이미지는 스크롤 밖의 열, 수정된 공수와 금액, 빈 날짜 안내를 포함한다', async () => {
     const note = '마지막 열 비고';
     (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue(
@@ -120,7 +216,7 @@ describe('대납출력부', () => {
     );
     await openServiceTab();
     fireEvent.click(screen.getByRole('button', { name: '일자별조회' }));
-    fireEvent.change(screen.getByLabelText('팀 필터'), { target: { value: 'team-daily' } });
+    fireEvent.click(screen.getByRole('button', { name: '일급팀 선택' }));
     fireEvent.change(screen.getByLabelText('일자'), { target: { value: `${fixtureMonth}-01` } });
     fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '1.5' } });
 
