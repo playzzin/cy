@@ -1,5 +1,5 @@
 import type { TeamSettlementAdditionItem, TeamSettlementDeductionItem, TeamSettlementDocument } from '../types/teamSettlement';
-import type { AccommodationBillingDocument } from '../types/accommodationBilling';
+import type { AccommodationBillingDocument, AccommodationBillingLineItem } from '../types/accommodationBilling';
 import type { VehicleBillingDocument } from '../types/vehicleBilling';
 import type { CardBillingDocument } from '../types/cardBilling';
 import type { TeamExpenseClaim } from '../types/teamExpenseLedger';
@@ -8,7 +8,10 @@ import { getSettlementBillingRowScopeKey, selectPreferredSettlementBillings } fr
 import { isSupportBillingMonthEnabled } from './supportBillingPeriod';
 
 export const SETTLEMENT_EXPENSE_ORIGINS = ['accommodation_billing', 'vehicle_billing', 'card_billing', 'team_expense_claim'] as const;
-export type SettlementExpenseDetailRow = { subject: string; label: string; amount: number; note?: string; date?: string };
+export type SettlementExpenseDetailRow = {
+  subject: string; label: string; amount: number; note?: string; date?: string;
+  accommodationLine?: Pick<AccommodationBillingLineItem, 'id' | 'label' | 'targetField' | 'sourceType' | 'sourceAccommodationId'>;
+};
 export type SettlementExpenseEntry = {
   direction: 'deduction' | 'addition';
   item: TeamSettlementDeductionItem | TeamSettlementAdditionItem;
@@ -64,7 +67,15 @@ export function buildTeamSettlementExpenseEntries(sources: SettlementExpenseSour
         const accommodationLine = line as AccommodationBillingDocument['lineItems'][number];
         return String(accommodationLine.status ?? '').trim().toLowerCase() !== 'cancelled' && !accommodationLine.cancelledAt;
       });
-      let details: SettlementExpenseDetailRow[] = lines.map(line => ({ subject: subject || '-', label: line.label || '경비', amount: number(line.amount) }));
+      let details: SettlementExpenseDetailRow[] = lines.map(line => ({
+        subject: subject || '-', label: line.label || '경비', amount: number(line.amount),
+        ...(origin === 'accommodation_billing' ? { accommodationLine: {
+          id: (line as AccommodationBillingLineItem).id, label: line.label,
+          targetField: (line as AccommodationBillingLineItem).targetField,
+          sourceType: (line as AccommodationBillingLineItem).sourceType,
+          sourceAccommodationId: (line as AccommodationBillingLineItem).sourceAccommodationId
+        } } : {})
+      }));
       // A present breakdown with a zero sum is a full refund, not a missing total.
       if (!(billing.lineItems ?? []).length && origin !== 'accommodation_billing') {
         if (origin === 'vehicle_billing' && number((billing as VehicleBillingDocument).fixedCost) + number((billing as VehicleBillingDocument).variableCost) > 0) {

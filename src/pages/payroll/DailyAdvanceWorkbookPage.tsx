@@ -14,6 +14,7 @@ import {
   faTable,
   faUsers,
 } from '@fortawesome/free-solid-svg-icons';
+import { buildDailyAdvanceStatementRows, buildStatementRecruiterFeeKey, buildStatementRecruiterFeeValueMap, createDailyAdvanceRowResolver, getReportAmountForEntry } from '../../utils/dailyAdvanceStatement';
 import { dailyReportService } from '../../services/dailyReportService';
 import {
   dailyAdvanceWorkbookProfileService,
@@ -1047,16 +1048,6 @@ const getActualUnitPrice = (claimUnitPrice: number): number => {
   return Math.max(0, claimUnitPrice - DAILY_WAGE_DEDUCTION_AMOUNT);
 };
 
-const getReportAmountForEntry = (entry: WorkbookEntry, manDay: number): number => {
-  const reportUnitPrice = entry.reportUnitPrice > 0
-    ? entry.reportUnitPrice
-    : entry.manDay > 0
-      ? entry.workerAmount / entry.manDay
-      : entry.claimUnitPrice;
-
-  return manDay * Math.max(0, reportUnitPrice || 0);
-};
-
 const resolveWorkerStableId = (worker?: Partial<Worker> | null): string => {
   if (!worker) return '';
   return (
@@ -1096,9 +1087,6 @@ const GOYUNJUNG_SAFE_POSITIONS: Array<{
   { left: '70%', top: '34%', align: 'right' },
 ];
 
-const buildStatementRecruiterFeeKey = (month: string, teamKey: string, workerId: string): string =>
-  `${month}__${teamKey}__${workerId}`;
-
 const parseStatementRecruiterFeeKey = (key: string): { month: string; teamKey: string; workerId: string } | null => {
   const firstSeparator = key.indexOf('__');
   const lastSeparator = key.lastIndexOf('__');
@@ -1132,18 +1120,6 @@ const readLegacyStatementRecruiterFeeValues = (): Record<string, number> => {
     return {};
   }
 };
-
-const buildStatementRecruiterFeeValueMap = (
-  fees: DailyAdvanceStatementRecruiterFee[]
-): Record<string, number> =>
-  fees.reduce<Record<string, number>>((accumulator, fee) => {
-    const key = fee.key || buildStatementRecruiterFeeKey(fee.month, fee.teamKey, fee.workerId);
-    const amount = Math.max(0, toNumber(fee.amount));
-    if (key) {
-      accumulator[key] = amount;
-    }
-    return accumulator;
-  }, {});
 
 const isServiceTeamNode = (team: Team | null): boolean => {
   if (!team) return false;
@@ -1433,36 +1409,8 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
         });
       }
 
-      const workerByAnyId = new Map<string, Worker>();
-      const workerByName = new Map<string, Worker>();
-      workerRows.forEach((worker) => {
-        const stableId = resolveWorkerStableId(worker);
-        const currentId = String(worker.id ?? '').trim();
-        const legacyId = String(worker.legacyId ?? '').trim();
-        const nameKey = normalizeText(worker.name);
-        if (currentId) workerByAnyId.set(currentId, worker);
-        if (legacyId && !workerByAnyId.has(legacyId)) workerByAnyId.set(legacyId, worker);
-        if (stableId && !workerByAnyId.has(stableId)) workerByAnyId.set(stableId, worker);
-        if (nameKey && !workerByName.has(nameKey)) workerByName.set(nameKey, worker);
-      });
-
-      // --- 신규: 누적 작업일수 계산을 위한 과거 데이터 로드 ---
-      // 1. 현재 표시될 모든 작업자의 안정적인 ID 추출
-      const getWorkerForRow = (row: any) =>
-        workerByAnyId.get(String(row.workerId ?? '').trim()) ||
-        workerByName.get(normalizeText(row.workerName || row.name));
-
-      const getRowSalaryType = (row: any, worker?: Worker | null) =>
-        resolveDailyAdvanceRowSalaryType(row, worker);
-
-      const getStableIdForRow = (row: any) => {
-        const worker = getWorkerForRow(row);
-        return (
-          resolveWorkerStableId(worker) ||
-          String(row.workerId ?? '').trim() ||
-          normalizeText(row.workerName || row.name)
-        );
-      };
+      const { getWorkerForRow, getStableIdForRow, resolveEntry } = createDailyAdvanceRowResolver(workerRows, teamRows);
+      const getRowSalaryType = (row: any, worker?: Worker | null) => resolveDailyAdvanceRowSalaryType(row, worker);
 
       const workerDateMap = new Map<string, string[]>(); // stableId -> [serviceDates]
       const serviceWorkerStableIds = new Set<string>();
@@ -1517,17 +1465,6 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
       };
       // ----------------------------------------------------
 
-      const teamByAnyId = new Map<string, Team>();
-      const teamByName = new Map<string, Team>();
-      teamRows.forEach((team) => {
-        const currentId = String(team.id ?? '').trim();
-        const legacyId = String(team.legacyId ?? '').trim();
-        const nameKey = normalizeTeamName(team.name);
-        if (currentId) teamByAnyId.set(currentId, team);
-        if (legacyId && !teamByAnyId.has(legacyId)) teamByAnyId.set(legacyId, team);
-        if (nameKey && !teamByName.has(nameKey)) teamByName.set(nameKey, team);
-      });
-
       const nextProfiles: Record<string, DailyAdvanceWorkbookProfile> = {};
       profileRows.forEach((profile) => {
         const workerId = String(profile.workerId ?? '').trim();
@@ -1539,32 +1476,12 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
 
       const nextEntries: WorkbookEntry[] = reportRows
         .map((row) => {
-          const worker = getWorkerForRow(row);
-          const salaryType = getRowSalaryType(row, worker);
+          const { entry: base, worker, team } = resolveEntry(row);
+          const { salaryType, workerId, workerName, teamName, teamId, teamKey, reportUnitPrice, manDay, date, day } = base;
           if (!isDailyWageLabel(salaryType)) return null;
-
-          const workerId = getStableIdForRow(row);
-          const workerName = displayText(worker?.name || row.workerName || row.name || '');
-          const team =
-            teamByAnyId.get(String(row.workerTeamId ?? '').trim()) ||
-            teamByAnyId.get(String(row.teamId ?? '').trim()) ||
-            teamByAnyId.get(String(worker?.teamId ?? '').trim()) ||
-            teamByName.get(normalizeTeamName(row.workerTeamName || worker?.teamName || row.teamName || '')) ||
-            null;
-
-          const teamName = displayText(
-            team?.name || row.workerTeamName || worker?.teamName || row.teamName || '미지정팀'
-          );
-          const teamId = String(team?.id ?? row.workerTeamId ?? row.teamId ?? worker?.teamId ?? '').trim();
-          const teamKey = teamId || `unresolved:${normalizeTeamName(teamName || workerName || 'unknown')}`;
-
-          const reportUnitPrice = toNumber(row.unitPrice || worker?.unitPrice || 0);
           const profile = nextProfiles[workerId];
-          const claimUnitPrice = getDefaultClaimUnitPrice(reportUnitPrice);
+          const claimUnitPrice = base.claimUnitPrice;
           const actualUnitPrice = getActualUnitPrice(reportUnitPrice);
-          const manDay = toNumber(row.manDay);
-          const date = displayText(row.date);
-          const day = getDayNumber(date);
           const note = displayText(row.workContent || profile?.memo || '');
           
           // 누적 순번 계산
@@ -1609,7 +1526,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
             claimUnitPrice,
             claimAmount: manDay * reportUnitPrice,
             reportUnitPrice,
-            workerAmount: toNumber((row as any)?.amount ?? manDay * reportUnitPrice),
+            workerAmount: base.workerAmount,
             recruiterFee,
             note,
             cumulativeCount,
@@ -1899,15 +1816,6 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     [statementTeamKey, statementTeamOptions, statementContext, teams]
   );
 
-  const getStatementAmount = useCallback(
-    (entry: WorkbookEntry): number => {
-      const draftValue = manDayDrafts[entry.key];
-      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-      return getReportAmountForEntry(entry, nextManDay);
-    },
-    [manDayDrafts]
-  );
-
   const statementEntries = useMemo(() => {
     if (!statementTeamKey) return [];
     return dailyWageEntries.filter((entry) => entry.teamKey === statementTeamKey);
@@ -1922,55 +1830,10 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     ? { width: `${60 / statementLastDay}%` }
     : DAILY_ADVANCE_DAY_COLUMN_STYLE;
 
-  const statementRows = useMemo(() => {
-    const rowMap = new Map<
-      string,
-      {
-        workerId: string;
-        workerName: string;
-        idNumber: string;
-        address: string;
-        salaryType: string;
-        days: number[];
-        totalManDay: number;
-        recruiterFee: number;
-        selectedAmount: number;
-      }
-    >();
-
-    statementEntries.forEach((entry) => {
-      const key = entry.workerId || normalizeText(entry.workerName);
-      if (!rowMap.has(key)) {
-        rowMap.set(key, {
-          workerId: entry.workerId,
-          workerName: entry.workerName,
-          idNumber: entry.idNumber,
-          address: entry.address,
-          salaryType: entry.salaryType,
-          days: Array.from({ length: statementLastDay }, () => 0),
-          totalManDay: 0,
-          recruiterFee: entry.recruiterFee || (statementRecruiterFeeValues[buildStatementRecruiterFeeKey(month, statementTeamKey, entry.workerId)] || 0),
-          selectedAmount: 0,
-        });
-      }
-
-      const target = rowMap.get(key)!;
-      const draftValue = manDayDrafts[entry.key];
-      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-      if (entry.day >= 1 && entry.day <= statementLastDay) {
-        target.days[entry.day - 1] += nextManDay;
-      }
-      target.totalManDay += nextManDay;
-      target.selectedAmount += getStatementAmount(entry);
-      if (!target.idNumber && entry.idNumber) target.idNumber = entry.idNumber;
-      if (!target.address && entry.address) target.address = entry.address;
-      if (!target.salaryType && entry.salaryType) target.salaryType = entry.salaryType;
-    });
-
-    return Array.from(rowMap.values()).sort((left, right) =>
-      left.workerName.localeCompare(right.workerName, 'ko')
-    );
-  }, [getStatementAmount, manDayDrafts, month, statementEntries, statementLastDay, statementRecruiterFeeValues, statementTeamKey]);
+  const statementRows = useMemo(() => buildDailyAdvanceStatementRows({
+    entries: statementEntries, month, teamKey: statementTeamKey, lastDay: statementLastDay,
+    recruiterFeeValues: statementRecruiterFeeValues, manDayDrafts
+  }), [manDayDrafts, month, statementEntries, statementLastDay, statementRecruiterFeeValues, statementTeamKey]);
 
   const statementDailyTotals = useMemo(() => {
     const totals = Array.from({ length: statementLastDay }, () => 0);

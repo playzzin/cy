@@ -6,12 +6,16 @@ import CompanyTeamSelector, { readCompanyTeamOrder } from '../../components/comm
 import { applySupportTeamOrder } from '../../utils/supportTeamOrder';
 import { calculateTeamSettlementOfficeExpense, LEGACY_TEAM_SETTLEMENT_OFFICE_RATES } from '../../utils/teamSettlementOfficeExpense';
 import { TeamSettlementOfficeExpenseDetail } from '../../components/payroll/TeamSettlementOfficeExpenseDetail';
+import { TeamSettlementInvoiceDetail } from '../../components/payroll/TeamSettlementInvoiceDetail';
 import TeamWorkbookStatementDialog from '../../components/payroll/TeamWorkbookStatementDialog';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import {
   TeamSettlementWorkspaceHeader,
   type TeamSettlementSaveState
 } from '../../components/payroll/TeamSettlementWorkspaceHeader';
+import { TeamSettlementAccommodationDetail } from '../../components/payroll/TeamSettlementAccommodationDetail';
+import { buildTeamSettlementAccommodationDetail, type AccommodationAddressReference } from '../../utils/teamSettlementAccommodationDetail';
+import { accommodationService } from '../../services/accommodationService';
 import { accommodationBillingService } from '../../services/accommodationBillingService';
 import { cardBillingService } from '../../services/cardBillingService';
 import { companyService } from '../../services/companyService';
@@ -369,6 +373,7 @@ const formatDeductionOrigin = (origin: TeamSettlementDeductionItem['origin']): s
   if (origin === 'team_expense_claim') return '경비';
   if (origin === 'office_expense') return '사무실비';
   if (origin === 'daily_wage_payroll' || origin === 'monthly_wage_payroll' || origin === 'service_team_payroll' || origin === 'daily_advance_recruiter_fee') return '급여';
+  if (origin === 'daily_advance_invoice') return '대납청구';
   if (origin === 'accommodation_billing') return '숙소';
   if (origin === 'vehicle_billing') return '차량';
   if (origin === 'card_billing') return '카드';
@@ -400,7 +405,8 @@ const PAYROLL_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem
   monthly_wage_payroll: 1,
   daily_wage_payroll: 2,
   service_team_payroll: 3,
-  daily_advance_recruiter_fee: 4
+  daily_advance_recruiter_fee: 4,
+  daily_advance_invoice: 0
 };
 
 const EXPENSE_DEDUCTION_ORIGIN_ORDER: Partial<Record<TeamSettlementDeductionItem['origin'], number>> = {
@@ -501,8 +507,8 @@ const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
   {
     key: 'payroll',
     title: '청구금액',
-    description: '급여와 인력소개비 청구 공제',
-    origins: ['monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'],
+    description: '대납청구서 인원별 청구금액 공제',
+    origins: ['daily_advance_invoice', 'monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'],
     showWhenEmpty: true
   },
   {
@@ -710,6 +716,8 @@ export const TeamSettlementPage: React.FC = () => {
   const [deductionSourceData, setDeductionSourceData] = useState<DeductionSourceData>(() => createEmptyDeductionSourceData());
   const [expenseSourceLoad, setExpenseSourceLoad] = useState<{ scope: string; status: 'loading' | 'ready' | 'error' }>({ scope: '', status: 'loading' });
   const [expenseSourceRevision, setExpenseSourceRevision] = useState(0);
+  const [accommodationAddresses, setAccommodationAddresses] = useState<AccommodationAddressReference[]>([]);
+  const [accommodationAddressStatus, setAccommodationAddressStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [supportRates, setSupportRates] = useState<SupportRate[]>([]);
   const [supportRatesLoaded, setSupportRatesLoaded] = useState<boolean>(false);
   const [bulkSupportRateInput, setBulkSupportRateInput] = useState<string>(() => formatCurrency(DEFAULT_SUPPORT_UNIT_PRICE));
@@ -946,6 +954,21 @@ export const TeamSettlementPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [selectedTeamId, yearMonth, doc?.updatedAt, expenseSourceRevision]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setAccommodationAddressStatus('loading');
+    void accommodationService.getAccommodations().then(rooms => {
+      if (cancelled) return;
+      setAccommodationAddresses(rooms.map(({ id, name, address }) => ({ id, name, address })));
+      setAccommodationAddressStatus('ready');
+    }).catch(() => {
+      if (cancelled) return;
+      setAccommodationAddresses([]);
+      setAccommodationAddressStatus('error');
+    });
+    return () => { cancelled = true; };
+  }, [expenseSourceRevision]);
+
   const settlementLoadGeneration = useRef(0);
   const settlementScope = useRef('');
   settlementScope.current = `${selectedTeamId}:${yearMonth}`;
@@ -1126,7 +1149,9 @@ export const TeamSettlementPage: React.FC = () => {
         d.origin === 'monthly_wage_payroll' ||
         d.origin === 'service_team_payroll'
       ))
-      .reduce((sum, d) => sum + safeNumber(d.amount), 0);
+      .reduce((sum, d) => sum + safeNumber(d.amount), 0)
+      + (doc?.deductions ?? []).filter(d => d.origin === 'daily_advance_invoice')
+        .flatMap(d => d.invoiceDetails ?? []).reduce((sum, row) => sum + row.claimAmount, 0);
 
     const getWorkerTeamId = (r: DailyReportWorkerRow): string => {
       const v = r.workerTeamId ?? r.teamId ?? '';
@@ -1169,7 +1194,10 @@ export const TeamSettlementPage: React.FC = () => {
     const siteTotalAmount = siteSkkumiTotals.reduce((sum, r) => sum + safeNumber(r.amount), 0);
     const siteTotalManDay = siteSkkumiTotals.reduce((sum, r) => sum + safeNumber(r.manDay), 0);
 
-    const teamAvgPerManDay = safeAverage(payrollAmountTotal, payrollManDayTotal);
+    const invoiceItems = (doc?.deductions ?? []).filter(item => item.origin === 'daily_advance_invoice');
+    const teamAvgPerManDay = safeAverage(payrollAmountTotal, invoiceItems.length
+      ? invoiceItems.flatMap(item => item.invoiceDetails ?? []).reduce((sum, row) => sum + row.manDay, 0)
+      : payrollManDayTotal);
     const siteAvgPerManDay = safeAverage(siteTotalAmount, siteTotalManDay);
 
     return { teamAvgPerManDay, siteAvgPerManDay };
@@ -1888,18 +1916,7 @@ export const TeamSettlementPage: React.FC = () => {
       | ({ kind: 'office_expense'; savedAmount: number } & ReturnType<typeof calculateTeamSettlementOfficeExpense>)
       | { kind: 'payroll'; rows: Array<{ workerId: string; workerName: string; manDay: number; amount: number }>; totalManDay: number; totalAmount: number }
       | { kind: 'recruiter_fee'; rows: NonNullable<TeamSettlementDeductionItem['recruiterFeeDetails']>; totalAmount: number }
-      | {
-        kind: 'accommodation_billing';
-        mode: 'document' | 'ledger';
-        rows: Array<{
-          subject: string;
-          label: string;
-          amount: number;
-          teamDays?: number;
-          totalDays?: number;
-        }>;
-        totalAmount: number;
-      }
+      | ({ kind: 'accommodation_billing' } & ReturnType<typeof buildTeamSettlementAccommodationDetail>)
       | {
         kind: 'vehicle_billing';
         mode: 'document' | 'ledger';
@@ -1926,6 +1943,11 @@ export const TeamSettlementPage: React.FC = () => {
       if (!doc) return null;
 
       const isAggregateDetailItem = String(item.id).startsWith('deduction-aggregate:');
+      if (item.origin === 'accommodation_billing') {
+        const items = isAggregateDetailItem ? doc.deductions.filter(row => row.origin === item.origin) : [item];
+        return { kind: 'accommodation_billing', ...buildTeamSettlementAccommodationDetail(items, expenseSourceResult.entries, accommodationAddresses) };
+      }
+
       if (String(item.id).startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX)) {
         const rows: ExpenseAggregateDetailRow[] = doc.deductions
           .filter(deduction => EXPENSE_DEDUCTION_ORIGINS.includes(deduction.origin) && (item.id === EXPENSE_GROUP_AGGREGATE_ALL_ID || deduction.origin === item.origin))
@@ -2033,7 +2055,7 @@ export const TeamSettlementPage: React.FC = () => {
         return { kind: 'payroll', rows, totalManDay, totalAmount };
       }
 
-      if (item.origin === 'accommodation_billing' || item.origin === 'vehicle_billing' || item.origin === 'card_billing' || item.origin === 'team_expense_claim') {
+      if (item.origin === 'vehicle_billing' || item.origin === 'card_billing' || item.origin === 'team_expense_claim') {
         const saved = isAggregateDetailItem ? doc.deductions.filter(row => row.origin === item.origin) : [item];
         const rows = saved.flatMap(row => getTeamSettlementExpenseDetail(row, expenseSourceResult.entries).rows);
         const totalAmount = saved.reduce((sum, row) => sum + row.amount, 0);
@@ -2043,7 +2065,7 @@ export const TeamSettlementPage: React.FC = () => {
 
       return null;
     },
-    [expenseSourceResult.entries, detailRows, doc, matchesTeam]
+    [expenseSourceResult.entries, detailRows, doc, matchesTeam, accommodationAddresses]
   );
 
   const getLineDetailRows = useCallback(
@@ -3054,7 +3076,9 @@ export const TeamSettlementPage: React.FC = () => {
         </p>
       )}
 
-      <div className="mt-2 overflow-auto">
+      {group.items.length > 0 && group.items.every(item => item.origin === 'daily_advance_invoice') ? (
+        <TeamSettlementInvoiceDetail items={group.items.filter(item => item.origin === 'daily_advance_invoice')} />
+      ) : <div className="mt-2 overflow-auto">
         <table data-compact="adjustment" className="w-full text-sm border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-600">
@@ -3248,56 +3272,7 @@ export const TeamSettlementPage: React.FC = () => {
                     )}
 
                     {detail.kind === 'accommodation_billing' && (
-                      <div>
-                        <div className="text-sm font-semibold text-slate-800">숙소 공제 상세</div>
-                        <div className="text-xs text-slate-500 mt-1">
-                          {detail.mode === 'document' ? '숙소 청구서 기준' : '월별 공과금 대장 배분 기준'}
-                        </div>
-
-                        <div className="mt-3 overflow-auto">
-                          <table className="w-full text-xs border-collapse">
-                            <thead>
-                              <tr className="bg-slate-50 text-slate-600">
-                                <th scope="col" className="text-left px-2 py-2 border">대상</th>
-                                <th scope="col" className="text-left px-2 py-2 border">항목</th>
-                                <th scope="col" className="text-right px-2 py-2 border">금액</th>
-                                {detail.mode === 'ledger' && (
-                                  <th scope="col" className="text-right px-2 py-2 border">배분일수(팀/전체)</th>
-                                )}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {detail.rows.length === 0 ? (
-                                <tr>
-                                  <td className="px-2 py-2 border text-slate-500" colSpan={detail.mode === 'ledger' ? 4 : 3}>
-                                    데이터 없음
-                                  </td>
-                                </tr>
-                              ) : (
-                                detail.rows.map((row, idx) => (
-                                  <tr key={`accommodation-row-${idx}`} className="bg-white">
-                                    <td data-label="대상" className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
-                                    <td data-label="항목" className="px-2 py-2 border">{row.label}</td>
-                                    <td data-label="금액" className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
-                                    {detail.mode === 'ledger' && (
-                                      <td data-label="배분일수(팀/전체)" className="px-2 py-2 border text-right">
-                                        {safeNumber(row.teamDays)}/{safeNumber(row.totalDays)}
-                                      </td>
-                                    )}
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        <div className="mt-3 text-sm">
-                          <div className="flex items-center justify-between mt-1">
-                            <div className="text-slate-600">총금액</div>
-                            <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
-                          </div>
-                        </div>
-                      </div>
+                      <TeamSettlementAccommodationDetail key={`${doc?.teamId}:${doc?.yearMonth}`} detail={detail} addressStatus={accommodationAddressStatus} />
                     )}
 
                     {detail.kind === 'vehicle_billing' && (
@@ -3560,7 +3535,7 @@ export const TeamSettlementPage: React.FC = () => {
             })}
           </tbody>
         </table>
-      </div>
+      </div>}
     </div>
   );
 
