@@ -130,6 +130,44 @@ describe('대납출력부', () => {
     expect(screen.getByLabelText('인력소개비 합계')).toHaveTextContent('0원');
   });
 
+  it('용역 청구 미리보기는 현재 팀만 표시하고 이전 달을 포함한 소개비와 엑셀 금액이 일치한다', async () => {
+    const history = [27, 28, 29, 30].map(day => ({ ...fixtureRows[0], date: `2026-01-${day}` }));
+    jest.mocked(dailyReportService.getWorkerRows).mockImplementation(async params => (params?.startDate === '1900-01-01' ? [...history, ...fixtureRows] : fixtureRows) as any);
+    jest.mocked(teamService.getTeams).mockResolvedValue([{ id: 'team-a', legacyId: 'old-a', name: '검증팀 A' }] as any);
+    render(<DailyAdvanceWorkbookPage statementContext={{ month: fixtureMonth, teamId: 'old-a', teamName: '검증팀 A', kind: 'service' }} />);
+    expect(await screen.findByText('2026-02 검증팀 A 용역비 청구서')).toBeVisible();
+    expect(screen.queryByText('검증나')).not.toBeInTheDocument();
+    expect(screen.queryByText('일급검증')).not.toBeInTheDocument();
+    const cells = totalCells();
+    expect(cells[29]).toHaveTextContent('2.5');
+    expect(cells[30]).toHaveTextContent('60,000');
+    expect(cells[31]).toHaveTextContent('310,000');
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+    const rows = XLSX.utils.sheet_to_json<Array<string | number>>(exportedSheet(), { header: 1 });
+    expect(rows[rows.length - 1].slice(-4)).toEqual([2.5, 60000, 310000, '']);
+  });
+
+  it('용역 내역이 없는 팀은 다른 팀 자료로 바뀌지 않는다', async () => {
+    render(<DailyAdvanceWorkbookPage statementContext={{ month: fixtureMonth, teamId: 'empty-team', teamName: '빈 팀', kind: 'service' }} />);
+    expect(await screen.findByText(/용역팀 데이터가 없습니다/)).toBeVisible();
+    expect(screen.queryByText('검증가')).not.toBeInTheDocument();
+    expect(screen.queryByText('검증나')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '화면복사' })).toBeDisabled();
+  });
+
+  it('용역 이력 조회가 실패하면 부정확한 청구서와 다운로드를 막는다', async () => {
+    const warning = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.mocked(dailyReportService.getWorkerRows).mockImplementation(async params => {
+      if (params?.startDate === '1900-01-01') throw new Error('history-unavailable');
+      return fixtureRows as any;
+    });
+    render(<DailyAdvanceWorkbookPage statementContext={{ month: fixtureMonth, teamId: 'team-a', teamName: '검증팀 A', kind: 'service' }} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('용역팀 누적 근무일');
+    expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeDisabled();
+    expect(screen.queryByRole('table', { name: '용역비 청구 내역' })).not.toBeInTheDocument();
+    warning.mockRestore();
+  });
+
   it('같은 날 여러 일보와 소수 공수를 합산하고 일급제는 제외하며 선택한 팀만 집계한다', async () => {
     await openServiceTab();
     const cells = totalCells();

@@ -40,6 +40,7 @@ import { prepareTeamSettlementManualSales, unlockTeamSettlementManualSales } fro
 import { mergeTeamSettlementSales } from '../utils/teamSettlementSalesMerge';
 import { compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
 import { buildTeamSettlementExpenseEntries } from '../utils/teamSettlementExpenses';
+import { applyServiceRecruiterFees, buildDailyAdvanceServiceRows } from '../utils/dailyAdvanceServiceStatement';
 import { buildTeamSettlementInvoiceDeduction } from '../utils/teamSettlementInvoice';
 import { createDailyAdvanceRowResolver, buildDailyAdvanceStatementRows, buildStatementRecruiterFeeValueMap, buildStatementRecruiterFeeDateMap } from '../utils/dailyAdvanceStatement';
 import { calculateTeamSettlementOfficeExpense, TEAM_SETTLEMENT_OFFICE_RATES } from '../utils/teamSettlementOfficeExpense';
@@ -1466,14 +1467,20 @@ export const teamSettlementService = {
 
     const statementResolver = createDailyAdvanceRowResolver(statementWorkers, teams);
     const statementTeamKey = String(teams.find(team => team.id === params.teamId || team.legacyId === params.teamId)?.id || params.teamId);
+    const statementEntries = statementWorkerRows.map(row => statementResolver.resolveEntry(row).entry);
     const statementRows = buildDailyAdvanceStatementRows({
-      entries: statementWorkerRows.map(row => statementResolver.resolveEntry(row).entry),
+      entries: statementEntries,
       month: params.yearMonth, teamKey: statementTeamKey,
       lastDay: Number(period.endDate.slice(-2)),
       recruiterFeeValues: buildStatementRecruiterFeeValueMap(statementRecruiterFees),
       recruiterFeeDates: buildStatementRecruiterFeeDateMap(statementRecruiterFees)
     });
-    const invoiceDeduction = buildTeamSettlementInvoiceDeduction(params.yearMonth, params.teamId, statementRows);
+    const serviceHistory = statementEntries.some(entry => entry.salaryType === '용역팀' && entry.teamKey === statementTeamKey)
+      ? await dailyReportService.getWorkerRows({ startDate: '1900-01-01', endDate: period.endDate }) : [];
+    const serviceRows = buildDailyAdvanceServiceRows(applyServiceRecruiterFees(statementEntries,
+      serviceHistory.map(row => statementResolver.resolveEntry(row).entry))
+      .filter(entry => entry.teamKey === statementTeamKey && entry.date.startsWith(`${params.yearMonth}-`)));
+    const invoiceDeduction = buildTeamSettlementInvoiceDeduction(params.yearMonth, params.teamId, statementRows, serviceRows);
 
     const nowIso = new Date().toISOString();
     const sales = [...dailyReportSales, ...supportFeeSales];

@@ -665,7 +665,7 @@ export const TeamSettlementPage: React.FC = () => {
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
   const [yearMonth, setYearMonth] = useState<string>(buildDefaultYearMonth());
   const [doc, setDoc] = useState<TeamSettlementDocument | null>(null);
-  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoiceOpen, setInvoiceOpen] = useState<'daily' | 'service' | null>(null);
   const [expenseCategoryLabels, setExpenseCategoryLabels] = useState<ReadonlyMap<string, string>>(() => new Map());
   useEffect(() => {
     let cancelled = false;
@@ -674,7 +674,7 @@ export const TeamSettlementPage: React.FC = () => {
       .catch(() => { /* Known internal codes fall back to 기타 without changing saved data. */ });
     return () => { cancelled = true; };
   }, []);
-  useEffect(() => { setInvoiceOpen(false); }, [selectedTeamId, yearMonth]);
+  useEffect(() => { setInvoiceOpen(null); }, [selectedTeamId, yearMonth]);
   const transactionMemoRef = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const textarea = transactionMemoRef.current;
@@ -3062,18 +3062,21 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="text-xs text-slate-500 mt-0.5">{group.description}</div>
           )}
         </div>
-        <div className="flex items-center gap-2 text-right">
-          {group.key === 'payroll' && (
+        <div className="flex flex-wrap items-center justify-end gap-2 text-right">
+          {group.key === 'payroll' && (<>
             <button
               type="button"
-              onClick={() => setInvoiceOpen(true)}
+              onClick={() => setInvoiceOpen('daily')}
               disabled={!canPreviewInvoice}
               className={`team-settlement-page__statement-button ${primaryButtonClassName}`}
               title="대납출력부에서 현재 팀과 월의 청구서를 만듭니다"
             >
               대납청구서 보기
             </button>
-          )}
+            <button type="button" onClick={() => setInvoiceOpen('service')} disabled={!canPreviewInvoice}
+              className={`team-settlement-page__statement-button ${primaryButtonClassName}`}
+              title="대납출력부에서 현재 팀과 월의 용역비 청구서를 만듭니다">용역비청구 보기</button>
+          </>)}
           <div>
             <div className="text-sm font-extrabold text-slate-900">{formatCurrency(group.totalAmount)}원</div>
             {group.key === 'payroll' && <div className="text-[11px] text-slate-500">인력소개비 포함</div>}
@@ -4370,8 +4373,8 @@ export const TeamSettlementPage: React.FC = () => {
         </div>
       )}
       {invoiceOpen && canPreviewInvoice && doc && <TeamWorkbookStatementDialog
-        context={{ month: yearMonth, teamId: selectedTeamId, teamName: selectedTeamName || doc.teamName, companyName: selectedTeam?.companyName }}
-        onClose={() => setInvoiceOpen(false)}
+        context={{ kind: invoiceOpen, month: yearMonth, teamId: selectedTeamId, teamName: selectedTeamName || doc.teamName, companyName: selectedTeam?.companyName }}
+        onClose={() => setInvoiceOpen(null)}
       />}
     </div>
   );

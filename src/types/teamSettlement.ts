@@ -89,6 +89,7 @@ export const TeamSettlementDeductionItemSchema = z.object({
   category: z.string().min(1),
   amount: NonNegativeNumberSchema,
   invoiceDetails: z.array(z.object({
+    invoiceType: z.enum(['daily', 'service']).optional(),
     workerId: z.string().min(1),
     workerName: z.string().min(1),
     manDay: NonNegativeNumberSchema,

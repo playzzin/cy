@@ -19,3 +19,7 @@
   .cy-detail-dialog.team-workbook-statement-dialog { border-radius: 0; }
   .team-workbook-statement-dialog .cy-detail-dialog__body { padding: 8px; }
 }
+
+.team-workbook-statement-preview .team-workbook-service-table :is(th, td) { min-width: 0; max-width: none; width: auto; white-space: normal; overflow-wrap: anywhere; }
+.team-workbook-statement-preview .team-workbook-service-table .sticky { position: static; }
+.team-workbook-statement-preview .team-workbook-service-table :is(.date-header-cell, td.tabular-nums) { white-space: nowrap; overflow-wrap: normal; font-size: 11px; padding-left: 0; padding-right: 0; }

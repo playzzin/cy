@@ -53,3 +53,15 @@ test('발생일을 지정하지 않은 과거 소개비는 공수로 추측하�
   fireEvent.click(screen.getByRole('button', { name: '인력소개비 상세' }));
   expect(within(screen.getByRole('table', { name: '인력소개비 인원별 금액' })).getByRole('row', { name: '소개 인원 A 미지정 발생일 지정 필요 120,000원' })).toBeVisible();
 });
+
+
+test('같은 인원의 일급·용역 내역을 분리하고 용역 소개비를 다시 더하지 않는다', () => {
+  render(<TeamSettlementInvoiceDetail items={[{ ...item, amount: item.amount + 160000, invoiceDetails: [...item.invoiceDetails!,
+    { invoiceType: 'service', workerId: 'a', workerName: '소개 인원 A', manDay: 1, claimAmount: 100000, recruiterFee: 60000, invoiceAmount: 160000 }] }]} />);
+  expect(screen.getByRole('row', { name: /^인력소개비 2명 180,000원/ })).toBeVisible();
+  expect(screen.getByRole('row', { name: /^청구금액 7공수 700,000원/ })).toBeVisible();
+  expect(screen.getByRole('row', { name: /^용역비 1공수 160,000원/ })).toBeVisible();
+  expect(screen.getByRole('group', { name: '소개비 포함 대납청구비 합계' })).toHaveTextContent('1,040,000원');
+  fireEvent.click(screen.getByRole('button', { name: '용역비 상세' }));
+  expect(within(screen.getByRole('table', { name: '용역비 인원별 금액' })).getByRole('row', { name: '소개 인원 A 1 60,000원 160,000원' })).toBeVisible();
+});

@@ -27,10 +27,10 @@ export default function TeamWorkbookStatementDialog({ context, onClose }: { cont
     return () => { observer?.disconnect(); window.removeEventListener('resize', measure); window.visualViewport?.removeEventListener('resize', measure); };
   }, []);
   return <ResponsiveDetailDialog open onOpenChange={open => { if (!open) onClose(); }}
-    title={`${context.teamName} 청구서`} description={`${context.month} · 대납출력부 청구서 · 인력소개비 포함`}
+    title={`${context.teamName} ${context.kind === 'service' ? '용역비 청구서' : '청구서'}`} description={`${context.month} · 대납출력부 ${context.kind === 'service' ? '용역팀' : '청구서'} · 인력소개비 포함`}
     className="team-workbook-statement-dialog" contentStyle={contentStyle}>
     <Suspense fallback={<p role="status">대납출력부 청구서를 불러오는 중입니다.</p>}>
-      <DailyAdvanceWorkbookPage key={`${context.month}:${context.teamId}`} statementContext={context} />
+      <DailyAdvanceWorkbookPage key={`${context.month}:${context.teamId}:${context.kind || 'daily'}`} statementContext={context} />
     </Suspense>
   </ResponsiveDetailDialog>;
 }

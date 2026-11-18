@@ -84,7 +84,7 @@ test('소개비 조회 실패를 0원으로 저장하거나 확정하지 않는�
 });
 
 
-test('월급제·용역팀·다른 팀의 인원과 청구서에 없는 소개비는 공제에서 제외한다', async () => {
+test('현재 팀 용역 청구액은 합산하고 월급제·다른 팀·청구서에 없는 소개비는 제외한다', async () => {
   const daily = (await dailyReportService.getWorkerRows())[0];
   jest.mocked(dailyReportService.getWorkerRows).mockResolvedValue([
     daily, { ...daily, workerId: 'monthly', salaryModel: '월급제', unitPrice: 3000000 },
@@ -95,6 +95,27 @@ test('월급제·용역팀·다른 팀의 인원과 청구서에 없는 소개�
     fee, { ...fee, workerId: 'monthly', amount: 999000 }, { ...fee, workerId: 'absent', amount: 999000 }
   ]);
   const result = await calculate();
-  expect(result.deductions.find(row => row.origin === 'daily_advance_invoice')?.amount).toBe(220000);
+  expect(result.deductions.find(row => row.origin === 'daily_advance_invoice')?.amount).toBe(780000);
+  expect(result.sourceSnapshot?.totals).toMatchObject({ deductions: 780000, net: -780000 });
+  expect(result.deductions.find(row => row.origin === 'daily_advance_invoice')?.invoiceDetails).toContainEqual(expect.objectContaining({ invoiceType: 'service', claimAmount: 500000, recruiterFee: 60000, invoiceAmount: 560000 }));
   expect(result.deductions.some(row => ['daily_wage_payroll', 'monthly_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'].includes(row.origin))).toBe(false);
+});
+
+
+test('이전 달 근무를 포함해 용역 소개비를 제한하고 이력 조회 실패 시 재집계·확정을 저장하지 않는다', async () => {
+  const daily = (await dailyReportService.getWorkerRows())[0];
+  const service = { ...daily, workerId: 'service', salaryModel: '용역팀', unitPrice: 200000 };
+  const history = [1, 2, 3, 4, 5].map(day => ({ ...service, date: `2026-07-0${day}` }));
+  jest.mocked(dailyReportService.getWorkerRows).mockImplementation(async params => params?.startDate === '1900-01-01' ? [...history, service] : [daily, service]);
+  const draft = await calculate();
+  expect(draft.deductions.find(row => row.origin === 'daily_advance_invoice')).toMatchObject({ amount: 420000,
+    invoiceDetails: expect.arrayContaining([expect.objectContaining({ invoiceType: 'service', recruiterFee: 0, invoiceAmount: 200000 })]) });
+  jest.mocked(dailyReportService.getWorkerRows).mockImplementation(async params => {
+    if (params?.startDate === '1900-01-01') throw new Error('service-history-unavailable');
+    return [daily, service];
+  });
+  const save = jest.spyOn(teamSettlementService, 'saveTeamSettlement').mockResolvedValue(undefined);
+  await expect(teamSettlementService.recalculateAndSaveTeamSettlement(scope)).rejects.toThrow('service-history-unavailable');
+  await expect(teamSettlementService.saveAndConfirmTeamSettlement(draft)).rejects.toThrow('service-history-unavailable');
+  expect(save).not.toHaveBeenCalled();
 });

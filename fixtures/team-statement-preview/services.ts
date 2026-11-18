@@ -1,3 +1,4 @@
+import { applyServiceRecruiterFees, buildDailyAdvanceServiceRows } from '../../src/utils/dailyAdvanceServiceStatement';
 // Synthetic data only. The browser harness blocks every nonlocal request.
 import { filterTeamSettlementAccommodationBillings } from '../../src/utils/teamSettlementAccommodationScope';
 import { buildTeamSettlementExpenseEntries } from '../../src/utils/teamSettlementExpenses';
@@ -10,6 +11,9 @@ const teams = [
 const workers = teams.map((team, index) => ({ id: `worker-${index}`, name: `가상작업자 ${index + 1}`, teamId: team.id, teamName: team.name, salaryModel: '일급제', unitPrice: 100000 }));
 if (new URLSearchParams(window.location.search).has('many')) {
   for (let index = 0; index < 39; index++) workers.push({ ...workers[0], id: `many-worker-${index}`, name: `가상추가인원 ${index + 1}` });
+}
+if (new URLSearchParams(window.location.search).has('service')) {
+  teams.forEach((team, index) => workers.push({ ...workers[index], id: `service-${index}`, name: `가상용역 ${index + 1}`, teamId: team.id, salaryModel: '용역팀' }));
 }
 const empty = async () => [];
 const fees = (month: string) => workers.map((worker, index) => ({ month, teamKey: worker.teamId, workerId: worker.id, amount: index === 0 ? 120000 : 30000, chargeDates: [`${month}-01`, `${month}-03`],
@@ -46,9 +50,9 @@ export const companyService = { getCompaniesByType: async () => [{ id: 'company'
 export const manpowerService = { getWorkers: async () => workers };
 export const dailyReportService = {
   getReportWorkerRowsByRange: empty,
-  getWorkerRows: async ({ startDate }: { startDate: string }) => workers.map(worker => ({
+  getWorkerRows: async ({ startDate, endDate }: { startDate: string; endDate?: string }) => workers.map(worker => ({
     ...worker, workerId: worker.id, workerName: worker.name, reportId: `report-${worker.id}`,
-    date: `${startDate.slice(0, 7)}-01`, manDay: 1, amount: 100000,
+    date: `${(endDate || startDate).slice(0, 7)}-01`, manDay: 1, amount: 100000,
   })),
 };
 export const dailyAdvanceWorkbookProfileService = { getProfiles: empty };
@@ -70,8 +74,10 @@ export const teamSettlementService = {
     const validation = new URLSearchParams(window.location.search).has('validation');
     const grouped = new URLSearchParams(window.location.search).has('grouped');
     const resolver = createDailyAdvanceRowResolver(workers, teams);
+    const entries = (await dailyReportService.getWorkerRows({ startDate: `${yearMonth}-01` })).map(row => resolver.resolveEntry(row).entry);
+    const serviceRows = buildDailyAdvanceServiceRows(applyServiceRecruiterFees(entries, entries).filter(entry => entry.teamKey === teamId));
     const invoiceRows = buildDailyAdvanceStatementRows({
-      entries: (await dailyReportService.getWorkerRows({ startDate: `${yearMonth}-01` })).map(row => resolver.resolveEntry(row).entry),
+      entries,
       month: yearMonth, teamKey: teamId, lastDay: new Date(Number(yearMonth.slice(0, 4)), Number(yearMonth.slice(-2)), 0).getDate(),
       recruiterFeeValues: buildStatementRecruiterFeeValueMap(fees(yearMonth)), recruiterFeeDates: buildStatementRecruiterFeeDateMap(fees(yearMonth))
     });
@@ -86,7 +92,7 @@ export const teamSettlementService = {
     if (validation) sales.push({ ...sales[0], id: 'missing-sale', source: 'auto', origin: 'daily_report', siteName: '누락 확인 현장', amount: 0 });
     const purchases = [{ id: 'purchase', source: 'manual', origin: 'manual', kind: '지원', siteName: '가상 지원 현장', counterTeamName: '가상 지원팀', manDay: 1, amount: first ? 200000 : 100000 }];
     const deductions = [
-      buildTeamSettlementInvoiceDeduction(yearMonth, teamId, invoiceRows),
+      buildTeamSettlementInvoiceDeduction(yearMonth, teamId, invoiceRows, serviceRows),
       { id: 'expense', source: 'manual', origin: 'manual', category: '공제 경비', amount: first ? 50000 : 10000, memo: '당월 경비 정산' },
       ...buildTeamSettlementExpenseEntries({ yearMonth, matchesTeam: id => id === teamId,
         accommodationDocs: await getTeamSettlementAccommodationBillings(yearMonth), vehicleDocs: [], cardDocs: [], teamExpenseClaims: []
