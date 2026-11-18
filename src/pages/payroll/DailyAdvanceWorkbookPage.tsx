@@ -1,5 +1,5 @@
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -722,6 +722,7 @@ const captureWorkbookTabToPng = async (root: HTMLElement): Promise<Blob> => {
             '[data-daily-advance-capture-root="true"]'
           );
           if (!clonedRoot) return;
+          if (clonedRoot.dataset.statementPreviewPaper === 'true') clonedRoot.style.transform = 'none';
 
           clonedRoot.style.width = `${width}px`;
           clonedRoot.style.minWidth = `${width}px`;
@@ -1176,6 +1177,9 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
   const [copyingTab, setCopyingTab] = useState<WorkbookTabKey | null>(null);
   const copyInFlightRef = useRef(false);
   const activeTabCaptureRef = useRef<HTMLDivElement | null>(null);
+  const statementViewportRef = useRef<HTMLDivElement | null>(null);
+  const [statementFit, setStatementFit] = useState(true);
+  const [statementLayout, setStatementLayout] = useState({ width: 1000, height: 0, scale: 1 });
   const [isGoyunjungMode, setIsGoyunjungMode] = useState<boolean>(() => {
     if (statementPreview || typeof window === 'undefined') return false;
     return window.localStorage.getItem(GOYUNJUNG_MODE_STORAGE_KEY) === 'true';
@@ -1834,6 +1838,27 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     entries: statementEntries, month, teamKey: statementTeamKey, lastDay: statementLastDay,
     recruiterFeeValues: statementRecruiterFeeValues, manDayDrafts
   }), [manDayDrafts, month, statementEntries, statementLastDay, statementRecruiterFeeValues, statementTeamKey]);
+
+  useLayoutEffect(() => {
+    if (!statementPreview || loading || loadErrorMessage || loadWarningMessage) return;
+    const viewport = statementViewportRef.current;
+    const paper = activeTabCaptureRef.current;
+    if (!viewport || !paper) return;
+    const measure = () => {
+      if (!viewport.clientWidth || !viewport.clientHeight) return;
+      const width = Math.max(1000, viewport.clientWidth);
+      const height = paper.offsetHeight;
+      const scale = Math.floor(Math.min(1, viewport.clientWidth / width, viewport.clientHeight / Math.max(1, height)) * 10000) / 10000;
+      setStatementLayout(previous => previous.width === width && previous.height === height && previous.scale === scale
+        ? previous : { width, height, scale });
+    };
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(viewport);
+    observer?.observe(paper);
+    window.addEventListener('resize', measure);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
+  }, [statementPreview, loading, loadErrorMessage, loadWarningMessage, statementTeamKey]);
 
   const statementDailyTotals = useMemo(() => {
     const totals = Array.from({ length: statementLastDay }, () => 0);
@@ -2648,7 +2673,7 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
             </dl>}
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg border border-[#d5ccb0] bg-white px-3 py-3 shadow-sm">
+          {!statementPreview && <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg border border-[#d5ccb0] bg-white px-3 py-3 shadow-sm">
             {!statementPreview && <button
               type="button"
               onClick={handleSaveStatementRecruiterFees}
@@ -2665,12 +2690,12 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
               <FontAwesomeIcon icon={faDownload} />
               <span>엑셀 다운로드</span>
             </button>
-          </div>
+          </div>}
         </div>
       </div>
 
       <div className="border-b border-[#d5ccb0] p-4">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="team-workbook-statement-parties grid gap-3 md:grid-cols-3">
           <div className="rounded-lg border border-[#d5ccb0] p-4" style={{ backgroundColor: COLORS.orange }}>
             <div className="text-xs font-bold text-[#4A452A]">회사</div>
             <div className="mt-2 text-base font-black text-[#1E1C11]">
@@ -3221,15 +3246,25 @@ const DailyAdvanceWorkbookPage: React.FC<{ statementContext?: DailyAdvanceStatem
     ? 'space-y-4 rounded-xl border border-white/45 bg-white/25 p-5 shadow-sm'
     : 'space-y-4 rounded-xl border border-[#d9cfb2] bg-[#fbf8ee] p-5 shadow-sm';
 
-  if (statementPreview) return <section className="daily-advance-workbook space-y-3" aria-label="대납출력부 팀 청구서">
-    <div className="flex flex-wrap items-center justify-end gap-2">
+  const statementScale = statementFit ? statementLayout.scale : 1;
+  if (statementPreview) return <section className="daily-advance-workbook team-workbook-statement-preview" aria-label="대납출력부 팀 청구서">
+    <div className="team-workbook-statement-preview__toolbar">
       <button type="button" className="rounded-lg border bg-white px-3 py-2 text-sm font-bold" onClick={() => void loadData()} disabled={loading || copyingTab !== null}>새로고침</button>
       <button type="button" className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-bold text-white" onClick={() => void handleCopyActiveTab()}
         disabled={loading || copyingTab !== null || Boolean(loadErrorMessage || loadWarningMessage) || !statementRows.length}>화면복사</button>
+      <button type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white" onClick={handleDownloadStatementExcel} disabled={loading}>엑셀 다운로드</button>
+      <button type="button" aria-pressed={statementFit} className="rounded-lg border bg-white px-3 py-2 text-sm font-bold" onClick={() => setStatementFit(true)}>전체 맞춤</button>
+      <button type="button" aria-pressed={!statementFit} className="rounded-lg border bg-white px-3 py-2 text-sm font-bold" onClick={() => setStatementFit(false)}>100%</button>
+      <span aria-label="청구서 배율" className="text-xs text-slate-600">{Math.round(statementScale * 100)}%</span>
     </div>
     {loading ? <p role="status" className="p-6 text-center">대납출력부 청구서를 만드는 중입니다.</p>
       : loadErrorMessage || loadWarningMessage ? <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">{loadErrorMessage || loadWarningMessage} 새로고침 후 다시 확인해 주세요.</p>
-        : <div ref={activeTabCaptureRef} data-daily-advance-capture-root="true">{renderStatementTab()}</div>}
+        : <div ref={statementViewportRef} className="team-workbook-statement-preview__viewport" aria-label="청구서 표시 영역">
+          <div className="team-workbook-statement-preview__canvas" style={{ width: statementLayout.width * statementScale, height: statementLayout.height * statementScale }}>
+            <div ref={activeTabCaptureRef} data-daily-advance-capture-root="true" data-statement-preview-paper="true" className="team-workbook-statement-preview__paper"
+              style={{ width: statementLayout.width, transform: `scale(${statementScale})` }}>{renderStatementTab()}</div>
+          </div>
+        </div>}
   </section>;
 
   return (

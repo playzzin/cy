@@ -1,15 +1,21 @@
 .cy-detail-dialog.team-workbook-statement-dialog {
-  inset: 0 0 0 auto;
+  inset: 0;
   transform: none;
-  width: calc(100vw - 24px);
+  width: 100%;
   height: 100dvh;
   max-height: 100dvh;
-  border-radius: 16px 0 0 16px;
+  border-radius: 12px;
 }
-.team-workbook-statement-dialog .cy-detail-dialog__body { flex: 1; background: #fbf8ee; padding: 12px; }
-.team-workbook-statement-dialog .team-workbook-statement-table { font-size: clamp(10px, .85vw, 13px); }
+.team-workbook-statement-dialog .cy-detail-dialog__body { display: flex; flex: 1; overflow: hidden; background: #fbf8ee; padding: 10px; }
+.team-workbook-statement-preview { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; gap: 8px; }
+.team-workbook-statement-preview__toolbar { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.team-workbook-statement-preview__viewport { flex: 1; min-height: 0; min-width: 0; overflow: auto; }
+.team-workbook-statement-preview__canvas { position: relative; overflow: hidden; margin: 0 auto; }
+.team-workbook-statement-preview__paper { position: absolute; top: 0; left: 0; transform-origin: top left; }
+.team-workbook-statement-dialog .team-workbook-statement-table { font-size: 13px; }
 .team-workbook-statement-dialog .team-workbook-statement-table :is(th, td) { padding-left: 2px; padding-right: 2px; }
+.team-workbook-statement-preview .team-workbook-statement-parties { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 640px) {
-  .cy-detail-dialog.team-workbook-statement-dialog { width: 100%; border-radius: 0; }
-  .team-workbook-statement-dialog .cy-detail-dialog__body { padding: 10px; }
+  .cy-detail-dialog.team-workbook-statement-dialog { border-radius: 0; }
+  .team-workbook-statement-dialog .cy-detail-dialog__body { padding: 8px; }
 }

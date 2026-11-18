@@ -41,7 +41,10 @@ async function build() {
         Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
           write: async items => {
             const blob = await items[0].getType('image/png');
-            window.__copiedInvoice = { type: blob.type, size: blob.size };
+            const bitmap = await createImageBitmap(blob);
+            window.__copiedInvoice = { type: blob.type, size: blob.size, width: bitmap.width, height: bitmap.height };
+            bitmap.close();
+            window.__copiedInvoiceBlob = blob;
           },
         } });
       });
@@ -81,6 +84,8 @@ async function build() {
       const purchases = page.getByRole('region', { name: '매입 내역' });
       assert.doesNotMatch(await purchases.innerText(), /급여|인력소개비|대납청구서/);
       assert.equal(await page.getByLabel('매입 - 200,000원 (1공수)', { exact: true }).isVisible(), true);
+      assert.equal(await page.getByRole('group', { name: '거래내역 합산 금액' }).getByText('1,200,000원', { exact: true }).isVisible(), true);
+      await page.locator('.team-settlement-page__transaction-totals').screenshot({ path: path.join(output, `transaction-totals-${width}.png`) });
       const summary = page.getByRole('region', { name: '정산 요약' });
       await summary.scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(output, `settlement-equation-${width}.png`) });
@@ -134,7 +139,7 @@ async function build() {
         const statement = invoice.getByRole('table', { name: '팀 대납청구 내역' });
         const tableBounds = await statement.boundingBox();
         const lastColumn = await statement.getByRole('columnheader', { name: '청구금액', exact: true }).boundingBox();
-        assert.ok(dialogBounds && tableBounds && lastColumn && dialogBounds.x + dialogBounds.width === width && tableBounds.x >= dialogBounds.x && lastColumn.x + lastColumn.width <= width, '우측 청구 영역에 일자부터 청구금액까지 모든 열이 한 번에 보인다');
+        assert.ok(dialogBounds && tableBounds && lastColumn && dialogBounds.x + dialogBounds.width <= width && tableBounds.x >= dialogBounds.x && lastColumn.x + lastColumn.width <= width, '우측 청구 영역에 일자부터 청구금액까지 모든 열이 한 번에 보인다');
         assert.equal(await statement.evaluate(table => table.parentElement.scrollWidth <= table.parentElement.clientWidth), true);
       }
       await page.screenshot({ path: path.join(output, `invoice-${width}.png`) });
@@ -239,8 +244,45 @@ async function build() {
       await page.getByRole('button', { name: '검증팀 B 선택' }).click();
       assert.equal(await groupedAdditions.getByRole('table', { name: '유류 개별 내역' }).count(), 0);
 
+      await page.goto(`${origin}/payroll/team-settlement?shell=1&many=1`);
+      await page.getByRole('button', { name: '대납청구서 보기' }).click();
+      const fittedInvoice = page.getByRole('dialog', { name: '검증팀 A 청구서' });
+      await fittedInvoice.getByText('가상추가인원 39', { exact: true }).waitFor();
+      const fitWithinContent = async () => {
+        await page.waitForFunction(() => {
+          const dialog = document.querySelector('.team-workbook-statement-dialog');
+          const viewport = document.querySelector('.team-workbook-statement-preview__viewport');
+          const paper = document.querySelector('[data-statement-preview-paper]');
+          const main = document.getElementById('main-content');
+          if (!dialog || !viewport || !paper || !main) return false;
+          const d = dialog.getBoundingClientRect(), v = viewport.getBoundingClientRect(), p = paper.getBoundingClientRect(), m = main.getBoundingClientRect();
+          return d.left >= m.left && d.right <= m.right + 1 && d.top >= 60 && d.bottom <= window.innerHeight + 1
+            && p.width > 0 && p.height > 0 && p.left >= v.left - 1 && p.right <= v.right + 1 && p.top >= v.top - 1 && p.bottom <= v.bottom + 1
+            && viewport.scrollHeight <= viewport.clientHeight + 1 && viewport.scrollWidth <= viewport.clientWidth + 1;
+        });
+      };
+      await fitWithinContent();
+      await page.screenshot({ path: path.join(output, `invoice-fit-content-${width}.png`) });
+      await fittedInvoice.getByRole('button', { name: '100%', exact: true }).click();
+      assert.equal(await fittedInvoice.getByRole('button', { name: '100%', exact: true }).getAttribute('aria-pressed'), 'true');
+      await page.waitForFunction(() => {
+        const viewport = document.querySelector('.team-workbook-statement-preview__viewport');
+        return viewport.scrollHeight > viewport.clientHeight;
+      });
+      await fittedInvoice.getByRole('button', { name: '전체 맞춤', exact: true }).click();
+      await fitWithinContent();
+      await page.setViewportSize({ width, height: 700 });
+      await fitWithinContent();
+      await fittedInvoice.getByRole('button', { name: '화면복사', exact: true }).click();
+      await page.waitForFunction(() => window.__copiedInvoice?.height > 2000);
+      const copySize = await page.evaluate(() => window.__copiedInvoice);
+      assert.ok(copySize.width >= 2000, '화면 맞춤 배율과 관계없이 전체 원본 너비로 복사한다');
+      const copied = await page.evaluate(async () => Array.from(new Uint8Array(await window.__copiedInvoiceBlob.arrayBuffer())));
+      fs.writeFileSync(path.join(output, `invoice-full-copy-${width}.png`), Buffer.from(copied));
+      await fittedInvoice.getByRole('button', { name: '상세 닫기' }).click();
+      await fittedInvoice.waitFor({ state: 'hidden' });
       assert.deepEqual(errors, []);
-      results.push({ width, exclusivePageAccordions: true, deduplicatedValidation: true, nestedAddressAccordion: true, accommodationRoomCount: true, accommodationRoomsAtSameAddress: true, groupedAdditions: true, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
+      results.push({ width, statementFitsContentWidthAndHeight: true, fullSizeInvoiceCopy: true, grossTransactionTotal: true, exclusivePageAccordions: true, deduplicatedValidation: true, nestedAddressAccordion: true, accommodationRoomCount: true, accommodationRoomsAtSameAddress: true, groupedAdditions: true, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
       await context.close();
     }
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));

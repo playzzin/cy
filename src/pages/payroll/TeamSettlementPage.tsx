@@ -4033,7 +4033,7 @@ export const TeamSettlementPage: React.FC = () => {
               <div className="team-settlement-page__transaction-total-label mb-2 text-xs font-black tracking-wide text-slate-600">
                 거래내역 합계
               </div>
-              <div className="team-settlement-page__transaction-totals grid gap-3 sm:grid-cols-2" aria-label="매출·매입 거래내역 합계">
+              <div className="team-settlement-page__transaction-totals grid gap-3" aria-label="매출·매입 거래내역 합계">
                 <div
                   className="flex min-h-[68px] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-3 shadow-sm"
                   aria-label={buildTeamSettlementTransactionSummary(
@@ -4043,7 +4043,7 @@ export const TeamSettlementPage: React.FC = () => {
                   )}
                 >
                   <span className="rounded-md bg-blue-600 px-2.5 py-1 text-sm font-black text-white shadow-sm">매출</span>
-                  <span className="font-black text-blue-300" aria-hidden="true">-</span>
+
                   <span className="text-lg font-black tracking-tight text-blue-950 sm:text-xl">
                     {formatCurrency(transactionSectionTotals.salesTotal.amount)}원
                   </span>
@@ -4052,6 +4052,7 @@ export const TeamSettlementPage: React.FC = () => {
                   </span>
                 </div>
 
+                <span className="team-settlement-page__transaction-operator" aria-hidden="true">+</span>
                 <div
                   className="flex min-h-[68px] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-orange-300 bg-gradient-to-r from-orange-50 to-amber-50 px-4 py-3 shadow-sm"
                   aria-label={buildTeamSettlementTransactionSummary(
@@ -4061,13 +4062,18 @@ export const TeamSettlementPage: React.FC = () => {
                   )}
                 >
                   <span className="rounded-md bg-orange-600 px-2.5 py-1 text-sm font-black text-white shadow-sm">매입</span>
-                  <span className="font-black text-orange-300" aria-hidden="true">-</span>
+
                   <span className="text-lg font-black tracking-tight text-orange-950 sm:text-xl">
                     {formatCurrency(transactionSectionTotals.purchasesTotal.amount)}원
                   </span>
                   <span className="text-sm font-black text-orange-700">
                     ({formatTeamSettlementSummaryManDay(transactionSectionTotals.purchasesTotal.manDay)}공수)
                   </span>
+                </div>
+                <span className="team-settlement-page__transaction-operator" aria-hidden="true">=</span>
+                <div role="group" aria-label="거래내역 합산 금액" className="flex flex-wrap items-center gap-2">
+                  <span>거래내역 합계</span>
+                  <strong className="text-lg font-black">{formatCurrency(transactionSectionTotals.salesTotal.amount + transactionSectionTotals.purchasesTotal.amount)}원</strong>
                 </div>
               </div>
               <div className="mt-2 text-right text-xs font-medium text-slate-500">

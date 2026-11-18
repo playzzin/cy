@@ -113,7 +113,11 @@
 .team-settlement-page .team-settlement-page__subtotal > .team-settlement-page__subtotal-group { display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 4px; color: var(--settlement-ink); }
 .team-settlement-page__subtotal-group > span:first-child { color: var(--settlement-accent-dark); }
 .team-settlement-page__subtotal-group + .team-settlement-page__subtotal-group { border-left: 1px solid var(--settlement-line); padding-left: 8px; }
-.team-settlement-page .team-settlement-page__transaction-totals { gap: 10px; }
+.team-settlement-page .team-settlement-page__transaction-totals { gap: 8px; grid-template-columns: minmax(0, 1fr); }
+.team-settlement-page__transaction-operator { align-self: center; justify-self: center; font-size: 22px; font-weight: 800; color: var(--settlement-accent); }
+@media (min-width: 768px) {
+  .team-settlement-page .team-settlement-page__transaction-totals { grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr) 16px minmax(0, 1.15fr); }
+}
 .team-settlement-page .team-settlement-page__transaction-totals > div { min-height: 52px; padding: 10px 12px; gap: 8px; border: 1px solid var(--settlement-accent-border); border-radius: 7px; background: var(--settlement-accent-soft); box-shadow: none; }
 .team-settlement-page__transaction-totals > div > span:first-child { padding: 4px 7px; border-radius: 4px; background: var(--settlement-accent); color: var(--settlement-accent-contrast); font-size: 12px; box-shadow: none; }
 .team-settlement-page__transaction-totals > div > span[aria-hidden] { display: none; }

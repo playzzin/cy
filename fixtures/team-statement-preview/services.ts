@@ -7,6 +7,9 @@ const teams = [
   { id: 'team-b', name: '검증팀 B', companyId: 'company', companyName: '검증회사', type: '시공팀', color: '#16a34a' },
 ];
 const workers = teams.map((team, index) => ({ id: `worker-${index}`, name: `가상작업자 ${index + 1}`, teamId: team.id, teamName: team.name, salaryModel: '일급제', unitPrice: 100000 }));
+if (new URLSearchParams(window.location.search).has('many')) {
+  for (let index = 0; index < 39; index++) workers.push({ ...workers[0], id: `many-worker-${index}`, name: `가상추가인원 ${index + 1}` });
+}
 const empty = async () => [];
 const fees = (month: string) => workers.map((worker, index) => ({ month, teamKey: worker.teamId, workerId: worker.id, amount: index === 0 ? 120000 : 30000 }));
 const accommodationDocs = (yearMonth: string) => new URLSearchParams(window.location.search).has('accommodation') ? [{
