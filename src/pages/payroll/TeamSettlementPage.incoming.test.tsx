@@ -881,3 +881,50 @@ it('지원단가 누락과 같은 지원건의 0원 오류는 한 번만 보여�
   expect(missing.getAllByText(/매입의 공수는 있지만/)).toHaveLength(1);
   expect(missing.getByText(/별도 누락 현장.*매입의 공수는 있지만/)).toBeVisible();
 });
+
+
+it('경비 아래 기타공제를 비어 있어도 표시하고 수기 입력·저장·재조회·삭제를 정산에 반영한다', async () => {
+  let saved = { ...document(), confirmedAt: null, purchases: [], sourceSnapshot: undefined } as TeamSettlementDocument;
+  saved.sales = [{ id: 'sale', source: 'manual', origin: 'manual', kind: '직영', siteName: '검증현장', manDay: 1, amount: 1000000 }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockImplementation(async ({ yearMonth }) => ({ ...saved, yearMonth }));
+  jest.mocked(teamSettlementService.saveTeamSettlement).mockImplementation(async next => { saved = next; });
+  render(<TeamSettlementPage />);
+  const other = await screen.findByRole('region', { name: '기타공제' });
+  expect(within(other).getByText('내역 없음')).toBeVisible();
+  expect(within(other).getByRole('group', { name: '기타공제 합계' })).toHaveTextContent('0원');
+  const headings = within(screen.getByRole('region', { name: '공제 내역' })).getAllByRole('heading', { level: 3 }).map(node => node.textContent);
+  expect(headings.indexOf('기타공제')).toBe(headings.indexOf('경비') + 1);
+  fireEvent.click(within(other).getByRole('button', { name: '기타공제 수기 추가' }));
+  fireEvent.change(within(other).getByRole('textbox', { name: '항목' }), { target: { value: '장비 분실 공제' } });
+  fireEvent.change(within(other).getByRole('textbox', { name: '금액' }), { target: { value: '75000' } });
+  fireEvent.change(within(other).getByRole('textbox', { name: '비고' }), { target: { value: '협의한 금액' } });
+  expect(within(other).getByRole('group', { name: '기타공제 합계' })).toHaveTextContent('75,000원');
+  expect(screen.getByRole('region', { name: '정산 요약' })).toHaveTextContent('925,000원');
+  fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
+  await waitFor(() => expect(teamSettlementService.saveTeamSettlement).toHaveBeenCalledWith(expect.objectContaining({
+    deductions: [expect.objectContaining({ source: 'manual', origin: 'manual', category: '장비 분실 공제', amount: 75000, memo: '협의한 금액' })]
+  })));
+  await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+  await waitFor(() => expect(within(screen.getByRole('region', { name: '기타공제' })).getByRole('textbox', { name: '금액' })).toHaveValue('75,000'));
+  fireEvent.click(within(screen.getByRole('region', { name: '기타공제' })).getByRole('button', { name: '삭제' }));
+  expect(screen.getByRole('region', { name: '정산 요약' })).toHaveTextContent('1,000,000원');
+  fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
+  await waitFor(() => expect(saved.deductions).toEqual([]));
+});
+
+it.each(['확정', '조회 전용'])('%s 정산은 기타공제를 볼 수 있지만 추가·수정·삭제할 수 없다', async mode => {
+  const saved = document();
+  if (mode === '조회 전용') {
+    saved.confirmedAt = null;
+    jest.mocked(useTeamSettlementAccess).mockReturnValue({ loading: false, canWrite: false });
+  }
+  saved.deductions = [{ id: 'manual', source: 'manual', origin: 'manual', category: '기존 기타공제', amount: 50000, memo: '확인' }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  render(<TeamSettlementPage />);
+  const other = await screen.findByRole('region', { name: '기타공제' });
+  expect(within(other).getByRole('button', { name: '기타공제 수기 추가' })).toBeDisabled();
+  within(other).getAllByRole('textbox').forEach(input => expect(input).toBeDisabled());
+  expect(within(other).getByRole('button', { name: '삭제' })).toBeDisabled();
+  expect(within(other).getByRole('group', { name: '기타공제 합계' })).toHaveTextContent('50,000원');
+});

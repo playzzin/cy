@@ -530,9 +530,10 @@ const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
   },
   {
     key: 'manual',
-    title: '수기 공제',
-    description: '직접 입력한 공제',
-    origins: ['manual']
+    title: '기타공제',
+    description: '항목·금액·비고를 직접 입력하는 공제',
+    origins: ['manual'],
+    showWhenEmpty: true
   }
 ];
 
@@ -1542,7 +1543,7 @@ export const TeamSettlementPage: React.FC = () => {
         id: buildLocalId('deduction_manual'),
         source: 'manual',
         origin: 'manual',
-        category: '수기',
+        category: '기타공제',
         amount: 0
       };
       return { ...prev, deductions: [...prev.deductions, item] };
@@ -3054,7 +3055,8 @@ export const TeamSettlementPage: React.FC = () => {
   };
 
   const renderAdjustmentGroup = (group: DeductionGroup) => (
-    <div key={group.key} id={group.key === 'payroll' ? 'settlement-invoice-deduction' : undefined} className="team-settlement-page__adjustment-group border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
+    <div key={group.key} role={group.key === 'manual' ? 'region' : undefined} aria-label={group.key === 'manual' ? '기타공제' : undefined}
+      id={group.key === 'payroll' ? 'settlement-invoice-deduction' : group.key === 'manual' ? 'settlement-other-deductions' : undefined} className="team-settlement-page__adjustment-group border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
       <div role="group" aria-label={`${group.title} 합계`} className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-bold text-slate-800">{group.title}</h3>
@@ -3063,6 +3065,8 @@ export const TeamSettlementPage: React.FC = () => {
           )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 text-right">
+          {group.key === 'manual' && <button type="button" aria-label="기타공제 수기 추가" className={addButtonClassName}
+            onClick={handleAddManualDeduction} disabled={!canEdit}>+ 수기 추가</button>}
           {group.key === 'payroll' && (<>
             <button
               type="button"
@@ -3094,7 +3098,7 @@ export const TeamSettlementPage: React.FC = () => {
       {group.key === 'payroll' && group.items.every(item => item.origin === 'daily_advance_invoice') ? (
         <TeamSettlementInvoiceDetail key={`${doc?.teamId}:${doc?.yearMonth}`} expandedKey={accordion.child(['invoice'])} onToggle={key => accordion.toggle(['invoice', key])} items={group.items.filter(item => item.origin === 'daily_advance_invoice')} />
       ) : <div className="mt-2 overflow-auto">
-        <table data-compact="adjustment" className="w-full text-sm border-collapse">
+        <table aria-label={group.key === 'manual' ? '기타공제 내역' : undefined} data-compact="adjustment" className="w-full text-sm border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-600">
               <th scope="col" className="text-left px-2 py-2 border">구분</th>
@@ -4117,11 +4121,8 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">02</span>공제</h2>
-                <div className="text-xs text-slate-500 mt-0.5">사무실비·대납청구비·경비 구분</div>
+                <div className="text-xs text-slate-500 mt-0.5">사무실비·대납청구비·경비·기타공제 구분</div>
               </div>
-              <button type="button" className={addButtonClassName} onClick={handleAddManualDeduction} disabled={!canEdit}>
-                + 수기 공제
-              </button>
             </div>
 
 

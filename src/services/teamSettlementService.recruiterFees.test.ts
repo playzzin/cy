@@ -44,6 +44,7 @@ test('청구서 금액만 공제하고 인원별 청구액·소개비를 원본�
 test('반복 재집계는 소개비를 교체하고 수기 추가를 보존하며 0원 변경도 반영한다', async () => {
   let saved = await calculate();
   saved.deductions.push(...(['daily_wage_payroll', 'monthly_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'] as const).map(origin => ({ id: origin, source: 'auto' as const, origin, category: '구 급여', amount: 900000 })));
+  saved.deductions.push({ id: 'other-deduction', source: 'manual', origin: 'manual', category: '장비 분실 공제', amount: 75000, memo: '협의한 금액' });
   saved.additions.push({ id: 'manual', source: 'manual', origin: 'manual', category: '수기 지급', amount: 7000 });
   saved.additions.push({ id: 'legacy-fee', source: 'auto', origin: 'daily_advance_recruiter_fee', category: '인력소개비', amount: 120000 });
   jest.mocked(listSystemConfigs).mockImplementation(async ({ configId }) => ({ data: { systemConfigs: configId === 'team_settlement_2026-08__team-a'
@@ -54,6 +55,8 @@ test('반복 재집계는 소개비를 교체하고 수기 추가를 보존하�
     await teamSettlementService.recalculateAndSaveTeamSettlement(scope);
     expect(saved.deductions.filter(row => ['daily_wage_payroll', 'monthly_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'].includes(row.origin))).toHaveLength(0);
     expect(saved.deductions.find(row => row.origin === 'daily_advance_invoice')).toMatchObject({ amount: 100000 + amount, invoiceDetails: [expect.objectContaining({ recruiterFee: amount })] });
+    expect(saved.deductions.find(row => row.id === 'other-deduction')).toMatchObject({ source: 'manual', origin: 'manual', category: '장비 분실 공제', amount: 75000, memo: '협의한 금액' });
+    expect(saved.deductions.filter(row => row.id === 'other-deduction')).toHaveLength(1);
     expect(saved.additions.reduce((sum, row) => sum + row.amount, 0)).toBe(7000);
     expect(saved.additions.some(row => row.origin === 'daily_advance_recruiter_fee')).toBe(false);
     expect(saved.sourceSnapshot?.totals).toMatchObject({ deductions: 100000 + amount, additions: 0, net: -100000 - amount });

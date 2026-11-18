@@ -69,7 +69,14 @@ export const teamSettlementService = {
   getTeamDisplayOrder: async () => teams.map(team => team.id),
   getSupportRateOverrides: async () => ({}),
   getSupportSettlementDetailRows: empty,
+  saveTeamSettlement: async (document: { yearMonth: string; teamId: string }) => {
+    localStorage.setItem(`synthetic-other-deductions:${document.yearMonth}:${document.teamId}`, JSON.stringify(document));
+  },
   getTeamSettlement: async ({ yearMonth, teamId }: { yearMonth: string; teamId: string }) => {
+    if (new URLSearchParams(window.location.search).has('manual-deductions')) {
+      const saved = localStorage.getItem(`synthetic-other-deductions:${yearMonth}:${teamId}`);
+      if (saved) return JSON.parse(saved);
+    }
     const first = teamId === 'team-a';
     const validation = new URLSearchParams(window.location.search).has('validation');
     const grouped = new URLSearchParams(window.location.search).has('grouped');

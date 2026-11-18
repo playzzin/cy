@@ -187,6 +187,29 @@ async function build() {
       await page.screenshot({ path: path.join(output, `additions-total-${width}.png`) });
       await additions.locator('button:not([disabled])').filter({ hasText: /^삭제$/ }).click();
       assert.equal(await additions.getByRole('group', { name: '추가 총금액' }).getByText('50,000원', { exact: true }).isVisible(), true);
+      await page.goto(`${origin}/payroll/team-settlement?edit=1&manual-deductions=1`);
+      const otherDeductions = page.getByRole('region', { name: '기타공제', exact: true });
+      await otherDeductions.getByRole('button', { name: '기타공제 수기 추가' }).click();
+      let addedDeduction = otherDeductions.getByRole('row').filter({ has: page.locator('input[aria-label="항목"][value="기타공제"]') });
+      await addedDeduction.getByRole('textbox', { name: '항목', exact: true }).fill('장비 분실 공제');
+      addedDeduction = otherDeductions.getByRole('row').filter({ has: page.locator('input[aria-label="항목"][value="장비 분실 공제"]') });
+      await addedDeduction.getByRole('textbox', { name: '금액', exact: true }).fill('75000');
+      await addedDeduction.getByRole('textbox', { name: '비고', exact: true }).fill('협의한 금액');
+      await otherDeductions.scrollIntoViewIfNeeded();
+      assert.equal(await otherDeductions.getByRole('group', { name: '기타공제 합계' }).getByText('125,000원', { exact: true }).isVisible(), true);
+      assert.equal(await page.getByRole('region', { name: '정산 요약' }).getByText('535,000원', { exact: true }).isVisible(), true);
+      await page.screenshot({ path: path.join(output, `other-deductions-${width}.png`) });
+      await page.getByRole('button', { name: '변경사항 저장' }).click();
+      await page.waitForFunction(() => Object.keys(localStorage).some(key => key.startsWith('synthetic-other-deductions:')));
+      await page.reload();
+      await addedDeduction.getByRole('textbox', { name: '비고', exact: true }).waitFor();
+      assert.equal(await addedDeduction.getByRole('textbox', { name: '금액', exact: true }).inputValue(), '75,000');
+      assert.equal(await addedDeduction.getByRole('textbox', { name: '비고', exact: true }).inputValue(), '협의한 금액');
+      await addedDeduction.getByRole('button', { name: '삭제', exact: true }).click();
+      assert.equal(await otherDeductions.getByRole('group', { name: '기타공제 합계' }).getByText('50,000원', { exact: true }).isVisible(), true);
+      assert.equal(await page.getByRole('region', { name: '정산 요약' }).getByText('610,000원', { exact: true }).isVisible(), true);
+      await page.getByRole('button', { name: '변경사항 저장' }).click();
+      await page.waitForFunction(() => Object.keys(localStorage).filter(key => key.startsWith('synthetic-other-deductions:')).every(key => !JSON.parse(localStorage[key]).deductions.some(row => row.category === '장비 분실 공제')));
       await page.goto(`${origin}/payroll/team-settlement?accommodation=1`);
       const roomRow = page.getByRole('row', { name: /숙소 숙소 전체/ });
       await roomRow.getByRole('button', { name: '상세', exact: true }).click();
@@ -351,7 +374,7 @@ async function build() {
       await serviceInvoice.getByText('가상용역 2', { exact: true }).waitFor();
       assert.doesNotMatch(await serviceInvoice.innerText(), /가상용역 1|가상작업자/);
       assert.deepEqual(errors, []);
-      results.push({ width, serviceInvoiceDeductionAndDetails: true, separateDailyAndServiceFees: true, matchingInvoiceFormat: true, serviceInvoiceFitsContent: true, serviceInvoiceExcel: true, serviceInvoiceTeamScope: true, statementFitsContentWidthAndHeight: true, fullSizeInvoiceCopy: true, grossTransactionTotal: true, exclusivePageAccordions: true, deduplicatedValidation: true, nestedAddressAccordion: true, accommodationRoomCount: true, explicitRecruiterFeeChargeDates: true, combinedAccommodationAddress: true, excludesPersonalAndOtherTeamAccommodation: true, accommodationRoomsAtSameAddress: true, groupedAdditions: true, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
+      results.push({ width, manualOtherDeductions: true, manualDeductionSaveReloadDelete: true, serviceInvoiceDeductionAndDetails: true, separateDailyAndServiceFees: true, matchingInvoiceFormat: true, serviceInvoiceFitsContent: true, serviceInvoiceExcel: true, serviceInvoiceTeamScope: true, statementFitsContentWidthAndHeight: true, fullSizeInvoiceCopy: true, grossTransactionTotal: true, exclusivePageAccordions: true, deduplicatedValidation: true, nestedAddressAccordion: true, accommodationRoomCount: true, explicitRecruiterFeeChargeDates: true, combinedAccommodationAddress: true, excludesPersonalAndOtherTeamAccommodation: true, accommodationRoomsAtSameAddress: true, groupedAdditions: true, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
       await context.close();
     }
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));
