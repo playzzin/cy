@@ -1,0 +1,46 @@
+import React from 'react';
+import '@testing-library/jest-dom';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { TeamSettlementInvoiceDetail } from './TeamSettlementInvoiceDetail';
+import type { TeamSettlementDeductionItem } from '../../types/teamSettlement';
+
+const item: TeamSettlementDeductionItem = { id: 'invoice', source: 'auto', origin: 'daily_advance_invoice', category: '대납청구금액', amount: 880000,
+  invoiceDetails: [
+    { workerId: 'a', workerName: '소개 인원 A', manDay: 1.5, claimAmount: 150000, recruiterFee: 120000, invoiceAmount: 270000 },
+    { workerId: 'b', workerName: '소개 인원 B', manDay: 2, claimAmount: 200000, recruiterFee: 60000, invoiceAmount: 260000 },
+    { workerId: 'c', workerName: '소개비 없는 인원', manDay: 3.5, claimAmount: 350000, recruiterFee: 0, invoiceAmount: 350000 }
+  ]
+};
+
+test('첫 화면에서 소개비 발생 인원·공수·합계와 소개비를 제외한 청구금액을 구분한다', () => {
+  render(<TeamSettlementInvoiceDetail items={[item]} />);
+  const table = within(screen.getByRole('table', { name: '대납청구금액 요약' }));
+  expect(table.getByRole('row', { name: /^인력소개비 2명 3\.5 180,000원/ })).toBeVisible();
+  expect(table.getByRole('row', { name: /^청구금액 3명 7 700,000원/ })).toBeVisible();
+  expect(screen.getByRole('group', { name: '소개비 포함 대납청구금액 합계' })).toHaveTextContent('880,000원');
+  expect(screen.queryByText('소개 인원 A')).not.toBeInTheDocument();
+});
+
+test('상세를 누르면 해당 항목의 인원별 금액을 표시하고 다시 누르면 접는다', () => {
+  render(<TeamSettlementInvoiceDetail items={[item]} />);
+  const fee = screen.getByRole('button', { name: '인력소개비 상세' });
+  fireEvent.click(fee);
+  const fees = within(screen.getByRole('table', { name: '인력소개비 인원별 금액' }));
+  expect(fees.getByRole('row', { name: '소개 인원 A 1.5 120,000원' })).toBeVisible();
+  expect(fees.queryByText('소개비 없는 인원')).not.toBeInTheDocument();
+  expect(fee).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '청구금액 상세' }));
+  expect(screen.queryByRole('table', { name: '인력소개비 인원별 금액' })).not.toBeInTheDocument();
+  expect(within(screen.getByRole('table', { name: '청구금액 인원별 금액' })).getByRole('row', { name: '소개비 없는 인원 3.5 350,000원' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '청구금액 상세' }));
+  expect(screen.queryByRole('table', { name: '청구금액 인원별 금액' })).not.toBeInTheDocument();
+});
+
+test('내역이 없거나 소개비가 0원이어도 요약과 전체 합계를 표시한다', () => {
+  const { rerender } = render(<TeamSettlementInvoiceDetail items={[]} />);
+  expect(screen.getByRole('row', { name: /^인력소개비 0명 0 0원/ })).toBeVisible();
+  expect(screen.getByRole('group', { name: '소개비 포함 대납청구금액 합계' })).toHaveTextContent('0원');
+  rerender(<TeamSettlementInvoiceDetail items={[{ ...item, amount: 350000, invoiceDetails: [item.invoiceDetails![2]] }]} />);
+  expect(screen.getByRole('row', { name: /^인력소개비 0명 0 0원/ })).toBeVisible();
+  expect(screen.getByRole('row', { name: /^청구금액 1명 3\.5 350,000원/ })).toBeVisible();
+});

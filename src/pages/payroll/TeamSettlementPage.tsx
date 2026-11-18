@@ -506,7 +506,7 @@ const getDeductionDisplayOriginLabel = (item: DeductionDisplayItem): string => {
 const DEDUCTION_GROUP_DEFINITIONS: DeductionGroupDefinition[] = [
   {
     key: 'payroll',
-    title: '청구금액',
+    title: '대납청구금액',
     description: '대납청구서 인원별 청구금액 공제',
     origins: ['daily_advance_invoice', 'monthly_wage_payroll', 'daily_wage_payroll', 'service_team_payroll', 'daily_advance_recruiter_fee'],
     showWhenEmpty: true
@@ -3076,8 +3076,8 @@ export const TeamSettlementPage: React.FC = () => {
         </p>
       )}
 
-      {group.items.length > 0 && group.items.every(item => item.origin === 'daily_advance_invoice') ? (
-        <TeamSettlementInvoiceDetail items={group.items.filter(item => item.origin === 'daily_advance_invoice')} />
+      {group.key === 'payroll' && group.items.every(item => item.origin === 'daily_advance_invoice') ? (
+        <TeamSettlementInvoiceDetail key={`${doc?.teamId}:${doc?.yearMonth}`} items={group.items.filter(item => item.origin === 'daily_advance_invoice')} />
       ) : <div className="mt-2 overflow-auto">
         <table data-compact="adjustment" className="w-full text-sm border-collapse">
           <thead>
@@ -4093,7 +4093,7 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="font-bold text-slate-900"><span className="mr-2 text-blue-600">02</span>공제</h2>
-                <div className="text-xs text-slate-500 mt-0.5">청구금액·인력소개비·사무실비·경비 구분</div>
+                <div className="text-xs text-slate-500 mt-0.5">대납청구금액·사무실비·경비 구분</div>
               </div>
               <button type="button" className={addButtonClassName} onClick={handleAddManualDeduction} disabled={!canEdit}>
                 + 수기 공제
@@ -4122,6 +4122,10 @@ export const TeamSettlementPage: React.FC = () => {
                   <div className="text-xs text-slate-500 mt-0.5">공제와 반대로 (+) 더해지는 항목</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <div role="group" aria-label="추가 총금액" className="text-right">
+                    <div className="text-xs text-slate-500">총금액</div>
+                    <div className="text-sm font-extrabold text-slate-900">{formatCurrency(totals.additionsTotal)}원</div>
+                  </div>
                   <button type="button" className={addButtonClassName} onClick={handleAddManualAddition} disabled={!canEdit}>
                     + 수기 추가
                   </button>
