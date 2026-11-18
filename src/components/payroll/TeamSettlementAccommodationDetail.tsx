@@ -13,34 +13,35 @@ export function TeamSettlementAccommodationDetail({ detail, addressStatus, expan
   const toggle = (key: string) => onToggle ? onToggle(key) : setLocalExpanded(previous => previous === key ? null : key);
   return <div role="region" aria-label="숙소 주소별 상세">
     <div className="text-sm font-semibold text-slate-800">숙소 주소별 합계</div>
-    <p className="mt-1 text-xs text-slate-500">주소별 더상세에서 전기·가스·월세·공과금을 확인합니다.</p>
+    <p className="mt-1 text-xs text-slate-500">같은 주소와 상세주소(숙소명·호수)끼리 합산합니다. 더상세에서 전기·가스·월세·공과금을 확인합니다.</p>
     {addressStatus === 'loading' && <p role="status" className="mt-2 text-xs text-slate-500">숙소 주소를 불러오는 중입니다.</p>}
     {addressStatus === 'error' && <p role="alert" className="mt-2 text-xs text-amber-700">숙소 주소를 불러오지 못했습니다. 경비 원본 다시 조회를 눌러 주세요.</p>}
     <div className="mt-3 overflow-auto">
       <table aria-label="숙소 주소별 합계" className="w-full text-xs border-collapse">
         <thead><tr className="bg-slate-50 text-slate-600">
-          <th scope="col" className="border px-2 py-2 text-left w-[55%]">주소</th>
+          <th scope="col" className="border px-2 py-2 text-left w-[35%]">주소</th>
+          <th scope="col" className="border px-2 py-2 text-left w-[25%]">상세주소</th>
           <th scope="col" className="border px-2 py-2 text-right w-[25%]">합계</th>
-          <th scope="col" className="border px-2 py-2 text-center w-[20%]">더상세</th>
+          <th scope="col" className="border px-2 py-2 text-center w-[15%]">더상세</th>
         </tr></thead>
-        <tbody>{detail.addresses.length === 0 ? <tr><td colSpan={3} className="border px-2 py-3 text-slate-500">내역 없음</td></tr> : detail.addresses.map(row => <React.Fragment key={row.key}>
+        <tbody>{detail.addresses.length === 0 ? <tr><td colSpan={4} className="border px-2 py-3 text-slate-500">내역 없음</td></tr> : detail.addresses.map(row => <React.Fragment key={row.key}>
           <tr className="bg-white">
             <td data-label="주소" className="border px-2 py-2 break-words">
               <div className="font-medium text-slate-800">{row.address}</div>
-              {row.names.length > 0 && <div className="mt-1 text-slate-500">{row.names.join(' · ')}</div>}
             </td>
+            <td data-label="상세주소" className="border px-2 py-2 break-words">{row.detailAddress}</td>
             <td data-label="합계" className="border px-2 py-2 text-right font-semibold">{money(row.amount)}</td>
             <td data-label="더상세" className="border px-2 py-2 text-center">
-              <button type="button" aria-label={`${row.address} ${row.names.join(' ')} 더상세`.replace(/\s+/g, ' ')} aria-expanded={expanded === row.key}
+              <button type="button" aria-label={`${row.address} ${row.detailAddress} 더상세`.replace(/\s+/g, ' ')} aria-expanded={expanded === row.key}
                 className="rounded border bg-white px-2 py-1 text-slate-700"
                 onClick={() => toggle(row.key)}>
                 {expanded === row.key ? '닫기' : '더상세'}
               </button>
             </td>
           </tr>
-          {expanded === row.key && <tr><td colSpan={3} className="border bg-slate-50 p-2">
+          {expanded === row.key && <tr><td colSpan={4} className="border bg-slate-50 p-2">
             {row.notes.map(note => <p key={note} className="mb-2 text-xs text-amber-700">{note}</p>)}
-            <table aria-label={`${row.address} 비용 내역`} className="w-full border-collapse bg-white">
+            <table aria-label={`${row.address} ${row.detailAddress} 비용 내역`} className="w-full border-collapse bg-white">
               <thead><tr className="text-slate-600">
                 <th scope="col" className="border px-2 py-2 text-left w-[20%]">항목</th>
                 <th scope="col" className="border px-2 py-2 text-right w-[30%]">금액</th>

@@ -21,8 +21,8 @@ const accommodationDocs = (yearMonth: string) => new URLSearchParams(window.loca
   ]
 }] : [];
 export const accommodationService = { getAccommodations: async () => [
-  { id: 'room-a', name: '검증 101호', address: '검증시 첫길 1 101호' },
-  { id: 'room-b', name: '검증 201호', address: '검증시 둘길 2 201호' }
+  { id: 'room-a', name: '검증 101호', address: '검증시 첫길 1' },
+  { id: 'room-b', name: '검증 201호', address: '검증시 첫길 1' }
 ] };
 export const useTeamSettlementAccess = () => ({ loading: false, canWrite: new URLSearchParams(window.location.search).has('edit') });
 export const teamService = { getTeams: async () => teams };

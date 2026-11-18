@@ -25,15 +25,23 @@ test('여러 청구서와 배분 기간을 주소별로 합산하고 관리비�
   const before = JSON.stringify(saved);
   const result = detail(saved, source, rooms);
   expect(result.totalAmount).toBe(1005000);
+  expect(result.roomCount).toBe(2);
+  expect(result.unknownCount).toBe(0);
   expect(result.addresses.map(row => [row.address, row.amount])).toEqual([['검증시 둘길 2 201호', 305000], ['검증시 첫길 1 101호', 700000]]);
   expect(result.addresses.find(row => row.names.includes('가상 101호'))!.costs.map(cost => [cost.category, cost.amount])).toEqual([['전기', 25000], ['가스', 20000], ['월세', 600000], ['공과금', 55000]]);
   expect(result.addresses.reduce((sum, row) => sum + row.costs.reduce((sum, cost) => sum + cost.amount, 0), 0)).toBe(result.totalAmount);
   expect(JSON.stringify(saved)).toBe(before);
 });
 
-test('같은 주소는 한 번 묶고 이름이 비슷한 다른 숙소와 합치지 않는다', () => {
+test('같은 주소라도 호수가 다르면 나누고 주소와 호수가 모두 같을 때만 묶는다', () => {
   const { source, saved } = setup([bill('one', [line('rent', 100), line('rent', 200, 'b')])]);
-  expect(detail(saved, source, [rooms[0], { ...rooms[1], address: rooms[0].address }]).addresses).toHaveLength(1);
+  const separate = detail(saved, source, [rooms[0], { ...rooms[1], address: rooms[0].address }]);
+  expect(separate.addresses.map(row => [row.detailAddress, row.amount])).toEqual([['가상 101호', 100], ['가상 201호', 200]]);
+  expect(separate.roomCount).toBe(2);
+  const combined = detail(saved, source, [rooms[0], { ...rooms[0], id: 'b' }]);
+  expect(combined.addresses).toHaveLength(1);
+  expect(combined.addresses[0].amount).toBe(300);
+  expect(combined.roomCount).toBe(1);
   const legacy = setup([bill('legacy', [line('rent', 100, 'a', { sourceAccommodationId: undefined, label: '가상 101호 월세 2026-10-01~2026-10-15' })])]);
   const result = detail(legacy.saved, legacy.source, [...rooms, { id: 'other', name: '가상 101호 별관', address: '다른 주소' }]);
   expect(result.addresses[0].address).toBe(rooms[0].address);
@@ -44,6 +52,8 @@ test('원본과 저장 금액이 다르면 저장액을 유지하고 주소와 �
   saved[0].amount = 300;
   const result = detail(saved, source, rooms);
   expect(result.totalAmount).toBe(300);
+  expect(result.roomCount).toBe(0);
+  expect(result.unknownCount).toBe(1);
   expect(result.addresses[0]).toMatchObject({ address: '주소 미확인', amount: 300 });
   expect(result.addresses[0].notes.join()).toContain('금액 차이');
   expect(result.addresses[0].costs.find(cost => cost.category === '기타')!.amount).toBe(300);

@@ -1445,6 +1445,17 @@ export const TeamSettlementPage: React.FC = () => {
     });
   }, [accordion.open, doc?.additions, expenseCategoryLabels]);
 
+  const accommodationDetail = useMemo(() => buildTeamSettlementAccommodationDetail(
+    (doc?.deductions ?? []).filter(item => item.origin === 'accommodation_billing'),
+    expenseSourceResult.entries, accommodationAddresses
+  ), [doc?.deductions, expenseSourceResult.entries, accommodationAddresses]);
+  const accommodationCountMemo = accommodationAddressStatus === 'loading' || expenseSourceResult.status === 'loading'
+    ? '숙소 수 확인 중'
+    : accommodationAddressStatus === 'error' || expenseSourceResult.status === 'error'
+      ? '숙소 수 확인 필요'
+      : [accommodationDetail.roomCount ? `숙소 ${accommodationDetail.roomCount}개` : '',
+        accommodationDetail.unknownCount ? `미확인 ${accommodationDetail.unknownCount}건` : ''].filter(Boolean).join(' · ') || '숙소 0개';
+
   const deductionGroups = useMemo<DeductionGroup[]>(() => {
     const deductionItems = doc?.deductions ?? [];
     const assignedIds = new Set<string>();
@@ -1464,7 +1475,7 @@ export const TeamSettlementPage: React.FC = () => {
       return {
         ...definition,
         items,
-        displayItems: buildDeductionDisplayItems(definition.key, items, doc?.sales),
+        displayItems: buildDeductionDisplayItems(definition.key, items, doc?.sales).map(item => item.origin === 'accommodation_billing' ? { ...item, memo: accommodationCountMemo } : item),
         totalAmount: items.reduce((sum, item) => sum + safeNumber(item.amount), 0)
       };
     });
@@ -1483,7 +1494,7 @@ export const TeamSettlementPage: React.FC = () => {
     }
 
     return groups.filter((group) => group.showWhenEmpty || group.items.length > 0);
-  }, [doc]);
+  }, [doc, accommodationCountMemo]);
 
   const additionGroups = useMemo(() => groupTeamSettlementAdditions(doc?.additions ?? [], expenseCategoryLabels), [doc?.additions, expenseCategoryLabels]);
 
@@ -1919,8 +1930,7 @@ export const TeamSettlementPage: React.FC = () => {
 
       const isAggregateDetailItem = String(item.id).startsWith('deduction-aggregate:');
       if (item.origin === 'accommodation_billing') {
-        const items = isAggregateDetailItem ? doc.deductions.filter(row => row.origin === item.origin) : [item];
-        return { kind: 'accommodation_billing', ...buildTeamSettlementAccommodationDetail(items, expenseSourceResult.entries, accommodationAddresses) };
+        return { kind: 'accommodation_billing', ...(isAggregateDetailItem ? accommodationDetail : buildTeamSettlementAccommodationDetail([item], expenseSourceResult.entries, accommodationAddresses)) };
       }
 
       if (String(item.id).startsWith(EXPENSE_GROUP_AGGREGATE_PREFIX)) {
@@ -2040,7 +2050,7 @@ export const TeamSettlementPage: React.FC = () => {
 
       return null;
     },
-    [expenseSourceResult.entries, detailRows, doc, matchesTeam, accommodationAddresses]
+    [expenseSourceResult.entries, detailRows, doc, matchesTeam, accommodationAddresses, accommodationDetail]
   );
 
   const getLineDetailRows = useCallback(

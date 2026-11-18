@@ -8,6 +8,8 @@ export type AccommodationAddressReference = Pick<Accommodation, 'id' | 'name' | 
 export type AccommodationAddressDetail = {
   key: string;
   address: string;
+  detailAddress: string;
+  identified: boolean;
   names: string[];
   amount: number;
   notes: string[];
@@ -53,9 +55,11 @@ export function buildTeamSettlementAccommodationDetail(
       const room = matches.length === 1 ? matches[0] : undefined;
       const address = clean(room?.address);
       const name = clean(room?.name) || legacyName;
-      const key = address ? `address:${address}` : `unknown:${sourceId || legacyName || item.id}`;
+      // Accommodation.name is the registered room/unit (the form's 숙소명(호수)).
+      // A shared street address must not combine different rooms.
+      const key = address ? JSON.stringify(['address', address, name || sourceId || item.id]) : `unknown:${sourceId || legacyName || item.id}`;
       const group: AccommodationAddressDetail = groups.get(key) || {
-        key, address: address || '주소 미확인', names: [], amount: 0, notes: [],
+        key, address: address || '주소 미확인', detailAddress: name || '상세주소 미확인', identified: Boolean(room && address && name), names: [], amount: 0, notes: [],
         costs: ACCOMMODATION_COST_CATEGORIES.map(category => ({ category, amount: 0, lines: [] }))
       };
       if (name && !group.names.includes(name)) group.names.push(name);
@@ -71,6 +75,8 @@ export function buildTeamSettlementAccommodationDetail(
   });
   return {
     addresses: [...groups.values()].sort((a, b) => a.address.localeCompare(b.address, 'ko') || a.names.join().localeCompare(b.names.join(), 'ko')),
+    roomCount: [...groups.values()].filter(row => row.identified).length,
+    unknownCount: [...groups.values()].filter(row => !row.identified).length,
     totalAmount: items.reduce((sum, item) => sum + item.amount, 0)
   };
 }

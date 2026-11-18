@@ -181,23 +181,26 @@ async function build() {
       await page.goto(`${origin}/payroll/team-settlement?accommodation=1`);
       const roomRow = page.getByRole('row', { name: /숙소 숙소 전체/ });
       await roomRow.getByRole('button', { name: '상세', exact: true }).click();
+      assert.equal(await roomRow.locator('input[aria-label="비고"]').inputValue(), '숙소 2개', '청구서 1건 안의 숙소 2개를 센다');
       const accommodation = page.getByRole('region', { name: '숙소 주소별 상세' });
-      const address = accommodation.getByRole('row', { name: /검증시 첫길 1 101호/ });
+      assert.equal(await accommodation.getByRole('columnheader', { name: '상세주소', exact: true }).isVisible(), true);
+      assert.equal(await accommodation.getByText('검증시 첫길 1', { exact: true }).count(), 2);
+      const address = accommodation.getByRole('row', { name: /검증시 첫길 1 검증 101호/ });
       await address.getByText('650,000원', { exact: true }).waitFor();
       assert.equal(await accommodation.getByText('300,000원', { exact: true }).isVisible(), true);
       assert.equal(await accommodation.getByText('950,000원', { exact: true }).isVisible(), true);
       await address.getByRole('button', { name: /더상세/ }).click();
-      const costs = accommodation.getByRole('table', { name: '검증시 첫길 1 101호 비용 내역' });
+      const costs = accommodation.getByRole('table', { name: '검증시 첫길 1 검증 101호 비용 내역' });
       for (const [category, amount] of [['전기', '30,000원'], ['가스', '20,000원'], ['월세', '500,000원'], ['공과금', '100,000원']]) {
         assert.equal(await costs.getByRole('row', { name: new RegExp('^' + category + ' ') }).getByRole('cell', { name: amount, exact: true }).isVisible(), true);
       }
       await costs.scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(output, `accommodation-${width}.png`) });
       assert.equal(await costs.evaluate(table => table.scrollWidth <= table.clientWidth + 1), true, '주소별 비용 표가 모바일 폭 안에 표시된다');
-      const secondAddress = accommodation.getByRole('row', { name: /검증시 둘길 2 201호/ });
+      const secondAddress = accommodation.getByRole('row', { name: /검증시 첫길 1 검증 201호/ });
       await secondAddress.getByRole('button', { name: /더상세/ }).click();
       assert.equal(await costs.count(), 0, '다른 주소를 열면 이전 주소만 닫고 숙소 부모는 유지한다');
-      assert.equal(await accommodation.getByRole('table', { name: '검증시 둘길 2 201호 비용 내역' }).isVisible(), true);
+      assert.equal(await accommodation.getByRole('table', { name: '검증시 첫길 1 검증 201호 비용 내역' }).isVisible(), true);
       await address.getByRole('button', { name: /더상세/ }).click();
       await address.getByRole('button', { name: /더상세/ }).click();
       assert.equal(await costs.count(), 0);
@@ -235,7 +238,7 @@ async function build() {
       assert.equal(await groupedAdditions.getByRole('table', { name: '유류 개별 내역' }).count(), 0);
 
       assert.deepEqual(errors, []);
-      results.push({ width, exclusivePageAccordions: true, deduplicatedValidation: true, nestedAddressAccordion: true, groupedAdditions: true, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
+      results.push({ width, exclusivePageAccordions: true, deduplicatedValidation: true, nestedAddressAccordion: true, accommodationRoomCount: true, accommodationRoomsAtSameAddress: true, groupedAdditions: true, invoiceInDeductions: true, payrollRemovedFromPurchases: true, settlementDeductsInvoiceOnly: true, workerFeeDetails: true, collapsedInvoiceSummary: true, feeWorkerCountAndClaimManDays: true, additionsTotal: true, accommodationAddressGroups: true, accommodationCostBreakdown: true, internalCategoryIdsHidden: true, currentTeamWorkbookStatement: true, feeColumnAndTotalVisible: true, imageCopy: true, excelDownload: true, teamSwitch: true, pageErrors: errors });
       await context.close();
     }
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results, null, 2));

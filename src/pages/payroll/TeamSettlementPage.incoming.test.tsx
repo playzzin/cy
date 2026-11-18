@@ -682,8 +682,8 @@ it('숙소 상세는 주소별 합계를 보여주고 더상세에서 전기·�
   saved.deductions = [{ id: 'accommodation_billing:2026-08:room-bill', source: 'auto', origin: 'accommodation_billing', category: '숙소비 (조회팀)', amount: 950000 }];
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
   require('../../services/accommodationService').accommodationService.getAccommodations.mockResolvedValue([
-    { id: 'room-a', name: '검증 101호', address: '검증시 첫길 1 101호' },
-    { id: 'room-b', name: '검증 201호', address: '검증시 둘길 2 201호' }
+    { id: 'room-a', name: '검증 101호', address: '검증시 첫길 1' },
+    { id: 'room-b', name: '검증 201호', address: '검증시 첫길 1' }
   ]);
   require('../../services/accommodationBillingService').accommodationBillingService.getBillingDocuments.mockResolvedValue([{
     id: 'room-bill', yearMonth: '2026-08', teamId: 'own', teamName: '조회팀', issuedToType: 'team', status: 'confirmed', lineItems: [
@@ -699,20 +699,23 @@ it('숙소 상세는 주소별 합계를 보여주고 더상세에서 전기·�
   fireEvent.click(await screen.findByRole('button', { name: /^정산 검증/ }));
   await waitFor(() => expect(within(screen.getByRole('status', { name: '경비 원본 검증' })).getByText('경비 원본과 저장 내역이 일치합니다.')).toBeVisible());
   fireEvent.click(within(getAdjustmentRow('숙소 전체')).getByRole('button', { name: '상세' }));
+  expect(within(getAdjustmentRow('숙소 전체')).getByRole('textbox', { name: '비고' })).toHaveValue('숙소 2개');
   const addresses = within(await screen.findByRole('region', { name: '숙소 주소별 상세' }));
-  const first = addresses.getByRole('row', { name: /검증시 첫길 1 101호/ });
+  expect(addresses.getAllByText('검증시 첫길 1')).toHaveLength(2);
+  expect(addresses.getByRole('columnheader', { name: '상세주소' })).toBeVisible();
+  const first = addresses.getByRole('row', { name: /검증시 첫길 1 검증 101호/ });
   expect(within(first).getByText('650,000원')).toBeVisible();
   expect(addresses.getByText('300,000원')).toBeVisible();
-  expect(addresses.queryByRole('table', { name: '검증시 첫길 1 101호 비용 내역' })).not.toBeInTheDocument();
+  expect(addresses.queryByRole('table', { name: '검증시 첫길 1 검증 101호 비용 내역' })).not.toBeInTheDocument();
   fireEvent.click(within(first).getByRole('button', { name: /더상세/ }));
-  const costs = within(addresses.getByRole('table', { name: '검증시 첫길 1 101호 비용 내역' }));
+  const costs = within(addresses.getByRole('table', { name: '검증시 첫길 1 검증 101호 비용 내역' }));
   for (const [category, amount] of [['전기', '30,000원'], ['가스', '20,000원'], ['월세', '500,000원'], ['공과금', '100,000원']]) {
     expect(within(costs.getByRole('row', { name: new RegExp('^' + category + ' ') })).getByRole('cell', { name: amount })).toBeVisible();
   }
   expect(addresses.getByText('950,000원')).toBeVisible();
   expect(costs.queryByText('검증 201호 월세')).not.toBeInTheDocument();
   fireEvent.click(within(first).getByRole('button', { name: /더상세/ }));
-  expect(addresses.queryByRole('table', { name: '검증시 첫길 1 101호 비용 내역' })).not.toBeInTheDocument();
+  expect(addresses.queryByRole('table', { name: '검증시 첫길 1 검증 101호 비용 내역' })).not.toBeInTheDocument();
   expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
 });
 
