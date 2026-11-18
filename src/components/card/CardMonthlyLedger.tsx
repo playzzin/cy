@@ -59,6 +59,7 @@ import {
     subscribeSupportManagementYearMonth,
 } from '../../utils/supportManagementState';
 import { SUPPORT_WRITE_RETRY_USER_MESSAGE } from '../../utils/supportWriteErrorReporting';
+import { normalizeCardHistoryTimeline } from '../../utils/cardHistoryTimeline';
 import {
     dedupeImportedStatementTransactions,
     dedupeStatementPaths,
@@ -329,6 +330,7 @@ const getCardLedgerStructureFingerprint = (row: CardLedgerRow): string => JSON.s
 
 interface CardMonthlyLedgerProps {
     exportContext?: SupportExportContext;
+    selectedTeamId?: string;
     cards: Card[];
     teams?: Team[];
     loadingCards: boolean;
@@ -344,14 +346,14 @@ const hexToRgba = (hex: string, alpha: number) => {
     return `rgba(${r},${g},${b},${alpha})`;
 };
 
-export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, teams = [], loadingCards, onOpenSetup, onOpenBillingTarget, exportContext }) => {
+export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, teams = [], selectedTeamId = '', loadingCards, onOpenSetup, onOpenBillingTarget, exportContext }) => {
     const [currentDate, setCurrentDate] = useState(getSupportManagementMonthDate);
     const [yearMonth, setYearMonth] = useState('');
     const requestedYearMonth = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-    const exportScopeRef = useRef({ yearMonth: requestedYearMonth, cards });
-    exportScopeRef.current = { yearMonth: requestedYearMonth, cards };
+    const exportScopeRef = useRef({ yearMonth: requestedYearMonth, cards, selectedTeamId });
+    exportScopeRef.current = { yearMonth: requestedYearMonth, cards, selectedTeamId };
     const loadRequestIdRef = useRef(0);
-    const [loadedExportScope, setLoadedExportScope] = useState<{ yearMonth: string; cards: Card[] } | null>(null);
+    const [loadedExportScope, setLoadedExportScope] = useState<{ yearMonth: string; cards: Card[]; selectedTeamId: string } | null>(null);
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
@@ -367,11 +369,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     const [isStatementHistoryOpen, setIsStatementHistoryOpen] = useState(false);
     const [statementCardId, setStatementCardId] = useState<string | null>(null);
     const [statementView, setStatementView] = useState<'details' | 'original'>('details');
-    useEffect(() => { setStatementCardId(null); }, [requestedYearMonth, cards]);
+    useEffect(() => { setStatementCardId(null); }, [requestedYearMonth, cards, selectedTeamId]);
     useSupportBillingClosingGuard('card', saving || loading || loadingCards || Boolean(statementUploadingRowId) || isStatementImportOpen
         ? '카드 자료를 처리 중입니다. 완료 후 청구 마감을 열어 주세요.'
         : isDirty ? '수정한 카드 대장을 먼저 저장한 뒤 청구 마감을 열어 주세요.' : null);
     const originalTxsRef = useRef<CardTransaction[]>([]);
+    const originalTxRowIdsRef = useRef(new Map<string, string>());
 
     const teamInfoMap = useMemo(() => {
         const map = new Map<string, { color: string; icon?: string }>();
@@ -417,6 +420,21 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         });
         return map;
     }, [teams]);
+
+    const visibleRows = useMemo(() => {
+        if (!selectedTeamId) return rows;
+        const selected = teamByAnyId.get(selectedTeamId) ?? teamByName.get(selectedTeamId);
+        const ids = new Set([selectedTeamId, selected?.id, selected?.legacyId].filter(Boolean));
+        const names = new Set([selected?.name].filter(Boolean));
+        return rows.filter(({ segment }) => [
+            { id: segment.teamId, name: segment.teamName },
+            { id: segment.billingTeamId, name: segment.billingTeamName }
+        ].some(({ id, name }) => {
+            const team = teamByAnyId.get(normalizeKey(id)) ?? teamByName.get(normalizeKey(name));
+            return ids.has(normalizeKey(id)) || names.has(normalizeKey(name))
+                || ids.has(normalizeKey(team?.id)) || ids.has(normalizeKey(team?.legacyId));
+        }));
+    }, [rows, selectedTeamId, teamByAnyId, teamByName]);
 
     const workerByAnyId = useMemo(() => {
         const map = new Map<string, Worker>();
@@ -512,8 +530,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             rawEndDate: string;
         };
 
-        const activeAssignments: AssignmentTimelineEntry[] = assignmentList
-            .filter((assignment) => normalizeKey(assignment.cardId) === cardId)
+        const activeAssignments: AssignmentTimelineEntry[] = normalizeCardHistoryTimeline(assignmentList
+            .filter((assignment) => normalizeKey(assignment.cardId) === cardId))
             .map((assignment) => ({
                 assignment,
                 startDate: parseYmdDate(assignment.startDate),
@@ -622,8 +640,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             };
         };
 
-        const targetRanges = billingTargetList
-            .filter((target) => normalizeKey(target.cardId) === cardId)
+        const targetRanges = normalizeCardHistoryTimeline(billingTargetList
+            .filter((target) => normalizeKey(target.cardId) === cardId))
             .map((target) => ({
                 target,
                 startDate: parseYmdDate(target.startDate),
@@ -767,7 +785,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         if (!yearMonth || yearMonth !== exportScopeRef.current.yearMonth) return null;
         const requestId = ++loadRequestIdRef.current;
         const isCurrentRequest = () => requestId === loadRequestIdRef.current
-            && yearMonth === exportScopeRef.current.yearMonth && cards === exportScopeRef.current.cards;
+            && yearMonth === exportScopeRef.current.yearMonth && cards === exportScopeRef.current.cards
+            && selectedTeamId === exportScopeRef.current.selectedTeamId;
         setLoadedExportScope(null);
         setLoading(true);
         try {
@@ -801,10 +820,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 }));
             });
 
-            dedupedTransactions.forEach((tx) => {
+            const findTransactionRow = (tx: CardTransaction): CardLedgerRow | undefined => {
                 const cardRows = newRows.filter((row) => normalizeKey(row.card.id) === normalizeKey(tx.cardId));
-                if (cardRows.length === 0 || !CATEGORIES.includes(tx.category as CardTransactionCategory)) return;
-
                 const txDate = parseYmdDate(tx.date);
                 const targetRow = txDate
                     ? cardRows.find((row) => {
@@ -813,7 +830,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                         return start && end && txDate.getTime() >= start.getTime() && txDate.getTime() <= end.getTime();
                     })
                     : undefined;
-                const row = targetRow ?? cardRows[0];
+                return targetRow ?? cardRows[0];
+            };
+            originalTxRowIdsRef.current = new Map(txs.map(tx => [tx.id, findTransactionRow(tx)?.id ?? '']));
+            dedupedTransactions.forEach((tx) => {
+                const row = findTransactionRow(tx);
+                if (!row || !CATEGORIES.includes(tx.category as CardTransactionCategory)) return;
                 const category = tx.category as CardTransactionCategory;
                 row.amounts = {
                     ...row.amounts,
@@ -839,7 +861,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
             newRows.sort(compareCardLedgerRowsByBillingTarget);
             setRows(newRows);
-            setLoadedExportScope({ yearMonth, cards });
+            setLoadedExportScope({ yearMonth, cards, selectedTeamId });
             setIsDirty(false);
             return { rows: newRows, billings };
         } catch (e) {
@@ -850,7 +872,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         } finally {
             if (isCurrentRequest()) setLoading(false);
         }
-    }, [yearMonth, cards, buildSegmentsForCard]);
+    }, [yearMonth, cards, selectedTeamId, buildSegmentsForCard]);
 
     const resolveSegmentTeamBadge = (segment: CardLedgerSegment) => {
         const team = segment.teamId
@@ -1290,14 +1312,18 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
     const canSaveLedger = !loadingCards && !loading && !saving && !statementUploadingRowId && !isStatementImportOpen
         && yearMonth === requestedYearMonth && loadedExportScope?.yearMonth === requestedYearMonth
-        && loadedExportScope?.cards === cards && rows.length > 0;
+        && loadedExportScope?.cards === cards && loadedExportScope?.selectedTeamId === selectedTeamId && visibleRows.length > 0;
 
     const handleSave = async () => {
         if (!canSaveLedger) return;
         // Capture both sides before any await; a concurrent reload must not pair
         // the previous screen's amounts with newly fetched source transactions.
-        const saveRows = [...rows];
-        const originalTransactions = [...originalTxsRef.current];
+        const saveRows = [...visibleRows];
+        const visibleIds = new Set(saveRows.map(row => row.id));
+        // A shared statement PDF can span several teams. Keep hidden periods out
+        // of the mutation input. Reuse display allocation, including legacy dates
+        // outside the periods, so saving cannot duplicate a fallback transaction.
+        const originalTransactions = originalTxsRef.current.filter(tx => visibleIds.has(originalTxRowIdsRef.current.get(tx.id) ?? ''));
         const saveLoadRequestId = loadRequestIdRef.current;
         const saveScope = exportScopeRef.current;
         setSaving(true);
@@ -1311,7 +1337,8 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             ]);
             if (saveLoadRequestId !== loadRequestIdRef.current
                 || saveScope.yearMonth !== exportScopeRef.current.yearMonth
-                || saveScope.cards !== exportScopeRef.current.cards) {
+                || saveScope.cards !== exportScopeRef.current.cards
+                || saveScope.selectedTeamId !== exportScopeRef.current.selectedTeamId) {
                 setSaveFeedback({
                     status: 'error',
                     title: '저장 중단',
@@ -1382,7 +1409,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             });
             const sourceFullyEligibleCardIds = new Set<string>();
             const allRowsByCardId = new Map<string, CardLedgerRow[]>();
-            saveRows.forEach((row) => {
+            rows.forEach((row) => {
                 const cardId = normalizeKey(row.card.id);
                 const cardRows = allRowsByCardId.get(cardId) ?? [];
                 cardRows.push(row);
@@ -1667,11 +1694,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     };
 
     const canExportLedger = !loadingCards && !loading && !saving && !statementUploadingRowId && !isStatementImportOpen
-        && loadedExportScope?.yearMonth === requestedYearMonth && loadedExportScope?.cards === cards && rows.length > 0;
+        && loadedExportScope?.yearMonth === requestedYearMonth && loadedExportScope?.cards === cards
+        && loadedExportScope?.selectedTeamId === selectedTeamId && visibleRows.length > 0;
     const handleExcelDownload = async () => {
         if (!canExportLedger) return;
         const context = { ...exportContext, yearMonth, hasUnsavedChanges: isDirty };
-        const exportRows = rows.map(row => {
+        const exportRows = visibleRows.map(row => {
             const summary = getAssignmentSummary(row);
             return { ...row,
                 assignedTeams: summary.assignedTeams.map(team => team.name),
@@ -1685,14 +1713,14 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
     const totals = useMemo(() => {
         const result = { ...emptyCategoryAmounts(), total: 0 };
-        rows.forEach(r => {
+        visibleRows.forEach(r => {
             CATEGORIES.forEach(category => {
                 result[category] += r.amounts[category] || 0;
             });
             result.total += r.total;
         });
         return result;
-    }, [rows]);
+    }, [visibleRows]);
 
     return (
         <div className="flex flex-col h-full w-full min-w-0 space-y-5">
@@ -1829,7 +1857,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
-                                {rows.map((row, idx) => {
+                                {visibleRows.map((row, idx) => {
                                     const assignmentSummary = getAssignmentSummary(row);
                                     const visibleAssignedWorkers = assignmentSummary.assignedWorkers.slice(0, 3);
                                     const rowBillingDocuments = getAllBillingDocumentsForRow(row);
@@ -2036,7 +2064,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                         </tr>
                                     );
                                 })}
-                                {rows.length === 0 && (
+                                {visibleRows.length === 0 && (
                                     <tr>
                                         <td colSpan={7} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">

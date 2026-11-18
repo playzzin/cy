@@ -16,6 +16,7 @@ import CardStatementImportModal from './CardStatementImportModal';
 import type { Card, CardTransaction } from '../../types/card';
 import type { CardBillingDocument } from '../../types/cardBilling';
 import type { CardMonthlyLedgerSaveResult } from '../../services/cardMonthlyLedgerMutationService';
+import type { Team } from '../../services/teamService';
 
 jest.mock('../../utils/supportResourceExcelExport', () => ({ buildCardLedgerWorkbook: jest.fn(() => ({})), downloadSupportResourceWorkbook: jest.fn() }));
 
@@ -97,6 +98,50 @@ beforeEach(() => {
   jest.mocked(cardBillingService.deleteDraftBillings).mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); diagnostic.mockRestore(); });
+
+it('shows cancelled card usage under its historical team, but not an overlapping predecessor after cancellation', async () => {
+  const closedCards: Card[] = [{ ...card, status: 'CLOSED', currentAssigneeId: null, currentAssigneeType: null }];
+  jest.mocked(cardService.listAllCardBillingTargets).mockResolvedValue([]);
+  jest.mocked(cardService.listAllCardAssignments).mockResolvedValue([
+    { id: 'old', cardId: card.id, cardLabel: card.name, assigneeId: 'legacy-team', assigneeType: 'TEAM', assigneeName: '시험팀', startDate: '2026-05-01', endDate: '2026-08-01' },
+    { id: 'corrected', cardId: card.id, cardLabel: card.name, assigneeId: 'legacy-team', assigneeType: 'TEAM', assigneeName: '시험팀', startDate: '2026-05-15', endDate: '2026-07-31' }
+  ]);
+  transactions = [{ id: 'past-use', cardId: card.id, cardLabel: card.name, date: '2026-07-20', yearMonth: '2026-07', merchant: '시험', category: 'OTHER', amount: 12345 }];
+  const historicalTeams = [{ id: 'team', legacyId: 'legacy-team', name: '시험팀' }] as Team[];
+  // eslint-disable-next-line testing-library/no-unnecessary-act
+  await act(async () => { render(<CardMonthlyLedger cards={closedCards} teams={historicalTeams} selectedTeamId="team" loadingCards={false} />); });
+  expect(screen.getByText('시험카드 (0000)')).toBeInTheDocument();
+  expect(screen.getAllByDisplayValue('12,345')).not.toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+  await waitFor(() => expect(buildCardLedgerWorkbook).toHaveBeenCalledWith(expect.anything(), [expect.objectContaining({ total: 12345 })]));
+  transactions = [];
+  await act(async () => rememberSupportManagementYearMonth('2026-08'));
+  expect(screen.queryByText('시험카드 (0000)')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '엑셀 다운로드' })).toBeDisabled();
+});
+
+it('filters split billing periods after allocating transactions and preserves a hidden period sharing the PDF on save', async () => {
+  jest.mocked(cardService.listAllCardBillingTargets).mockResolvedValue([
+    { id: 'first', cardId: card.id, cardLabel: card.name, targetId: 'first-team', targetType: 'TEAM', targetName: '첫팀', startDate: '2026-07-01', endDate: '2026-07-15' },
+    { id: 'second', cardId: card.id, cardLabel: card.name, targetId: 'second-team', targetType: 'TEAM', targetName: '둘째팀', startDate: '2026-07-16' }
+  ]);
+  transactions = [
+    { id: 'first-tx', cardId: card.id, cardLabel: card.name, date: '2026-07-03', yearMonth: '2026-07', merchant: '시험', category: 'OTHER', amount: 100, statementAttachmentPaths: ['statements/shared.pdf'] },
+    { id: 'legacy-date-tx', cardId: card.id, cardLabel: card.name, date: '', yearMonth: '2026-07', merchant: '시험', category: 'OTHER', amount: 50, statementAttachmentPaths: ['statements/shared.pdf'] },
+    { id: 'second-tx', cardId: card.id, cardLabel: card.name, date: '2026-07-20', yearMonth: '2026-07', merchant: '시험', category: 'OTHER', amount: 200, statementAttachmentPaths: ['statements/shared.pdf'] }
+  ];
+  // eslint-disable-next-line testing-library/no-unnecessary-act
+  await act(async () => { render(<CardMonthlyLedger cards={cards} teams={teams} selectedTeamId="first-team" loadingCards={false} />); });
+  expect(screen.getAllByText('시험카드 (0000)')).toHaveLength(1);
+  expect(screen.queryByText('둘째팀')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '엑셀 다운로드' }));
+  await waitFor(() => expect(buildCardLedgerWorkbook).toHaveBeenCalledWith(expect.anything(), [expect.objectContaining({ total: 150 })]));
+  ledger.mockClear();
+  fireEvent.click(screen.getByRole('button', { name: /^저장$/ }));
+  await waitFor(() => expect(ledger).toHaveBeenCalledTimes(1));
+  expect(ledger.mock.calls[0][0].visibleRows).toEqual([{ row: expect.objectContaining({ total: 150 }) }]);
+  expect(ledger.mock.calls[0][0].originalTransactions.map(tx => tx.id)).toEqual(['first-tx', 'legacy-date-tx']);
+});
 
 it('opens card analysis with every attachment and its ledger amount without ledger or billing writes', async () => {
   transactions = [{ id: 'fixture-tx', cardId: card.id, cardLabel: card.name, date: '2026-07-01', yearMonth: '2026-07', merchant: 'fixture', category: 'OTHER', amount: 100, statementAttachmentPaths: ['statements/first.pdf', 'statements/second.pdf'] }];

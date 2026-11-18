@@ -156,6 +156,27 @@ cancelBatch.set(doc(db, 'support_cancellation_logs', cancelOperationId), {
 await cancelBatch.commit();
 assert.equal((await getDoc(cardRef)).data()?.status, 'SUSPENDED');
 
+// Correct an inactive card's closed history in the same audited command.
+const correctionId = 'backdate_active-card_rules-test';
+const correctionBatch = writeBatch(db);
+correctionBatch.update(assignmentRef, { endDate: '2026-08-18', updatedAt: serverTimestamp() });
+correctionBatch.update(billingRef, { endDate: '2026-08-18', updatedAt: serverTimestamp() });
+correctionBatch.update(cardRef, {
+  lastLifecycleOperationId: correctionId,
+  lastLifecycleOperationType: 'CANCEL',
+  lastLifecycleOperationAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+});
+correctionBatch.set(doc(db, 'support_cancellation_logs', correctionId), {
+  resourceType: 'card', resourceId: cardId, resourceLabel: '규칙 테스트 카드',
+  reason: 'CARD_SUSPENDED', reasonLabel: '카드 정지', processedDate: '2026-08-18',
+  statusBefore: 'SUSPENDED', statusAfter: 'SUSPENDED', note: '종료일 정정 테스트',
+  createdAt: serverTimestamp(),
+});
+await correctionBatch.commit();
+assert.equal((await getDoc(assignmentRef)).data()?.endDate, '2026-08-18');
+assert.equal((await getDoc(billingRef)).data()?.endDate, '2026-08-18');
+
 for (const [kind, collectionName, payload] of [
   ['assignment', 'cardAssignments', {
     cardId,

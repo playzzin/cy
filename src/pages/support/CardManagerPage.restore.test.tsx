@@ -4,20 +4,21 @@ import { MemoryRouter } from 'react-router-dom';
 import { CardManagerPage } from './CardManagerPage';
 import { cardService } from '../../services/cardService';
 import type { Card } from '../../types/card';
+import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: null }) }));
 jest.mock('../../services/userService', () => ({ userService: {} }));
 jest.mock('../../services/cardService', () => ({ cardService: {
     getCards: jest.fn(), listAllCardBillingTargets: jest.fn().mockResolvedValue([]), restoreCardUse: jest.fn(),
 } }));
-jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [] } }));
-jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: async () => [] } }));
+jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [{ id: 'team', name: '시험팀', type: '시공팀', companyId: 'company' }] } }));
+jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: async () => [{ id: 'company', name: '청연이엔지', type: '시공사' }] } }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorkers: async () => [] } }));
 jest.mock('../../services/officeStaffService', () => ({ officeStaffService: { getOfficeStaff: async () => [] } }));
 jest.mock('../../components/card/CardForm', () => ({ CardForm: () => null }));
 jest.mock('../../components/card/CardAssignmentManager', () => ({ CardAssignmentManager: () => null }));
 jest.mock('../../components/card/CardBillingTargetManager', () => ({ CardBillingTargetManager: () => null }));
-jest.mock('../../components/card/CardMonthlyLedger', () => ({ CardMonthlyLedger: () => null }));
+jest.mock('../../components/card/CardMonthlyLedger', () => ({ CardMonthlyLedger: jest.fn(() => null) }));
 jest.mock('../../components/support/SupportExcelDownloadButton', () => ({ SupportExcelDownloadButton: () => null }));
 
 const card: Card = { id: 'closed-card', name: '해지 테스트 카드', issuer: '테스트', cardType: 'CREDIT', status: 'CLOSED', last4: '0001', maskedNumber: '****-****-****-0001' };
@@ -71,4 +72,12 @@ it('keeps the restore action available after an error', async () => {
     await waitFor(() => expect(window.alert).toHaveBeenCalledWith('카드 해지 해제 중 오류가 발생했습니다.'));
     expect(screen.getByRole('button', { name: '카드 해지 해제: 해지 테스트 카드' })).toBeEnabled();
     expect(cardService.getCards).toHaveBeenCalledTimes(1);
+});
+
+it('passes closed cards to the monthly ledger when a team is selected', async () => {
+    render(<MemoryRouter><CardManagerPage initialTab="ledger" /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('tab', { name: '팀별 보기: 시험팀' }));
+    await waitFor(() => expect(jest.mocked(CardMonthlyLedger).mock.calls.at(-1)?.[0]).toMatchObject({
+        cards: [card], selectedTeamId: 'team'
+    }));
 });

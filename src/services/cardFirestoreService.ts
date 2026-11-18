@@ -197,6 +197,9 @@ export const cardFirestoreService = {
 
         const cardRef = doc(db, CARDS_COLLECTION, params.cardId);
         const lifecycleCreatedAtIso = new Date().toISOString();
+        const needsClosure = (value: Record<string, unknown>): boolean => hasOpenLink(value)
+            || (params.targetStatus !== 'AVAILABLE' && Boolean(parseYmdDate(value.endDate))
+                && String(value.endDate) > params.effectiveDate);
         for (let attempt = 0; attempt < 3; attempt += 1) {
             // Read the card first. Any concurrent assignment/billing command also updates
             // this document, so a later fingerprint mismatch forces a fresh link query.
@@ -209,10 +212,10 @@ export const cardFirestoreService = {
                 getDocs(query(collection(db, BILLING_TARGETS_COLLECTION), where('cardId', '==', params.cardId))),
             ]);
             const assignmentRefs = assignmentQuerySnapshot.docs
-                .filter((item) => hasOpenLink(item.data() as Record<string, unknown>))
+                .filter((item) => needsClosure(item.data() as Record<string, unknown>))
                 .map((item) => item.ref);
             const billingRefs = billingQuerySnapshot.docs
-                .filter((item) => hasOpenLink(item.data() as Record<string, unknown>))
+                .filter((item) => needsClosure(item.data() as Record<string, unknown>))
                 .map((item) => item.ref);
             if (assignmentRefs.length + billingRefs.length > MAX_CARD_LIFECYCLE_LINKS) {
                 throw new Error('card-lifecycle-link-limit-exceeded');
@@ -246,11 +249,13 @@ export const cardFirestoreService = {
                         throw new Error(CARD_LIFECYCLE_PREFLIGHT_CHANGED);
                     }
 
+                    // A backdated cancellation also trims older links that still
+                    // extend beyond it, including links closed before restoration.
                     const openAssignments = assignmentSnapshots.filter((snapshot) => (
-                        snapshot.exists() && hasOpenLink(snapshot.data() as Record<string, unknown>)
+                        snapshot.exists() && needsClosure(snapshot.data() as Record<string, unknown>)
                     ));
                     const openBillingTargets = billingSnapshots.filter((snapshot) => (
-                        snapshot.exists() && hasOpenLink(snapshot.data() as Record<string, unknown>)
+                        snapshot.exists() && needsClosure(snapshot.data() as Record<string, unknown>)
                     ));
                     const latestOpenAssignment = openAssignments
                         .map((snapshot) => snapshot.data() as Record<string, unknown>)

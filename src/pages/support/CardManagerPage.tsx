@@ -282,9 +282,11 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                 c.memo
             ].some(value => String(value ?? '').toLowerCase().includes(query));
 
-            return teamMatches && searchMatches;
+            // Monthly rows resolve their team from dated assignment/billing history.
+            // Cancellation intentionally clears the card's current assignment.
+            return (activeTab === 'ledger' || teamMatches) && searchMatches;
         });
-    }, [cards, selectedTeamId, selectedTeamIdentity, teamByAnyId, teamByName, workerByAnyId, workerByName, searchTerm, officeStaffRows]);
+    }, [cards, activeTab, selectedTeamId, selectedTeamIdentity, teamByAnyId, teamByName, workerByAnyId, workerByName, searchTerm, officeStaffRows]);
 
     // 핸들러 함수들
     const handleRefresh = () => {
@@ -558,7 +560,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                 <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
                     {activeTab === 'status' && <div ref={setExportButtonContainer} className="contents" />}
                     <span className="whitespace-nowrap px-1 text-xs font-bold text-slate-400">
-                        조회 {filteredCards.length} / {cards.length}
+                        {activeTab === 'ledger' ? '선택한 월의 배정·청구팀 기준' : `조회 ${filteredCards.length} / ${cards.length}`}
                     </span>
 
                     <label className="relative block w-full sm:min-w-[240px] xl:w-72">
@@ -586,6 +588,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({
                 ) : activeTab === 'ledger' ? (
                     <CardMonthlyLedger
                         cards={filteredCards}
+                        selectedTeamId={selectedTeamId}
                         exportContext={{ teamName: selectedTeamIdentity.team?.name || '전체', searchText: searchTerm }}
                         teams={teams}
                         loadingCards={loading}
