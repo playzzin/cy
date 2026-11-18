@@ -93,7 +93,11 @@ describe('teamSettlementService confirmation freshness', () => {
 
   it('도급·직영은 공수만 가져오고 작업자 급여는 매입에만 반영하며 지원정산 금액을 가져오지 않는다', async () => {
     jest.spyOn(manpowerService, 'getWorkers').mockResolvedValue([]);
-    jest.spyOn(siteService, 'getSites').mockResolvedValue([]);
+    // 현장 마스터와 일보 구분이 반대여도 일보 행의 구분으로 정산한다.
+    jest.spyOn(siteService, 'getSites').mockResolvedValue([
+      { id: 'contract', name: '도급 현장', siteType: '직영' },
+      { id: 'direct', name: '직영 현장', siteType: '도급' }
+    ] as never);
     jest.spyOn(teamService, 'getTeams').mockResolvedValue([]);
     jest.spyOn(companyService, 'getCompanies').mockResolvedValue([]);
     jest.spyOn(dailyReportService, 'getReportWorkerRowsByRange').mockResolvedValue([

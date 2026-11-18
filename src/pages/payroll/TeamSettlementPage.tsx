@@ -944,7 +944,7 @@ export const TeamSettlementPage: React.FC = () => {
 
     setLoadState({ status: 'loading' });
     try {
-      const loaded = await teamSettlementService.getTeamSettlement({ yearMonth, teamId: selectedTeamId, persistSnapshot: canWrite });
+      const loaded = await teamSettlementService.getTeamSettlement({ yearMonth, teamId: selectedTeamId, persistSnapshot: canWrite, refreshDraft: canWrite });
       if (sequence !== settlementLoadGeneration.current) return;
       const nextDoc = stripSupportOriginalLines(loaded);
       setDoc(nextDoc);
@@ -3639,8 +3639,15 @@ export const TeamSettlementPage: React.FC = () => {
                 </div>
                 <div id="settlement-source-validation" className={`mt-1 text-xs font-semibold ${confirmationIssues.length > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
                   {doc.sourceSnapshot
-                    ? `원천 고정 ${new Date(doc.sourceSnapshot.capturedAt).toLocaleString('ko-KR')} · 출력일보 ${doc.sourceSnapshot.dailyReports.length}건`
-                    : '저장 또는 재집계 시 현재 월의 원천 스냅샷이 고정됩니다.'}
+                    ? `원천 기준 ${new Date(doc.sourceSnapshot.capturedAt).toLocaleString('ko-KR')} · 출력일보 ${doc.sourceSnapshot.dailyReports.length}건`
+                    : '출력일보를 기준으로 정산합니다.'}
+                </div>
+                <div className="mt-1 text-xs text-slate-600">
+                  {doc.confirmedAt
+                    ? '확정 당시 일보 기준입니다. 일보 수정사항은 재집계 후 반영됩니다.'
+                    : canWrite
+                      ? '도급·직영 구분과 공수는 최신 일보 기준입니다. 일보 수정 후 새로고침하면 반영됩니다.'
+                      : '저장된 정산 기준입니다. 일보 수정사항은 정산 담당자가 반영한 후 확인할 수 있습니다.'}
                 </div>
               </div>
               <span className={`rounded-full px-3 py-1 text-xs font-black ${confirmationIssues.length > 0
@@ -3672,7 +3679,7 @@ export const TeamSettlementPage: React.FC = () => {
             {doc.sourceSnapshot && doc.sourceSnapshot.dailyReports.length > 0 && (
               <details className="mt-3 rounded-xl border border-slate-200 bg-white/80">
                 <summary className="cursor-pointer select-none px-3 py-2 text-xs font-black text-slate-800">
-                  고정된 출력일보 팀·현장 보기 ({doc.sourceSnapshot.dailyReports.length}건)
+                  정산 기준 출력일보 팀·현장 보기 ({doc.sourceSnapshot.dailyReports.length}건)
                 </summary>
                 <div className="max-h-64 overflow-auto border-t border-slate-200">
                   <table className="w-full min-w-[680px] border-collapse text-xs">

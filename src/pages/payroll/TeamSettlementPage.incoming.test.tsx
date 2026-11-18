@@ -44,6 +44,32 @@ const document = (): TeamSettlementDocument => ({
   sourceSnapshot: { version: 2, capturedAt: '2026-09-01T00:00:00.000Z', dailyReports: [], supportDetails: [],
     totals: { sales: 0, purchases: 540000, deductions: 0, additions: 0, net: -540000 } }
 });
+
+it('CEO 새로고침은 최신 일보 구분을 요청하고 정산 표를 도급에서 직영으로 갱신한다', async () => {
+  const saved = document();
+  saved.confirmedAt = null;
+  saved.purchases = [];
+  saved.sourceSnapshot = undefined;
+  saved.sales = [{ id: 'contract', source: 'auto', origin: 'daily_report', kind: '도급',
+    siteId: 'test-site', siteName: '구분 변경 검증 현장', manDay: 2, amount: 900000, amountOverridden: true }];
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
+  render(<TeamSettlementPage />);
+  const table = await screen.findByRole('table', { name: '도급/직영 매출' });
+  const row = within(table).getByRole('row', { name: /구분 변경 검증 현장/ });
+  expect(within(row).getByText('도급', { exact: true })).toBeVisible();
+  expect(screen.getByText(/도급·직영 구분과 공수는 최신 일보 기준입니다/)).toBeVisible();
+  jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue({ ...saved,
+    sales: [{ ...saved.sales[0], id: 'direct', kind: '직영' }]
+  });
+  fireEvent.click(screen.getByRole('button', { name: '새로고침' }));
+  await waitFor(() => {
+    const refreshed = within(screen.getByRole('table', { name: '도급/직영 매출' })).getByRole('row', { name: /구분 변경 검증 현장/ });
+    expect(within(refreshed).getByText('직영', { exact: true })).toBeVisible();
+  });
+  expect(teamSettlementService.getTeamSettlement).toHaveBeenLastCalledWith(expect.objectContaining({ refreshDraft: true }));
+  expect(teamSettlementService.recalculateAndSaveTeamSettlement).not.toHaveBeenCalled();
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});
 beforeAll(() => {
   global.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 });
@@ -85,7 +111,7 @@ it.each([false, true])('조회자는 정산의 확정 여부와 관계없이 모
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue({ ...document(), confirmedAt: confirmed ? document().confirmedAt : null });
   render(<TeamSettlementPage />);
   await screen.findByText(/조회 전용입니다/);
-  await waitFor(() => expect(teamSettlementService.getTeamSettlement).toHaveBeenCalledWith(expect.objectContaining({ persistSnapshot: false })));
+  await waitFor(() => expect(teamSettlementService.getTeamSettlement).toHaveBeenCalledWith(expect.objectContaining({ persistSnapshot: false, refreshDraft: false })));
   const refresh = screen.getByRole('button', { name: '새로고침' });
   await waitFor(() => expect(refresh).toBeEnabled());
   expect(screen.getByRole('button', { name: '재집계' })).toBeDisabled();

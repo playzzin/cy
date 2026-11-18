@@ -35,6 +35,7 @@ import {
 } from '../utils/teamSettlementSupportRateOverrides';
 import { getTeamSettlementConfirmationIssues } from '../utils/teamSettlementDraft';
 import { prepareTeamSettlementManualSales, unlockTeamSettlementManualSales } from '../utils/teamSettlementManualSales';
+import { mergeTeamSettlementSales } from '../utils/teamSettlementSalesMerge';
 import { compactTeamSettlementAutoMemo } from '../utils/teamSettlementMemo';
 import { buildTeamSettlementExpenseEntries } from '../utils/teamSettlementExpenses';
 import { calculateTeamSettlementOfficeExpense, TEAM_SETTLEMENT_OFFICE_RATES } from '../utils/teamSettlementOfficeExpense';
@@ -345,27 +346,9 @@ const mergeAutoAndDraft = (params: { autoDoc: TeamSettlementDocument; savedDoc: 
     return stripSupportOriginalLines(savedDoc);
   }
 
-  const savedSalesById = new Map(savedDoc.sales.map((x) => [x.id, x] as const));
-  const patchedAutoSales = autoDoc.sales.map((autoItem) => {
-    const saved = savedSalesById.get(autoItem.id);
-    if (!saved) return autoItem;
-
-    const nextQuantity = typeof saved.quantity === 'number' && Number.isFinite(saved.quantity) ? saved.quantity : autoItem.quantity;
-    const hasAmountOverride = saved.amountOverridden === true;
-    const nextMemo = typeof saved.memo === 'string' && saved.memo.trim() ? saved.memo : autoItem.memo;
-
-    return {
-      ...autoItem,
-      quantity: nextQuantity,
-      amount: hasAmountOverride ? saved.amount : autoItem.amount,
-      amountOverridden: hasAmountOverride ? true : undefined,
-      memo: nextMemo
-    };
-  });
-
   return {
     ...autoDoc,
-    sales: [...patchedAutoSales, ...savedDoc.sales.filter((x) => x.source === 'manual')],
+    sales: mergeTeamSettlementSales(autoDoc.sales, savedDoc.sales),
     purchases: [...autoDoc.purchases, ...savedDoc.purchases.filter((x) => x.source === 'manual')],
     deductions: [...autoDoc.deductions, ...savedDoc.deductions.filter((x) => x.source === 'manual')],
     additions: [
@@ -796,7 +779,7 @@ export const teamSettlementService = {
     return rows;
   },
 
-  async getTeamSettlement(params: { yearMonth: string; teamId: string; persistSnapshot?: boolean }): Promise<TeamSettlementDocument> {
+  async getTeamSettlement(params: { yearMonth: string; teamId: string; persistSnapshot?: boolean; refreshDraft?: boolean }): Promise<TeamSettlementDocument> {
     const team = await buildTeamIdVariants(params.teamId);
     const systemId = buildSystemConfigId({ yearMonth: params.yearMonth, teamId: team.canonicalTeamId });
 
@@ -808,9 +791,9 @@ export const teamSettlementService = {
     const savedParsed = savedUnknown ? TeamSettlementDocumentSchema.safeParse(savedUnknown) : null;
     const savedDoc = savedParsed && savedParsed.success ? savedParsed.data : null;
 
-    // 저장 원천은 재집계 전까지 유지한다. 미확정 도급·직영의 미입력 자동금액만
-    // 수기 입력 방식으로 전환하며, 확정 문서는 현재 데이터로 다시 계산하지 않는다.
-    if (savedDoc?.sourceSnapshot || savedDoc?.confirmedAt) {
+    // CEO 편집 화면은 미확정 정산을 최신 일보로 갱신한다. 확정 정산과
+    // 제한된 원천만 조회할 수 있는 팀 조회 화면은 저장된 원천을 유지한다.
+    if (savedDoc?.confirmedAt || (savedDoc?.sourceSnapshot && !params.refreshDraft)) {
       return prepareTeamSettlementManualSales(stripSupportOriginalLines(savedDoc));
     }
 
@@ -822,8 +805,8 @@ export const teamSettlementService = {
     });
 
     const merged = mergeAutoAndDraft({ autoDoc, savedDoc });
-    // 쓰기 권한을 확인한 호출자만 최초 원천을 고정한다. 일반 조회는 저장하지 않는다.
-    if (params.persistSnapshot) await this.saveTeamSettlement(merged);
+    // 최초 원천 저장만 허용한다. 기존 정산의 조회·새로고침은 서버에 쓰지 않는다.
+    if (params.persistSnapshot && !savedDoc?.sourceSnapshot) await this.saveTeamSettlement(merged);
     return merged;
   },
 
