@@ -3,75 +3,57 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { enableDevAdminSession, isDevAdminAllowed } from '../../utils/devAdminSession';
 import { getGoogleAuthErrorMessage } from '../../utils/firebaseAuthError';
+import { normalizeLoginReturnPath, readGoogleLoginRedirect } from '../../utils/googleLoginRedirect';
 
-type LoginLocationState = {
-  from?: string | {
-    pathname?: string;
-    search?: string;
-    hash?: string;
-  };
-};
-
-const normalizeReturnPath = (path: string) => (
-  path.startsWith('/') && !path.startsWith('//') ? path : '/dashboard'
-);
-
+type LoginLocationState = { from?: string | { pathname?: string; search?: string; hash?: string } };
 const Login: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const locationState = location.state as LoginLocationState | null;
+  const [redirectReturnPath] = useState(() => readGoogleLoginRedirect()?.returnPath);
   const returnPath = useMemo(() => {
     const from = locationState?.from;
-    if (typeof from === 'string') return normalizeReturnPath(from);
-    if (from && typeof from === 'object') {
-      return normalizeReturnPath(`${from.pathname || '/dashboard'}${from.search || ''}${from.hash || ''}`);
-    }
-    return '/dashboard';
-  }, [locationState]);
-
+    if (typeof from === 'string') return normalizeLoginReturnPath(from);
+    if (from) return normalizeLoginReturnPath(`${from.pathname || '/dashboard'}${from.search || ''}${from.hash || ''}`);
+    return redirectReturnPath || '/dashboard';
+  }, [locationState, redirectReturnPath]);
+  const { currentUser, loading: authLoading, authError, login, loginWithGoogle } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { currentUser, loading: authLoading, login, loginWithGoogle } = useAuth();
-  const canUseDevAdmin = isDevAdminAllowed();
+  const [busy, setBusy] = useState<'email' | 'google' | null>(null);
+  const restoring = authLoading || Boolean(currentUser);
 
   useEffect(() => {
-    if (!authLoading && currentUser) {
-      navigate(returnPath, { replace: true });
-    }
+    if (!authLoading && currentUser) navigate(returnPath, { replace: true });
   }, [authLoading, currentUser, navigate, returnPath]);
+  useEffect(() => {
+    const reset = (event: PageTransitionEvent) => { if (event.persisted) setBusy(null); };
+    window.addEventListener('pageshow', reset);
+    return () => window.removeEventListener('pageshow', reset);
+  }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setError(''); setBusy('email');
     try {
-      setError('');
-      setLoading(true);
-      await login(email, password);
+      await login(email.trim(), password, remember);
       navigate(returnPath, { replace: true });
-    } catch (err) {
-      setError('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    } catch { setError('로그인하지 못했습니다. 이메일과 비밀번호를 확인해 주세요.'); }
+    finally { setBusy(null); }
   };
-
   const handleGoogleLogin = async () => {
+    if (busy) return;
+    setError(''); setBusy('google');
     try {
-      setError('');
-      setLoading(true);
-      await loginWithGoogle();
-      navigate(returnPath, { replace: true });
-    } catch (err) {
-      setError(getGoogleAuthErrorMessage(err));
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+      await loginWithGoogle({ remember, returnPath });
+      // Keep the pending state until the successful redirect unloads this page.
+    } catch (cause) { setError(getGoogleAuthErrorMessage(cause)); setBusy(null); }
   };
 
+  const canUseDevAdmin = isDevAdminAllowed();
   const handleDevAdminLogin = () => {
     enableDevAdminSession();
     window.location.assign(returnPath);
@@ -123,21 +105,29 @@ const Login: React.FC = () => {
               <h2 className="mb-2 hidden text-2xl font-bold text-slate-100 lg:block">계정 로그인</h2>
               <p className="mb-6 text-sm text-slate-300">이메일과 비밀번호를 입력해 시스템에 접속하세요.</p>
 
-              {error && (
+              {(error || authError) && (
                 <div
                   role="alert"
                   aria-live="polite"
                   className="mb-4 rounded-lg border border-rose-700/40 bg-rose-950/40 px-4 py-3 text-sm text-rose-300"
                 >
-                  {error}
+                  {error || authError}
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+              {restoring ? (
+                <div role="status" aria-live="polite" className="flex min-h-64 items-center justify-center py-12 text-sm text-slate-300">
+                  {currentUser ? '업무 화면으로 이동하는 중…' : '로그인 상태를 확인하는 중…'}
+                </div>
+              ) : <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-300">이메일</label>
+                  <label htmlFor="login-email" className="mb-2 block text-sm font-medium text-slate-300">이메일</label>
                   <input
-                    type="text"
+                    id="login-email"
+                    name="email"
+                    type="email"
+                    autoComplete="username"
+                    disabled={Boolean(busy)}
                     inputMode="email"
                     autoCapitalize="none"
                     autoCorrect="off"
@@ -150,9 +140,13 @@ const Login: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-300">비밀번호</label>
+                  <label htmlFor="login-password" className="mb-2 block text-sm font-medium text-slate-300">비밀번호</label>
                   <input
+                    id="login-password"
+                    name="password"
                     type="password"
+                    autoComplete="current-password"
+                    disabled={Boolean(busy)}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="비밀번호를 입력하세요"
@@ -161,12 +155,17 @@ const Login: React.FC = () => {
                   />
                 </div>
 
+                <label className="flex min-h-8 items-center gap-2 text-sm text-slate-300">
+                  <input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)} disabled={Boolean(busy)} className="h-4 w-4 accent-cyan-500" />
+                  이 브라우저에서 로그인 유지
+                </label>
+
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={Boolean(busy)}
                   className="w-full rounded-lg bg-cyan-500 py-3 font-bold text-slate-950 transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {loading ? '로그인 중...' : '로그인'}
+                  {busy === 'email' ? '로그인 중...' : '로그인'}
                 </button>
 
                 <div className="flex items-center gap-3 py-1">
@@ -178,23 +177,23 @@ const Login: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleGoogleLogin}
-                  disabled={loading}
+                  disabled={Boolean(busy)}
                   className="w-full rounded-lg border border-slate-700 bg-slate-900 py-3 font-semibold text-slate-100 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Google로 로그인
+                  {busy === 'google' ? 'Google로 이동 중…' : 'Google로 로그인'}
                 </button>
 
                 {canUseDevAdmin && (
                   <button
                     type="button"
                     onClick={handleDevAdminLogin}
-                    disabled={loading}
+                    disabled={Boolean(busy)}
                     className="w-full rounded-lg border border-amber-500/40 bg-amber-400/10 py-3 font-semibold text-amber-100 transition-colors hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     개발자 관리자 모드로 열기
                   </button>
                 )}
-              </form>
+              </form>}
             </section>
           </div>
         </div>

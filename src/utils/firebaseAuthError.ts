@@ -4,6 +4,8 @@ type FirebaseAuthErrorLike = {
 };
 
 const GOOGLE_AUTH_ERROR_MESSAGES: Record<string, string> = {
+  'auth/redirect-cancelled': 'Google 로그인이 완료되지 않았습니다. 다시 시도하거나 이메일로 로그인해 주세요.',
+  'auth/redirect-operation-pending': 'Google 로그인으로 이동 중입니다. 잠시만 기다려 주세요.',
   'auth/popup-blocked': '브라우저가 Google 로그인 창을 차단했습니다. 팝업을 허용한 뒤 다시 시도해 주세요.',
   'auth/popup-closed-by-user': 'Google 로그인 창이 닫혔습니다. 다시 시도해 주세요.',
   'auth/cancelled-popup-request': '이미 Google 로그인을 진행 중입니다. 열린 로그인 창을 확인해 주세요.',

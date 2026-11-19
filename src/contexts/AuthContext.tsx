@@ -4,21 +4,22 @@ import type { Auth, User } from 'firebase/auth';
 import { createDevAdminUser, disableDevAdminSession, isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { loginAccessTracker, writeAuthLog, writeLogoutLog } from '../services/loginAccessTracker';
 import { isDevPreviewFrame, postPreviewMessage, startDevPreviewAuth } from '../utils/devPreviewRuntime';
+import { clearGoogleLoginRedirect, readGoogleLoginRedirect, rememberGoogleLoginRedirect } from '../utils/googleLoginRedirect';
+import { getGoogleAuthErrorMessage } from '../utils/firebaseAuthError';
 
 type FirebaseAuthModule = typeof import('firebase/auth');
 
 interface AuthContextType {
   currentUser: User | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, remember?: boolean) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
+  loginWithGoogle: (options?: { remember?: boolean; returnPath?: string }) => Promise<void>;
   loading: boolean;
+  authError: string;
 }
 
 let firebaseAuthLoader: Promise<{ auth: Auth; authModule: FirebaseAuthModule }> | null = null;
-
-const PUBLIC_AUTH_OBSERVER_DELAY_MS = 5000;
 
 const loadFirebaseAuth = () => {
   firebaseAuthLoader =
@@ -34,16 +35,26 @@ const loadFirebaseAuth = () => {
   return firebaseAuthLoader;
 };
 
-const shouldDeferAuthObserver = () => {
-  if (typeof window === 'undefined') return false;
-  const { pathname } = window.location;
-
-  return (
-    pathname === '/' ||
-    pathname === '/login' ||
-    pathname === '/company/landing' ||
-    pathname.startsWith('/homepage/client/')
-  );
+// Share completion across StrictMode remounts so a redirect is logged once.
+let googleRedirectCompletion: Promise<void> | null = null;
+let googleRedirectAttempt: number | null = null;
+const completeGoogleRedirect = (auth: Auth, authModule: FirebaseAuthModule, startedAt: number): Promise<void> => {
+  if (googleRedirectCompletion && googleRedirectAttempt === startedAt) return googleRedirectCompletion;
+  googleRedirectAttempt = startedAt;
+  const finishAccess = loginAccessTracker.beginInteractiveLogin();
+  googleRedirectCompletion = authModule.getRedirectResult(auth).then(result => {
+    if (!result) throw Object.assign(new Error('Google sign-in did not complete'), { code: 'auth/redirect-cancelled' });
+    finishAccess(result.user);
+    void writeAuthLog({ action: 'login_success', provider: 'google', method: 'redirect', user: result.user, email: result.user.email });
+  }).catch(error => {
+    void writeAuthLog({ action: 'login_failed', provider: 'google', method: 'redirect',
+      errorCode: (error as { code?: string })?.code || null, errorMessage: getGoogleAuthErrorMessage(error) });
+    throw error;
+  }).finally(() => {
+    clearGoogleLoginRedirect();
+    finishAccess();
+  });
+  return googleRedirectCompletion;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -60,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(() => createDevAdminUser());
   const [loading, setLoading] = useState(() => !isDevAdminSessionEnabled());
   const [previewError, setPreviewError] = useState('');
+  const [authError, setAuthError] = useState('');
 
   useEffect(() => {
     if (isDevPreviewFrame) return startDevPreviewAuth(user => { setCurrentUser(user); setLoading(false); }, message => { setPreviewError(message); setLoading(false); });
@@ -74,18 +86,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let resolved = false;
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
-    const observerDelay = shouldDeferAuthObserver() ? PUBLIC_AUTH_OBSERVER_DELAY_MS : 0;
 
     const timeoutId = window.setTimeout(() => {
       if (resolved || cancelled) return;
       resolved = true;
+      setAuthError('로그인 상태 확인이 지연되고 있습니다. 연결을 확인하고 다시 시도해 주세요.');
       setLoading(false);
-    }, observerDelay + 8000);
+    }, 12000);
 
     const startAuthObserver = async () => {
       try {
         const { auth, authModule } = await loadFirebaseAuth();
         if (cancelled) return;
+
+        const redirect = readGoogleLoginRedirect();
+        if (redirect) {
+          void completeGoogleRedirect(auth, authModule, redirect.startedAt).catch(error => {
+            if (!cancelled) setAuthError(getGoogleAuthErrorMessage(error));
+          });
+        }
 
         unsubscribe = authModule.onAuthStateChanged(auth, (user) => {
           if (cancelled) return;
@@ -95,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           setCurrentUser(user);
           setLoading(false);
+          if (user) setAuthError('');
 
           if (user) {
             (async () => {
@@ -108,31 +128,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         });
       } catch (error) {
-        console.error('Failed to initialize Firebase auth:', error);
+        console.error('Failed to initialize Firebase auth.');
+        if (cancelled) return;
+        setAuthError('로그인 서비스를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');
         resolved = true;
         window.clearTimeout(timeoutId);
         setLoading(false);
       }
     };
 
-    const observerTimerId = window.setTimeout(() => {
-      void startAuthObserver();
-    }, observerDelay);
+    void startAuthObserver();
 
     return () => {
       cancelled = true;
       window.clearTimeout(timeoutId);
-      window.clearTimeout(observerTimerId);
       unsubscribe?.();
     };
   }, []);
 
-  async function login(email: string, password: string) {
+  async function login(email: string, password: string, remember = true) {
     if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const finishAccess = loginAccessTracker.beginInteractiveLogin();
 
     try {
+      setAuthError('');
+      await authModule.setPersistence(auth, remember ? authModule.browserLocalPersistence : authModule.browserSessionPersistence);
       const result = await authModule.signInWithEmailAndPassword(auth, email, password);
       finishAccess(result.user);
       setCurrentUser(result.user);
@@ -165,6 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { auth, authModule } = await loadFirebaseAuth();
     const finishAccess = loginAccessTracker.beginInteractiveLogin();
     try {
+      await authModule.setPersistence(auth, authModule.browserLocalPersistence);
       const result = await authModule.createUserWithEmailAndPassword(auth, email, password);
       finishAccess(result.user);
       setCurrentUser(result.user);
@@ -176,6 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function logout() {
+    clearGoogleLoginRedirect();
     if (isDevPreviewFrame) { postPreviewMessage('cy-preview:exit'); return; }
     if (isDevAdminSessionEnabled()) {
       const user = createDevAdminUser();
@@ -233,37 +256,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }
 
-  async function loginWithGoogle() {
+  async function loginWithGoogle({ remember = true, returnPath = '/dashboard' } = {}) {
     if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const provider = new authModule.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    const finishAccess = loginAccessTracker.beginInteractiveLogin();
-
     try {
-      const result = await authModule.signInWithPopup(auth, provider);
-      finishAccess(result.user);
-      setCurrentUser(result.user);
-      setLoading(false);
-
-      void writeAuthLog({
-        action: 'login_success',
-        provider: 'google',
-        method: 'popup',
-        user: result.user,
-        email: result.user.email,
-      });
+      setAuthError('');
+      await authModule.setPersistence(auth, remember ? authModule.browserLocalPersistence : authModule.browserSessionPersistence);
+      rememberGoogleLoginRedirect(returnPath);
+      await authModule.signInWithRedirect(auth, provider);
     } catch (error) {
+      clearGoogleLoginRedirect();
       void writeAuthLog({
         action: 'login_failed',
         provider: 'google',
-        method: 'popup',
+        method: 'redirect',
         errorCode: (error as { code?: string })?.code || null,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: getGoogleAuthErrorMessage(error),
       });
       throw error;
-    } finally {
-      finishAccess();
     }
   }
 
@@ -273,7 +284,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signup,
     logout,
     loginWithGoogle,
-    loading
+    loading,
+    authError,
   };
 
   if (isDevPreviewFrame && previewError) return <p role="alert" className="p-6">{previewError}</p>;

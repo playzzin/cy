@@ -1,6 +1,7 @@
 import { getApps, initializeApp } from 'firebase/app';
 import { assertDeploymentEnvironment } from './deploymentEnvironment';
 import { isDevPreviewFrame } from '../utils/devPreviewRuntime';
+import { resolveFirebaseAuthDomain } from './firebaseAuthDomain';
 
 const REQUIRED_ENV_KEYS = [
   'REACT_APP_FIREBASE_API_KEY',
@@ -32,7 +33,11 @@ export const app = (() => {
   const measurementId = process.env.REACT_APP_FIREBASE_MEASUREMENT_ID;
   const firebaseConfig = {
     apiKey: requireEnv('REACT_APP_FIREBASE_API_KEY'),
-    authDomain: requireEnv('REACT_APP_FIREBASE_AUTH_DOMAIN'),
+    authDomain: resolveFirebaseAuthDomain(
+      requireEnv('REACT_APP_FIREBASE_PROJECT_ID'),
+      requireEnv('REACT_APP_FIREBASE_AUTH_DOMAIN'),
+      typeof window === 'undefined' ? '' : window.location.hostname,
+    ),
     projectId: requireEnv('REACT_APP_FIREBASE_PROJECT_ID'),
     storageBucket: requireEnv('REACT_APP_FIREBASE_STORAGE_BUCKET'),
     messagingSenderId: requireEnv('REACT_APP_FIREBASE_MESSAGING_SENDER_ID'),
