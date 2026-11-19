@@ -6,6 +6,7 @@ import { loginAccessTracker, writeAuthLog, writeLogoutLog } from '../services/lo
 import { isDevPreviewFrame, postPreviewMessage, startDevPreviewAuth } from '../utils/devPreviewRuntime';
 import { clearGoogleLoginRedirect, readGoogleLoginRedirect, rememberGoogleLoginRedirect } from '../utils/googleLoginRedirect';
 import { getGoogleAuthErrorMessage } from '../utils/firebaseAuthError';
+import { clearLocalGoogleLogin, consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin } from '../utils/localGoogleLogin';
 
 type FirebaseAuthModule = typeof import('firebase/auth');
 
@@ -38,11 +39,13 @@ const loadFirebaseAuth = () => {
 // Share completion across StrictMode remounts so a redirect is logged once.
 let googleRedirectCompletion: Promise<void> | null = null;
 let googleRedirectAttempt: number | null = null;
-const completeGoogleRedirect = (auth: Auth, authModule: FirebaseAuthModule, startedAt: number): Promise<void> => {
+const completeGoogleRedirect = (auth: Auth, authModule: FirebaseAuthModule, startedAt: number, flow?: 'local-google'): Promise<void> => {
   if (googleRedirectCompletion && googleRedirectAttempt === startedAt) return googleRedirectCompletion;
   googleRedirectAttempt = startedAt;
   const finishAccess = loginAccessTracker.beginInteractiveLogin();
-  googleRedirectCompletion = authModule.getRedirectResult(auth).then(result => {
+  googleRedirectCompletion = Promise.resolve().then(() => flow === 'local-google'
+    ? authModule.signInWithCredential(auth, authModule.GoogleAuthProvider.credential(consumeLocalGoogleCredential()))
+    : authModule.getRedirectResult(auth)).then(result => {
     if (!result) throw Object.assign(new Error('Google sign-in did not complete'), { code: 'auth/redirect-cancelled' });
     finishAccess(result.user);
     void writeAuthLog({ action: 'login_success', provider: 'google', method: 'redirect', user: result.user, email: result.user.email });
@@ -101,7 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const redirect = readGoogleLoginRedirect();
         if (redirect) {
-          void completeGoogleRedirect(auth, authModule, redirect.startedAt).catch(error => {
+          void completeGoogleRedirect(auth, authModule, redirect.startedAt, redirect.flow).catch(error => {
             if (!cancelled) setAuthError(getGoogleAuthErrorMessage(error));
           });
         }
@@ -199,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     clearGoogleLoginRedirect();
+    clearLocalGoogleLogin();
     if (isDevPreviewFrame) { postPreviewMessage('cy-preview:exit'); return; }
     if (isDevAdminSessionEnabled()) {
       const user = createDevAdminUser();
@@ -263,10 +267,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setAuthError('');
       await authModule.setPersistence(auth, remember ? authModule.browserLocalPersistence : authModule.browserSessionPersistence);
-      rememberGoogleLoginRedirect(returnPath);
-      await authModule.signInWithRedirect(auth, provider);
+      if (usesLocalGoogleLogin()) {
+        rememberGoogleLoginRedirect(returnPath, 'local-google');
+        await startLocalGoogleLogin(auth.app.options.apiKey || '');
+      } else {
+        rememberGoogleLoginRedirect(returnPath);
+        await authModule.signInWithRedirect(auth, provider);
+      }
     } catch (error) {
       clearGoogleLoginRedirect();
+      clearLocalGoogleLogin();
       void writeAuthLog({
         action: 'login_failed',
         provider: 'google',

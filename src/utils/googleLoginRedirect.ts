@@ -7,19 +7,20 @@ export const normalizeLoginReturnPath = (value: string): string => {
   return pathname === '/' || pathname === '/login' ? '/dashboard' : value;
 };
 
-export const readGoogleLoginRedirect = (): { returnPath: string; startedAt: number } | null => {
+export const readGoogleLoginRedirect = (): { returnPath: string; startedAt: number; flow?: 'local-google' } | null => {
   try {
     const value = JSON.parse(window.sessionStorage.getItem(STORAGE_KEY) || 'null');
     if (!value || typeof value.returnPath !== 'string' || typeof value.startedAt !== 'number'
       || Date.now() - value.startedAt > MAX_AGE_MS || value.startedAt > Date.now()) return null;
-    return { returnPath: normalizeLoginReturnPath(value.returnPath), startedAt: value.startedAt };
+    return { returnPath: normalizeLoginReturnPath(value.returnPath), startedAt: value.startedAt,
+      ...(value.flow === 'local-google' ? { flow: 'local-google' as const } : {}) };
   } catch { return null; }
 };
 
-export const rememberGoogleLoginRedirect = (returnPath: string): void => {
+export const rememberGoogleLoginRedirect = (returnPath: string, flow?: 'local-google'): void => {
   try {
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-      returnPath: normalizeLoginReturnPath(returnPath), startedAt: Date.now(),
+      returnPath: normalizeLoginReturnPath(returnPath), startedAt: Date.now(), ...(flow ? { flow } : {}),
     }));
   } catch {
     throw Object.assign(new Error('Login redirect storage is unavailable'), { code: 'auth/web-storage-unsupported' });

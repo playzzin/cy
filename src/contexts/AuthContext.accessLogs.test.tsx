@@ -1,19 +1,22 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithRedirect, getRedirectResult, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithRedirect, signInWithCredential, getRedirectResult, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
 import { AuthProvider, useAuth } from './AuthContext';
 import { loginLogService } from '../services/loginLogService';
 import { loginAccessTracker } from '../services/loginAccessTracker';
 import { rememberGoogleLoginRedirect, readGoogleLoginRedirect } from '../utils/googleLoginRedirect';
+import { consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin } from '../utils/localGoogleLogin';
 
-jest.mock('../config/firebaseAuth', () => ({ auth: { currentUser: null } }));
+jest.mock('../config/firebaseAuth', () => ({ auth: { currentUser: null, app: { options: { apiKey: 'synthetic-api-key' } } } }));
+jest.mock('../utils/localGoogleLogin', () => ({ clearLocalGoogleLogin: jest.fn(), consumeLocalGoogleCredential: jest.fn(), startLocalGoogleLogin: jest.fn(), usesLocalGoogleLogin: jest.fn() }));
 jest.mock('../services/loginLogService', () => ({ loginLogService: { safeCreateLog: jest.fn() } }));
 jest.mock('../services/userService', () => ({ userService: { saveUser: jest.fn() } }));
 jest.mock('../utils/devAdminSession', () => ({ createDevAdminUser: () => null, isDevAdminSessionEnabled: () => false, disableDevAdminSession: jest.fn() }));
 jest.mock('firebase/auth', () => ({
   onAuthStateChanged: jest.fn(), signInWithEmailAndPassword: jest.fn(), createUserWithEmailAndPassword: jest.fn(), signInWithRedirect: jest.fn(),
   getRedirectResult: jest.fn(), setPersistence: jest.fn(), browserLocalPersistence: { type: 'LOCAL' }, browserSessionPersistence: { type: 'SESSION' },
-  GoogleAuthProvider: jest.fn(() => ({ setCustomParameters: jest.fn() })),
+  signInWithCredential: jest.fn(),
+  GoogleAuthProvider: Object.assign(jest.fn(() => ({ setCustomParameters: jest.fn() })), { credential: jest.fn(value => ({ idToken: value })) }),
 }));
 
 let current: ReturnType<typeof useAuth>;
@@ -32,6 +35,8 @@ beforeEach(() => {
   (setPersistence as jest.Mock).mockResolvedValue(undefined);
   (getRedirectResult as jest.Mock).mockResolvedValue(null);
   (signInWithRedirect as jest.Mock).mockResolvedValue(undefined);
+  (usesLocalGoogleLogin as jest.Mock).mockReturnValue(false);
+  (startLocalGoogleLogin as jest.Mock).mockResolvedValue(undefined);
   loginAccessTracker.observe(null);
   window.history.replaceState({}, '', '/admin/login-logs');
   (loginLogService.safeCreateLog as jest.Mock).mockResolvedValue(true);
@@ -102,6 +107,29 @@ it('clears redirect state and permits retry if redirect startup fails', async ()
   await act(async () => { await expect(current.loginWithGoogle()).rejects.toMatchObject({ code: 'auth/network-request-failed' }); });
   expect(readGoogleLoginRedirect()).toBeNull();
   expect(loginLogService.safeCreateLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'login_failed', method: 'redirect' }));
+});
+
+it('starts local Google authentication without the cross-origin Firebase iframe', async () => {
+  (usesLocalGoogleLogin as jest.Mock).mockReturnValue(true);
+  await open();
+  await act(async () => current.loginWithGoogle({ remember: false, returnPath: '/payroll' }));
+  expect(startLocalGoogleLogin).toHaveBeenCalledWith('synthetic-api-key');
+  expect(signInWithRedirect).not.toHaveBeenCalled();
+  expect(setPersistence).toHaveBeenCalledWith(expect.anything(), browserSessionPersistence);
+  expect(readGoogleLoginRedirect()).toEqual(expect.objectContaining({ returnPath: '/payroll', flow: 'local-google' }));
+});
+
+it('verifies the local Google credential with Firebase once across StrictMode mounts', async () => {
+  rememberGoogleLoginRedirect('/dashboard', 'local-google');
+  (consumeLocalGoogleCredential as jest.Mock).mockReturnValue('synthetic-google-id-token');
+  (signInWithCredential as jest.Mock).mockImplementation(async () => { await Promise.resolve(); observe(user); return { user }; });
+  render(<React.StrictMode><AuthProvider><Probe /></AuthProvider></React.StrictMode>);
+  await waitFor(() => expect(current.currentUser).toBe(user));
+  await waitFor(() => expect(loginLogService.safeCreateLog).toHaveBeenCalledTimes(1));
+  expect(signInWithCredential).toHaveBeenCalledTimes(1);
+  expect(getRedirectResult).not.toHaveBeenCalled();
+  expect(readGoogleLoginRedirect()).toBeNull();
+  expect(JSON.stringify((loginLogService.safeCreateLog as jest.Mock).mock.calls)).not.toContain('synthetic-google-id-token');
 });
 
 it('does not block successful login on an unresolved audit write', async () => {
