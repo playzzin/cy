@@ -928,3 +928,28 @@ it.each(['확정', '조회 전용'])('%s 정산은 기타공제를 볼 수 있�
   expect(within(other).getByRole('button', { name: '삭제' })).toBeDisabled();
   expect(within(other).getByRole('group', { name: '기타공제 합계' })).toHaveTextContent('50,000원');
 });
+
+it.each([
+  [1500000, 540000, '960,000원'],
+  [100000, 540000, '-440,000원'],
+  [0, 540000, '-540,000원'],
+  [1500000, 0, '1,500,000원'],
+  [0, 0, '0원'],
+])('거래내역 합계는 매출 %s에서 매입 %s를 차감해 %s로 표시한다', async (sales, purchases, expected) => {
+  const saved = document();
+  saved.confirmedAt = null;
+  saved.sourceSnapshot = undefined;
+  saved.sales = [{ id: 'net-sales', source: 'manual', origin: 'manual', kind: '직영',
+    siteName: '합계 검증 현장', amount: Number(sales), manDay: 1 }];
+  saved.purchases = [{ ...saved.purchases[0], source: 'manual', origin: 'manual', amount: Number(purchases) }];
+  saved.deductions = [{ id: 'net-deduction', source: 'manual', origin: 'manual', category: '검증 공제', amount: 1111 }];
+  saved.additions = [{ id: 'net-addition', source: 'manual', origin: 'manual', category: '검증 추가', amount: 2222 }];
+  saved.summary = { prevCarryover: 3333, deposit: 4444 };
+  jest.mocked(teamSettlementService.getTeamSettlement).mockImplementation(async ({ yearMonth }) => ({ ...saved, yearMonth }));
+  render(<TeamSettlementPage />);
+  await screen.findByDisplayValue('합계 검증 현장');
+  const transactions = screen.getByLabelText('매출·매입 거래내역 합계');
+  expect(within(transactions).getByRole('group', { name: '거래내역 합계 금액' })).toHaveTextContent(String(expected));
+  expect(within(transactions).getByText('−', { exact: true })).toBeVisible();
+  expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
+});

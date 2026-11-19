@@ -4059,7 +4059,7 @@ export const TeamSettlementPage: React.FC = () => {
                   </span>
                 </div>
 
-                <span className="team-settlement-page__transaction-operator" aria-hidden="true">+</span>
+                <span className="team-settlement-page__transaction-operator" aria-hidden="true">−</span>
                 <div
                   className="flex min-h-[68px] flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-orange-300 bg-gradient-to-r from-orange-50 to-amber-50 px-4 py-3 shadow-sm"
                   aria-label={buildTeamSettlementTransactionSummary(
@@ -4078,9 +4078,9 @@ export const TeamSettlementPage: React.FC = () => {
                   </span>
                 </div>
                 <span className="team-settlement-page__transaction-operator" aria-hidden="true">=</span>
-                <div role="group" aria-label="거래내역 합산 금액" className="flex flex-wrap items-center gap-2">
+                <div role="group" aria-label="거래내역 합계 금액" className="flex flex-wrap items-center gap-2">
                   <span>거래내역 합계</span>
-                  <strong className="text-lg font-black">{formatCurrency(transactionSectionTotals.salesTotal.amount + transactionSectionTotals.purchasesTotal.amount)}원</strong>
+                  <strong className="text-lg font-black">{formatCurrency(transactionSectionTotals.salesTotal.amount - transactionSectionTotals.purchasesTotal.amount)}원</strong>
                 </div>
               </div>
               <div className="mt-2 text-right text-xs font-medium text-slate-500">
