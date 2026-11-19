@@ -4,7 +4,8 @@ const ATTEMPT_KEY = 'cy_local_google_attempt';
 const RESULT_KEY = 'cy_local_google_result';
 const MAX_AGE_MS = 10 * 60 * 1000;
 const LOCAL_ORIGIN = 'http://localhost:3000';
-export const LOCAL_GOOGLE_CALLBACK = '/local-google-auth.html';
+// /__/ is already excluded by both old and current app service workers.
+export const LOCAL_GOOGLE_CALLBACK = '/__/local-google-auth.html';
 
 export const usesLocalGoogleLogin = (origin = window.location.origin): boolean => origin === LOCAL_ORIGIN;
 const failure = (code = 'auth/invalid-credential') => Object.assign(new Error('Google login could not be verified'), { code });

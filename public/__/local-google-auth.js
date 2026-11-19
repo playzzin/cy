@@ -1,4 +1,4 @@
-/* This isolated page runs before the app, analytics, and error reporting. */
+/* This isolated, cache-excluded page runs before app analytics/error reporting. */
 (() => {
   const fragment = window.location.hash.slice(1);
   window.history.replaceState(null, '', window.location.pathname);

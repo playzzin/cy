@@ -31,7 +31,7 @@ it('requests only an ID token with independent unpredictable state and nonce', a
   const first = new URL(await prepareLocalGoogleLogin('synthetic-api-key'));
   const second = new URL(await prepareLocalGoogleLogin('synthetic-api-key'));
   expect(first.origin).toBe('https://accounts.google.com');
-  expect(first.searchParams.get('redirect_uri')).toBe('http://localhost:3000/local-google-auth.html');
+  expect(first.searchParams.get('redirect_uri')).toBe('http://localhost:3000/__/local-google-auth.html');
   expect(first.searchParams.get('response_type')).toBe('id_token');
   expect(first.searchParams.get('state')).toHaveLength(64);
   expect(first.searchParams.get('nonce')).not.toBe(first.searchParams.get('state'));
@@ -70,13 +70,13 @@ it.each(['state', 'expired', 'future', 'cancelled'])('rejects %s and removes pen
   expect(sessionStorage.length).toBe(0);
 });
 
-const callbackScript = readFileSync(join(process.cwd(), 'public/local-google-auth.js'), 'utf8');
+const callbackScript = readFileSync(join(process.cwd(), 'public/__/local-google-auth.js'), 'utf8');
 function callback(fragment: string, origin = 'http://localhost:3000') {
   const replaceState = jest.fn();
   const replace = jest.fn();
   const status = { textContent: '' };
   runInNewContext(callbackScript, {
-    window: { location: { origin, pathname: '/local-google-auth.html', hash: `#${fragment}`, replace }, history: { replaceState } },
+    window: { location: { origin, pathname: '/__/local-google-auth.html', hash: `#${fragment}`, replace }, history: { replaceState } },
     sessionStorage, URLSearchParams, Date, document: { getElementById: () => status },
   });
   return { replaceState, replace, status };
@@ -86,7 +86,7 @@ it('clears the sensitive fragment before returning to the app, without placing c
   const idToken = token();
   sessionStorage.setItem('cy_local_google_attempt', JSON.stringify(attempt()));
   const result = callback(new URLSearchParams({ state: attempt().state, id_token: idToken }).toString());
-  expect(result.replaceState).toHaveBeenCalledWith(null, '', '/local-google-auth.html');
+  expect(result.replaceState).toHaveBeenCalledWith(null, '', '/__/local-google-auth.html');
   expect(result.replace).toHaveBeenCalledWith('/login');
   expect(result.replaceState.mock.invocationCallOrder[0]).toBeLessThan(result.replace.mock.invocationCallOrder[0]);
   expect(consumeLocalGoogleCredential()).toBe(idToken);
@@ -107,4 +107,16 @@ it('clears temporary data on logout and retry', () => {
   sessionStorage.setItem('cy_local_google_result', 'fixture');
   clearLocalGoogleLogin();
   expect(sessionStorage.length).toBe(0);
+});
+
+it('keeps credential callback pages outside app-shell/offline caching in the deployed service worker', () => {
+  const listeners: Record<string, (event: unknown) => void> = {};
+  runInNewContext(readFileSync(join(process.cwd(), 'public/service-worker.js'), 'utf8'), {
+    self: { location: { origin: 'http://localhost:3000' }, addEventListener: (type: string, handler: (event: unknown) => void) => { listeners[type] = handler; } }, URL,
+  });
+  const respondWith = jest.fn();
+  for (const filename of ['local-google-auth.html', 'local-google-auth.js']) {
+    listeners.fetch({ request: { method: 'GET', mode: 'navigate', url: `http://localhost:3000/__/${filename}` }, respondWith });
+  }
+  expect(respondWith).not.toHaveBeenCalled();
 });
