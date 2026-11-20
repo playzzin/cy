@@ -10,6 +10,7 @@ interface Props {
   paths: string[];
   title?: string;
   fileNames?: Record<string, string>;
+  showDetailsLink?: boolean;
   onClose: () => void;
   onRemoved?: (path: string) => void;
   removalDisabled?: boolean;
@@ -21,7 +22,9 @@ const getRealAccountUrl = (): string => {
   return `${url.pathname}${url.search}${url.hash}`;
 };
 
-const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 파일', fileNames, onClose, onRemoved, removalDisabled }) => {
+const isImageName = (name: string) => /\.(?:png|jpe?g|webp|gif|bmp|avif)$/i.test(name);
+
+const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 파일', fileNames, showDetailsLink = true, onClose, onRemoved, removalDisabled }) => {
   const [removed, setRemoved] = useState<string[]>([]);
   const files = useMemo(() => Array.from(new Set(paths.map(path => path.trim()).filter(path => path && !removed.includes(path)))), [paths, removed]);
   const [confirmPath, setConfirmPath] = useState('');
@@ -40,13 +43,17 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
       setRemoveError(cause instanceof Error ? cause.message : '파일 삭제에 실패했습니다. 다시 시도해 주세요.');
     } finally { removingRef.current = false; setRemoving(false); }
   };
-  const [selected, setSelected] = useState(() => files[files.length - 1] || '');
+  const defaultPath = [...files].reverse().find(path => isImageName(fileNames?.[path] || getCardStatementFileName(path))) || files[files.length - 1] || '';
+  const [selected, setSelected] = useState(() => defaultPath);
   const [loaded, setLoaded] = useState<{ path: string; link: CardStatementAttachmentLink } | null>(null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const activePath = files.includes(selected) ? selected : files[files.length - 1] || '';
+  const [previewError, setPreviewError] = useState(false);
+  const activePath = files.includes(selected) ? selected : defaultPath;
   const activeName = fileNames?.[activePath] || getCardStatementFileName(activePath);
   const link = loaded?.path === activePath ? loaded.link : null;
+  const isImage = isImageName(getCardStatementFileName(activePath)) || isImageName(activeName);
+  const isPdf = /\.pdf$/i.test(activeName) || /\.pdf$/i.test(getCardStatementFileName(activePath));
   const statementMonth = activePath.match(/^card-(?:billing|ledger)-statements\/(\d{4}-\d{2})\//)?.[1];
   const detailParams = new URLSearchParams({ storagePath: activePath, fileName: activeName });
   if (statementMonth) detailParams.set('month', statementMonth);
@@ -54,7 +61,7 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
   useEffect(() => {
     let active = true;
     let release: (() => void) | undefined;
-    setLoaded(null); setError('');
+    setLoaded(null); setError(''); setPreviewError(false);
     if (activePath) {
       cardStatementAttachmentService.resolve(activePath).then(resolved => {
         if (!active) { resolved.release(); return; }
@@ -93,10 +100,15 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
             </div>}
             <button type="button" onClick={() => setRetry(value => value + 1)} className="mt-2 rounded-lg border border-rose-200 bg-white px-3 py-2 font-bold">다시 시도</button>
           </div>}
-          {statementMonth && <a href={`/support/cards/statements?${detailParams.toString()}`} className="mb-4 inline-flex rounded-lg border border-indigo-200 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-50">Gemini 분석 · 상세내역 보기</a>}
+          {showDetailsLink && statementMonth && <a href={`/support/cards/statements?${detailParams.toString()}`} className="mb-4 inline-flex rounded-lg border border-indigo-200 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-50">Gemini 분석 · 상세내역 보기</a>}
           {activePath && !error && !link && <p role="status" className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">원본 파일을 준비하는 중…</p>}
           {link && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <p className="break-all text-sm font-bold text-emerald-900">{activeName}</p>
+            {isImage && !previewError && <a href={link.url} target="_blank" rel="noopener noreferrer" aria-label="원본 사진 크게 보기" className="mt-3 block rounded-lg bg-white p-2">
+              <img key={activePath} src={link.url} alt={`${activeName} 원본 사진`} referrerPolicy="no-referrer" onError={() => setPreviewError(true)} className="mx-auto max-h-[55vh] max-w-full object-contain" />
+            </a>}
+            {isImage && previewError && <p role="status" className="mt-3 text-sm text-amber-900">사진 미리보기를 불러오지 못했습니다. 아래 원본 열기 버튼으로 확인해 주세요.</p>}
+            {isPdf && <iframe key={activePath} title={`${activeName} PDF 원본`} src={link.url} referrerPolicy="no-referrer" className="mt-3 h-[55vh] w-full rounded-lg border-0 bg-white" />}
             <p className="mt-1 text-xs leading-5 text-emerald-800">아래 버튼을 눌러 원본을 여세요. 새 탭이 열리지 않으면 현재 탭에서 열 수 있습니다.</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <a href={link.url} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white">새 탭에서 원본 열기</a>

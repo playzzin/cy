@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import type { VehicleExpenseRecord } from '../../types/vehicle';
 import { vehicleFineImportService } from '../../services/vehicleFineImportService';
 
-export default function VehicleFinePhotos({ expenses, vehiclePlate, onRemoved, removalDisabled }: { expenses: VehicleExpenseRecord[]; vehiclePlate: string; onRemoved?: () => void; removalDisabled?: boolean }) {
+export default function VehicleFinePhotos({ expenses, vehiclePlate, onRemoved, removalDisabled, triggerLabel = '사진 보기' }: { expenses: VehicleExpenseRecord[]; vehiclePlate: string; triggerLabel?: string; onRemoved?: () => void; removalDisabled?: boolean }) {
     const [removedIds, setRemovedIds] = useState<string[]>([]);
     const visibleExpenses = expenses.filter(expense => !expense.fineNotice?.attachmentRemoved && !removedIds.includes(expense.id));
     const [confirmId, setConfirmId] = useState('');
@@ -45,7 +45,7 @@ export default function VehicleFinePhotos({ expenses, vehiclePlate, onRemoved, r
     };
     if (!visibleExpenses.length) return null;
     return <Dialog.Root open={open} onOpenChange={value => { if (removingRef.current) return; setOpen(value); setConfirmId(''); if (value) setSelectedId(visibleExpenses[0].id); }}>
-        <Dialog.Trigger asChild><button type="button" className="w-full rounded px-2 py-1 text-xs font-bold text-indigo-700 hover:bg-indigo-50" aria-label={`${vehiclePlate} 과태료 사진 보기`}>사진 보기 · {visibleExpenses.length}건</button></Dialog.Trigger>
+        <Dialog.Trigger asChild><button type="button" className="w-full rounded px-2 py-1 text-xs font-bold text-indigo-700 hover:bg-indigo-50" aria-label={`${vehiclePlate} 과태료 ${triggerLabel}`}>{triggerLabel} · {visibleExpenses.length}건</button></Dialog.Trigger>
         <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-[100] bg-black/50" />
             <Dialog.Content className="fixed left-1/2 top-1/2 z-[101] flex max-h-[92vh] w-[96vw] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-xl bg-white p-4 shadow-xl">

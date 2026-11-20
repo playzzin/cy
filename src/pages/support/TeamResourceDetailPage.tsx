@@ -20,7 +20,7 @@ import {
 import { accommodationService } from '../../services/accommodationService';
 import MonthNavigator from '../../components/common/MonthNavigator';
 import CardStatementFilesDialog from '../../components/card/CardStatementFilesDialog';
-import CardStatementUsageDialog from '../../components/card/CardStatementUsageDialog';
+import VehicleFinePhotos from '../../components/vehicle/VehicleFinePhotos';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import { cardService } from '../../services/cardService';
 import { vehicleService } from '../../services/vehicleService';
@@ -32,8 +32,9 @@ import type { Card, CardAssignmentRecord, CardTransaction } from '../../types/ca
 import { dedupeStatementPaths } from '../../utils/cardStatementDeduplication';
 import type { CardBillingDocument } from '../../types/cardBilling';
 import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
-import type { Vehicle, VehicleAssignmentRecord } from '../../types/vehicle';
+import type { Vehicle, VehicleAssignmentRecord, VehicleExpenseRecord } from '../../types/vehicle';
 import type { VehicleBillingDocument } from '../../types/vehicleBilling';
+import { getVehicleBillingFineExpenses } from '../../utils/vehicleBillingFineAttachments';
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import type { Team } from '../../services/teamService';
 import {
@@ -340,7 +341,8 @@ const TeamResourceDetailPage: React.FC = () => {
     const [cardAssignments, setCardAssignments] = useState<CardAssignmentRecord[]>([]);
     const [cardTransactions, setCardTransactions] = useState<{ month: string; rows: CardTransaction[] }>({ month: '', rows: [] });
     const [statementRevision, setStatementRevision] = useState(0);
-    const [statementSelection, setStatementSelection] = useState<{ scope: string; key: string; view: 'original' | 'details' } | null>(null);
+    const [statementSelection, setStatementSelection] = useState<{ scope: string; key: string } | null>(null);
+    const [vehicleExpenses, setVehicleExpenses] = useState<{ month: string; rows: VehicleExpenseRecord[]; loading: boolean; error: boolean }>({ month: '', rows: [], loading: false, error: false });
     const [workers, setWorkers] = useState<Worker[]>([]);
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
@@ -372,6 +374,18 @@ const TeamResourceDetailPage: React.FC = () => {
         });
         return () => { active = false; };
     }, [selectedMonth, statementRevision]);
+
+    useEffect(() => {
+        if (detailView !== 'vehicle') return;
+        let active = true;
+        setVehicleExpenses({ month: selectedMonth, rows: [], loading: true, error: false });
+        vehicleService.listAllVehicleExpenses(undefined, selectedMonth).then(rows => {
+            if (active) setVehicleExpenses({ month: selectedMonth, rows, loading: false, error: false });
+        }).catch(() => {
+            if (active) setVehicleExpenses({ month: selectedMonth, rows: [], loading: false, error: true });
+        });
+        return () => { active = false; };
+    }, [detailView, selectedMonth, statementRevision]);
 
     const loadResourceData = useCallback(async () => {
         setLoadingResources(true);
@@ -533,10 +547,11 @@ const TeamResourceDetailPage: React.FC = () => {
 
     const selectedVehicleDocs = useMemo(
         () => rawDocs.vehicleDocs.filter(doc =>
+            doc.yearMonth === selectedMonth &&
             matchesSelectedTeam(doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName) &&
             matchesBillingTarget(doc.issuedToType, doc.issuedToWorkerId, doc.issuedToWorkerName)
         ),
-        [matchesBillingTarget, matchesSelectedTeam, rawDocs.vehicleDocs]
+        [matchesBillingTarget, matchesSelectedTeam, rawDocs.vehicleDocs, selectedMonth]
     );
 
     const selectedCardDocs = useMemo(
@@ -666,7 +681,7 @@ const TeamResourceDetailPage: React.FC = () => {
             map.set(key, current);
         });
 
-        return Array.from(map.values())
+        return Array.from(map.entries()).map(([key, resource]) => ({ ...resource, key }))
             .sort((left, right) => String(left.vehicle?.licensePlate ?? '').localeCompare(String(right.vehicle?.licensePlate ?? ''), 'ko-KR'));
     }, [endDate, isCurrentSelectedMonth, matchesResourceAssignee, selectedVehicleDocs, startDate, vehicleAssignments, vehicleByKey, vehicles]);
 
@@ -1548,7 +1563,7 @@ const TeamResourceDetailPage: React.FC = () => {
                                                             const vehicle = resource.vehicle;
                                                             const firstAssignment = resource.assignments[0];
                                                             return (
-                                                                <tr key={vehicle?.id || firstAssignment?.vehicleId || firstAssignment?.id}>
+                                                                <tr key={resource.key}>
                                                                     <td data-label="차량번호"><strong>{vehicle?.licensePlate || firstAssignment?.vehiclePlate || EMPTY_TEXT}</strong></td>
                                                                     <td data-label="모델">{vehicle?.model || EMPTY_TEXT}</td>
                                                                     <td data-label="계약구분">{vehicle?.type || EMPTY_TEXT}</td>
@@ -1593,6 +1608,8 @@ const TeamResourceDetailPage: React.FC = () => {
                                                     ) : (
                                                         selectedVehicleDocs.map(doc => {
                                                             const breakdown = summarizeVehicleBillingCosts(doc);
+                                                            const fineExpenses = vehicleExpenses.month === selectedMonth && !vehicleExpenses.loading && !isBusy
+                                                                ? getVehicleBillingFineExpenses(doc, vehicleExpenses.rows) : [];
                                                             return (
                                                                 <tr key={doc.id}>
                                                                     <td data-label="차량"><strong>{doc.vehiclePlate || EMPTY_TEXT}</strong></td>
@@ -1602,7 +1619,13 @@ const TeamResourceDetailPage: React.FC = () => {
                                                                     <td data-label="주유비" className="tw-number">{formatCurrency(breakdown.fuel)}</td>
                                                                     <td data-label="수리비" className="tw-number">{formatCurrency(breakdown.repair)}</td>
                                                                     <td data-label="통행료" className="tw-number">{formatCurrency(breakdown.toll)}</td>
-                                                                    <td data-label="과태료" className="tw-number">{formatCurrency(breakdown.fine)}</td>
+                                                                    <td data-label="과태료" className="tw-number">
+                                                                        <div>{formatCurrency(breakdown.fine)}</div>
+                                                                        {fineExpenses.length > 0 ? <VehicleFinePhotos key={`${statementScope}:${doc.id}`} expenses={fineExpenses} vehiclePlate={doc.vehiclePlate || '차량'} triggerLabel="원본 보기" onRemoved={() => setStatementRevision(value => value + 1)} /> : breakdown.fine > 0 && <div className="trd-statement-actions">
+                                                                            <button type="button" disabled>원본 보기</button>
+                                                                            <small>{vehicleExpenses.month !== selectedMonth || vehicleExpenses.loading ? '불러오는 중…' : vehicleExpenses.error ? '조회 실패 · 새로고침해 주세요' : '연결된 고지서 없음'}</small>
+                                                                        </div>}
+                                                                    </td>
                                                                     <td data-label="기타" className="tw-number">{formatCurrency(breakdown.other)}</td>
                                                                     <td data-label="합계" className="tw-number"><strong>{formatCurrency(breakdown.total)}</strong></td>
                                                                 </tr>
@@ -1657,12 +1680,8 @@ const TeamResourceDetailPage: React.FC = () => {
                                                                         <div className="trd-statement-actions">
                                                                             <div className="trd-statement-actions__buttons">
                                                                                 <button type="button" disabled={!resource.statementPaths.length || isBusy}
-                                                                                    onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, view: 'original' })}>
+                                                                                    onClick={() => setStatementSelection({ scope: statementScope, key: resource.key })}>
                                                                                     원본 보기
-                                                                                </button>
-                                                                                <button type="button" disabled={!resource.statementPaths.length || !resource.cardId || isBusy}
-                                                                                    onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, view: 'details' })}>
-                                                                                    상세내역
                                                                                 </button>
                                                                             </div>
                                                                             <small>{resource.statementPaths.length ? `${resource.statementPaths.length}개 파일` : '등록된 파일 없음'}</small>
@@ -1747,26 +1766,16 @@ const TeamResourceDetailPage: React.FC = () => {
                     )}
                 </section>
             </main>
-            {statementResource && (statementSelection?.view === 'original' ? (
+            {statementResource && (
                 <CardStatementFilesDialog
                     key={`${statementScope}:${statementResource.key}:original`}
                     paths={statementResource.statementPaths}
                     title={`${statementResource.card?.name || statementResource.cardLabel} 사용내역서 원본`}
                     onRemoved={() => { setStatementRevision(value => value + 1); void loadResourceData(); }}
+                    showDetailsLink={false}
                     onClose={() => setStatementSelection(null)}
                 />
-            ) : (
-                <CardStatementUsageDialog
-                    key={`${statementScope}:${statementResource.key}:details`}
-                    yearMonth={selectedMonth}
-                    cardId={statementResource.cardId}
-                    cardLast4={statementResource.card?.last4 || ''}
-                    cardName={statementResource.card?.name || statementResource.cardLabel}
-                    onAttachmentsChanged={() => { setStatementRevision(value => value + 1); void loadResourceData(); }}
-                    paths={statementResource.statementPaths}
-                    onClose={() => setStatementSelection(null)}
-                />
-            ))}
+            )}
         </div>
     );
 };

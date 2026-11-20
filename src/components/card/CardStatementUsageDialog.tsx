@@ -175,7 +175,7 @@ const CardStatementUsageDialog: React.FC<CardStatementUsageDialogProps> = ({ yea
       <Dialog.Overlay className="fixed inset-0 z-[95] bg-slate-900/50" />
       <Dialog.Content className="fixed left-1/2 top-1/2 z-[96] flex max-h-[92vh] w-[calc(100%-1.5rem)] max-w-6xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl">
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4">
-          <div><Dialog.Title className="text-lg font-extrabold text-slate-900">{cardName} 사용내역 상세</Dialog.Title><Dialog.Description className="mt-1 text-sm text-slate-500">{yearMonth} · 카드 {cardLast4 ? `•••• ${cardLast4}` : '번호 미확인'} · 연결된 PDF {files.length}개</Dialog.Description></div>
+          <div><Dialog.Title className="text-lg font-extrabold text-slate-900">{cardName} 사용내역 상세</Dialog.Title><Dialog.Description className="mt-1 text-sm text-slate-500">{yearMonth} · 카드 {cardLast4 ? `•••• ${cardLast4}` : '번호 미확인'} · 연결된 원본 {files.length}개</Dialog.Description></div>
           <button type="button" onClick={onClose} aria-label="사용내역 상세 닫기" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={20} aria-hidden="true" /></button>
         </header>
         <div className="min-h-0 space-y-4 overflow-y-auto p-4 sm:p-5">

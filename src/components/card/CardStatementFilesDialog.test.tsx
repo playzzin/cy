@@ -111,6 +111,32 @@ test('empty attachments never make a request and the dialog can close', () => {
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
+test('previews the selected original photo, changes photos, and keeps native links when preview fails', async () => {
+  render(<CardStatementFilesDialog paths={['receipts/first.jpg', 'receipts/second.PNG']} onClose={jest.fn()} />);
+  expect(await screen.findByRole('img', { name: 'second.PNG 원본 사진' })).toHaveAttribute('src', 'https://example.com/receipts/second.PNG');
+  expect(screen.getByRole('link', { name: '원본 사진 크게 보기' })).toHaveAttribute('target', '_blank');
+  fireEvent.error(screen.getByRole('img'));
+  expect(screen.getByRole('status')).toHaveTextContent('사진 미리보기를 불러오지 못했습니다');
+  expect(screen.getByRole('link', { name: '새 탭에서 원본 열기' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '1. first.jpg' }));
+  expect(await screen.findByRole('img', { name: 'first.jpg 원본 사진' })).toHaveAttribute('src', 'https://example.com/receipts/first.jpg');
+});
+
+test('previews a PDF immediately and hides details for the original-only view', async () => {
+  render(<CardStatementFilesDialog paths={['card-ledger-statements/2026-11/statement.pdf']} showDetailsLink={false} onClose={jest.fn()} />);
+  await screen.findByRole('link', { name: '새 탭에서 원본 열기' });
+  expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Gemini 분석 · 상세내역 보기' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /상세내역/ })).not.toBeInTheDocument();
+  expect(screen.getByTitle('statement.pdf PDF 원본')).toHaveAttribute('src', 'https://example.com/card-ledger-statements/2026-11/statement.pdf');
+});
+
+test('opens a photo immediately when photos and PDFs are attached together', async () => {
+  render(<CardStatementFilesDialog paths={['receipt.jpg', 'statement.pdf']} showDetailsLink={false} onClose={jest.fn()} />);
+  expect(await screen.findByRole('img', { name: 'receipt.jpg 원본 사진' })).toHaveAttribute('src', 'https://example.com/receipt.jpg');
+  expect(resolve).toHaveBeenCalledWith('receipt.jpg');
+});
+
 test('explains how to leave the sample account when file access is refused', async () => {
   window.history.replaceState({}, '', '/support/cards?view=ledger&devAdmin=1#statement');
   jest.mocked(isDevAdminSessionEnabled).mockReturnValue(true);
