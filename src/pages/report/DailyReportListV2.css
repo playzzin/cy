@@ -89,6 +89,33 @@
 }
 
 .daily-report-v2-toolbar-toggle { display: none; }
+.daily-report-v2-image {
+    background: #fff;
+    color: #1e293b;
+    font-family: inherit;
+}
+.daily-report-v2-image-heading { padding: 16px; border-bottom: 1px solid #e2e8f0; }
+.daily-report-v2-image-heading h2 { margin: 0 0 6px; font-size: 20px; font-weight: 800; }
+.daily-report-v2-image-heading p { margin: 4px 0 0; font-size: 12px; color: #475569; overflow-wrap: anywhere; }
+.daily-report-v2-image .daily-report-v2-results,
+.daily-report-v2-image .daily-report-v2-results > div,
+.daily-report-v2-image .daily-report-v2-wrapper {
+    flex: none !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    opacity: 1 !important;
+    transform: none !important;
+}
+.daily-report-v2-image .daily-report-v2-summary-scroll { flex-wrap: wrap; overflow: visible; }
+.daily-report-v2-image details:not([open]),
+.daily-report-v2-image summary { display: none; }
+.daily-report-v2-image .daily-report-v2-mobile-group-header,
+.daily-report-v2-image .daily-report-workbook-table thead,
+.daily-report-v2-image .daily-report-workbook-table th,
+.daily-report-v2-image .daily-report-workbook-table td {
+    position: static !important;
+}
 .daily-report-v2-toolbar-main { min-width: 0; margin: 0; border: 0; padding: 0; }
 .daily-report-v2-pagination {
     display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end;

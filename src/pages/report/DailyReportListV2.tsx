@@ -37,6 +37,8 @@ import DailyReportListToolbar, {
     DailyReportSortMode,
 } from './components/DailyReportListToolbar';
 import { buildDailyReportListSummary } from './dailyReportListMetrics';
+import { captureDailyReportListImage } from './dailyReportListImage';
+import { reserveImageClipboardWrite } from '../../utils/taxInvoiceClipboard';
 import {
     useWorkerAccessScope,
     workerAccessMatchesReportRow,
@@ -383,6 +385,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
     const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
     const [tablePage, setTablePage] = useState(1);
     const tableWrapperRef = useRef<HTMLDivElement>(null);
+    const resultsRef = useRef<HTMLDivElement>(null);
+    const copyingImageRef = useRef(false);
+    const [isCopyingImage, setIsCopyingImage] = useState(false);
     const pendingEditsRef = useRef(false);
     const savingRef = useRef(false);
     const canChangeQuery = useCallback(() => {
@@ -1669,6 +1674,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 {isOpen && (
                     <div
                         ref={filterMenuRef}
+                        data-html2canvas-ignore="true"
                         onClick={(event) => event.stopPropagation()}
                         className={`absolute top-full mt-2 w-[240px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl ${
                             menuAlign === 'right' ? 'right-0' : 'left-0'
@@ -2872,6 +2878,43 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
         || !!queryError
         || sortedRows.length === 0;
 
+    const isCopyDisabled = isTransferBusy || isEditMode || rowSavingKeys.size > 0 || isCopyingImage;
+    const handleCopyImage = async () => {
+        if (isCopyDisabled || copyingImageRef.current || !resultsRef.current) return;
+        // Reserve the clipboard during the click, before image rendering awaits (Safari).
+        const reservation = reserveImageClipboardWrite();
+        if (!reservation) {
+            toast.error('이 브라우저에서는 이미지 복사를 지원하지 않습니다. Chrome 또는 Edge에서 다시 시도해 주세요.');
+            return;
+        }
+        copyingImageRef.current = true;
+        setIsCopyingImage(true);
+        const displayedCount = showMobileCards
+            ? resultsRef.current.querySelectorAll('.daily-report-v2-mobile-card').length
+            : tableRows.length;
+        const rangeLabel = showMobileCards
+            ? `현재 표시된 ${formatNumber(displayedCount)} / ${formatNumber(sortedRows.length)}건`
+            : `${currentTablePage} / ${tablePageCount}페이지 · ${formatNumber(tableStartIndex + 1)}–${formatNumber(tableStartIndex + displayedCount)} / ${formatNumber(sortedRows.length)}건`;
+        try {
+            const blob = await captureDailyReportListImage(resultsRef.current, {
+                period: `${startDate} ~ ${endDate}`,
+                filters: activeFilterLabels,
+                rangeLabel,
+            });
+            reservation.complete(blob);
+            const outcome = await reservation.result;
+            if (!outcome.ok) throw outcome.error;
+            toast.success(`현재 목록 ${formatNumber(displayedCount)}건을 이미지로 복사했습니다. 붙여넣기(Ctrl+V)로 사용하세요.`);
+        } catch (error) {
+            reservation.cancel(error);
+            console.error('[DailyReportListV2] Image copy failed', error);
+            toast.error('목록 이미지를 복사하지 못했습니다. 브라우저의 클립보드 권한을 확인하거나 조회 범위를 줄여 다시 시도해 주세요.');
+        } finally {
+            copyingImageRef.current = false;
+            setIsCopyingImage(false);
+        }
+    };
+
     const handleDownloadExcel = useCallback(async () => {
         if (sortedRows.length === 0) {
             toast.info('다운로드할 행이 없습니다.');
@@ -3006,6 +3049,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 isSearchDisabled={isQueryLoading || isMutationLoading || rowSavingKeys.size > 0}
                 isTransferBusy={isTransferBusy}
                 isDownloadingExcel={isDownloadingExcel}
+                isCopyingImage={isCopyingImage}
+                isCopyDisabled={isCopyDisabled}
                 onDateQueryModeChange={handleDateQueryModeChange}
                 onMonthChange={handleMonthChange}
                 onMonthNavigate={handleMonthNavigate}
@@ -3025,10 +3070,12 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, init
                 onBulkDelete={() => { void handleBulkDelete(); }}
                 onSearch={handleSearch}
                 onDownloadExcel={() => { void handleDownloadExcel(); }}
+                onCopyImage={() => { void handleCopyImage(); }}
                 onSaveAll={() => { void handleSaveAllDirtyRows(); }}
             />
 
             <motion.div
+                ref={resultsRef}
                 key={isQueryLoading ? 'loading' : queryError ? 'error' : 'results'}
                 initial="hidden"
                 animate="visible"

@@ -5,6 +5,12 @@ import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom
 import Swal from 'sweetalert2';
 import DailyReportListV2 from './DailyReportListV2';
 import { dailyReportService } from '../../services/dailyReportService';
+import { captureDailyReportListImage } from './dailyReportListImage';
+import { reserveImageClipboardWrite } from '../../utils/taxInvoiceClipboard';
+import { toast } from '../../utils/swal';
+
+jest.mock('./dailyReportListImage', () => ({ captureDailyReportListImage: jest.fn() }));
+jest.mock('../../utils/taxInvoiceClipboard', () => ({ reserveImageClipboardWrite: jest.fn() }));
 
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportWorkerRowsByRange: jest.fn(), updateWorkerInReport: jest.fn(), updateReport: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [] } }));
@@ -15,7 +21,10 @@ jest.mock('../../services/dailyReportTransferService', () => ({ dailyReportTrans
 jest.mock('../../services/fileTransferAuditService', () => ({ fileTransferAuditService: { log: jest.fn() } }));
 jest.mock('../../utils/swal', () => ({ confirm: { save: async () => ({ isConfirmed: true }) }, toast: { success: jest.fn(), warning: jest.fn(), error: jest.fn(), info: jest.fn() } }));
 jest.mock('sweetalert2', () => ({ fire: jest.fn() }));
-jest.mock('framer-motion', () => ({ motion: { div: ({ children, variants, initial, animate, ...props }: any) => <div {...props}>{children}</div> } }));
+jest.mock('framer-motion', () => {
+    const React = require('react');
+    return { motion: { div: React.forwardRef(({ children, variants, initial, animate, ...props }: any, ref: any) => <div ref={ref} {...props}>{children}</div>) } };
+});
 jest.mock('../../hooks/useWorkerAccessScope', () => ({
     useWorkerAccessScope: () => ({ mode: 'all', loading: false, workerIds: [], workerUids: [], workerNames: [], teamIds: [] }),
     workerAccessMatchesReportRow: () => true, workerAccessMatchesSite: () => true,
@@ -38,11 +47,78 @@ const mount = (query = 'date=2026-09-29') => render(<MemoryRouter future={{ v7_s
 
 beforeEach(() => {
     jest.clearAllMocks(); sessionStorage.clear(); rows = [makeRow(0), makeRow(1)];
+    (captureDailyReportListImage as jest.Mock).mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
+    (reserveImageClipboardWrite as jest.Mock).mockReturnValue({ complete: jest.fn(), cancel: jest.fn(), result: Promise.resolve({ ok: true }) });
     Object.defineProperty(window, 'matchMedia', { writable: true, value: jest.fn(() => ({ matches: false, addEventListener: jest.fn(), removeEventListener: jest.fn() })) });
     (dailyReportService.getReportWorkerRowsByRange as jest.Mock).mockImplementation(async () => rows.map(row => ({ ...row })));
     (dailyReportService.updateWorkerInReport as jest.Mock).mockImplementation(async (reportId, _worker, changes) => {
         rows = rows.map(row => row.reportId === reportId ? { ...row, ...changes } : row);
     });
+});
+
+test('화면 복사는 현재 페이지의 필터·정렬 결과와 조회 범위를 전달한다', async () => {
+    rows = Array.from({ length: 205 }, (_, index) => makeRow(index));
+    mount(); await screen.findByText('테스트 작업자 000');
+    fireEvent.click(screen.getByRole('button', { name: '다음 페이지' }));
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('100건')));
+    const [element, context] = (captureDailyReportListImage as jest.Mock).mock.calls[0];
+    expect(within(element).getByText('테스트 작업자 100')).toBeInTheDocument();
+    expect(within(element).queryByText('테스트 작업자 000')).toBeNull();
+    expect(context).toEqual({ period: '2026-09-29 ~ 2026-09-29', filters: [], rangeLabel: '2 / 3페이지 · 101–200 / 205건' });
+    fireEvent.change(screen.getByLabelText('작업자 이름 검색'), { target: { value: '204' } });
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    await waitFor(() => expect(captureDailyReportListImage).toHaveBeenCalledTimes(2));
+    expect(within(element).queryByText('테스트 작업자 100')).toBeNull();
+    expect(within(element).getByText('테스트 작업자 204')).toBeInTheDocument();
+    expect((captureDailyReportListImage as jest.Mock).mock.calls[1][1].filters.join(' ')).toContain('204');
+});
+
+test('복사 중에는 중복 실행하지 않고 이미지 생성 전에 클립보드를 예약한다', async () => {
+    let finish!: (blob: Blob) => void;
+    (captureDailyReportListImage as jest.Mock).mockImplementation(() => new Promise<Blob>(resolve => { finish = resolve; }));
+    mount(); await screen.findByText('테스트 작업자 000');
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    expect(screen.getByRole('button', { name: '복사 중…' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '복사 중…' }));
+    expect(captureDailyReportListImage).toHaveBeenCalledTimes(1);
+    expect((reserveImageClipboardWrite as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan((captureDailyReportListImage as jest.Mock).mock.invocationCallOrder[0]);
+    finish(new Blob(['image'], { type: 'image/png' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '화면 복사' })).toBeEnabled());
+});
+
+test('모바일 복사는 현재 표시된 카드 수를 안내한다', async () => {
+    rows = Array.from({ length: 85 }, (_, index) => makeRow(index));
+    (window.matchMedia as jest.Mock).mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() });
+    mount(); await screen.findByText('테스트 작업자 000');
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('40건')));
+    expect((captureDailyReportListImage as jest.Mock).mock.calls[0][1].rangeLabel).toBe('현재 표시된 40 / 85건');
+});
+
+test('조회 중·빈 결과·수정 모드에서는 복사를 막는다', async () => {
+    const view = mount();
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeDisabled();
+    await screen.findByText('테스트 작업자 000');
+    fireEvent.click(screen.getByRole('button', { name: '수정모드' }));
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeDisabled();
+    view.unmount(); rows = []; mount();
+    await screen.findByText('조회된 작업자 내역이 없습니다');
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeDisabled();
+    expect(captureDailyReportListImage).not.toHaveBeenCalled();
+});
+
+test.each(['capture', 'permission', 'unsupported'])('복사 실패(%s)는 성공으로 안내하지 않고 재시도를 허용한다', async failure => {
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    if (failure === 'capture') (captureDailyReportListImage as jest.Mock).mockRejectedValueOnce(new Error('render failed'));
+    if (failure === 'permission') (reserveImageClipboardWrite as jest.Mock).mockReturnValueOnce({ complete: jest.fn(), cancel: jest.fn(), result: Promise.resolve({ ok: false, error: new DOMException('denied', 'NotAllowedError') }) });
+    if (failure === 'unsupported') (reserveImageClipboardWrite as jest.Mock).mockReturnValueOnce(null);
+    mount(); await screen.findByText('테스트 작업자 000');
+    fireEvent.click(screen.getByRole('button', { name: '화면 복사' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '화면 복사' })).toBeEnabled();
+    error.mockRestore();
 });
 
 test('날짜 링크는 세션의 월간 모드보다 우선하며 잘못된 입력으로 조회하지 않는다', async () => {

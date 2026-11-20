@@ -5,6 +5,7 @@ import {
     faCalendarAlt,
     faChevronLeft,
     faChevronRight,
+    faCopy,
     faDownload,
     faFilter,
     faLocationDot,
@@ -64,6 +65,8 @@ interface DailyReportListToolbarProps {
     isSearchDisabled: boolean;
     isTransferBusy: boolean;
     isDownloadingExcel: boolean;
+    isCopyingImage: boolean;
+    isCopyDisabled: boolean;
     onDateQueryModeChange: (mode: DailyReportDateQueryMode) => void;
     onMonthChange: (value: string) => void;
     onMonthNavigate: (offset: -1 | 1) => void;
@@ -83,6 +86,7 @@ interface DailyReportListToolbarProps {
     onBulkDelete: () => void;
     onSearch: () => void;
     onDownloadExcel: () => void;
+    onCopyImage: () => void;
     onSaveAll: () => void;
 }
 
@@ -112,6 +116,8 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
     isSearchDisabled,
     isTransferBusy,
     isDownloadingExcel,
+    isCopyingImage,
+    isCopyDisabled,
     onDateQueryModeChange,
     onMonthChange,
     onMonthNavigate,
@@ -131,6 +137,7 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
     onBulkDelete,
     onSearch,
     onDownloadExcel,
+    onCopyImage,
     onSaveAll,
 }) => {
     const [expanded, setExpanded] = useState(false);
@@ -346,6 +353,16 @@ const DailyReportListToolbar: React.FC<DailyReportListToolbarProps> = ({
                     >
                         <FontAwesomeIcon icon={faSearch} />
                         조회
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onCopyImage}
+                        disabled={isCopyDisabled}
+                        title={isEditMode ? '수정 종료 후 화면을 복사할 수 있습니다.' : '현재 페이지의 목록을 스크롤 밖 내용까지 이미지로 복사합니다.'}
+                        className="daily-report-v2-secondary-action flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                    >
+                        <FontAwesomeIcon icon={isCopyingImage ? faSpinner : faCopy} spin={isCopyingImage} />
+                        {isCopyingImage ? '복사 중…' : '화면 복사'}
                     </button>
                     <button
                         type="button"
