@@ -26,6 +26,7 @@ import {
 } from '../features/dashboard-operations';
 
 export interface DashboardExecutiveStats {
+    workerCountAsOf?: string;
     workers: {
         total: number;
         active: number;
@@ -182,6 +183,7 @@ const loadSnapshotFromFirebase = async (): Promise<DashboardExecutiveStats> => {
     });
 
     return {
+        workerCountAsOf: todayStr,
         workers: workersData,
         sites: {
             total: sitesData.length,

@@ -5,10 +5,10 @@ import { recordWorkerIdentityChange } from './identityDocumentLogService';
 import { WorkerZod as Worker } from '../types/zod/workerSchema';
 import { auth, db, storage } from '../config/firebase';
 import { getWorkerCacheRevision } from '../utils/workerCacheRevision';
+import { countWorkerHeadcount } from '../utils/workerHeadcount';
 import {
     collection,
     getDocs,
-    getCountFromServer,
     query,
     where,
     Timestamp,
@@ -79,17 +79,8 @@ const snapshotWorker = (id: string, data: Record<string, unknown>): Record<strin
 export const manpowerService = {
     // Get all workers (Paginated)
     getWorkerCounts: async (): Promise<{ total: number; active: number }> => {
-        const scoped = await getTeamScopedRows<Worker>('workers');
-        const workers = scoped ?? (isDevAdminSessionEnabled() ? devWorkers : null);
-        if (workers !== null) {
-            return { total: workers.length, active: workers.filter(worker => worker.status === '재직').length };
-        }
-        const workersRef = collection(db, 'workers');
-        const [total, active] = await Promise.all([
-            getCountFromServer(workersRef),
-            getCountFromServer(query(workersRef, where('status', '==', '재직'))),
-        ]);
-        return { total: total.data().count, active: active.data().count };
+        // 위젯·통합 DB와 같은 권한 범위, 캐시, 상태 정규화 기준으로 집계합니다.
+        return countWorkerHeadcount(await manpowerService.getWorkers());
     },
 
     getWorkersPaginated: async (limitCount: number, lastDoc: any = null): Promise<{ workers: Worker[], lastDoc: any }> => {

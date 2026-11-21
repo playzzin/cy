@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { workerHeadcountBasis } from '../../utils/workerHeadcount';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { Worker } from '../../services/manpowerService';
 import type { Team } from '../../services/teamService';
@@ -809,6 +810,7 @@ function IntegratedDatabase() {
                                     </button>
                                 ))}
                             </div>
+                            <p className="mt-2 text-xs leading-5 text-slate-500">작업자 집계: {workerHeadcountBasis(snapshot?.workerCountAsOf)}</p>
                         </section>
                     )}
 

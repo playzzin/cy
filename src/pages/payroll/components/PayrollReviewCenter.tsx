@@ -12,10 +12,11 @@ export function PayrollReviewCenter({ rows, rangeLabel, busy, onInspect }: {
     const visible = result.issues.filter(issue => `${issue.workerName} ${issue.teamName} ${issue.month} ${issue.title}`.includes(search.trim()));
     return <details className="my-2 shrink-0 rounded-xl border border-slate-200 bg-white">
         <summary className="cursor-pointer px-4 py-3 text-sm font-bold text-slate-800">
-            정산 확인센터 · {busy ? '자료 확인 중' : rows.length === 0 ? '조회 후 확인 가능' : `금액·중복 확인 ${result.errorCount}건 / 계좌 확인 ${result.warningCount}건`}
+            정산 확인센터 · {busy ? '자료 확인 중' : rows.length === 0 ? '조회 후 확인 가능' : `금액·중복 확인 ${result.errorCount}건 / 지급계좌 확인 필요 ${result.warningCount}건`}
         </summary>
         <div className="border-t border-slate-100 p-4">
             <p className="text-sm text-slate-600">{rangeLabel} · 현재 조회된 급여 {rows.length}건의 공제 합계, 지급 대상, 계좌, 저장본을 대조합니다.</p>
+            <p className="mt-1 text-xs text-slate-500">지급계좌는 현재 조회·필터 결과 중 실지급액이 0원보다 큰 급여의 은행·계좌번호·예금주를 확인합니다. 건수는 인원수가 아닌 급여 행 수입니다. 대표계좌 적용 여부는 은행이체 미리보기에서 확인해 주세요.</p>
             <p className="mt-1 text-xs text-slate-500">확정본은 확정 당시 금액으로 점검합니다. 실제 은행 지급 여부는 포함하지 않습니다. 숙소·차량 원장은 아래 관리 화면에서 월 전체로 대조할 수 있습니다.</p>
             <div className="mt-2 flex gap-4 text-sm text-indigo-700"><a href="/support/accommodation?view=ledger">숙소 원장 대조 열기</a><a href="/support/vehicles?view=ledger">차량 원장 대조 열기</a></div>
             {busy ? <p role="status" className="mt-3">자료를 불러오거나 계산하고 있습니다. 완료 후 결과를 확인해 주세요.</p> : <>

@@ -4,6 +4,8 @@ import type { Site } from '../../services/siteService';
 import type { Company } from '../../services/companyService';
 import type { OfficeStaff } from '../../services/officeStaffService';
 import type { DailyReport } from '../../services/dailyReportService';
+import { countWorkerHeadcount } from '../../utils/workerHeadcount';
+import { getKoreanDateKey } from '../../utils/koreanBusinessDate';
 
 export interface DatabaseStats {
     workers: {
@@ -48,6 +50,7 @@ export interface DatabaseStats {
 }
 
 export interface IntegratedDatabaseOverviewSnapshot {
+    workerCountAsOf?: string;
     workers: Worker[];
     officeStaff: OfficeStaff[];
     teams: Team[];
@@ -118,8 +121,7 @@ export const buildDatabaseStats = (
     reportStats: DatabaseStats['reports']
 ): DatabaseStats => ({
     workers: {
-        total: workers.length,
-        active: workers.filter(worker => worker.status === ACTIVE_WORKER_STATUS).length,
+        ...countWorkerHeadcount(workers),
         inactive: workers.filter(worker => worker.status === RETIRED_WORKER_STATUS || worker.status === ON_LEAVE_WORKER_STATUS).length,
         unassigned: workers.filter(worker => !worker.teamId).length
     },
@@ -173,6 +175,7 @@ export const buildOverviewSnapshot = (params: {
     const recentReports = filterReportsByDateRange(params.allReports, startDateStr, endDateStr);
 
     return {
+        workerCountAsOf: getKoreanDateKey(today),
         workers: params.workers,
         officeStaff: params.officeStaff,
         teams: params.teams,

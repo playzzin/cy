@@ -9,6 +9,7 @@ import {
   faUsers,
 } from '@fortawesome/free-solid-svg-icons';
 import type { DashboardExecutiveStats } from '../../services/dashboardExecutiveService';
+import { workerHeadcountBasis } from '../../utils/workerHeadcount';
 import { getReportCoverageLabel } from '../../features/daily-report-coverage/dailyReportCoverage';
 
 const formatManDay = (value: number) =>
@@ -56,6 +57,7 @@ interface ExecutiveStatCardProps {
   unit?: string;
   footerLabel?: string;
   footerValue?: React.ReactNode;
+  basis?: string;
   onClick?: () => void;
   children?: React.ReactNode;
 }
@@ -71,6 +73,7 @@ const ExecutiveStatCard = React.memo<ExecutiveStatCardProps>(({
   unit,
   footerLabel,
   footerValue,
+  basis,
   onClick,
   children,
 }) => {
@@ -117,6 +120,7 @@ const ExecutiveStatCard = React.memo<ExecutiveStatCardProps>(({
           </div>
         </>
       )}
+      {basis && <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{basis}</p>}
     </div>
   );
 });
@@ -158,13 +162,14 @@ export const DashboardExecutiveMetricGrid = React.memo<DashboardExecutiveMetricG
         icon={faUsers}
         iconClassName="text-blue-600"
         iconBgClassName="bg-blue-50"
-        badge="실시간"
+        badge="등록 현황"
         badgeClassName="bg-blue-50 text-blue-600"
         title="총 등록 작업자"
         value={stats.workers.total}
         unit="명"
         footerLabel="현재 재직"
         footerValue={`${stats.workers.active}명`}
+        basis={workerHeadcountBasis(stats.workerCountAsOf)}
       />
       <ExecutiveStatCard
         icon={faBuilding}

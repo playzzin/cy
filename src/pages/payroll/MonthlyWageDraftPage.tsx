@@ -16,6 +16,7 @@ import { storeTransferHandoff } from '../../features/bank-transfer/transferHando
 import type { TransferLoadResult } from '../../features/bank-transfer/types';
 import { PayrollReviewCenter } from './components/PayrollReviewCenter';
 import { reviewPayroll, reviewTransferTotals, type PayrollReviewRow } from './utils/payrollReview';
+import { validatePayrollAccount } from './utils/payrollAccountValidation';
 import { resolveKBSalaryFilterFromPaymentId } from './utils/kbTransferExport';
 import { isFinalizedMonthlyPayrollRun, monthlyPayrollSettlementService, type MonthlyPayrollSavedManualInput, type MonthlyPayrollSettlement, type MonthlyPayrollSettlementSaveInput, type MonthlyPayrollRunStatus } from '../../services/monthlyPayrollSettlementService';
 import { payrollConfigService, PayrollConfig, PayrollInsuranceConfig, DEFAULT_ADVANCE_ITEM_LABELS } from '../../services/payrollConfigService';
@@ -112,7 +113,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
         basePaymentData,
         setPaymentData,
         ledgerRowsData, 
-        errorCount, 
         refetch: refetchPayrollData
     } = usePayrollData(startMonth, endMonth, { 
         selectedTeamId: selectedTeamId || undefined, 
@@ -2768,31 +2768,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
 
 
 
-    const validateItem = useCallback((item: Partial<PaymentData>): { isValid: boolean, errors: PaymentData['errors'] } => {
-        const errors: PaymentData['errors'] = {};
-        let isValid = true;
-
-        if (!item.bankName) {
-            errors.bankName = true;
-            isValid = false;
-        }
-        if (!resolveBankCode(item.bankName, item.bankCode)) {
-            if (item.bankName) {
-                errors.bankCode = true;
-                isValid = false;
-            }
-        }
-        if (!item.accountNumber) {
-            errors.accountNumber = true;
-            isValid = false;
-        }
-        if (!item.accountHolder) {
-            errors.accountHolder = true;
-            isValid = false;
-        }
-
-        return { isValid, errors };
-    }, [resolveBankCode]);
+    const validateItem = useCallback(validatePayrollAccount, []);
     void [
         buildUtilityDeductionLines,
         sumInsuranceSectionTax,
@@ -3845,7 +3821,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                 workerId: payment.workerId,
                 teamId: payment.teamId,
                 salaryModel: resolveKBSalaryFilterFromPaymentId(payment.id),
-                bankCode: analyzeBankMapping(payment.bankName, payment.bankCode).code,
+                bankCode: resolvePayrollBankCode(payment.bankName, payment.bankCode),
                 accountNumber: payment.accountNumber || '',
                 accountHolder: payment.accountHolder || '',
                 deductionLineTotal: [...(breakdown?.standardLines ?? []), ...(breakdown?.additionalLines ?? [])].reduce((sum, line) => sum + Number(line.amount), 0),
@@ -4413,10 +4389,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                 </div>
             )}
 
-            {errorCount > 0 && (
+            {!loading && !payrollSettlementLoading && !deductionApplyInProgress && payrollReview.warningCount > 0 && (
                 <div className="flex-shrink-0 mb-2 bg-red-50 border border-red-200 text-red-700 px-2.5 py-2 rounded-lg flex items-center gap-1.5 text-base">
                     <FontAwesomeIcon icon={faExclamationTriangle} className="text-red-500" />
-                    <span><strong>{errorCount}건</strong>의 계좌 정보가 누락되었습니다. 작업자 DB를 점검해주세요.</span>
+                    <span><strong>지급계좌 확인 필요 {payrollReview.warningCount}건</strong> · 현재 조회·필터 결과 중 실지급액이 0원보다 큰 급여 기준입니다. 정산 확인센터에서 대상과 확인 항목을 확인해 주세요.</span>
                 </div>
             )}
 

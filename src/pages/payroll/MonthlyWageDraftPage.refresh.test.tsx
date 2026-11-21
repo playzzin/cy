@@ -149,6 +149,25 @@ beforeEach(() => {
     (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockResolvedValue([]);
 });
 
+it('확인센터와 하단 경고가 현재 조회 결과의 지급계좌 확인 건수를 함께 갱신한다', async () => {
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue(
+        ['월급제', '일급제', '용역팀'].map((payType, index) => ({
+            id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
+            bankName: '국민은행', accountNumber: index === 0 ? ' ' : 'fixture-account', accountHolder: `검증${index}`,
+        }))
+    );
+    render(<MonthlyWageDraftPage />);
+    await ready();
+    expect(screen.getAllByText(/지급계좌 확인 필요 1건/)).toHaveLength(2);
+    expect(screen.queryByText(/건의 계좌 정보가 누락/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '작업자 변경' }));
+    expect(await screen.findByText(/지급계좌 확인 필요 0건/)).toBeInTheDocument();
+    expect(screen.queryByText(/지급계좌 확인 필요 1건/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '조회' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '은행 이체' })).toBeEnabled());
+    expect(screen.getByText(/지급계좌 확인 필요 0건/)).toBeInTheDocument();
+});
+
 it('로그인하지 않은 상태에서는 미리보기 송금 목록 전달을 막는다', async () => {
     render(<MonthlyWageDraftPage />);
     await ready();

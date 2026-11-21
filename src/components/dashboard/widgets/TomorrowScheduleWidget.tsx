@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
-import { addDays, format, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -22,6 +22,7 @@ import { teamService, Team } from '../../../services/teamService';
 import { vehicleService } from '../../../services/vehicleService';
 import { Vehicle } from '../../../types/vehicle';
 import { useAuth } from '../../../contexts/AuthContext';
+import { getKoreanDateKey, shiftDateKey } from '../../../utils/koreanBusinessDate';
 
 type ScheduleSource = 'tomorrow' | 'fallback' | 'empty';
 
@@ -84,6 +85,8 @@ const BOARD_VEHICLE_CELL_MIN_WIDTH = 112;
 interface ScheduleState {
     loading: boolean;
     error: string | null;
+    referenceLoading?: boolean;
+    referenceError?: string;
     targetDate: string;
     dispatch: DailyDispatch | null;
     source: ScheduleSource;
@@ -249,15 +252,29 @@ const MetricValue = styled.div`
     }
 `;
 
-const Notice = styled.div`
-    margin-bottom: 16px;
-    color: #92400e;
-    background: #fffbeb;
-    border: 1px solid #fde68a;
-    border-radius: 10px;
-    padding: 10px 12px;
-    font-size: 0.86rem;
-    font-weight: 700;
+const MissingSchedule = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 16px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    background: #f8fafc;
+    color: #334155;
+    text-align: center;
+
+    strong { font-size: 1.05rem; }
+    span { font-size: 0.86rem; color: #64748b; }
+`;
+
+const ScheduleContent = styled.section<{ $reference: boolean }>`
+    margin-top: ${(props) => (props.$reference ? '20px' : '0')};
+    padding: ${(props) => (props.$reference ? '16px' : '0')};
+    border: ${(props) => (props.$reference ? '1px solid #fde68a' : '0')};
+    border-radius: 12px;
+    background: ${(props) => (props.$reference ? '#fffbeb' : 'transparent')};
+    min-width: 0;
 `;
 
 const AssignmentList = styled.div`
@@ -1165,14 +1182,6 @@ const formatDateText = (date: string) => {
     }
 };
 
-const formatShortDateText = (date: string) => {
-    try {
-        return format(parseISO(date), 'M월 d일', { locale: ko });
-    } catch {
-        return date;
-    }
-};
-
 const getDispatchUpdatedMillis = (dispatch: DailyDispatch): number => {
     try {
         return dispatch.updatedAt?.toMillis?.() || 0;
@@ -1278,7 +1287,7 @@ const openNavigation = (deepLink: string, fallbackUrl: string) => {
 
 export const TomorrowScheduleWidget: React.FC = () => {
     const { currentUser } = useAuth();
-    const tomorrowDate = useMemo(() => format(addDays(new Date(), 1), 'yyyy-MM-dd'), []);
+    const tomorrowDate = useMemo(() => shiftDateKey(getKoreanDateKey(), 1), []);
     const [lookups, setLookups] = useState<LookupState>(() => emptyLookups());
     const [viewerTeamScope, setViewerTeamScope] = useState<ViewerTeamScope>(EMPTY_VIEWER_TEAM_SCOPE);
     const [showMyTeamOnly, setShowMyTeamOnly] = useState(false);
@@ -1299,7 +1308,7 @@ export const TomorrowScheduleWidget: React.FC = () => {
 
             try {
                 const [tomorrowDispatch, workers, vehicles, teams, sites, linkedWorker] = await Promise.all([
-                    dispatchService.getDispatchByDate(tomorrowDate),
+                    dispatchService.getDispatchByDate(tomorrowDate, { throwOnError: true }),
                     manpowerService.getWorkers().catch(() => []),
                     vehicleService.listAllVehicles().catch(() => []),
                     teamService.getTeams().catch(() => []),
@@ -1323,27 +1332,34 @@ export const TomorrowScheduleWidget: React.FC = () => {
                     return;
                 }
 
-                const allDispatches = await dispatchService.getAllDispatches();
-                if (!isMounted) return;
-
-                const fallbackDispatches = allDispatches
-                    .filter((dispatch) => dispatch.date !== tomorrowDate)
-                    .sort((left, right) => (
-                        getDispatchUpdatedMillis(right) - getDispatchUpdatedMillis(left) ||
-                        (right.date || '').localeCompare(left.date || '', 'en')
-                    ));
-                const latestDispatch =
-                    fallbackDispatches.find((dispatch) => hasAssignments(dispatch)) ||
-                    fallbackDispatches[0] ||
-                    null;
-
                 setState({
                     loading: false,
                     error: null,
-                    targetDate: latestDispatch?.date || tomorrowDate,
-                    dispatch: latestDispatch,
-                    source: latestDispatch ? 'fallback' : 'empty',
+                    targetDate: tomorrowDate,
+                    dispatch: null,
+                    source: 'empty',
+                    referenceLoading: true,
                 });
+                try {
+                    const allDispatches = await dispatchService.getAllDispatches();
+                    if (!isMounted) return;
+                    const latestDispatch = allDispatches
+                        .filter((dispatch) => /^\d{4}-\d{2}-\d{2}$/.test(dispatch.date)
+                            && dispatch.date < tomorrowDate && hasAssignments(dispatch))
+                        .sort((left, right) => (
+                            getDispatchUpdatedMillis(right) - getDispatchUpdatedMillis(left)
+                            || right.date.localeCompare(left.date, 'en')
+                        ))[0] || null;
+                    setState({
+                        loading: false,
+                        error: null,
+                        targetDate: latestDispatch?.date || tomorrowDate,
+                        dispatch: latestDispatch,
+                        source: latestDispatch ? 'fallback' : 'empty',
+                    });
+                } catch {
+                    if (isMounted) setState(prev => ({ ...prev, referenceLoading: false, referenceError: '최근 참고 일정을 불러오지 못했습니다.' }));
+                }
             } catch (error) {
                 console.error('Failed to load tomorrow dispatch schedule', error);
                 if (!isMounted) return;
@@ -1388,12 +1404,28 @@ export const TomorrowScheduleWidget: React.FC = () => {
         };
     }, [displayAssignments, lookups]);
 
-    const sourceLabel =
-        state.source === 'tomorrow'
-            ? '내일 일정'
-            : state.source === 'fallback'
-                ? `최근 저장 일정 · ${formatShortDateText(state.targetDate)}`
-                : '일정 없음';
+    const scheduleActions = <>
+        <FilterButton
+            type="button"
+            $active={showMyTeamOnly}
+            disabled={!viewerTeamScope.hasScope}
+            onClick={() => setShowMyTeamOnly((prev) => !prev)}
+            title={viewerTeamScope.hasScope ? `${viewerTeamScope.label} 인원이 포함된 현장만 보기` : '연결된 팀 정보가 없습니다.'}
+        >
+            <FontAwesomeIcon icon={faUsers} />
+            내 팀 포함 현장
+        </FilterButton>
+        <FilterButton
+            type="button"
+            $active={isBoardCollapsed}
+            onClick={() => setIsBoardCollapsed((prev) => !prev)}
+            title={isBoardCollapsed ? '현장 일정 펼치기' : '현장 일정 접기'}
+            aria-expanded={!isBoardCollapsed}
+        >
+            <FontAwesomeIcon icon={isBoardCollapsed ? faChevronDown : faChevronUp} />
+            {isBoardCollapsed ? '펼치기' : '접기'}
+        </FilterButton>
+    </>;
 
     const renderChipList = (items: DisplayChip[], emptyText: string) => {
         if (items.length === 0) {
@@ -1413,40 +1445,22 @@ export const TomorrowScheduleWidget: React.FC = () => {
     };
 
     return (
-        <WidgetContainer>
+        <WidgetContainer aria-label="내일 현장 일정">
             <Header>
                 <TitleGroup>
                     <Title>
                         <FontAwesomeIcon icon={faCalendarDay} />
                         내일 현장 일정
                     </Title>
-                    <DateText>{formatDateText(state.targetDate)}</DateText>
+                    <DateText as="time" dateTime={tomorrowDate}>{formatDateText(tomorrowDate)}</DateText>
                 </TitleGroup>
                 <HeaderActions>
-                    {!state.loading && (
-                        <SourceBadge $fallback={state.source === 'fallback'}>
-                            {sourceLabel}
+                    {!state.loading && !state.error && (
+                        <SourceBadge $fallback={state.source !== 'tomorrow'}>
+                            {state.source === 'tomorrow' ? '내일 일정 등록' : '미등록'}
                         </SourceBadge>
                     )}
-                    <FilterButton
-                        type="button"
-                        $active={showMyTeamOnly}
-                        disabled={!viewerTeamScope.hasScope}
-                        onClick={() => setShowMyTeamOnly((prev) => !prev)}
-                        title={viewerTeamScope.hasScope ? `${viewerTeamScope.label} 인원이 포함된 현장만 보기` : '연결된 팀 정보가 없습니다.'}
-                    >
-                        <FontAwesomeIcon icon={faUsers} />
-                        내 팀 포함 현장
-                    </FilterButton>
-                    <FilterButton
-                        type="button"
-                        $active={isBoardCollapsed}
-                        onClick={() => setIsBoardCollapsed((prev) => !prev)}
-                        title={isBoardCollapsed ? '현장 일정 펼치기' : '현장 일정 접기'}
-                    >
-                        <FontAwesomeIcon icon={isBoardCollapsed ? faChevronDown : faChevronUp} />
-                        {isBoardCollapsed ? '펼치기' : '접기'}
-                    </FilterButton>
+                    {!state.loading && !state.error && state.source === 'tomorrow' && scheduleActions}
                 </HeaderActions>
             </Header>
 
@@ -1456,19 +1470,25 @@ export const TomorrowScheduleWidget: React.FC = () => {
                     현장 일정을 불러오는 중입니다.
                 </LoadingState>
             ) : state.error ? (
-                <EmptyState>{state.error}</EmptyState>
-            ) : assignments.length === 0 ? (
-                <EmptyState>
-                    <FontAwesomeIcon icon={faClipboardList} />
-                    저장된 현장 일정이 없습니다.
-                </EmptyState>
+                <EmptyState role="alert">{state.error}</EmptyState>
             ) : (
                 <>
-                    {state.source === 'fallback' && (
-                        <Notice>
-                            내일 저장된 일정이 없어 마지막 저장 일정({formatDateText(state.targetDate)})을 표시합니다.
-                        </Notice>
+                    {state.source !== 'tomorrow' && (
+                        <MissingSchedule role="status">
+                            <strong>내일 일정 미등록</strong>
+                            <span>{formatDateText(tomorrowDate)}에 등록된 현장 배치가 없습니다.</span>
+                        </MissingSchedule>
                     )}
+                    {state.referenceLoading && <DateText>최근 참고 일정을 확인하고 있습니다.</DateText>}
+                    {state.referenceError && <DateText>{state.referenceError}</DateText>}
+                    {assignments.length > 0 && <ScheduleContent $reference={state.source === 'fallback'} aria-label={state.source === 'fallback' ? '최근 일정 참고' : '내일 일정 상세'}>
+                    {state.source === 'fallback' && <Header>
+                        <TitleGroup>
+                            <Title as="h4"><FontAwesomeIcon icon={faClipboardList} />최근 일정 참고</Title>
+                            <DateText>{formatDateText(state.targetDate)} · 내일 확정 일정이 아닙니다.</DateText>
+                        </TitleGroup>
+                        <HeaderActions>{scheduleActions}</HeaderActions>
+                    </Header>}
                     <Metrics>
                         <Metric>
                             <MetricLabel>현장</MetricLabel>
@@ -1733,6 +1753,7 @@ export const TomorrowScheduleWidget: React.FC = () => {
                         </BoardCards>
                     </BoardSurface>
                     )}
+                    </ScheduleContent>}
                 </>
             )}
         </WidgetContainer>

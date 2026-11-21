@@ -32,6 +32,18 @@ beforeEach(() => {
     (siteService.getSites as jest.Mock).mockResolvedValue([]);
 });
 
+it('은행명만 저장된 정상 계좌를 누락으로 세지 않고 재조회에도 같은 검증을 적용한다', async () => {
+    (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValue(reports('2026-11', 200000));
+    const { result } = renderHook(() => usePayrollData('2026-11', '2026-11'));
+    await waitFor(() => expect(result.current.paymentData).toHaveLength(1));
+    expect(result.current.errorCount).toBe(0);
+    expect(result.current.paymentData[0]).toMatchObject({ isValid: true, errors: {} });
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ ...fixtureWorker, accountNumber: ' ' }]);
+    await act(async () => { await result.current.refetch(); });
+    expect(result.current.errorCount).toBe(1);
+    expect(result.current.paymentData[0].errors).toEqual({ accountNumber: true });
+});
+
 it.each(['노무', '계산서'])('종료·퇴사·복원 전후에도 과거 공수와 급여·정산 합계를 보존한다: %s', async paymentMethod => {
     (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValue([{
         ...reports('2026-09', 200000)[0], siteId: 'site', siteName: '검증현장',

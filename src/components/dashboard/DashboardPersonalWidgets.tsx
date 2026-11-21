@@ -6,6 +6,8 @@ import { dailyReportService, type DailyReport } from '../../services/dailyReport
 import { manpowerService } from '../../services/manpowerService';
 import { siteService } from '../../services/siteService';
 import { teamService } from '../../services/teamService';
+import { countWorkerHeadcount, isEmployedWorker, workerHeadcountBasis } from '../../utils/workerHeadcount';
+import { getKoreanDateKey } from '../../utils/koreanBusinessDate';
 import { useAuth } from '../../contexts/AuthContext';
 import { DASHBOARD_MODES, type DashboardModeConfig } from './roleDashboardConfig';
 import { DashboardWidgetSettingsModal } from './DashboardWidgetSettingsModal';
@@ -21,6 +23,7 @@ interface DashboardPersonalWidgetsProps {
 }
 
 interface SummaryWidgetData {
+    basis?: string;
     value: string;
     unit: string;
     metaLabel: string;
@@ -124,11 +127,6 @@ const formatManDay = (value: number): string => (
 const formatDateLabel = (date?: string): string => {
     if (!date) return '-';
     return format(new Date(`${date}T00:00:00`), 'M월 d일');
-};
-
-const isActiveWorker = (status: unknown): boolean => {
-    const normalized = String(status || '').trim().toLowerCase();
-    return normalized === '재직' || normalized === 'active' || normalized === '근무';
 };
 
 const normalizeText = (value: unknown): string => String(value ?? '').trim();
@@ -381,7 +379,7 @@ const buildTeamWorkerRows = (workers: any[], teams: any[]): RankingRow[] => {
 
         const entry = teamMap.get(teamId)!;
         entry.totalWorkers += 1;
-        if (isActiveWorker(worker.status)) entry.activeWorkers += 1;
+        if (isEmployedWorker(worker)) entry.activeWorkers += 1;
     });
 
     return Array.from(teamMap.entries())
@@ -539,6 +537,7 @@ const SummaryCard: React.FC<{
                 <span className="text-slate-500">{data.metaLabel}</span>
                 <span className={`font-bold ${theme.accent}`}>{data.metaValue}</span>
             </div>
+            {data.basis && <p className="mt-2 text-xs leading-5 text-slate-500">{data.basis}</p>}
         </article>
     );
 };
@@ -695,7 +694,7 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
                 }
 
                 const recent = getRecentTotal(allAggregates);
-                const activeWorkers = scopedWorkers.filter((worker) => isActiveWorker(worker.status)).length;
+                const workerCounts = countWorkerHeadcount(scopedWorkers);
                 const activeSites = scopedSites.filter((site) => normalizeText(site.status) === 'active').length;
                 const activeTeams = teams.filter((team) => normalizeText(team.status) === 'active').length;
                 const monthTotalManDay = monthAggregates.reduce((sum, report) => sum + report.manDay, 0);
@@ -716,10 +715,11 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
                             : '출력일보 없음',
                     },
                     registeredWorkers: {
-                        value: scopedWorkers.length.toLocaleString('ko-KR'),
+                        value: workerCounts.total.toLocaleString('ko-KR'),
                         unit: '명',
-                        metaLabel: '재직',
-                        metaValue: `${activeWorkers.toLocaleString('ko-KR')}명`,
+                        metaLabel: '현재 재직',
+                        metaValue: `${workerCounts.active.toLocaleString('ko-KR')}명`,
+                        basis: workerHeadcountBasis(getKoreanDateKey(), isOverallScope ? undefined : nextScopeLabel),
                     },
                     registeredSites: {
                         value: scopedSites.length.toLocaleString('ko-KR'),

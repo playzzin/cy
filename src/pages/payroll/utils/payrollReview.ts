@@ -1,4 +1,5 @@
 import type { SimplePayrollClosingRow } from '../components/SimplePayrollClosingTable';
+import { validatePayrollAccount } from './payrollAccountValidation';
 
 export interface PayrollReviewRow extends SimplePayrollClosingRow {
     workerId: string;
@@ -55,8 +56,9 @@ export function reviewPayroll(rows: PayrollReviewRow[]) {
             if (row.netAmount < 0) add('negative', '공제액이 급여보다 큼', `실지급액이 ${won(row.netAmount)}입니다. 가불·공제와 이월 처리 여부를 확인해 주세요.`, 'ledger');
         }
         if (row.netAmount > 0) {
-            const missing = [!row.bankCode.trim() && '은행', !row.accountNumber.trim() && '계좌번호', !row.accountHolder.trim() && '예금주'].filter(Boolean);
-            if (missing.length) add('account', '지급 계좌 확인', `${missing.join('·')} 정보가 없습니다. 대표계좌를 사용할 경우 은행이체 미리보기에서 적용 결과를 확인해 주세요.`, 'account', 'warning');
+            const { errors } = validatePayrollAccount(row);
+            const missing = [(errors.bankName || errors.bankCode) && '은행', errors.accountNumber && '계좌번호', errors.accountHolder && '예금주'].filter(Boolean);
+            if (missing.length) add('account', '지급계좌 확인 필요', `${missing.join('·')} 정보를 확인해 주세요. 대표계좌를 사용할 경우 은행이체 미리보기에서 적용 결과를 확인해 주세요.`, 'account', 'warning');
         }
         if (row.saved && !row.isSnapshot && (
             differs(row.grossAmount, row.saved.grossAmount)

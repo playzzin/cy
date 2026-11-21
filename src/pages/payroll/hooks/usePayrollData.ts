@@ -10,7 +10,9 @@ import {
 } from '../../../services/payrollConfigService';
 import { advancePaymentService, AdvancePayment } from '../../../services/advancePaymentService';
 import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEntry, DeductionLine } from '../types/payroll';
-import { BANK_CODES, STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
+import { STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
+import { validatePayrollAccount } from '../utils/payrollAccountValidation';
+import { resolvePayrollBankCode } from '../utils/payrollBankCode';
 import { resolveReportPayType } from '../../../utils/payType';
 import {
   buildManualInputFromAdvanceRecord,
@@ -233,31 +235,7 @@ export const usePayrollData = (
   const [errorCount, setErrorCount] = useState(0);
   const fetchSequenceRef = useRef(0);
 
-  const validateItem = useCallback((item: Partial<PaymentData>): { isValid: boolean, errors: Record<string, boolean> } => {
-    const errors: Record<string, boolean> = {};
-    let isValid = true;
-
-    if (!item.bankName) {
-      errors.bankName = true;
-      isValid = false;
-    }
-    if (!item.bankCode && item.bankName) {
-      if (!BANK_CODES[item.bankName]) {
-        errors.bankCode = true;
-        isValid = false;
-      }
-    }
-    if (!item.accountNumber) {
-      errors.accountNumber = true;
-      isValid = false;
-    }
-    if (!item.accountHolder) {
-      errors.accountHolder = true;
-      isValid = false;
-    }
-
-    return { isValid, errors };
-  }, []);
+  const validateItem = useCallback(validatePayrollAccount, []);
 
   const fetchData = useCallback(async () => {
     const sequence = ++fetchSequenceRef.current;
@@ -593,7 +571,7 @@ export const usePayrollData = (
         const unitPrice = agg.unitPrices.length === 1 ? agg.unitPrices[0] : (agg.manDay > 0 ? Math.round(grossAmount / agg.manDay) : (w.unitPrice || 0));
         
         const bankName = w.bankName || '';
-        const bankCode = BANK_CODES[bankName] || '';
+        const bankCode = resolvePayrollBankCode(bankName);
         const accountNumber = w.accountNumber || '';
         const accountHolder = w.accountHolder || '';
 
