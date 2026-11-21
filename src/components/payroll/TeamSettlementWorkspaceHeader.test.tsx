@@ -29,3 +29,14 @@ test('고정 작업줄에서 연도를 넘어 월을 이동하며 저장 중에�
   rerender(<TeamSettlementWorkspaceHeader {...props} saveState="saving" />);
   expect(screen.getByRole('button', { name: '다음 달' })).toBeDisabled();
 });
+
+
+test('조회 권한은 월 이동과 새로고침만 제공하고 사무실 수정 버튼은 숨긴다', () => {
+  render(<TeamSettlementWorkspaceHeader teamName="검증팀" year={2026} month={11} confirmedAt={null} updatedAt={null}
+    isDirty={false} issueCount={0} saveState="idle" loading={false} canWrite={false} canEdit={false} canRecalculate={false}
+    onRefresh={jest.fn()} onRecalculate={jest.fn()} onSave={jest.fn()} onConfirm={jest.fn()} onUnconfirm={jest.fn()} onMonthChange={jest.fn()} />);
+  expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: '다음 달' })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: /재집계|변경사항|확정/ })).not.toBeInTheDocument();
+  expect(screen.getByText(/팀 정산 조회 화면입니다/)).toHaveAttribute('role', 'status');
+});

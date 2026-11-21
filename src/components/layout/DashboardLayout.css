@@ -2314,3 +2314,6 @@ body.dashboard2-codeit-theme .codeit-dashboard2.dashboard2-dark [class*="border-
     .app.sidebar-right #main-header { padding: 0 10px 0 15px; }
     .app.sidebar-right .header-left-group { margin-left: 8px; }
 }
+
+#main-header .app-menu-toggle { width: auto; min-width: 72px; min-height: 44px; gap: 8px; padding: 8px 10px; font-size: 14px; font-weight: 700; }
+#main-header .app-menu-toggle svg { font-size: 18px; }

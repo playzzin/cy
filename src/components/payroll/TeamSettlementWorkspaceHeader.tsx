@@ -70,14 +70,14 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
               <span className="team-settlement-page__heading-label">팀정산 관리</span>
               <h1>{year}년 {month}월{teamName && teamName !== '팀 선택' ? ` ${teamName}` : ''}</h1>
             </div>
-            {!canWrite && <p className="team-settlement-page__read-only mt-2 text-sm text-amber-800" role="status">조회 전용입니다. CEO, DEV, 매니저 직책만 수정할 수 있습니다.</p>}
+            {!canWrite && <p className="team-settlement-page__read-only mt-2 text-sm text-amber-800" role="status">팀 정산 조회 화면입니다. 수정·확정이 필요하면 사무실에 요청해 주세요.</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-            {isDirty ? (
+            {canWrite && (isDirty ? (
               <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-amber-800">변경사항 있음</span>
             ) : (
               <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">변경 없음</span>
-            )}
+            ))}
             {issueCount > 0 && (
               <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-700">검토 필요 {issueCount}건</span>
             )}
@@ -116,6 +116,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
           >
             새로고침
           </button>
+          {canWrite && <>
           <button
             type="button"
             className={`${baseButtonClassName} border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
@@ -151,6 +152,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
               저장 후 확정
             </button>
           )}
+          </>}
         </div>
       </section>
     </>

@@ -1,3 +1,4 @@
+import { TEAM_REQUESTS_PATH } from '../constants/teamWorkflowActions';
 import type { MenuItem, SiteDataType } from '../types/menu';
 import { hideTeamWorkflowLink } from './teamWorkflowPolicy';
 import { teamAccountApprovalEnabled } from './teamAccountApprovalFeature';
@@ -120,6 +121,12 @@ export const ensureTeamPersonnelMenu = (config: SiteDataType): void => {
             const group: MenuItem = { id: `${key}-sites`, text: '현장관리', icon: 'fa-building', sub: [] };
             site.menu.push(group);
             upgradeSites([group]);
+        }
+
+        const hasRequestsMenu = (items: (MenuItem | string)[]): boolean => items.some(item => typeof item !== 'string'
+            && (item.path?.split(/[?#]/)[0].replace(/\/+$/, '') === TEAM_REQUESTS_PATH || Boolean(item.sub && hasRequestsMenu(item.sub))));
+        if (!hasRequestsMenu(site.menu)) {
+            site.menu.push({ id: `${key}-team-requests`, text: '팀 요청함', path: TEAM_REQUESTS_PATH, icon: 'fa-clipboard-check' });
         }
 
         const hasMemoMenu = (items: (MenuItem | string)[]): boolean => items.some(item => typeof item !== 'string'

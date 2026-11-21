@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
+    faBars,
     faUserGear,
     faGear,
     faUserShield,
@@ -615,24 +616,14 @@ const Header: React.FC<HeaderProps> = ({
             <div className="header-left-group">
                 <button
                     type="button"
-                    className={`app-menu-logo-button ${isSiteLayerMode ? 'cheongyeon-header-logo' : ''}`}
+                    className={`app-menu-logo-button app-menu-toggle ${isSiteLayerMode ? 'cheongyeon-header-logo' : ''}`}
                     id="sidebar-toggle"
                     onClick={toggleSidebar}
                     aria-label="메뉴 토글"
                     title="메뉴 토글"
                 >
-                    {logoUrl ? (
-                        <img
-                            src={logoUrl}
-                            alt="Logo"
-                            className={isSiteLayerMode ? 'cheongyeon-header-logo-image' : 'app-menu-logo-image'}
-                        />
-                    ) : (
-                        <FontAwesomeIcon
-                            icon={resolveIcon(safeCurrentSiteData.icon, faShieldHalved)}
-                            className={isSiteLayerMode ? 'cheongyeon-header-logo-icon' : 'app-menu-logo-icon'}
-                        />
-                    )}
+                    <FontAwesomeIcon icon={faBars} aria-hidden="true" />
+                    <span>메뉴</span>
                 </button>
 
                 {siteLandingPath && (

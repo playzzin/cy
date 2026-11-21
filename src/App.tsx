@@ -1,3 +1,4 @@
+import { TEAM_REQUEST_ACTIONS } from './constants/teamWorkflowActions';
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
@@ -554,12 +555,8 @@ const App: React.FC = () => {
                 <OperationalWorkflowPage
                   eyebrow="팀장 업무"
                   title="팀 요청함"
-                  description="팀원 휴무, 인원 요청, 경비 요청, 가불 현황을 확인하는 팀장용 업무 허브입니다."
-                  actions={[
-                    { label: '현장 인원 요청', description: '현장별 필요 인원과 휴무 요청을 등록/확인합니다.', path: '/assignment/field-request' },
-                    { label: '경비 요청', description: '팀 경비와 후청구 요청을 확인합니다.', path: '/support/expense-claims' },
-                    { label: '가불 현황', description: '팀 단위 가불/공제 상태를 확인합니다.', path: '/payroll/advance-payment' },
-                  ]}
+                  description="작업자 등록, 경비, 가불을 신청하고 각 화면에서 처리 상태를 확인합니다."
+                  actions={TEAM_REQUEST_ACTIONS}
                 />
               }
             />

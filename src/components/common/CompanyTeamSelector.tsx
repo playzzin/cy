@@ -26,6 +26,7 @@ type Props = {
     onChange: (teamId: string) => void;
     onMissingSelection?: (firstTeamId: string | null) => void;
     allowAllTeams?: boolean;
+    allowOrderEditing?: boolean;
     ariaLabel?: string;
     compact?: boolean;
     appearance?: 'default' | 'advance';
@@ -94,7 +95,7 @@ const TeamButton: React.FC<{
     );
 };
 
-const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = [], internalLabel = '', selectedTeamId, onChange, onMissingSelection, allowAllTeams = true, ariaLabel = '통합 현황 팀 선택', compact = false, appearance = 'default' }) => {
+const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = [], internalLabel = '', selectedTeamId, onChange, onMissingSelection, allowAllTeams = true, allowOrderEditing = true, ariaLabel = '통합 현황 팀 선택', compact = false, appearance = 'default' }) => {
     const buttonsRef = useRef<HTMLDivElement>(null);
     const [savedOrder, setSavedOrder] = useState(readCompanyTeamOrder);
     const [draftOrder, setDraftOrder] = useState<string[]>([]);
@@ -102,6 +103,7 @@ const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = []
     const [saving, setSaving] = useState(false);
     const [orderReady, setOrderReady] = useState(false);
     const [error, setError] = useState('');
+    useEffect(() => { if (!allowOrderEditing) setEditing(false); }, [allowOrderEditing]);
     const order = editing ? draftOrder : savedOrder;
     const internal = useMemo(() => applySupportTeamOrder(internalTeams, order), [internalTeams, order]);
     const support = useMemo(() => applySupportTeamOrder(supportTeams, order), [supportTeams, order]);
@@ -142,7 +144,7 @@ const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = []
     }, [allowAllTeams, editing, error, internal, onMissingSelection, orderReady, selectedTeamId, support]);
 
     const handleDragEnd = ({ active, over }: DragEndEvent) => {
-        if (!editing || saving || !over || active.id === over.id) return;
+        if (!allowOrderEditing || !editing || saving || !over || active.id === over.id) return;
         // 소속팀·지원팀 구분과 현재 회사 필터 밖의 팀 순서를 보존한다.
         const group = [internal, support].find((rows) => rows.some((team) => team.id === active.id));
         if (!group) return;
@@ -180,7 +182,7 @@ const CompanyTeamSelector: React.FC<Props> = ({ internalTeams, supportTeams = []
         </div>
     );
 
-    const orderActions = (
+    const orderActions = allowOrderEditing && (
                 <div className={appearance === 'advance' ? 'company-team-selector__actions' : `flex shrink-0 items-center gap-1.5 whitespace-nowrap ${compact ? 'order-2' : ''}`}>
                     {editing && (
                         <button type="button" disabled={saving} onClick={() => void saveOrder(true)} className={appearance === 'advance' ? 'company-team-selector__order-button' : 'inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50'}>

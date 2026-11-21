@@ -195,13 +195,13 @@ it.each([false, true])('조회자는 정산의 확정 여부와 관계없이 모
   jest.mocked(useTeamSettlementAccess).mockReturnValue({ loading: false, canWrite: false });
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue({ ...document(), confirmedAt: confirmed ? document().confirmedAt : null });
   render(<TeamSettlementPage />);
-  await screen.findByText(/조회 전용입니다/);
+  await screen.findByText(/팀 정산 조회 화면입니다/);
   await waitFor(() => expect(teamSettlementService.getTeamSettlement).toHaveBeenCalledWith(expect.objectContaining({ persistSnapshot: false, refreshDraft: false })));
   const refresh = screen.getByRole('button', { name: '새로고침' });
   await waitFor(() => expect(refresh).toBeEnabled());
-  expect(screen.getByRole('button', { name: '재집계' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: '변경사항 없음' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: confirmed ? '확정 취소' : '저장 후 확정' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '재집계' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '변경사항 없음' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: confirmed ? '확정 취소' : '저장 후 확정' })).not.toBeInTheDocument();
   for (const button of screen.getAllByRole('button', { name: /수기.*추가|일괄.*적용/ })) expect(button).toBeDisabled();
   fireEvent.click(refresh);
   await waitFor(() => expect(teamSettlementService.getTeamSettlement).toHaveBeenCalledTimes(2));

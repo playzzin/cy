@@ -663,6 +663,7 @@ const buildMonthRange = (yearMonth: string): { startDate: string; endDate: strin
 export const TeamSettlementPage: React.FC = () => {
   const { canWrite, loading: accessLoading } = useTeamSettlementAccess();
   const [teams, setTeams] = useState<Team[]>([]);
+  const [teamListState, setTeamListState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
   const [yearMonth, setYearMonth] = useState<string>(buildDefaultYearMonth());
   const [doc, setDoc] = useState<TeamSettlementDocument | null>(null);
@@ -781,9 +782,11 @@ export const TeamSettlementPage: React.FC = () => {
         const rows = siteConstructionTeams.length > 0 ? siteConstructionTeams : constructionCompanyTeams;
         const preferredOrder = serverTeamOrder.length > 0 ? serverTeamOrder : readCompanyTeamOrder();
         setTeams(applySupportTeamOrder(rows, preferredOrder));
+        setTeamListState('ready');
       } catch (error) {
         console.error(error);
         toast.error('팀 목록 로드 실패');
+        if (!cancelled) setTeamListState('error');
       }
     };
     void loadTeams();
@@ -3643,11 +3646,15 @@ export const TeamSettlementPage: React.FC = () => {
           selectedTeamId={selectedTeamId}
           onChange={handleTeamSelect}
           allowAllTeams={false}
+          allowOrderEditing={canWrite}
           ariaLabel="정산 팀 선택"
           appearance="advance"
           compact
         />
       </div>
+
+      {!canWrite && teamListState === 'ready' && teams.length === 0 && <p role="status" className="mt-3 rounded-xl border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-600">조회할 정산 팀이 없습니다. 사무실에 계정의 소속팀 연결과 정산 대상 팀 등록 여부를 확인해 주세요.</p>}
+      {teamListState === 'error' && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">정산 팀 목록을 불러오지 못했습니다. 화면을 새로고침해 주세요.</p>}
 
       {doc && (
         <div className="team-settlement-page__overview mt-4 space-y-4">

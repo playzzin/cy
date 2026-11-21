@@ -4,6 +4,7 @@ import type { MenuItem, SiteDataType } from '../../types/menu';
 import { positionSiteKey } from '../../utils/linkedPositionMenus';
 import { MENU_PATHS } from '../../constants/menuPaths';
 import { ACTIVITY_SOURCES, activitySourceForPath } from '../../features/activity-center/activitySources';
+import { TEAM_REQUEST_ACTIONS, TEAM_REQUESTS_PATH } from '../../constants/teamWorkflowActions';
 
 export function previewMenuContainsPath(items: (MenuItem | string)[], path: string): boolean {
     const target = new URL(path, 'https://preview.invalid');
@@ -26,6 +27,9 @@ export function previewMenuContainsPath(items: (MenuItem | string)[], path: stri
 export function previewMenuAllowsPath(items: (MenuItem | string)[], path: string): boolean {
     if (previewMenuContainsPath(items, path)) return true;
     const pathname = new URL(path, 'https://preview.invalid').pathname.replace(/\/$/, '');
+    // Registered menus may expose the individual request pages without the hub.
+    // Opening that navigation hub does not grant access to an unregistered destination.
+    if (pathname === TEAM_REQUESTS_PATH) return TEAM_REQUEST_ACTIONS.some(action => previewMenuContainsPath(items, action.path));
     if (pathname === '/activity') {
         const source = activitySourceForPath(path);
         return (source ? [source] : ACTIVITY_SOURCES).some(item => item.paths.some(route => previewMenuContainsPath(items, route)));

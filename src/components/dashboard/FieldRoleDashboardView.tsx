@@ -19,6 +19,7 @@ import {
 import { dailyReportService, type DailyReport } from '../../services/dailyReportService';
 import type { Worker } from '../../services/manpowerService';
 import { useRouteAction } from '../../hooks/useRouteAction';
+import { TEAM_HISTORY_PATH, TEAM_REQUESTS_PATH, TEAM_SITE_PATH } from '../../constants/teamWorkflowActions';
 import { getDataLoadErrorMessage } from '../../utils/dataLoadError';
 
 export type FieldDashboardRole = 'teamLead' | 'foreman' | 'worker';
@@ -53,9 +54,9 @@ const ROLE_COPY: Record<FieldDashboardRole, {
         description: '팀 출역, 일보, 현장 흐름을 확인하고 필요한 업무로 바로 이어집니다.',
         gradient: 'from-cyan-950 via-cyan-800 to-teal-700',
         actions: [
-            { label: '일보 작성', description: '팀 작업 내용과 출역을 기록합니다.', path: '/reports/daily?tab=input', icon: faCalendarCheck, tone: 'bg-cyan-50 text-cyan-700 ring-cyan-100' },
-            { label: '팀 요청함', description: '휴무·인원·경비 요청을 확인합니다.', path: '/team/requests', icon: faClipboardCheck, tone: 'bg-indigo-50 text-indigo-700 ring-indigo-100' },
-            { label: '현장 현황', description: '담당 현장의 진행 상태를 봅니다.', path: '/dashboard/site-status', icon: faLocationDot, tone: 'bg-emerald-50 text-emerald-700 ring-emerald-100' },
+            { label: '근무내역 확인', description: '팀원의 출역 기록과 공수를 확인합니다.', path: TEAM_HISTORY_PATH, icon: faCalendarCheck, tone: 'bg-cyan-50 text-cyan-700 ring-cyan-100' },
+            { label: '팀 요청함', description: '작업자 등록·경비·가불 신청을 확인합니다.', path: TEAM_REQUESTS_PATH, icon: faClipboardCheck, tone: 'bg-indigo-50 text-indigo-700 ring-indigo-100' },
+            { label: '현장 현황', description: '담당 현장의 정보와 출역을 확인합니다.', path: TEAM_SITE_PATH, icon: faLocationDot, tone: 'bg-emerald-50 text-emerald-700 ring-emerald-100' },
             { label: '팀 정산', description: '팀별 공수와 정산 흐름을 확인합니다.', path: '/payroll/team-settlement', icon: faHandHoldingDollar, tone: 'bg-amber-50 text-amber-700 ring-amber-100' },
         ],
     },
@@ -168,8 +169,10 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
     const [error, setError] = useState('');
     const [retryKey, setRetryKey] = useState(0);
     const config = ROLE_COPY[role];
+    const historyPath = role === 'teamLead' ? TEAM_HISTORY_PATH : '/reports/daily?tab=list-v2';
+    const historyLabel = role === 'teamLead' ? '근무내역 보기' : '일보 목록';
     const today = useMemo(() => format(new Date(), 'yyyy-MM-dd'), []);
-    const period = useMemo(() => ({ start: format(subDays(new Date(), 30), 'yyyy-MM-dd'), end: today }), [today]);
+    const period = useMemo(() => ({ start: format(subDays(new Date(), 29), 'yyyy-MM-dd'), end: today }), [today]);
 
     useEffect(() => {
         let active = true;
@@ -217,10 +220,12 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
     const uniqueWorkers = useMemo(() => {
         const members = new Set<string>();
         scopedReports.forEach((report) => (report.workers || []).forEach((worker) => {
-            if (normalize(worker.workerId)) members.add(normalize(worker.workerId));
+            const belongsToTeam = sameValue(worker.teamId, linkedWorker?.teamId) || sameValue(worker.workerTeamName, linkedWorker?.teamName)
+                || (!normalize(worker.teamId) && !normalize(worker.workerTeamName) && (sameValue(report.teamId, linkedWorker?.teamId) || sameValue(report.teamName, linkedWorker?.teamName)));
+            if (normalize(worker.workerId) && Number(worker.manDay) > 0 && belongsToTeam) members.add(normalize(worker.workerId));
         }));
         return members;
-    }, [scopedReports]);
+    }, [scopedReports, linkedWorker]);
     const recentReports = useMemo(() => [...scopedReports]
         .sort((left, right) => right.date.localeCompare(left.date))
         .slice(0, 4), [scopedReports]);
@@ -251,14 +256,14 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
     const latestReport = recentReports[0];
     const todayStatus = todayReports.length > 0
         ? (role === 'worker' ? '오늘 출역 확인됨' : `오늘 일보 ${todayReports.length}건 확인됨`)
-        : (role === 'worker' ? '오늘 출역 확인 필요' : '오늘 일보 작성 필요');
+        : (role === 'worker' ? '오늘 출역 확인 필요' : role === 'teamLead' ? '오늘 일보 미등록 · 출역 여부 확인' : '오늘 일보 작성 필요');
     const profileReady = Boolean(normalize(linkedWorker?.id));
 
     const metrics = role === 'teamLead'
         ? [
             { label: '오늘 팀 공수', value: `${formatManDay(todayManDay)} 공수`, description: todayStatus, icon: faUsers, tone: 'bg-cyan-50 text-cyan-700' },
             { label: '최근 30일 누적', value: `${formatManDay(monthManDay)} 공수`, description: '최근 30일 팀 작업 기준', icon: faChartLine, tone: 'bg-indigo-50 text-indigo-700' },
-            { label: '확인된 팀원', value: `${uniqueWorkers.size}명`, description: '최근 출역 기록 기준', icon: faUserCheck, tone: 'bg-emerald-50 text-emerald-700' },
+            { label: '최근 30일 출역 인원', value: `${uniqueWorkers.size}명`, description: '출역 기록 기준 · 등록 팀원 수와 다릅니다', icon: faUserCheck, tone: 'bg-emerald-50 text-emerald-700' },
             { label: '투입 현장', value: `${uniqueSites.size}곳`, description: '최근 30일 출역 현장', icon: faLocationDot, tone: 'bg-amber-50 text-amber-700' },
         ]
         : role === 'foreman'
@@ -308,12 +313,14 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
                 ))}
             </section>
 
+            {role === 'teamLead' && <button type="button" onClick={() => runRouteAction('/manpower/team-worker-detail')} className="min-h-11 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700">등록 팀원 보기<FontAwesomeIcon icon={faArrowRight} className="ml-2" /></button>}
+
             {role === 'teamLead' && (
                 <section className="grid grid-cols-1 gap-6 xl:grid-cols-5">
                     <div className="xl:col-span-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                        <SectionHeading title="팀 운영 현황" description="최근 출역 기록을 기준으로 현장별 팀 공수를 확인합니다." actionLabel="일보 목록" onAction={() => runRouteAction('/reports/daily?tab=list-v2')} />
+                        <SectionHeading title="팀 운영 현황" description="최근 출역 기록을 기준으로 현장별 팀 공수를 확인합니다." actionLabel={historyLabel} onAction={() => runRouteAction(historyPath)} />
                         <div className="divide-y divide-slate-100">
-                            {siteSummaries.length > 0 ? siteSummaries.map((site) => <button key={site.id} type="button" onClick={() => runRouteAction('/dashboard/site-status')} className="flex w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-slate-50 sm:px-6"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700"><FontAwesomeIcon icon={faLocationDot} /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-black text-slate-800">{site.name}</span><span className="mt-1 block text-xs font-medium text-slate-400">최근 일보 {site.reportCount}건</span></span><span className="shrink-0 text-sm font-black text-slate-800">{formatManDay(site.manDay)} 공수</span></button>) : <EmptyState message="최근 30일 동안 소속 팀의 출역 기록이 없습니다." />}
+                            {siteSummaries.length > 0 ? siteSummaries.map((site) => <button key={site.id} type="button" onClick={() => runRouteAction(TEAM_SITE_PATH)} className="flex w-full items-center gap-4 px-5 py-4 text-left transition hover:bg-slate-50 sm:px-6"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-50 text-cyan-700"><FontAwesomeIcon icon={faLocationDot} /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-black text-slate-800">{site.name}</span><span className="mt-1 block text-xs font-medium text-slate-400">최근 일보 {site.reportCount}건</span></span><span className="shrink-0 text-sm font-black text-slate-800">{formatManDay(site.manDay)} 공수</span></button>) : <EmptyState message="최근 30일 동안 소속 팀의 출역 기록이 없습니다." />}
                         </div>
                     </div>
                     <aside className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -338,7 +345,7 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
                     </div>
                     <aside className="xl:col-span-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                         <SectionHeading title="최근 작업 기록" description="가장 최근의 현장 작업 내용입니다." />
-                        {latestReport ? <div className="p-5"><span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">{latestReport.date.replace(/-/g, '.')}</span><p className="mt-3 text-base font-black text-slate-900">{latestReport.siteName || '미지정 현장'}</p><p className="mt-2 text-sm leading-6 text-slate-500">{getWorkContent(latestReport, linkedWorker, role)}</p><button type="button" onClick={() => runRouteAction('/reports/daily?tab=list-v2')} className="mt-5 text-sm font-extrabold text-emerald-700">출역 기록 보기<FontAwesomeIcon icon={faArrowRight} className="ml-1.5 text-xs" /></button></div> : <EmptyState message="최근 작업 기록이 없습니다." />}
+                        {latestReport ? <div className="p-5"><span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">{latestReport.date.replace(/-/g, '.')}</span><p className="mt-3 text-base font-black text-slate-900">{latestReport.siteName || '미지정 현장'}</p><p className="mt-2 text-sm leading-6 text-slate-500">{getWorkContent(latestReport, linkedWorker, role)}</p><button type="button" onClick={() => runRouteAction(historyPath)} className="mt-5 text-sm font-extrabold text-emerald-700">출역 기록 보기<FontAwesomeIcon icon={faArrowRight} className="ml-1.5 text-xs" /></button></div> : <EmptyState message="최근 작업 기록이 없습니다." />}
                     </aside>
                 </section>
             )}
@@ -366,9 +373,9 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
             </section>
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <SectionHeading title={role === 'worker' ? '최근 내 작업' : '최근 일보'} description="최근 기록된 작업과 공수를 확인합니다." actionLabel="일보 목록" onAction={() => runRouteAction('/reports/daily?tab=list-v2')} />
+                <SectionHeading title={role === 'worker' ? '최근 내 작업' : '최근 일보'} description="최근 기록된 작업과 공수를 확인합니다." actionLabel={historyLabel} onAction={() => runRouteAction(historyPath)} />
                 <div className="divide-y divide-slate-100">
-                    {recentReports.length > 0 ? recentReports.map((report) => <button key={`${report.id || report.date}-${report.siteId}`} type="button" onClick={() => runRouteAction('/reports/daily?tab=list-v2')} className="flex w-full items-center gap-4 px-5 py-3.5 text-left transition hover:bg-slate-50 sm:px-6"><span className="w-20 shrink-0 text-xs font-bold text-slate-400">{report.date.replace(/-/g, '.')}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold text-slate-800">{report.siteName || '미지정 현장'}</span><span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{getWorkContent(report, linkedWorker, role)}</span></span><span className="shrink-0 text-sm font-black text-slate-700">{formatManDay(report.scopedManDay)} 공수</span></button>) : <EmptyState message={profileReady ? '최근 30일 동안 확인할 출역 기록이 없습니다.' : '프로필 연결 후 개인 출역 기록을 확인할 수 있습니다.'} />}
+                    {recentReports.length > 0 ? recentReports.map((report) => <button key={`${report.id || report.date}-${report.siteId}`} type="button" onClick={() => runRouteAction(historyPath)} className="flex w-full items-center gap-4 px-5 py-3.5 text-left transition hover:bg-slate-50 sm:px-6"><span className="w-20 shrink-0 text-xs font-bold text-slate-400">{report.date.replace(/-/g, '.')}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold text-slate-800">{report.siteName || '미지정 현장'}</span><span className="mt-0.5 block truncate text-xs font-medium text-slate-400">{getWorkContent(report, linkedWorker, role)}</span></span><span className="shrink-0 text-sm font-black text-slate-700">{formatManDay(report.scopedManDay)} 공수</span></button>) : <EmptyState message={profileReady ? '최근 30일 동안 확인할 출역 기록이 없습니다.' : '프로필 연결 후 개인 출역 기록을 확인할 수 있습니다.'} />}
                 </div>
             </section>
         </div>

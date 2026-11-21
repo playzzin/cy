@@ -13,6 +13,8 @@ test('일보 쿼리 진입을 차단하고 옛 달력 주소는 근무내역으�
     const view = render(<MemoryRouter initialEntries={['/reports/daily?tab=board-input']}><TeamWorkflowGate profile={profile}><p>일보 입력</p></TeamWorkflowGate></MemoryRouter>);
     await screen.findByText('팀장 조회 메뉴를 이용해 주세요');
     expect(screen.queryByText('일보 입력')).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '팀장 조회 메뉴' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '대시보드로' })).toHaveAttribute('href', '/dashboard');
     view.unmount();
     render(<MemoryRouter initialEntries={['/reports/daily-worker-calendar']}><TeamWorkflowGate profile={profile}><Location /></TeamWorkflowGate></MemoryRouter>);
     await screen.findByText('/manpower/team-worker-history');

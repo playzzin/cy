@@ -53,6 +53,6 @@ export default function TeamWorkflowGate({ profile, children }: { profile: UserD
     const legacyWorkSection = restricted && location.pathname.replace(/\/+$/, '') === '/manpower/team-worker-detail'
         && new URLSearchParams(location.search).get('section') === 'work';
     if (destination === 'work' || legacyWorkSection) return <Navigate to="/manpower/team-worker-history" replace />;
-    if (destination === 'blocked') return <div className="p-6"><h1 className="text-xl font-bold">팀장 조회 메뉴를 이용해 주세요</h1><p className="my-3">일보 입력·수정과 전체 인원 관리는 사무실에서 처리합니다.</p><Link to="/manpower/team-worker-history">작업자 근무내역 보기</Link></div>;
+    if (destination === 'blocked') return <div className="p-6"><h1 className="text-xl font-bold">팀장 조회 메뉴를 이용해 주세요</h1><p className="my-3">일보 입력·수정과 전체 인원 관리는 사무실에서 처리합니다.</p><nav aria-label="팀장 조회 메뉴" className="flex flex-wrap gap-3"><Link className="inline-flex min-h-11 items-center rounded-lg border px-4 py-2" to="/dashboard">대시보드로</Link><Link className="inline-flex min-h-11 items-center rounded-lg border px-4 py-2" to="/manpower/team-worker-history">작업자 근무내역 보기</Link><Link className="inline-flex min-h-11 items-center rounded-lg border px-4 py-2" to="/manpower/site-responsible-detail">현장정보 보기</Link></nav></div>;
     return <RestrictedTeamContext.Provider value={restricted}><React.Fragment key={revision}>{children}</React.Fragment></RestrictedTeamContext.Provider>;
 }
