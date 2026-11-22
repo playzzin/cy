@@ -55,6 +55,19 @@ beforeEach(() => {
     })));
 });
 
+test('빠른 검색 바로 아래에서 결과 수와 빈 결과를 알리고 지우면 목록을 복원한다', async () => {
+    render(<TeamWorkerDetailPage view="workHistory" />);
+    const search = screen.getByLabelText('작업자 빠른 검색', { selector: 'input' });
+    const status = within(screen.getByRole('region', { name: '작업자 빠른 검색' })).getByRole('status');
+    await waitFor(() => expect(status).toHaveTextContent('검색 결과 3명'));
+    fireEvent.change(search, { target: { value: 'zzQA' } });
+    expect(status).toHaveTextContent('검색 결과 0명');
+    expect(search).toHaveAccessibleDescription('검색 결과 0명 · 일치하는 작업자가 없습니다.');
+    fireEvent.click(screen.getByRole('button', { name: '검색어 지우기' }));
+    expect(status).toHaveTextContent('검색 결과 3명');
+    expect(search).toHaveAccessibleDescription('검색 결과 3명');
+});
+
 test('급여명세서는 이름 검색 후 명시적으로 선택하며 동명이인과 타 팀의 기록이 섞이지 않는다', async () => {
     render(<TeamWorkerDetailPage view="payslip" />);
     await screen.findByRole('button', { name: /가상하나.*검증팀/ });

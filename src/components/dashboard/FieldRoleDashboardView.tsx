@@ -365,12 +365,12 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
                 </section>
             )}
 
-            <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            {role !== 'teamLead' && <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <SectionHeading title="빠른 실행" description="현재 역할에서 자주 사용하는 업무로 이동합니다." />
                 <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
                     {config.actions.map((action) => <button key={action.path} type="button" onClick={() => runRouteAction(action.path)} className="group rounded-xl border border-slate-200 p-4 text-left transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm"><span className={`flex h-10 w-10 items-center justify-center rounded-xl ring-1 ${action.tone}`}><FontAwesomeIcon icon={action.icon} /></span><p className="mt-4 text-sm font-black text-slate-900">{action.label}<FontAwesomeIcon icon={faArrowRight} className="ml-1.5 text-xs text-slate-300 transition group-hover:text-slate-700" /></p><p className="mt-1 text-xs font-medium leading-5 text-slate-400">{action.description}</p></button>)}
                 </div>
-            </section>
+            </section>}
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <SectionHeading title={role === 'worker' ? '최근 내 작업' : '최근 일보'} description="최근 기록된 작업과 공수를 확인합니다." actionLabel={historyLabel} onAction={() => runRouteAction(historyPath)} />

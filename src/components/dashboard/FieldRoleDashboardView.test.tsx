@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { FieldRoleDashboardView } from './FieldRoleDashboardView';
+import { TeamLeadQuickActions } from './TeamLeadQuickActions';
 import { dailyReportService } from '../../services/dailyReportService';
 import type { Worker } from '../../services/manpowerService';
 
@@ -30,10 +31,12 @@ test('조회 실패를 0공수나 기록 없음으로 표시하지 않고 원인
 
 test('팀장 바로가기는 조회·신청 메뉴로 연결하고 일보 입력을 요구하지 않는다', async () => {
     (dailyReportService.getReports as jest.Mock).mockResolvedValue([]);
-    render(<FieldRoleDashboardView role="teamLead" linkedWorker={worker} />);
+    render(<><TeamLeadQuickActions /><FieldRoleDashboardView role="teamLead" linkedWorker={worker} /></>);
     await screen.findByText('오늘 팀 공수');
     for (const [label, path] of [
         ['근무내역 확인', '/manpower/team-worker-history'],
+        ['경비 신청', '/support/team-expense-requests'],
+        ['가불 신청', '/payroll/advance-request'],
         ['현장 현황', '/manpower/site-responsible-detail'],
         ['팀 요청함', '/team/requests'],
         ['팀 정산', '/payroll/team-settlement'],

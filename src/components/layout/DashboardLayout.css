@@ -1556,7 +1556,14 @@ a {
     }
 
     #mobile-close-btn {
-        display: block;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        flex-shrink: 0;
+        border-radius: 10px;
     }
 
     /* Backdrop */

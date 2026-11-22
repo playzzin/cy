@@ -76,6 +76,7 @@ interface SidebarProps {
     toggleNestedSubmenu: (nestedItemId: string) => void;
     handleMenuItemClick: (item: MenuItem, position?: number) => void;
     handleSubMenuClick: (subItem: string) => void;
+    navigateMenuPath?: (path: string) => void;
     handleLogoClick: () => void;
     menuPaths: { [key: string]: string };
     isSidebarCollapsed: boolean;
@@ -233,6 +234,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     toggleNestedSubmenu,
     handleMenuItemClick,
     handleSubMenuClick,
+    navigateMenuPath,
     handleLogoClick,
     menuPaths: legacyPaths,
     isSidebarCollapsed,
@@ -402,7 +404,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             if (isMobile) closeAll();
             return;
         }
-        navigate(path);
+        if (navigateMenuPath) navigateMenuPath(path);
+        else navigate(path);
         if (isMobile) closeAll();
     };
 

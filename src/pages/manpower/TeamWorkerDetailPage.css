@@ -1916,6 +1916,20 @@
         margin-bottom: 10px;
     }
 
+    .tw-search-result {
+        grid-column: 1 / -1;
+        margin: 0;
+        color: #475569;
+        font-size: 14px;
+        line-height: 1.5;
+        font-weight: 600;
+    }
+
+    .tw-page--searching .tw-kpi-grid,
+    .tw-page--searching .tw-mobile-team-context {
+        display: none;
+    }
+
     .tw-mobile-search {
         position: relative;
         display: flex;

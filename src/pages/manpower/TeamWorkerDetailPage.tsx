@@ -807,12 +807,18 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
         );
     };
 
+    const searchResultMessage = loadingMaster || accessScope.loading
+        ? '작업자를 불러오는 중입니다.'
+        : masterError ? '작업자 목록을 불러오지 못했습니다.'
+            : filteredWorkers.length === 0 ? '검색 결과 0명 · 일치하는 작업자가 없습니다.'
+                : '검색 결과 ' + filteredWorkers.length.toLocaleString('ko-KR') + '명';
+
     const selectedWorkerPhone = String(selectedWorker?.contact ?? '').replace(/[^0-9+]/g, '');
     const showingWorkHistory = detailView === 'workHistory' || detailView === 'dailyReport'
         || (!restrictedTeam && detailView === 'profile' && profileSection === 'work');
 
     return (
-        <div className={`tw-page${showingWorkHistory ? ' tw-page--work-history' : ''}`}>
+        <div className={`tw-page${showingWorkHistory ? ' tw-page--work-history' : ''}${searchQuery.trim() ? ' tw-page--searching' : ''}`}>
             <header className="tw-page__header">
                 <div>
                     <div className="tw-page__eyebrow">
@@ -850,6 +856,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                         onChange={(event) => setSearchQuery(event.target.value)}
                         placeholder={isDocumentView ? '작업자 이름 검색' : '이름 · 연락처 · 팀으로 검색'}
                         aria-label="작업자 빠른 검색"
+                        aria-describedby="team-worker-mobile-search-result"
                     />
                     {searchQuery && (
                         <button type="button" onClick={() => setSearchQuery('')} aria-label="검색어 지우기">
@@ -857,6 +864,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                         </button>
                     )}
                 </label>
+                <p id="team-worker-mobile-search-result" className="tw-search-result" role="status" aria-live="polite">{searchResultMessage}</p>
             </section>
 
             <section id="team-worker-filter-controls" className="tw-toolbar tw-toolbar--always-visible">
