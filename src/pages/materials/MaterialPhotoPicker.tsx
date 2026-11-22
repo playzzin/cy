@@ -402,7 +402,7 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
             />
 
             <div className={compact ? 'material-photo-picker__toolbar' : ''}>
-                {leadingActions}
+                {leadingActions && <div className="material-photo-picker__leading">{leadingActions}</div>}
                 <div className={compact ? 'material-photo-picker__summary' : 'flex items-center justify-between gap-3'}>
                     <div className="min-w-0">
                         <div className={`flex items-center gap-1.5 text-sm font-black ${classes.text}`}>
@@ -445,7 +445,7 @@ const MaterialPhotoPicker: React.FC<MaterialPhotoPickerProps> = ({
                         갤러리 선택
                     </button>
                 </div>
-                {trailingActions}
+                {trailingActions && <div className="material-photo-picker__trailing">{trailingActions}</div>}
             </div>
 
             {limitMessage ? (

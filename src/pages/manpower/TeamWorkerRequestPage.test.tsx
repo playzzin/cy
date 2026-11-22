@@ -1,3 +1,4 @@
+import { clearRequestDrafts } from '../../utils/requestDraftStore';
 import React from 'react';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -10,6 +11,7 @@ const team = { id: 'team-a', name: 'A팀', color: '#ef4444', icon: 'fa-helmet-sa
 const data = { canReview: false, teams: [team], company: { id: 'company-dynamic', name: '㈜청연이엔지' }, requests: [] };
 const identity = new File(['test'], '신분증.png', { type: 'image/png' });
 beforeEach(() => {
+  clearRequestDrafts();
   jest.clearAllMocks(); URL.createObjectURL = jest.fn(() => 'blob:test-document'); URL.revokeObjectURL = jest.fn();
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID: () => `test-${Math.random()}` } });
   service.list.mockResolvedValue(data); service.upload.mockResolvedValue({}); service.submit.mockResolvedValue({ id: 'request', status: 'pending' }); service.review.mockResolvedValue({});
@@ -21,6 +23,24 @@ const fill = async () => {
   await screen.findByDisplayValue('테스트 작업자');
   fireEvent.change(screen.getByLabelText('연락처 *'), { target: { value: '01000000000' } });
 };
+
+test('다른 화면에서 돌아오면 입력·서류를 복원하고 지우기를 선택하면 초안을 폐기한다', async () => {
+  const view = render(<TeamWorkerRequestPage />); await fill();
+  fireEvent.change(screen.getByLabelText('주소 *'), { target: { value: '보존할 테스트 주소' } });
+  view.unmount();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  render(<TeamWorkerRequestPage />);
+  expect(await screen.findByLabelText('주소 *')).toHaveValue('보존할 테스트 주소');
+  expect(screen.getByText('이전에 작성하던 내용을 복원했습니다.')).toBeInTheDocument();
+  expect(screen.getByRole('img', { name: '신분증 원본' })).toHaveAttribute('src', 'blob:test-document');
+  expect(service.upload).not.toHaveBeenCalled();
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: '작성 내용 지우기' }));
+  expect(screen.getByLabelText('이름 *')).toHaveValue('');
+  expect(screen.queryByRole('img', { name: '신분증 원본' })).not.toBeInTheDocument();
+  expect(URL.revokeObjectURL).toHaveBeenCalled();
+  confirm.mockRestore();
+});
 test('현재 소속팀과 회사로 신청하며 분석 결과를 수정하고 미리보기 확인 전에는 업로드하지 않는다', async () => {
   render(<TeamWorkerRequestPage />); await fill();
   expect(screen.getByText('A팀')).toHaveStyle({ borderColor: '#ef4444' });

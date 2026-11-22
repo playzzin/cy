@@ -1,3 +1,4 @@
+import { clearRequestDrafts } from '../../utils/requestDraftStore';
 import React from 'react';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -17,6 +18,7 @@ const billing = { id: 'team-b', name: 'B팀', color: '#2563eb', icon: 'fa-truck-
 const data = { canReview: false, payerTeams: [payer], teams: [payer, billing], categories: [{ id: 'meal', label: '식대' }], paymentCards: [{ id: 'card-a', label: '경비카드 1234', teamId: 'team-a' }], requests: [] };
 const request: any = { id: 'request-a', status: 'pending', teamId: 'team-a', teamName: 'A팀', submitterName: '팀장', description: '점심 식대', amount: 25000, date: '2026-09-20', categoryLabel: '식대', paymentMethod: '현찰', attachments: [{ id: 'receipt', url: 'https://example.test/receipt.png' }] };
 beforeEach(() => {
+  clearRequestDrafts();
   jest.resetAllMocks();
   mockCurrentUser = { uid: 'leader' };
   Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { randomUUID: () => `test-${Math.random()}` } });
@@ -38,6 +40,24 @@ const fillRequest = async () => {
   fireEvent.change(screen.getByLabelText('영수증 파일 첨부'), { target: { files: [new File(['receipt'], '영수증.png', { type: 'image/png' })] } });
   await screen.findByText('영수증.png');
 };
+
+test('다른 화면에서 돌아오면 경비 입력과 영수증을 복원하고 승인 요청 전에는 업로드하지 않는다', async () => {
+  const view = render(<TeamExpenseRequestPage />); await fillRequest();
+  view.unmount();
+  expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  render(<TeamExpenseRequestPage />);
+  expect(await screen.findByLabelText('사용 내용')).toHaveValue('점심 식대');
+  expect(screen.getByLabelText('금액 (원)')).toHaveValue(25000);
+  expect(screen.getByText('영수증.png')).toBeInTheDocument();
+  expect(screen.getByText('이전에 작성하던 내용을 복원했습니다.')).toBeInTheDocument();
+  expect(service.upload).not.toHaveBeenCalled();
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button', { name: '작성 내용 지우기' }));
+  await waitFor(() => expect(screen.getByLabelText('사용 내용')).toHaveValue(''));
+  expect(screen.queryByText('영수증.png')).not.toBeInTheDocument();
+  expect(URL.revokeObjectURL).toHaveBeenCalled();
+  confirm.mockRestore();
+});
 
 test('청구팀 입력칸에서 검색하고 키보드로 선택하며 미선택 검색어는 저장하지 않는다', async () => {
   render(<TeamExpenseRequestPage />);

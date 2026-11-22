@@ -1,3 +1,4 @@
+import MaterialCertificateStart from './MaterialCertificateStart';
 import MaterialCertificateDocument from './MaterialCertificateDocument';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -10,7 +11,6 @@ import {
     faDownload,
     faPrint,
     faShareNodes,
-    faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons';
 import {
     getInboundCertificateDraft,
@@ -139,29 +139,7 @@ const MaterialInboundCertificatePage: React.FC = () => {
         }
     };
 
-    if (!draft) {
-        return (
-            <div className="mx-auto max-w-3xl p-6">
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900">
-                    <div className="flex items-center gap-2 text-lg font-extrabold">
-                        <FontAwesomeIcon icon={faTriangleExclamation} />
-                        입고증 데이터를 찾을 수 없습니다
-                    </div>
-                    <p className="mt-2 text-sm font-semibold">
-                        입고 등록 화면에서 자재와 사진을 선택한 뒤 입고증 페이지를 다시 열어 주세요.
-                    </p>
-                    <button
-                        type="button"
-                        onClick={() => navigate('/materials/inbound')}
-                        className="mt-5 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white"
-                    >
-                        <FontAwesomeIcon icon={faArrowLeft} />
-                        입고 등록으로 이동
-                    </button>
-                </div>
-            </div>
-        );
-    }
+    if (!draft) return <MaterialCertificateStart kind="inbound" expired={searchParams.has('draftId')} />;
 
     return (
         <div className="min-h-screen bg-slate-100 p-3 sm:p-6">

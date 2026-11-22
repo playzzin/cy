@@ -286,11 +286,12 @@
   }
   .team-settlement-page__final-card .truncate { margin-top: 0; font-size: 18px; }
   .team-settlement-page__selector-card:has(.team-settlement-page__month-picker) {
-    display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 6px; align-items: center;
+    display: block;
   }
-  .team-settlement-page__selector-card:has(.team-settlement-page__month-picker) > .mt-2 { margin-top: 0; gap: 4px; }
+  .team-settlement-page__selector-card:has(.team-settlement-page__month-picker) > .mt-2 { margin-top: 6px; gap: 8px; }
   .team-settlement-page__selector-card:has(.team-settlement-page__month-picker) .inline-flex { padding: 0; justify-content: center; }
-  .team-settlement-page__month-picker button { height: 26px; min-height: 26px; }
+  .team-settlement-page__selector-card:has(.team-settlement-page__month-picker) button { height: 44px; min-height: 44px; min-width: 44px; font-size: 14px; }
+  .team-settlement-page__month-picker { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
   .team-settlement-page #settlement-validation > .flex { gap: 4px; }
   .team-settlement-page #settlement-validation > .flex > span { padding: 2px 6px; }
   .team-settlement-page__transaction-subtitle { display: none; }

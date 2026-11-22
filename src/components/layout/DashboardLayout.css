@@ -1761,6 +1761,21 @@ a {
     opacity: 1 !important;
 }
 
+/* Hidden desktop actions must not intercept clicks on the menu row. */
+.menu-open-new-btn, .submenu-open-new-btn { pointer-events: none; }
+.menu-item:hover .menu-open-new-btn,
+.menu-item:focus-within .menu-open-new-btn,
+.submenu-leaf-item:hover .submenu-open-new-btn,
+.submenu-leaf-item:focus-within .submenu-open-new-btn,
+.nested-leaf-item:hover .submenu-open-new-btn,
+.nested-leaf-item:focus-within .submenu-open-new-btn {
+    opacity: 1 !important;
+    pointer-events: auto;
+}
+@media (max-width: 768px), (hover: none), (pointer: coarse) {
+    .menu-open-new-btn, .submenu-open-new-btn { display: none !important; }
+}
+
 /* Dashboard2 Codeit-inspired page shell */
 body.dashboard2-codeit-theme {
     background: #ffffff !important;
