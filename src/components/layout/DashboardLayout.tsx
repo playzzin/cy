@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useLocation, useNavigationType, type NavigateOptions } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigationType } from 'react-router-dom';
 import { useMobileShellScroll } from '../../hooks/useMobileScroll';
+import { useMobileSidebarHistory } from '../../hooks/useMobileSidebarHistory';
 import { useTeamLeaderTypography } from '../../hooks/useTeamLeaderTypography';
 import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
@@ -54,7 +55,6 @@ const getPositionSiteKey = (positionId: string): string =>
 const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) => {
     const { currentUser } = useAuth();
     const [isMobile, setIsMobile] = useState(false);
-    const [isMobileOpen, setIsMobileOpen] = useState(false);
     const navigationType = useNavigationType();
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(false);
@@ -90,19 +90,13 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
 
     const autoAppliedPositionForUserRef = useRef('');
 
-    const navigate = useNavigate();
     const location = useLocation();
+    const { isOpen: isMobileOpen, setOpen: setIsMobileOpen, navigateFromMenu: navigateSync } = useMobileSidebarHistory(isMobile);
     useMobileShellScroll(location.pathname, location.hash, navigationType, isMobileOpen, isMobile);
     const siteModeDashboardPath = siteData?.[currentSite]?.menu ? SITE_HOME_PATHS[currentSite] : undefined;
     const onSiteHome = Object.values(SITE_HOME_PATHS).includes(location.pathname);
     const isSiteLayerMode = Boolean(siteModeDashboardPath);
     const usesSiteBranding = isSiteLayerMode;
-    const navigateSync = useCallback((to: string, options?: NavigateOptions) => {
-        navigate(to, {
-            ...options,
-            flushSync: true,
-        });
-    }, [navigate]);
 
     // Fetch Menu Config
     useEffect(() => {

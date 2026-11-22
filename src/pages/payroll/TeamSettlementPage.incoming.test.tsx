@@ -202,7 +202,9 @@ it.each([false, true])('조회자는 정산의 확정 여부와 관계없이 모
   expect(screen.queryByRole('button', { name: '재집계' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '변경사항 없음' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: confirmed ? '확정 취소' : '저장 후 확정' })).not.toBeInTheDocument();
-  for (const button of screen.getAllByRole('button', { name: /수기.*추가|일괄.*적용/ })) expect(button).toBeDisabled();
+  expect(screen.queryByRole('button', { name: /수기|일괄적용/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('textbox', { name: '지원단가 일괄변경 금액' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/필요한 경우 수기 추가/)).not.toBeInTheDocument();
   fireEvent.click(refresh);
   await waitFor(() => expect(teamSettlementService.getTeamSettlement).toHaveBeenCalledTimes(2));
   expect(teamSettlementService.saveTeamSettlement).not.toHaveBeenCalled();
@@ -923,7 +925,8 @@ it.each(['확정', '조회 전용'])('%s 정산은 기타공제를 볼 수 있�
   jest.mocked(teamSettlementService.getTeamSettlement).mockResolvedValue(saved);
   render(<TeamSettlementPage />);
   const other = await screen.findByRole('region', { name: '기타공제' });
-  expect(within(other).getByRole('button', { name: '기타공제 수기 추가' })).toBeDisabled();
+  const addButton = within(other).queryByRole('button', { name: '기타공제 수기 추가' }) as HTMLButtonElement | null;
+  expect(addButton?.disabled ?? null).toBe(mode === '확정' ? true : null);
   within(other).getAllByRole('textbox').forEach(input => expect(input).toBeDisabled());
   expect(within(other).getByRole('button', { name: '삭제' })).toBeDisabled();
   expect(within(other).getByRole('group', { name: '기타공제 합계' })).toHaveTextContent('50,000원');

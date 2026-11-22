@@ -3068,7 +3068,7 @@ export const TeamSettlementPage: React.FC = () => {
           )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 text-right">
-          {group.key === 'manual' && <button type="button" aria-label="기타공제 수기 추가" className={addButtonClassName}
+          {canWrite && group.key === 'manual' && <button type="button" aria-label="기타공제 수기 추가" className={addButtonClassName}
             onClick={handleAddManualDeduction} disabled={!canEdit}>+ 수기 추가</button>}
           {group.key === 'payroll' && (<>
             <button
@@ -3878,13 +3878,13 @@ export const TeamSettlementPage: React.FC = () => {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <h2 className="team-settlement-page__transaction-title font-bold text-slate-900">
-                  <span className="mr-2 text-blue-600">01</span>매출·매입 조정
+                  <span className="mr-2 text-blue-600">01</span>{canWrite ? '매출·매입 조정' : '매출·매입 내역'}
                 </h2>
                 <div className="team-settlement-page__transaction-subtitle text-xs text-slate-500 mt-0.5">
-                  도급·직영 공수 자동집계 · 매출금액 직접 입력 · 지원단가 자동집계
+                  {canWrite ? '도급·직영 공수 자동집계 · 매출금액 직접 입력 · 지원단가 자동집계' : '도급·직영 공수와 지원 매출·매입 내역을 확인합니다.'}
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
+              {canWrite && <div className="flex items-center gap-2 flex-wrap">
                 <span className="team-settlement-page__transaction-bulk-label text-xs font-semibold text-slate-600">지원단가 일괄변경</span>
                 <input
                   type="text"
@@ -3905,7 +3905,7 @@ export const TeamSettlementPage: React.FC = () => {
                 <button type="button" className={secondaryButtonClassName} onClick={handleApplyBulkSupportRate} disabled={!canEdit}>
                   일괄적용
                 </button>
-              </div>
+              </div>}
             </div>
 
             <div className="team-settlement-page__transaction-columns">
@@ -3917,9 +3917,9 @@ export const TeamSettlementPage: React.FC = () => {
                 <div className="mt-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="team-settlement-page__transaction-section-title text-sm font-semibold text-slate-700">지원</div>
-                    <button type="button" className={addButtonClassName} onClick={() => handleAddManualSale('지원')} disabled={!canEdit}>
+                    {canWrite && <button type="button" className={addButtonClassName} onClick={() => handleAddManualSale('지원')} disabled={!canEdit}>
                       + 수기 지원 매출
-                    </button>
+                    </button>}
                   </div>
                   <div className="mt-2 overflow-auto">
                     <table data-compact="support" className="w-full text-sm border-collapse">
@@ -3935,7 +3935,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </thead>
                       <tbody>
                         {salesSupportLinesMerged.length === 0
-                          ? <EmptySettlementTableRow colSpan={6} message="지원 매출 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
+                          ? <EmptySettlementTableRow colSpan={6} message={canWrite ? '지원 매출 내역이 없습니다. 재집계하거나 수기로 추가해 주세요.' : '지원 매출 내역이 없습니다.'} />
                           : renderTransactionLineRows(salesSupportLinesMerged, { showKindColumn: false, showSupportRateColumn: true })}
                       </tbody>
                     </table>
@@ -3951,11 +3951,11 @@ export const TeamSettlementPage: React.FC = () => {
                 <div className="mt-6">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="team-settlement-page__transaction-section-title text-sm font-semibold text-slate-700">도급/직영</div>
-                    <button type="button" className={addButtonClassName} onClick={() => handleAddManualSale('직영')} disabled={!canEdit}>
+                    {canWrite && <button type="button" className={addButtonClassName} onClick={() => handleAddManualSale('직영')} disabled={!canEdit}>
                       + 수기 도급/직영 매출
-                    </button>
+                    </button>}
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">공수만 자동집계하며, 금액은 직접 입력합니다.</p>
+                  <p className="mt-1 text-xs text-slate-500">{canWrite ? '공수만 자동집계하며, 금액은 직접 입력합니다.' : '도급·직영 매출의 공수와 금액을 확인합니다.'}</p>
                   <div className="mt-2 overflow-auto">
                     <table aria-label="도급/직영 매출" data-compact="transaction" className="w-full text-sm border-collapse">
                       <thead>
@@ -3970,7 +3970,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </thead>
                       <tbody>
                         {salesContractDirectLines.length === 0
-                          ? <EmptySettlementTableRow colSpan={6} message="도급·직영 매출 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
+                          ? <EmptySettlementTableRow colSpan={6} message={canWrite ? '도급·직영 매출 내역이 없습니다. 재집계하거나 수기로 추가해 주세요.' : '도급·직영 매출 내역이 없습니다.'} />
                           : renderTransactionLineRows(salesContractDirectLines)}
                       </tbody>
                     </table>
@@ -4009,9 +4009,9 @@ export const TeamSettlementPage: React.FC = () => {
                 <div className="mt-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div className="team-settlement-page__transaction-section-title text-sm font-semibold text-slate-700">지원</div>
-                    <button type="button" className={addButtonClassName} onClick={handleAddManualPurchase} disabled={!canEdit}>
+                    {canWrite && <button type="button" className={addButtonClassName} onClick={handleAddManualPurchase} disabled={!canEdit}>
                       + 수기 지원 매입
-                    </button>
+                    </button>}
                   </div>
 
                   <div className="mt-2 overflow-auto">
@@ -4028,7 +4028,7 @@ export const TeamSettlementPage: React.FC = () => {
                       </thead>
                       <tbody>
                         {purchaseSupportLinesMerged.length === 0
-                          ? <EmptySettlementTableRow colSpan={6} message="지원 매입 내역이 없습니다. 재집계하거나 수기로 추가해 주세요." />
+                          ? <EmptySettlementTableRow colSpan={6} message={canWrite ? '지원 매입 내역이 없습니다. 재집계하거나 수기로 추가해 주세요.' : '지원 매입 내역이 없습니다.'} />
                           : renderTransactionLineRows(purchaseSupportLinesMerged, { showKindColumn: false, showSupportRateColumn: true })}
                       </tbody>
                     </table>
@@ -4149,9 +4149,9 @@ export const TeamSettlementPage: React.FC = () => {
                     <div className="text-xs text-slate-500">총금액</div>
                     <div className="text-sm font-extrabold text-slate-900">{formatCurrency(totals.additionsTotal)}원</div>
                   </div>
-                  <button type="button" className={addButtonClassName} onClick={handleAddManualAddition} disabled={!canEdit}>
+                  {canWrite && <button type="button" className={addButtonClassName} onClick={handleAddManualAddition} disabled={!canEdit}>
                     + 수기 추가
-                  </button>
+                  </button>}
                 </div>
               </div>
 
@@ -4188,7 +4188,7 @@ export const TeamSettlementPage: React.FC = () => {
                   </thead>
                   <tbody>
                     {additionGroup.items.length === 0 ? (
-                      <EmptySettlementTableRow colSpan={5} message="추가 항목이 없습니다. 필요한 경우 수기 추가를 사용해 주세요." />
+                      <EmptySettlementTableRow colSpan={5} message={canWrite ? '추가 항목이 없습니다. 필요한 경우 수기 추가를 사용해 주세요.' : '추가 항목이 없습니다.'} />
                     ) : additionGroup.items.map((item) => {
                       const editableRow = canEdit && item.source === 'manual';
                       return (

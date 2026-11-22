@@ -1,5 +1,6 @@
 import React, { Suspense, useMemo } from 'react';
 import { DashboardHeader } from '../components/dashboard/DashboardHeader';
+import { TeamLeadQuickActions } from '../components/dashboard/TeamLeadQuickActions';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { useSiteMode } from '../contexts/SiteModeContext';
@@ -123,6 +124,7 @@ const DashboardPage: React.FC = () => {
             />
 
             <main className="relative z-10 mx-auto -mt-12 min-w-0 w-full max-w-none overflow-hidden px-3 pb-28 sm:-mt-16 sm:px-5 md:pb-12 lg:px-8 2xl:px-10">
+                {isTeamLeadDashboard && <TeamLeadQuickActions />}
                 {!isPartnerDashboard && !isDedicatedFieldDashboard && (
                     <div className="mb-6">
                         <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[240px]" label="빠른 실행 메뉴를 준비하는 중입니다." />}>
