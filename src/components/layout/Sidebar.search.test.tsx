@@ -1,7 +1,8 @@
 import React from 'react';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import { useMobileSidebarHistory } from '../../hooks/useMobileSidebarHistory';
 import Sidebar from './Sidebar';
 import { MenuItem, SiteData } from '../../types/menu';
 import { linkedMenuId } from '../../utils/linkedPositionMenus';
@@ -47,6 +48,35 @@ const app = (props: Partial<React.ComponentProps<typeof Sidebar>> = {}) => (
     <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><Sidebar {...defaults} {...props} /><LocationProbe /></MemoryRouter>
 );
 const searchFor = (value: string) => fireEvent.change(screen.getByRole('searchbox', { name: '메뉴 검색' }), { target: { value } });
+
+it.each(['하위 메뉴', '메뉴 검색'])('모바일 %s 선택은 목적지로 이동하고 뒤로 가기에 메뉴 기록을 남기지 않는다', async mode => {
+    const MobileSidebar = () => {
+        const { isOpen, setOpen, navigateFromMenu } = useMobileSidebarHistory(true);
+        const navigate = useNavigate();
+        return <>
+            <Sidebar {...defaults} isMobile
+                currentSiteData={{ ...site, menu: [{ id: 'group', text: '현장 관리', sub: [{ text: '팀 정산', path: '/payroll' }] }] }}
+                activeMenuItems={{ group: true }} navigateMenuPath={navigateFromMenu}
+                closeAll={() => setOpen(false)} openMobileSidebar={() => setOpen(true)} />
+            <button onClick={() => setOpen(true)}>검증 메뉴 열기</button>
+            <button onClick={() => navigate(-1)}>검증 뒤로</button>
+            <output data-testid="mobile-menu-state">{isOpen ? '열림' : '닫힘'}</output>
+            <LocationProbe />
+        </>;
+    };
+    render(<MemoryRouter initialEntries={['/previous', '/start']} initialIndex={1}><MobileSidebar /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: '검증 메뉴 열기' }));
+    expect(screen.getByTestId('mobile-menu-state')).toHaveTextContent('열림');
+    if (mode === '메뉴 검색') searchFor('팀 정산');
+    fireEvent.click(screen.getByRole('link', { name: /^팀 정산/ }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/payroll'));
+    expect(screen.getByTestId('mobile-menu-state')).toHaveTextContent('닫힘');
+    fireEvent.click(screen.getByRole('button', { name: '검증 뒤로' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/start'));
+    expect(screen.getByTestId('mobile-menu-state')).toHaveTextContent('닫힘');
+    fireEvent.click(screen.getByRole('button', { name: '검증 뒤로' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/previous'));
+});
 
 it('직책 및 연결 원본 글꼴을 상속하고 메뉴 글꼴 예외를 검색과 접힌 패널에서도 표시한다', async () => {
     const group = linkedMenuId('pos_leader');

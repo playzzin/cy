@@ -766,6 +766,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                             toggleSubmenu={toggleSubmenu}
                             toggleNestedSubmenu={toggleNestedSubmenu}
                             handleMenuItemClick={handleMenuItemClick}
+                            navigateMenuPath={navigateSync}
                             handleSubMenuClick={handleSubMenuClick}
                             handleLogoClick={handleLogoClick}
                             menuPaths={menuPaths}
@@ -851,6 +852,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                         toggleSubmenu={toggleSubmenu}
                         toggleNestedSubmenu={toggleNestedSubmenu}
                         handleMenuItemClick={handleMenuItemClick}
+                        navigateMenuPath={navigateSync}
                         handleSubMenuClick={handleSubMenuClick}
                         handleLogoClick={handleLogoClick}
                         menuPaths={menuPaths}
