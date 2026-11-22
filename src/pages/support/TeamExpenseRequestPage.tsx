@@ -1,4 +1,6 @@
 import SecureExpenseReceipt from '../../components/SecureExpenseReceipt';
+import RequestDraftNotice from '../../components/RequestDraftNotice';
+import { readRequestDraft, saveRequestDraft, deleteRequestDraft } from '../../utils/requestDraftStore';
 import { useUnsavedRequestGuard } from '../../hooks/useUnsavedRequestGuard';
 import TeamRequestDraftMaintenance from '../../components/TeamRequestDraftMaintenance';
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -36,8 +38,12 @@ const ExpensePortal = ({ children }: { children: React.ReactNode }) => createPor
 const ReceiptToolLoading = ({ onClose }: { onClose: () => void }) => <div className="expense-request-modal" role="dialog" aria-modal="true" aria-label="영수증 도구 준비" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}><div><p role="status" className="expense-request-loading"><Loader2 className="animate-spin" size={18} />영수증 도구를 준비하고 있습니다.</p><button type="button" autoFocus onClick={onClose}>닫기</button></div></div>;
 const ExpenseRequestSkeleton = () => <div className="expense-request-skeleton" aria-hidden="true"><div className="expense-skeleton-panel"><span className="expense-skeleton-line short" /><span className="expense-skeleton-line" /><div className="expense-skeleton-fields">{Array.from({ length: 4 }, (_, index) => <span key={index} className="expense-skeleton-field" />)}</div><span className="expense-skeleton-block" /></div><div className="expense-skeleton-panel"><span className="expense-skeleton-line short" /><span className="expense-skeleton-field" />{Array.from({ length: 3 }, (_, index) => <span key={index} className="expense-skeleton-block" />)}</div></div>;
 
+type ExpenseDraft = { form: ReturnType<typeof emptyForm>; receipts: Receipt[]; requestId: string; uploaded: { key: string; ids: Set<string> } };
+const draftKey = 'team-expense';
 export default function TeamExpenseRequestPage() {
   const { currentUser } = useAuth();
+  const cachedDraft = useMemo(() => readRequestDraft<ExpenseDraft>(currentUser?.uid, draftKey), [currentUser?.uid]);
+  const [draftOwner, setDraftOwner] = useState(currentUser?.uid);
   const [yearMonth, setYearMonth] = useState(() => today().slice(0, 7));
   const [data, setData] = useState<TeamExpenseRequestData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,13 +53,13 @@ export default function TeamExpenseRequestPage() {
   const [preparing, setPreparing] = useState(false);
   const preparation = useRef(0);
   const preparingLock = useRef(false);
-  const uploadedReceipts = useRef({ key: '', ids: new Set<string>() });
+  const uploadedReceipts = useRef(cachedDraft?.uploaded ?? { key: '', ids: new Set<string>() });
   const [detailsOpen, setDetailsOpen] = useState(false);
   const moreLock = useRef(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const [form, setForm] = useState(emptyForm);
-  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [notice, setNotice] = useState(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : '');
+  const [form, setForm] = useState(() => cachedDraft?.form ?? emptyForm());
+  const [receipts, setReceipts] = useState<Receipt[]>(cachedDraft?.receipts ?? []);
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState('');
   const [filter, setFilter] = useState('all');
@@ -61,7 +67,7 @@ export default function TeamExpenseRequestPage() {
   const [historyTeamSearch, setHistoryTeamSearch] = useState('');
   const [review, setReview] = useState<{ row: TeamExpenseRequest; decision: 'approved' | 'rejected' } | null>(null);
   const [reason, setReason] = useState('');
-  const [requestId, setRequestId] = useState(createId);
+  const [requestId, setRequestId] = useState(() => cachedDraft?.requestId ?? createId());
   const fileInput = useRef<HTMLInputElement>(null);
   const deviceCameraInput = useRef<HTMLInputElement>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -76,13 +82,21 @@ export default function TeamExpenseRequestPage() {
   activeUid.current = currentUser?.uid;
   receiptsRef.current = receipts;
 
-  useUnsavedRequestGuard(preparing || receipts.length > 0 || Boolean(form.description || form.amount || form.memo));
+  const hasDraft = receipts.length > 0 || Boolean(form.description || form.amount || form.memo);
+  useUnsavedRequestGuard(preparing || hasDraft, '작성 중인 내용은 이 탭에 임시 보관됩니다. 다른 화면으로 이동할까요?');
   useEffect(() => {
+    if (draftOwner !== currentUser?.uid) return;
+    if (hasDraft) saveRequestDraft(currentUser?.uid, draftKey, { form, receipts, requestId, uploaded: uploadedReceipts.current }, () => receipts.forEach(receipt => URL.revokeObjectURL(receipt.preview)));
+    else deleteRequestDraft(currentUser?.uid, draftKey);
+  });
+  useEffect(() => {
+    if (draftOwner === currentUser?.uid) return;
+    setDraftOwner(currentUser?.uid);
     preparation.current++; preparingLock.current = false; setPreparing(false);
     refreshAfterSaveMonth.current = null;
-    uploadedReceipts.current = { key: '', ids: new Set() };
+    uploadedReceipts.current = cachedDraft?.uploaded ?? { key: '', ids: new Set() };
     receiptsRef.current.forEach(receipt => URL.revokeObjectURL(receipt.preview));
-    setReceipts([]); setForm(emptyForm()); setData(null); setReview(null); setNotice(''); setRequestId(createId()); setCameraOpen(false); setAnalysisReceipt(null); setConfirmOpen(false);
+    setReceipts(cachedDraft?.receipts ?? []); setForm(cachedDraft?.form ?? emptyForm()); setData(null); setReview(null); setNotice(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : ''); setRequestId(cachedDraft?.requestId ?? createId()); setCameraOpen(false); setAnalysisReceipt(null); setConfirmOpen(false);
     setHistoryTeamSearch(''); setTeamFilter('all');
   }, [currentUser?.uid]);
 
@@ -130,7 +144,7 @@ export default function TeamExpenseRequestPage() {
     } catch (cause) { if (sequence === generation.current) setError(cause instanceof Error ? cause.message : '추가 내역을 불러오지 못했습니다.'); }
     finally { moreLock.current = false; setLoadingMore(false); }
   };
-  useEffect(() => () => { preparation.current++; receiptsRef.current.forEach(receipt => URL.revokeObjectURL(receipt.preview)); }, []);
+  useEffect(() => () => { preparation.current++; }, []);
   useEffect(() => {
     if (!preparing && !receipts.length && !form.description && !form.amount && !form.memo) return;
     const prevent = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -260,6 +274,10 @@ export default function TeamExpenseRequestPage() {
   }, { pending: 0, approved: 0, rejected: 0, pendingAmount: 0 }), [data?.requests]);
   const payerTeam = data?.payerTeams.find(team => team.id === form.teamId);
   const chargeToTeam = data?.teams.find(team => team.id === form.chargeToTeamId);
+  const discardDraft = () => {
+    deleteRequestDraft(currentUser?.uid, draftKey); setReceipts([]); setForm(emptyForm()); setRequestId(createId()); setDetailsOpen(false); uploadedReceipts.current = { key: '', ids: new Set() }; setNotice('작성 내용을 지웠습니다.');
+    void load();
+  };
   const receiptLocked = saving || loading || preparing || !payerTeam || Boolean(analysisReceipt) || confirmOpen;
 
   return <main className={`team-expense-request ${data && !data.canReview ? 'expense-quick-entry' : ''}`}>
@@ -274,6 +292,7 @@ export default function TeamExpenseRequestPage() {
     <p className="expense-request-note">사무실이 승인하면 청구팀의 경비에서 차감하고, 먼저 돈을 낸 사용팀에는 같은 금액을 환급합니다. 환급은 팀 정산에 반영됩니다.</p>
     {error && !confirmOpen && <div className="expense-request-error" role="alert" style={review ? { position: 'fixed', bottom: 20, left: '10%', right: '10%', zIndex: 1001 } : undefined}>{error}</div>}
     {notice && <div className="expense-request-success" role="status"><CheckCircle2 size={18} />{notice}</div>}
+    {hasDraft && <RequestDraftNotice onDiscard={discardDraft} disabled={saving || preparing || confirmOpen} />}
     {loading && <div role="status" className="expense-request-loading-state"><p className="expense-request-loading"><Loader2 className="animate-spin" size={18} />{data ? '최신 경비 신청을 확인하고 있습니다.' : '경비 신청을 불러오는 중입니다.'}</p>{!data && <ExpenseRequestSkeleton />}</div>}
     {data && <div className={`expense-request-grid ${data.canReview ? 'review-only' : ''}`}>
       {!data.canReview && <section className="expense-request-panel"><h2><Plus size={19} />새 경비 신청</h2><p className="expense-request-note">승인 전에는 경비와 정산 금액에 포함되지 않습니다.</p>

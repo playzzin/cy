@@ -43,6 +43,8 @@ it('keeps the active session when refreshing the directory', async () => {
     fireEvent.click(await screen.findByRole('button', { name: '검증 팀장 A · A팀' }));
     fireEvent.click(screen.getByRole('button', { name: '이 사용자로 보기' }));
     const frame = await screen.findByTitle('검증 팀장 A 사용자 화면');
+    // Navigation confirmations must work in the read-only account preview.
+    expect(frame.getAttribute('sandbox')?.split(' ')).toContain('allow-modals');
     fireEvent.click(screen.getByRole('button', { name: '사용자 목록 새로고침' }));
     await screen.findByRole('button', { name: '검증 팀장 A · A팀' });
     expect(screen.getByTitle('검증 팀장 A 사용자 화면')).toBe(frame);

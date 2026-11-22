@@ -31,6 +31,9 @@ export function useMobileSidebarHistory(mobile: boolean) {
         const hasMenuEntry = latest.current.location.state?.[MENU_STATE_KEY] === true;
         if (hasMenuEntry) pending.current = true;
         navigate(to, { ...options, replace: options?.replace ?? hasMenuEntry, flushSync: true });
+        // A form guard may cancel navigation without changing the location.
+        // The menu must remain usable after the user chooses to keep editing.
+        queueMicrotask(() => { pending.current = false; });
     }, [navigate]);
 
     useEffect(() => {

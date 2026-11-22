@@ -1,3 +1,4 @@
+import { setRequestDraftOwner } from '../utils/requestDraftStore';
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Auth, User } from 'firebase/auth';
@@ -75,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(() => !isDevAdminSessionEnabled());
   const [previewError, setPreviewError] = useState('');
   const [authError, setAuthError] = useState('');
+  useEffect(() => { setRequestDraftOwner(currentUser?.uid ?? null); }, [currentUser?.uid]);
 
   useEffect(() => {
     if (isDevPreviewFrame) return startDevPreviewAuth(user => { setCurrentUser(user); setLoading(false); }, message => { setPreviewError(message); setLoading(false); });

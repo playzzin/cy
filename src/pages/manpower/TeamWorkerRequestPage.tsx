@@ -1,3 +1,5 @@
+import RequestDraftNotice from '../../components/RequestDraftNotice';
+import { readRequestDraft, saveRequestDraft, deleteRequestDraft } from '../../utils/requestDraftStore';
 import { useUnsavedRequestGuard } from '../../hooks/useUnsavedRequestGuard';
 import TeamRequestDraftMaintenance from '../../components/TeamRequestDraftMaintenance';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -46,15 +48,19 @@ function UploadBox({ kind, document: doc, disabled, onFile, onRemove, onAnalyze 
 }
 function FieldSummary({ fields }: { fields: WorkerRegistrationFields }) { return <dl className="worker-fields-summary">{(Object.keys(fieldLabels) as Array<keyof WorkerRegistrationFields>).map(key => <div key={key}><dt>{fieldLabels[key]}</dt><dd>{fields[key] || '미등록'}</dd></div>)}</dl>; }
 
+type WorkerDraft = { fields: WorkerRegistrationFields; documents: DocumentFile[]; teamId: string; requestId: string; warnings: Partial<Record<WorkerDocumentKind, string[]>> };
+const draftKey = 'worker-registration';
 export default function TeamWorkerRequestPage() {
   const { currentUser } = useAuth();
-  const [yearMonth, setYearMonth] = useState(monthNow), [data, setData] = useState<TeamWorkerRequestData | null>(null), [teamId, setTeamId] = useState('');
-  const [fields, setFields] = useState(empty), [documents, setDocuments] = useState<DocumentFile[]>([]), [requestId, setRequestId] = useState(createId);
-  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const cachedDraft = useMemo(() => readRequestDraft<WorkerDraft>(currentUser?.uid, draftKey), [currentUser?.uid]);
+  const [draftOwner, setDraftOwner] = useState(currentUser?.uid);
+  const [yearMonth, setYearMonth] = useState(monthNow), [data, setData] = useState<TeamWorkerRequestData | null>(null), [teamId, setTeamId] = useState(cachedDraft?.teamId || '');
+  const [fields, setFields] = useState(() => cachedDraft?.fields ?? empty()), [documents, setDocuments] = useState<DocumentFile[]>(cachedDraft?.documents ?? []), [requestId, setRequestId] = useState(() => cachedDraft?.requestId ?? createId());
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : '');
   const [loadingMore, setLoadingMore] = useState(false);
   const [payroll, setPayroll] = useState({ payType: '', unitPrice: '' });
   const moreLock = useRef(false);
-  const [warnings, setWarnings] = useState<Partial<Record<WorkerDocumentKind, string[]>>>({}), [confirm, setConfirm] = useState(false);
+  const [warnings, setWarnings] = useState<Partial<Record<WorkerDocumentKind, string[]>>>(cachedDraft?.warnings ?? {}), [confirm, setConfirm] = useState(false);
   const [filter, setFilter] = useState('all'), [review, setReview] = useState<TeamWorkerRequest | null>(null), [reason, setReason] = useState(''), [preview, setPreview] = useState<DocumentFile | null>(null);
   const generation = useRef(0), lock = useRef(false), activeUid = useRef(currentUser?.uid), documentsRef = useRef(documents), previewRef = useRef(preview);
   activeUid.current = currentUser?.uid; documentsRef.current = documents; previewRef.current = preview;
@@ -64,11 +70,19 @@ export default function TeamWorkerRequestPage() {
     catch (cause) { if (sequence === generation.current) { setData(null); setError(errorText(cause)); } }
     finally { if (sequence === generation.current) setLoading(false); }
   }, [yearMonth]);
-  useUnsavedRequestGuard(documents.length > 0 || Object.values(fields).some(Boolean));
+  const hasDraft = documents.length > 0 || Object.values(fields).some(Boolean);
+  useUnsavedRequestGuard(hasDraft, '작성 중인 내용은 이 탭에 임시 보관됩니다. 다른 화면으로 이동할까요?');
   useEffect(() => {
+    if (draftOwner !== currentUser?.uid) return;
+    if (hasDraft) saveRequestDraft(currentUser?.uid, draftKey, { fields, documents, teamId, requestId, warnings }, () => documents.forEach(doc => URL.revokeObjectURL(doc.preview)));
+    else deleteRequestDraft(currentUser?.uid, draftKey);
+  });
+  useEffect(() => {
+    if (draftOwner === currentUser?.uid) return;
+    setDraftOwner(currentUser?.uid);
     documentsRef.current.forEach(doc => URL.revokeObjectURL(doc.preview));
     if (previewRef.current) URL.revokeObjectURL(previewRef.current.preview);
-    setDocuments([]); setFields(empty()); setTeamId(''); setData(null); setReview(null); setPreview(null); setConfirm(false); setWarnings({}); setNotice(''); setRequestId(createId());
+    setDocuments(cachedDraft?.documents ?? []); setFields(cachedDraft?.fields ?? empty()); setTeamId(cachedDraft?.teamId || ''); setData(null); setReview(null); setPreview(null); setConfirm(false); setWarnings(cachedDraft?.warnings ?? {}); setNotice(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : ''); setRequestId(cachedDraft?.requestId ?? createId());
   }, [currentUser?.uid]);
   useEffect(() => { void load(); return () => { generation.current++; }; }, [currentUser?.uid, load]);
   const loadMore = async () => {
@@ -83,7 +97,7 @@ export default function TeamWorkerRequestPage() {
     } catch (cause) { if (sequence === generation.current) setError(errorText(cause)); }
     finally { moreLock.current = false; setLoadingMore(false); }
   };
-  useEffect(() => () => { documentsRef.current.forEach(doc => URL.revokeObjectURL(doc.preview)); if (previewRef.current) URL.revokeObjectURL(previewRef.current.preview); }, []);
+  useEffect(() => () => { if (previewRef.current) URL.revokeObjectURL(previewRef.current.preview); }, []);
   useEffect(() => {
     if (!documents.length && !Object.values(fields).some(Boolean)) return;
     const prevent = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -139,6 +153,9 @@ export default function TeamWorkerRequestPage() {
     catch (cause) { if (uid === activeUid.current) setError(errorText(cause)); }
     finally { lock.current = false; setBusy(''); }
   };
+  const discardDraft = () => {
+    deleteRequestDraft(currentUser?.uid, draftKey); setDocuments([]); setFields(empty()); setWarnings({}); setRequestId(createId()); setNotice('작성 내용을 지웠습니다.');
+  };
   const selectedTeam = data?.teams.find(team => team.id === teamId);
   const disabled = loading || loadingMore || Boolean(busy) || confirm || Boolean(review) || Boolean(preview);
   const warningsList = Object.values(warnings).flatMap(value => value || []);
@@ -151,6 +168,7 @@ export default function TeamWorkerRequestPage() {
       <div className="worker-heading-actions"><a className="worker-history-link" href="#worker-request-history"><ArrowDown size={16} />신청 내역</a><button type="button" className="primary" disabled={disabled} onClick={() => void load(true)}><RefreshCw size={16} className={loading ? 'worker-spin' : ''} />새로고침</button></div>
     </header>
     {error && !confirm && !review && <p role="alert" className="worker-error">{error}</p>}{notice && <p role="status" className="worker-notice">{notice}</p>}{busy && <p role="status" className="worker-busy"><Sparkles size={17} />{busy}</p>}
+    {hasDraft && <RequestDraftNotice onDiscard={discardDraft} disabled={Boolean(busy) || confirm} />}
     <section className="worker-summary" aria-label="불러온 신청 현황" aria-busy={loading}>
       <article><span className="worker-summary-icon"><Files size={20} /></span><div><span>조회한 신청</span><strong>{data ? data.requests.length.toLocaleString() : '—'}<small>건</small></strong></div></article>
       <article className="pending"><span className="worker-summary-icon"><Clock3 size={20} /></span><div><span>승인 대기</span><strong>{data ? counts.pending.toLocaleString() : '—'}<small>건</small></strong></div></article>

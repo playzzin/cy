@@ -135,7 +135,7 @@ export default function DevUserPreview({ actorUid, positionId, path, positions, 
             {(directoryLoading || busy) && <div role="status" className="dev-user-preview__loading">{directoryLoading ? '연결된 사용자 계정을 확인하는 중입니다.' : '선택한 사용자의 화면을 준비하는 중입니다.'}</div>}
             {activeSession && <iframe key={activeSession.frameId} ref={iframe} name={activeSession.frameId}
                 src={previewFrameUrl(activeSession.initialPath)}
-                title={selected?.displayName + ' 사용자 화면'} sandbox="allow-scripts allow-same-origin" referrerPolicy="same-origin" />}
+                title={selected?.displayName + ' 사용자 화면'} sandbox="allow-scripts allow-same-origin allow-modals" referrerPolicy="same-origin" />}
             {!selected && !directoryLoading && !error && <div className="dev-user-preview__empty">
                 <h1>{position?.name} 사용자 시점</h1>
                 <p>{directoryError || (candidates.length ? '사용자 선택 창에서 확인할 계정을 선택하세요.' : '활성 계정을 연결한 뒤 이 직책의 사용자 화면을 확인할 수 있습니다.')}</p>
