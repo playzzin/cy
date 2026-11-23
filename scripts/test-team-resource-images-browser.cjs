@@ -10,6 +10,22 @@ const root = path.resolve(__dirname, '..');
 const fixture = path.join(root, 'fixtures/team-resource-images-preview');
 const output = path.join(root, 'artifacts/team-resource-images/browser');
 const origin = 'http://127.0.0.1:4212';
+async function assertStablePdf(page) {
+    await page.locator('.original-pdf__page[aria-busy="false"] canvas:not([hidden])').waitFor();
+    const stability = await page.locator('.original-pdf__page').evaluate(async host => {
+        const original = host.querySelector('canvas');
+        const width = host.clientWidth;
+        let replacements = 0, hiddenFrames = 0, widthChanges = 0;
+        for (let frame = 0; frame < 120; frame++) {
+            await new Promise(requestAnimationFrame);
+            if (host.querySelector('canvas') !== original) replacements++;
+            if (original.hidden || !original.isConnected) hiddenFrames++;
+            if (host.clientWidth !== width) widthChanges++;
+        }
+        return { replacements, hiddenFrames, widthChanges };
+    });
+    assert.deepEqual(stability, { replacements: 0, hiddenFrames: 0, widthChanges: 0 }, 'PDF remains visible without scrollbar/render feedback');
+}
 async function build() {
     const replacements = ['services/accommodationService', 'services/cardService', 'services/vehicleService', 'services/manpowerService',
         'hooks/useWorkerAccessScope', 'hooks/useExpenseLedgerData', 'services/cardStatementAttachmentService', 'services/cardStatementImportService',
@@ -60,6 +76,8 @@ async function build() {
             page.on('pageerror', error => errors.push(error.message));
             try {
                 await page.goto(`${origin}/support/team-resource-detail`);
+                // Exercise scrollbars that consume layout width, even in headless Chrome.
+                await page.addStyleTag({ content: '.original-pdf__page::-webkit-scrollbar { width: 16px; height: 16px; }' });
                 await page.getByRole('tab', { name: /^카드/ }).click();
                 const cards = page.getByRole('region', { name: '카드 원본 빠른보기' });
                 await cards.scrollIntoViewIfNeeded();
@@ -76,10 +94,12 @@ async function build() {
                 await page.getByTitle('사용내역서.pdf PDF 원본').waitFor();
                 const pdfPage = page.getByRole('img', { name: '사용내역서.pdf PDF 원본 1쪽', exact: true });
                 await pdfPage.waitFor();
+                await assertStablePdf(page);
                 assert.ok(await pdfPage.evaluate(canvas => canvas.width > 100 && canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data.some((v, i) => i % 4 !== 3 && v < 150)));
                 const fittedWidth = (await pdfPage.boundingBox()).width;
                 await page.getByRole('button', { name: 'PDF 확대', exact: true }).click();
                 await page.waitForFunction(width => document.querySelector('.original-pdf canvas:not([hidden])')?.getBoundingClientRect().width > width * 1.4, fittedWidth);
+                await assertStablePdf(page);
                 await page.getByRole('button', { name: 'PDF 다음 페이지', exact: true }).click();
                 await page.getByRole('img', { name: '사용내역서.pdf PDF 원본 2쪽', exact: true }).waitFor();
                 assert.match(await page.getByLabel('PDF 페이지', { exact: true }).innerText(), /2 \/ 2/);
@@ -117,6 +137,7 @@ async function build() {
                 await second.click();
                 await page.getByTitle('과태료 PDF 원본').waitFor();
                 await page.getByRole('img', { name: '과태료 PDF 원본 1쪽', exact: true }).waitFor();
+                await assertStablePdf(page);
                 assert.match(await page.getByLabel('선택한 과태료 정보').innerText(), /64,000원/);
                 await page.getByRole('button', { name: '닫기', exact: true }).click();
                 assert.equal(await second.evaluate(node => node === document.activeElement), true);

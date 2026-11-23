@@ -8,6 +8,8 @@ export default function OriginalPdfPreview({ url, title }: { url: string; title:
     const [zoom, setZoom] = useState(1);
     const [width, setWidth] = useState(320);
     const [ready, setReady] = useState(false);
+    const [rendering, setRendering] = useState(false);
+    const [renderedPage, setRenderedPage] = useState(1);
     const [error, setError] = useState('');
     const [revision, setRevision] = useState(0);
     const host = useRef<HTMLDivElement>(null);
@@ -15,7 +17,7 @@ export default function OriginalPdfPreview({ url, title }: { url: string; title:
     useEffect(() => {
         let disposed = false;
         let destroy: (() => void) | undefined;
-        setDocument(null); setPage(1); setZoom(1); setError('');
+        setDocument(null); setPage(1); setZoom(1); setReady(false); setError('');
         void import('../../utils/pdfPreviewRuntime').then(({ openPdfDocument }) => {
             if (disposed) return;
             const task = openPdfDocument(url);
@@ -33,8 +35,8 @@ export default function OriginalPdfPreview({ url, title }: { url: string; title:
         return () => { observer?.disconnect(); window.removeEventListener('resize', measure); };
     }, []);
     useEffect(() => {
-        setReady(false);
         if (!document || !canvas.current) return;
+        setRendering(true);
         let disposed = false;
         let cancel: (() => void) | undefined;
         const target = canvas.current;
@@ -45,13 +47,20 @@ export default function OriginalPdfPreview({ url, title }: { url: string; title:
             const cssHeight = Math.round(cssWidth * original.height / original.width);
             const resolution = Math.min(window.devicePixelRatio || 1, 2, 4096 / Math.max(cssWidth, cssHeight));
             const viewport = pdfPage.getViewport({ scale: cssWidth / original.width * resolution });
-            target.width = Math.ceil(viewport.width); target.height = Math.ceil(viewport.height);
-            target.style.width = `${cssWidth}px`; target.style.height = `${cssHeight}px`;
-            const job = pdfPage.render({ canvas: target, viewport });
+            // Paint offscreen so resizing/page changes never clear the visible original.
+            const buffer = window.document.createElement('canvas');
+            buffer.width = Math.ceil(viewport.width); buffer.height = Math.ceil(viewport.height);
+            const job = pdfPage.render({ canvas: buffer, viewport });
             cancel = () => job.cancel();
             await job.promise;
-            if (!disposed) { setReady(true); setError(''); }
-        }).catch(() => { if (!disposed) setError('이 페이지를 표시하지 못했습니다. 다시 시도해 주세요.'); });
+            if (disposed) return;
+            const context = target.getContext('2d');
+            if (!context) throw new Error('Canvas context unavailable');
+            target.width = buffer.width; target.height = buffer.height;
+            target.style.width = `${cssWidth}px`; target.style.height = `${cssHeight}px`;
+            context.drawImage(buffer, 0, 0);
+            setRenderedPage(page); setReady(true); setRendering(false); setError('');
+        }).catch(() => { if (!disposed) { setRendering(false); setError('이 페이지를 표시하지 못했습니다. 다시 시도해 주세요.'); } });
         return () => { disposed = true; cancel?.(); };
     }, [document, page, width, zoom]);
     return <div className="original-pdf" title={title}>
@@ -63,10 +72,10 @@ export default function OriginalPdfPreview({ url, title }: { url: string; title:
             <button type="button" aria-label="PDF 화면에 맞추기" disabled={!document} onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
             <button type="button" aria-label="PDF 확대" disabled={!document || zoom >= 4} onClick={() => setZoom(value => Math.min(4, value + .5))}>+</button>
         </div>
-        <div ref={host} className="original-pdf__page">
+        <div ref={host} className="original-pdf__page" aria-busy={rendering}>
             {error ? <p role="alert" className="original-document__notice">{error} <button type="button" onClick={() => setRevision(value => value + 1)}>다시 시도</button></p>
                 : !ready && <p role="status" className="original-document__notice">PDF를 표시하는 중…</p>}
-            <canvas key={`${url}:${page}:${width}:${zoom}:${revision}`} ref={canvas} hidden={!ready || !!error} role="img" aria-label={`${title} ${page}쪽`} />
+            <canvas ref={canvas} hidden={!ready || !!error} role="img" aria-label={`${title} ${renderedPage}쪽`} />
         </div>
     </div>;
 }
