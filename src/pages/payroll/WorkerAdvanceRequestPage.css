@@ -3,6 +3,23 @@
     min-width: 0;
 }
 
+/* Keep text legible on the request form's light input backgrounds. */
+.advance-request-page input,
+.advance-request-page textarea,
+.advance-request-page select {
+    color: #000;
+    -webkit-text-fill-color: #000;
+    caret-color: #000;
+    color-scheme: light;
+}
+
+.advance-request-page input::placeholder,
+.advance-request-page textarea::placeholder {
+    color: #475569;
+    -webkit-text-fill-color: #475569;
+    opacity: 1;
+}
+
 @media (max-width: 360px) {
     .advance-summary {
         grid-template-columns: minmax(0, 1fr);
