@@ -1,0 +1,4 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+body { margin: 0; font-family: 'Malgun Gothic', sans-serif; background: #f5f7fb; }

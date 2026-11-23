@@ -36,6 +36,7 @@ import SignatureGeneratorModal from '../../components/signatures/SignatureGenera
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
 import { DEFAULT_TEAM_COLOR } from '../../constants/solidColorPalette';
+import './WorkerDatabase.css';
 import {
     classifyWorkerAffiliation,
     isCheongyeonEngCompanyName,
@@ -77,6 +78,12 @@ const WORKER_COLUMNS = [
 ];
 
 const ACCOUNT_COLUMN_KEYS = ['bankName', 'accountNumber', 'accountHolder', 'directPayBankName', 'directPayAccountNumber', 'directPayAccountHolder'];
+const DETAIL_ROW_COLUMNS = new Set([WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'address', ...ACCOUNT_COLUMN_KEYS, 'signature', 'bloodType']);
+const WORKER_COLUMN_WEIGHTS: Record<string, number> = {
+    name: 1.4, idNumber: 1.4, contact: 1.3, teamName: 1.4, companyName: 1.7,
+    address: 2.6, accountNumber: 1.8, directPayAccountNumber: 1.8,
+    laborStatementPayType: 1.4, signature: 1, bloodType: 0.7,
+};
 const QUICK_VIEW_PERSONAL_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'idNumber', 'contact', 'address', 'unitPrice', ...ACCOUNT_COLUMN_KEYS];
 const QUICK_VIEW_WORK_COLUMNS = [WORKER_LABOR_PAY_TYPE_COLUMN_KEY, 'name', 'role', 'salaryModel', 'teamName', 'companyName', 'status', 'totalManDay'];
 const QUICK_VIEW_ACCOUNT_COLUMNS = ['name', 'teamName', ...ACCOUNT_COLUMN_KEYS];
@@ -115,6 +122,7 @@ interface WorkerDatabaseProps {
 }
 
 const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, highlightedId }) => {
+    const tableId = React.useId();
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
@@ -144,6 +152,17 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             ? moveFixedWorkerColumns(columnOrder.filter((key) => QUICK_VIEW_WORK_COLUMNS.includes(key)))
             : (quickColumnView === 'accounts' ? QUICK_VIEW_ACCOUNT_COLUMNS : orderedVisibleColumnKeys));
     const tableColSpan = effectiveVisibleColumnKeys.length + 2;
+    const workerRowColumns = [
+        effectiveVisibleColumnKeys.filter(key => !DETAIL_ROW_COLUMNS.has(key)),
+        effectiveVisibleColumnKeys.filter(key => DETAIL_ROW_COLUMNS.has(key)),
+    ].filter(keys => keys.length > 0);
+    const workerCellLayout = new Map(workerRowColumns.flatMap((keys, rowIndex) => {
+        const totalWeight = keys.reduce((total, key) => total + (WORKER_COLUMN_WEIGHTS[key] ?? 1), 0);
+        return keys.map(key => [key, {
+            row: rowIndex,
+            width: `${(WORKER_COLUMN_WEIGHTS[key] ?? 1) / totalWeight * 100}%`,
+        }] as const);
+    }));
 
     const applyQuickView = (next: 'personal' | 'work' | 'accounts') => {
         setShowColumnSettings(false);
@@ -1322,30 +1341,29 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                         </p>
                     </div>
 
-                    <div className={`overflow-auto ${isStickyHeader ? 'h-[calc(100vh-250px)] border-b border-gray-200' : 'pb-80'}`}>
-                        <table className="w-full text-sm">
-                            <thead className={`bg-slate-900 text-white ${isStickyHeader ? 'sticky top-0 z-10' : ''}`}>
+                    <div className={`worker-database-scroll overflow-auto ${isStickyHeader ? 'h-[calc(100vh-250px)] border-b border-gray-200' : 'pb-80'}`}>
+                        <table className="worker-database-list w-full text-sm" aria-label="작업자 목록">
+                            <thead className={`worker-database-head ${isStickyHeader ? 'sticky top-0 z-10' : ''}`}>
                                 <tr>
-                                    <th className="px-4 py-3 text-center w-12 border border-slate-700">
-                                        <button onClick={toggleSelectAll} className="text-gray-500 hover:text-gray-700">
+                                    <th id={`${tableId}-selection`} className="worker-database-select">
+                                        <button onClick={toggleSelectAll} aria-label="작업자 전체 선택" aria-pressed={selectedWorkerIds.length === filteredWorkers.length && filteredWorkers.length > 0} className="text-gray-500 hover:text-indigo-600">
                                             <FontAwesomeIcon icon={selectedWorkerIds.length === filteredWorkers.length && filteredWorkers.length > 0 ? faCheckSquare : faSquare} />
                                         </button>
                                     </th>
                                     {effectiveVisibleColumnKeys.map((key) => {
                                         const col = WORKER_COLUMNS.find(c => c.key === key);
                                         if (!col) return null;
-                                        const alignClass = col.key === 'unitPrice' || col.key === 'totalManDay'
-                                            ? 'text-right'
-                                            : col.key === 'signature' || col.key === WORKER_LABOR_PAY_TYPE_COLUMN_KEY
-                                                ? 'text-center'
-                                                : 'text-left';
                                         return (
-                                            <th key={col.key} className={`px-4 py-3 ${alignClass} whitespace-nowrap font-medium text-white border border-slate-700 ${col.key.startsWith('directPay') ? 'bg-indigo-900' : ''}`}>
+                                            <th key={col.key} id={`${tableId}-${col.key}`} className="sr-only" scope="col">
                                                 {col.label}
                                             </th>
                                         );
                                     })}
-                                    <th className="px-4 py-3 text-center font-medium text-white border border-slate-700">관리</th>
+                                    <th className="worker-database-heading" aria-hidden="true">
+                                        <span>작업자 정보</span>
+                                        <span className="worker-database-heading-hint">인적·근무 정보 / 주소·계좌 정보</span>
+                                    </th>
+                                    <th id={`${tableId}-actions`} className="worker-database-actions-heading">관리</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -1372,7 +1390,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                         return (
                                             <tr
                                                 key={worker.id}
-                                                className={`border-b transition-colors 
+                                                className={`worker-database-row border-b transition-colors
                                                     ${isHighlighted ? 'bg-red-50 border border-red-300 ring-1 ring-red-300 z-10 relative' :
                                                         selectedWorkerIds.includes(worker.id!) ? 'bg-indigo-50' :
                                                             'hover:bg-gray-50'} 
@@ -1395,12 +1413,13 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                     }
                                                     : null}
                                             >
-                                                <td className="px-4 py-3 text-center border border-slate-200">
-                                                    <button onClick={() => toggleSelectWorker(worker.id!)} className={`${selectedWorkerIds.includes(worker.id!) ? 'text-indigo-600' : 'text-gray-400'} hover:text-indigo-600`}>
+                                                <td headers={`${tableId}-selection`} className="worker-database-select">
+                                                    <button onClick={() => toggleSelectWorker(worker.id!)} aria-label={`${worker.name} 선택`} aria-pressed={selectedWorkerIds.includes(worker.id!)} className={`${selectedWorkerIds.includes(worker.id!) ? 'text-indigo-600' : 'text-gray-400'} hover:text-indigo-600`}>
                                                         <FontAwesomeIcon icon={selectedWorkerIds.includes(worker.id!) ? faCheckSquare : faSquare} />
                                                     </button>
                                                 </td>
-                                                {effectiveVisibleColumnKeys.map((key) => {
+                                                {workerRowColumns.flat().map((key) => {
+                                                    const cell = (() => {
                                                     switch (key) {
                                                         case WORKER_LABOR_PAY_TYPE_COLUMN_KEY: {
                                                             const currentPayType = getWorkerLaborStatementPayType(worker);
@@ -1461,7 +1480,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                             >
                                                                                 <FontAwesomeIcon icon={faUser} className="text-white text-xs" />
                                                                             </span>
-                                                                            <span className="truncate">{worker.name}</span>
+                                                                            <span>{worker.name}</span>
                                                                             {worker.fileNameSaved && (
                                                                                 <button
                                                                                     onClick={(e) => {
@@ -1520,7 +1539,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                             handleWorkerBlur(worker.id!, 'address', String(val));
                                                                         }}
                                                                         minimal={!isEditMode}
-                                                                        formatDisplay={(val) => <span className="truncate max-w-[200px] inline-block" title={String(val)}>{val || '-'}</span>}
+                                                                        formatDisplay={(val) => <span>{val || '-'}</span>}
                                                                     />
                                                                 </td>
                                                             );
@@ -1849,9 +1868,23 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                 </td>
                                                             );
                                                     }
+                                                    })();
+                                                    const layout = workerCellLayout.get(key)!;
+                                                    return React.cloneElement(cell, {
+                                                        className: `worker-database-cell ${cell.props.className}`,
+                                                        headers: `${tableId}-${key}`,
+                                                        'data-column': key,
+                                                        'data-detail-row': layout.row > 0 || undefined,
+                                                        style: { flexBasis: layout.width },
+                                                    }, <>
+                                                        <span className="worker-database-field-label" aria-hidden="true">
+                                                            {WORKER_COLUMNS.find(column => column.key === key)?.label}
+                                                        </span>
+                                                        <div className="worker-database-field-value">{cell.props.children}</div>
+                                                    </>);
                                                 })}
 
-                                                <td className="px-4 py-3 text-center border border-slate-200">
+                                                <td headers={`${tableId}-actions`} className="worker-database-actions">
                                                     <WorkerAccountSummary worker={worker} disabled={loading}
                                                         onRegister={purpose => setAccountTarget({ worker: { ...worker }, purpose })} />
                                                     <div className="flex items-center justify-center gap-2">

@@ -358,6 +358,13 @@ export const accountLinkService = {
         await callable({ linkId: link.id, siteIds: link.siteIds });
     },
 
+    async approveMatchedLink(linkId: string, targetEntityId: string): Promise<void> {
+        if (!linkId || !targetEntityId) throw new Error('account-link-target-required');
+        // Separate endpoint: older servers must fail closed instead of ignoring the selected target.
+        const callable = httpsCallable<{ linkId: string; targetEntityId: string }, { status: 'active' }>(functions, 'approveMatchedAccountLinkRequest');
+        await callable({ linkId, targetEntityId });
+    },
+
     async rejectLink(link: AccountLink, actor: { uid?: string; email?: string | null }, reason?: string): Promise<void> {
         if (!link.id) throw new Error('account-link-id-required');
         const callable = httpsCallable<{ linkId: string; reason?: string }, { status: 'rejected' }>(

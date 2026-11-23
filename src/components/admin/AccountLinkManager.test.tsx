@@ -14,7 +14,7 @@ jest.mock('../../services/userService', () => ({ userService: {} }));
 jest.mock('../../services/manpowerService', () => ({ manpowerService: {} }));
 jest.mock('../../services/companyService', () => ({ companyService: { getCompanies: jest.fn() } }));
 jest.mock('../../services/officeStaffService', () => ({ officeStaffService: { getOfficeStaff: jest.fn() } }));
-jest.mock('../../services/accountLinkService', () => ({ accountLinkService: { getAllLinks: jest.fn(), approveLink: jest.fn(), rejectLink: jest.fn() } }));
+jest.mock('../../services/accountLinkService', () => ({ accountLinkService: { getAllLinks: jest.fn(), approveLink: jest.fn(), approveMatchedLink: jest.fn(), unlinkConnection: jest.fn(), rejectLink: jest.fn() } }));
 
 const users = [
     { uid: 'sample-user', displayName: '연결 사용자', email: 'sample@example.test', position: '일반', status: 'active', linkedWorkerIds: ['worker-1'] },
@@ -233,4 +233,44 @@ it('요청 직책을 서버가 적용할 직책으로 단정하지 않는다', a
     expect(screen.getByText('요청 직책: 총괄')).toBeInTheDocument();
     expect(screen.queryByText('적용 직책: 총괄')).not.toBeInTheDocument();
     expect(accountLinkService.approveLink).not.toHaveBeenCalled();
+});
+
+it('신규 요청을 기존 대상에 매칭하고 확정한 대상 ID만 서버로 보낸다', async () => {
+    const request = { ...links[0], entityId: 'new_company', entityName: '신규 신청 회사', accountType: 'partner_company' };
+    (accountLinkService.getAllLinks as jest.Mock).mockResolvedValue([request]);
+    render(<AccountLinkManager users={users} workers={workers} approvalsOnly />);
+    fireEvent.click(await screen.findByRole('button', { name: '연결 대상 찾기·변경' }));
+    fireEvent.click(screen.getByRole('button', { name: '예시 회사 협력사' }));
+    fireEvent.click(screen.getByRole('button', { name: '승인하고 연결' }));
+    expect(screen.getByText('pending@example.test 계정을 예시 회사에 연결합니다.')).toBeInTheDocument();
+    expect(accountLinkService.approveMatchedLink).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '연결 확정' }));
+    await waitFor(() => expect(accountLinkService.approveMatchedLink).toHaveBeenCalledWith('link-1', 'company-1'));
+    expect(accountLinkService.approveLink).not.toHaveBeenCalled();
+});
+
+it('확인 중 대상을 바꾸면 이전 확인을 폐기하고 다시 확인해야 한다', async () => {
+    render(<AccountLinkManager users={users} workers={workers} approvalsOnly />);
+    fireEvent.click(await screen.findByRole('button', { name: '승인하고 연결' }));
+    fireEvent.click(screen.getByRole('button', { name: '연결 대상 찾기·변경' }));
+    fireEvent.click(screen.getByRole('button', { name: /원래 요청 대상 유지/ }));
+    expect(screen.queryByRole('button', { name: '연결 확정' })).not.toBeInTheDocument();
+    expect(accountLinkService.approveLink).not.toHaveBeenCalled();
+});
+
+it('연결 해제 영향 확인과 취소를 지원하고 중복 해제 요청을 막는다', async () => {
+    let finish: () => void = () => {};
+    (accountLinkService.unlinkConnection as jest.Mock).mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<AccountLinkManager users={users} workers={workers} lockedUserId="sample-user" />);
+    fireEvent.click(await screen.findByRole('button', { name: '예시 작업자 연결 해제' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('마지막 연결이면 직책과 접근 승인도 해제됩니다');
+    fireEvent.click(screen.getByRole('button', { name: '취소' }));
+    expect(accountLinkService.unlinkConnection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '예시 작업자 연결 해제' }));
+    const confirm = screen.getByRole('button', { name: '해제 확정' });
+    fireEvent.click(confirm); fireEvent.click(confirm);
+    expect(accountLinkService.unlinkConnection).toHaveBeenCalledTimes(1);
+    expect(accountLinkService.unlinkConnection).toHaveBeenCalledWith({ uid: 'sample-user', entityType: 'worker', entityId: 'worker-1', entityIds: ['worker-1'] });
+    await act(async () => { finish(); });
+    expect(await screen.findByText('예시 작업자 연결을 해제했습니다.')).toBeInTheDocument();
 });

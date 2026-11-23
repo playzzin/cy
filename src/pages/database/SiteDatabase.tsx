@@ -20,6 +20,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
 import { useNavigate } from 'react-router-dom';
 import { DEFAULT_TEAM_COLOR } from '../../constants/solidColorPalette';
+import { useDatabaseListLayout, DatabaseListCell, DatabaseListHeading, DatabaseListViewToggle } from './DatabaseListLayout';
 
 const SITE_COLUMNS = [
     { key: 'name', label: '현장명' },
@@ -257,6 +258,9 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         showColumnSettings,
         setShowColumnSettings
     } = useColumnSettings('site_db_v6', SITE_COLUMNS);
+    const listLayout = useDatabaseListLayout(SITE_COLUMNS, visibleColumns,
+        ['address', 'clientCompanyName', 'companyName', 'partnerName'],
+        { name: 2.4, responsibleTeamName: 1.4, siteManagerName: 1.3, address: 3.2, clientCompanyName: 1.6, companyName: 1.6, partnerName: 1.6 });
 
     useEffect(() => {
         const checkPermission = async () => {
@@ -619,12 +623,13 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
             {/* Table */}
             <div className={`flex-1 overflow-auto ${!hideHeader ? 'p-6 pb-[400px]' : 'pb-[400px]'}`}>
                 <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                    <div className="p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
                         <h3 className="text-md font-semibold text-gray-800 flex items-center gap-2">
                             <FontAwesomeIcon icon={faMapMarkerAlt} className="text-emerald-600" />
                             등록된 현장 ({filteredSites.length}개)
                         </h3>
-                        <div className="flex items-center gap-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                            <DatabaseListViewToggle layout={listLayout} />
                             <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
                                 <input
                                     type="checkbox"
@@ -657,20 +662,22 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                     </div>
 
                     <div className={`${isStickyHeader ? 'overflow-auto h-[calc(100vh-300px)]' : 'overflow-x-auto'}`}>
-                        <table className="min-w-full divide-y divide-slate-200 text-sm">
+                        <table className={`${listLayout.className} w-full divide-y divide-slate-200 text-sm`} data-list="sites" aria-label="현장 목록">
                             <thead className={`bg-slate-900 text-white ${isStickyHeader ? 'sticky top-0 z-10' : ''}`}>
                                 <tr>
-                                    <th className="px-6 py-3 w-10 border border-slate-700">
+                                    <th className="database-list-select px-6 py-3 w-10 border border-slate-700">
                                         <input
                                             type="checkbox"
+                                            aria-label="현장 전체 선택"
                                             checked={filteredSites.length > 0 && selectedSiteIds.length === filteredSites.length}
                                             onChange={toggleSelectAll}
                                             className="rounded text-indigo-600 focus:ring-indigo-500"
                                         />
                                     </th>
-                                    <th className="px-2 py-3 w-8 border border-slate-700"></th>
-                                    {SITE_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
-                                        <th key={col.key} className="px-6 py-3 font-semibold text-left text-white whitespace-nowrap border border-slate-700">
+                                    <th className="database-list-expand px-2 py-3 w-8 border border-slate-700"><span className="sr-only">상세 보기</span></th>
+                                    <DatabaseListHeading layout={listLayout} title="현장 정보" hint="담당·현장·결제 정보 / 주소·관련 회사" />
+                                    {listLayout.columns.map(col => (
+                                        <th key={col.key} id={`${listLayout.id}-${col.key}`} data-column={col.key} scope="col" className="px-6 py-3 font-semibold text-left text-white whitespace-nowrap border border-slate-700">
                                             {col.label}
                                         </th>
                                     ))}
@@ -692,6 +699,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                         return (
                                             <React.Fragment key={site.id || site.name}>
                                                 <tr
+                                                    data-record="site"
                                                     className={`transition-colors border-b ${isHighlighted
                                                         ? 'bg-red-50 border border-red-300 ring-1 ring-red-300 z-10 relative'
                                                         : expandedSiteId === site.id
@@ -699,27 +707,29 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                             : 'bg-white hover:bg-slate-50'
                                                         }`}
                                                 >
-                                                    <td className="px-6 py-4 align-top border border-slate-200">
+                                                    <td className="database-list-select px-6 py-4 align-top border border-slate-200">
                                                         <input
                                                             type="checkbox"
+                                                            aria-label={`${site.name} 선택`}
                                                             checked={!!site.id && selectedSiteIds.includes(site.id)}
                                                             onChange={() => site.id && toggleSelect(site.id)}
                                                             className="rounded text-indigo-600 focus:ring-indigo-500"
                                                         />
                                                     </td>
                                                     <td
-                                                        className="px-2 py-4 text-center align-top cursor-pointer"
-                                                        onClick={() => site.id && toggleExpand(site.id)}
+                                                        className="database-list-expand px-2 py-4 text-center align-top"
                                                     >
                                                         {site.id && (
+                                                            <button type="button" aria-label={`${site.name} 상세 보기`} aria-expanded={expandedSiteId === site.id} onClick={() => site.id && toggleExpand(site.id)}>
                                                             <FontAwesomeIcon
                                                                 icon={expandedSiteId === site.id ? faChevronDown : faChevronRight}
                                                                 className="text-slate-400 hover:text-indigo-600 transition-colors"
                                                             />
+                                                            </button>
                                                         )}
                                                     </td>
-                                                    {SITE_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
-                                                        <td key={`${site.id || site.name}-${col.key}`} className="px-6 py-4 align-top border border-slate-200">
+                                                    {listLayout.columns.map(col => (
+                                                        <DatabaseListCell key={`${site.id || site.name}-${col.key}`} column={col} layout={listLayout} className="px-6 py-4 align-top border border-slate-200">
                                                             {isEditMode && site.id ? (
                                                                 col.key === 'status' ? (
                                                                     <select
@@ -1086,7 +1096,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                     renderCellValue(site, col)
                                                                 )
                                                             )}
-                                                        </td>
+                                                        </DatabaseListCell>
                                                     ))}
                                                 </tr>
                                                 {/* Accordion Row */}

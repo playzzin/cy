@@ -168,3 +168,27 @@ it('연결 조회 실패 시 미완성 집계를 승인 건수로 표시하지 �
     expect(screen.getByRole('button', { name: '승인 요청' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '요청 확인·승인 →' })).not.toBeInTheDocument();
 });
+
+it('권한 카드와 저장 전 변경 요약이 같은 값을 사용한다', async () => {
+    await open();
+    fireEvent.click(within(screen.getByRole('group', { name: '시스템 권한 선택' })).getByRole('button', { name: /관리자/ }));
+    expect(screen.getByLabelText('저장할 변경 내용')).toHaveTextContent('권한: 일반 → 관리자');
+    expect(accountLinkService.updateUserAccess).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '직책·권한 저장' }));
+    await waitFor(() => expect(accountLinkService.updateUserAccess).toHaveBeenCalledWith(expect.objectContaining({ uid: 'sample-user', role: 'admin', position: '일반' })));
+});
+
+it('미연결 현황과 직책 필터로 사용자를 찾고 연결창을 같은 화면에서 연다', async () => {
+    await open();
+    fireEvent.change(screen.getByLabelText('사용자 직책 필터'), { target: { value: '일반' } });
+    expect(within(screen.getByLabelText('사용자 목록')).queryByRole('button', { name: /대기 사용자/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /연결이 필요한 계정/ }));
+    expect(screen.getByLabelText('사용자 직책 필터')).toHaveValue('');
+    expect(within(screen.getByLabelText('사용자 목록')).getByRole('button', { name: /대기 사용자/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '연결 관리 →' }));
+    const dialog = await screen.findByRole('dialog', { name: '계정 연결 관리' });
+    expect(dialog).toHaveTextContent('연결 화면: sample-user');
+    fireEvent.click(within(dialog).getByRole('button', { name: '상세 닫기' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('기본 직책')).toHaveValue('일반');
+});

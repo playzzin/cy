@@ -52,8 +52,10 @@ export function SiteModeProvider({
     );
 }
 
+export const useOptionalSiteMode = () => useContext(SiteModeContext);
+
 export function useSiteMode() {
-    const context = useContext(SiteModeContext);
+    const context = useOptionalSiteMode();
     if (!context) {
         throw new Error('useSiteMode must be used within a SiteModeProvider');
     }

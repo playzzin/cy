@@ -20,6 +20,7 @@ import { getIcon } from '../../utils/iconMapper';
 import { DEFAULT_TEAM_COLOR } from '../../constants/solidColorPalette';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import TeamColorInput from '../../components/manpower/TeamColorPicker';
+import { useDatabaseListLayout, DatabaseListCell, DatabaseListHeading, DatabaseListViewToggle } from './DatabaseListLayout';
 
 // 직책별 아이콘 매핑 (positions DB 기반)
 const getPositionIcon = (role: string | undefined, positions: Position[]) => {
@@ -104,6 +105,9 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
         showColumnSettings,
         setShowColumnSettings
     } = useColumnSettings('team_db', TEAM_COLUMNS);
+    const listLayout = useDatabaseListLayout(TEAM_COLUMNS, visibleColumns,
+        ['bankName', 'accountNumber', 'accountHolder', 'siteCount', 'memberCount', 'totalManDay'],
+        { name: 2, leaderName: 1.2, companyName: 1.8, accountNumber: 1.8, accountHolder: 1.2, siteCount: 1.4 });
 
     useEffect(() => {
         loadData();
@@ -428,7 +432,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                 className="pl-10 pr-4 py-2 border border-slate-200 rounded w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                             />
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                             <label className="flex items-center gap-2 cursor-pointer">
                                 <input
                                     type="checkbox"
@@ -438,6 +442,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                 />
                                 <span className="text-sm text-slate-600">폐업/대기 포함</span>
                             </label>
+                            <DatabaseListViewToggle layout={listLayout} />
                             <label className="flex items-center gap-2 cursor-pointer bg-white px-2 py-1 rounded border border-gray-200 hover:bg-gray-50">
                                 <input
                                     type="checkbox"
@@ -465,20 +470,22 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
 
             <div className={`flex-1 ${!hideHeader ? 'p-6' : ''} ${isStickyHeader ? 'overflow-hidden' : 'overflow-auto pb-[400px]'}`}>
                 <div className={`${isStickyHeader ? 'overflow-auto h-full max-h-[calc(100vh-250px)]' : 'overflow-x-auto'}`}>
-                    <table className="w-full text-sm text-left text-slate-500">
+                    <table className={`${listLayout.className} w-full text-sm text-left text-slate-500`} data-list="teams" aria-label="팀 목록">
                         <thead className={`text-xs text-white uppercase bg-slate-900 ${isStickyHeader ? 'sticky top-0 z-10' : ''}`}>
                             <tr>
-                                <th className="px-6 py-3 w-4 border border-slate-700">
+                                <th className="database-list-select px-6 py-3 w-4 border border-slate-700">
                                     <input
                                         type="checkbox"
+                                        aria-label="팀 전체 선택"
                                         checked={teams.length > 0 && selectedTeamIds.length === teams.length}
                                         onChange={toggleSelectAll}
                                         className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
                                     />
                                 </th>
-                                <th className="px-2 py-3 w-8 border border-slate-700"></th>
-                                {TEAM_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
-                                    <th key={col.key} className="px-6 py-3 font-semibold border border-slate-700">{col.label}</th>
+                                <th className="database-list-expand px-2 py-3 w-8 border border-slate-700"><span className="sr-only">상세 보기</span></th>
+                                <DatabaseListHeading layout={listLayout} title="팀 정보" hint="소속·팀장·상태 / 계좌·배정·공수" />
+                                {listLayout.columns.map(col => (
+                                    <th key={col.key} id={`${listLayout.id}-${col.key}`} data-column={col.key} scope="col" className="px-6 py-3 font-semibold border border-slate-700">{col.label}</th>
                                 ))}
                             </tr>
                         </thead>
@@ -494,6 +501,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                     return (
                                         <React.Fragment key={team.id}>
                                             <tr
+                                                data-record="team"
                                                 onClick={() => toggleSelect(team.id!)}
                                                 className={`transition-colors border-b cursor-pointer
                                                     ${isHighlighted ? 'bg-red-50 border border-red-300 ring-1 ring-red-300 z-10 relative' :
@@ -517,22 +525,25 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                     }
                                                     : null}
                                             >
-                                                <td className="px-6 py-4 border border-slate-200" onClick={(e) => e.stopPropagation()}>
+                                                <td className="database-list-select px-6 py-4 border border-slate-200" onClick={(e) => e.stopPropagation()}>
                                                     <input
                                                         type="checkbox"
+                                                        aria-label={`${team.name} 선택`}
                                                         checked={selectedTeamIds.includes(team.id!)}
                                                         onChange={() => toggleSelect(team.id!)}
                                                         className="rounded text-indigo-600 focus:ring-indigo-500"
                                                     />
                                                 </td>
-                                                <td className="px-2 py-4 text-center cursor-pointer border border-slate-200" onClick={() => toggleTeamExpand(team.id!)}>
+                                                <td className="database-list-expand px-2 py-4 text-center border border-slate-200">
+                                                    <button type="button" aria-label={`${team.name} 상세 보기`} aria-expanded={expandedTeamIds.includes(team.id!)} onClick={(e) => { e.stopPropagation(); toggleTeamExpand(team.id!); }}>
                                                     <FontAwesomeIcon
                                                         icon={expandedTeamIds.includes(team.id!) ? faChevronDown : faChevronRight}
                                                         className="text-slate-400 hover:text-indigo-600 transition-colors"
                                                     />
+                                                    </button>
                                                 </td>
-                                                {TEAM_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
-                                                    <td key={`${team.id}-${col.key}`} className="px-6 py-4 border border-slate-200">
+                                                {listLayout.columns.map(col => (
+                                                    <DatabaseListCell key={`${team.id}-${col.key}`} column={col} layout={listLayout} className="px-6 py-4 border border-slate-200">
                                                         {isEditMode && team.id ? (
                                                             col.key === 'totalManDay' ? (
                                                                 <span className="font-bold text-blue-600">
@@ -859,7 +870,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                                 renderCellValue(team, col)
                                                             )
                                                         )}
-                                                    </td>
+                                                    </DatabaseListCell>
                                                 ))}
                                             </tr>
                                             {

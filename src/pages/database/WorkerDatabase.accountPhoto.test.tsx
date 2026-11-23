@@ -27,6 +27,10 @@ jest.mock('../../components/manpower/IdCardAnalysisModal', () => () => null);
 jest.mock('../../components/signatures/SignatureGeneratorModal', () => () => null);
 jest.mock('../manpower/WorkerModal', () => () => null);
 
+// These flows mount the full worker table and open/save several account dialogs.
+// The 5s default intermittently expires under the full suite before assertions finish.
+jest.setTimeout(15000);
+
 const fields = { bankName: '검증은행', accountNumber: '001234567890', accountHolder: '검증작업자' };
 let workers: Worker[];
 

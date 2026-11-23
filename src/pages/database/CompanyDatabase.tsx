@@ -18,6 +18,7 @@ import { getCompanyTypeLabel } from '../../utils/companyTypeLabel';
 import { InputPopover } from '../../components/common/SingleSelectPopover';
 import { partnerRecognitionService } from '../../services/partnerRecognitionService';
 import type { BusinessCardImage, BusinessContact, CompanyRelationship } from '../../types/partnerRecognition';
+import { useDatabaseListLayout, DatabaseListCell, DatabaseListHeading, DatabaseListViewToggle } from './DatabaseListLayout';
 
 const COMPANY_COLUMNS = [
     { key: 'name', label: '회사명' },
@@ -104,6 +105,9 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
         showColumnSettings,
         setShowColumnSettings
     } = useColumnSettings('company_db', COMPANY_COLUMNS);
+    const listLayout = useDatabaseListLayout(COMPANY_COLUMNS, visibleColumns,
+        ['address', 'bankName', 'accountNumber', 'accountHolder', 'totalManDay', 'constructorTotalManDay', 'partnerTotalManDay'],
+        { name: 2, phone: 1.4, businessNumber: 1.5, address: 3, accountNumber: 1.8, accountHolder: 1.3, totalManDay: 1.1, constructorTotalManDay: 1.1, partnerTotalManDay: 1.1 });
 
     // Initial Load
     useEffect(() => {
@@ -382,6 +386,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                         />
                     </div>
 
+                    <DatabaseListViewToggle layout={listLayout} />
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">
                         <input
                             type="checkbox"
@@ -444,20 +449,22 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
             <div className="flex-1 overflow-auto p-4 md:p-6 bg-slate-50">
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className={`min-h-[500px] ${isStickyHeader ? 'overflow-auto h-[calc(100vh-300px)]' : 'overflow-x-auto'}`}>
-                        <table className="min-w-[960px] w-full text-sm text-left text-slate-500 border-collapse">
+                        <table className={`${listLayout.className} w-full text-sm text-left text-slate-500 border-collapse`} data-list="companies" data-has-actions={listLayout.hasActions} aria-label="회사 목록">
                             <thead className={`text-xs uppercase bg-slate-900 text-white ${isStickyHeader ? 'sticky top-0 z-10' : ''}`}>
                                 <tr>
-                                    <th className="px-6 py-3 w-4 border border-slate-700">
+                                    <th className="database-list-select px-6 py-3 w-4 border border-slate-700">
                                         <input
                                             type="checkbox"
+                                            aria-label="회사 전체 선택"
                                             checked={filteredCompanies.length > 0 && selectedCompanyIds.length === filteredCompanies.length}
                                             onChange={toggleSelectAll}
                                             className="rounded text-indigo-600 focus:ring-indigo-500 bg-slate-800 border-slate-600"
                                         />
                                     </th>
-                                    <th className="px-2 py-3 w-8 border border-slate-700"></th>
-                                    {COMPANY_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
-                                        <th key={col.key} className="px-6 py-3 font-semibold border border-slate-700 whitespace-nowrap">{col.label}</th>
+                                    <th className="database-list-expand px-2 py-3 w-8 border border-slate-700"><span className="sr-only">상세 보기</span></th>
+                                    <DatabaseListHeading layout={listLayout} title="회사 정보" hint="기본·사업자 정보 / 주소·계좌·공수" />
+                                    {listLayout.columns.map(col => (
+                                        <th key={col.key} id={`${listLayout.id}-${col.key}`} data-column={col.key} scope="col" className="px-6 py-3 font-semibold border border-slate-700 whitespace-nowrap">{col.label}</th>
                                     ))}
                                 </tr>
                             </thead>
@@ -480,6 +487,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                         return (
                                             <React.Fragment key={company.id}>
                                                 <tr
+                                                    data-record="company"
                                                     onClick={() => toggleSelect(company.id!)}
                                                     className={`transition-colors border-b cursor-pointer ${isHighlighted ? 'bg-red-50 border-red-200' :
                                                         selectedCompanyIds.includes(company.id!) ? 'bg-indigo-50/50' : 'bg-white hover:bg-slate-50'
@@ -491,22 +499,25 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                                         }
                                                     } : null}
                                                 >
-                                                    <td className="px-6 py-4 border border-slate-200" onClick={(e) => e.stopPropagation()}>
+                                                    <td className="database-list-select px-6 py-4 border border-slate-200" onClick={(e) => e.stopPropagation()}>
                                                         <input
                                                             type="checkbox"
+                                                            aria-label={`${company.name} 선택`}
                                                             checked={selectedCompanyIds.includes(company.id!)}
                                                             onChange={() => toggleSelect(company.id!)}
                                                             className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
                                                         />
                                                     </td>
-                                                    <td className="px-2 py-4 text-center cursor-pointer border border-slate-200" onClick={(e) => { e.stopPropagation(); toggleCompanyExpand(company.id!); }}>
+                                                    <td className="database-list-expand px-2 py-4 text-center border border-slate-200">
+                                                        <button type="button" aria-label={`${company.name} 상세 보기`} aria-expanded={expandedCompanyIds.includes(company.id!)} onClick={(e) => { e.stopPropagation(); toggleCompanyExpand(company.id!); }}>
                                                         <FontAwesomeIcon
                                                             icon={expandedCompanyIds.includes(company.id!) ? faChevronDown : faChevronRight}
                                                             className="text-slate-400 hover:text-indigo-600 transition-colors"
                                                         />
+                                                        </button>
                                                     </td>
-                                                    {COMPANY_COLUMNS.filter(col => visibleColumns.includes(col.key)).map(col => (
-                                                        <td key={`${company.id}-${col.key}`} className="px-6 py-4 border border-slate-200">
+                                                    {listLayout.columns.map(col => (
+                                                        <DatabaseListCell key={`${company.id}-${col.key}`} column={col} layout={listLayout} className="px-6 py-4 border border-slate-200">
                                                             {col.key === 'name' ? (
                                                                 <div
                                                                     className="flex items-center gap-2 hover:text-indigo-600 font-semibold text-slate-800 cursor-pointer"
@@ -560,7 +571,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                                             ) : (
                                                                 renderCellValue(company, col.key)
                                                             )}
-                                                        </td>
+                                                        </DatabaseListCell>
                                                     ))}
                                                 </tr>
 
