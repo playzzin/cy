@@ -28,8 +28,8 @@ test('카드 상세는 화면 진입 시 자동 조회하고 같은 화면에서
     fireEvent.click(screen.getByRole('button', { name: '전체 5건 펼치기' }));
     expect(screen.getAllByRole('article')).toHaveLength(5);
     expect(cardStatementImportService.getFileDetail).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getAllByRole('button', { name: '이 내역의 원본 보기' })[0]);
-    expect(CardStatementFilesDialog).toHaveBeenLastCalledWith(expect.objectContaining({ initialPath: 'source.pdf' }), expect.anything());
+    expect(screen.queryByRole('button', { name: '이 내역의 원본 보기' })).not.toBeInTheDocument();
+    expect(CardStatementFilesDialog).not.toHaveBeenCalled();
 });
 
 test('다른 카드·다른 월·배정기간 밖의 상세와 중복 원본은 합계에서 제외한다', () => {
@@ -49,7 +49,8 @@ test('저장된 사용내역을 조회하고 검색·분류 및 연결 원본 �
     expect(cardStatementImportService.getFileDetail).toHaveBeenCalledWith({ storagePath: 'source.pdf', yearMonth: '2026-11' });
     fireEvent.change(screen.getByLabelText('카드 상세내역 분류'), { target: { value: 'MEAL' } });
     expect(screen.queryByText('가상 주유소')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '이 내역의 원본 보기' }));
+    fireEvent.click(screen.getByText('연결된 원본 1개'));
+    fireEvent.click(screen.getByRole('button', { name: 'source.pdf' }));
     const calls = jest.mocked(CardStatementFilesDialog).mock.calls;
     expect(calls[calls.length - 1][0]).toMatchObject({ initialPath: 'source.pdf', paths: ['source.pdf'], showDetailsLink: false });
     expect(screen.queryByRole('button', { name: /분석.*저장/ })).not.toBeInTheDocument();

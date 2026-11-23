@@ -95,9 +95,8 @@ export default function TeamCardStatementDetails({ yearMonth, cardId, cardLast4,
                         <p><time>{row.date}</time> · {categories[row.category] || '기타'}</p>
                         {row.memo && <p>{row.memo}</p>}
                         {row.confidence < .8 && <small>원본 확인이 필요한 내역입니다.</small>}
-                        {row.path && <button type="button" onClick={() => setOriginal(row.path)}>이 내역의 원본 보기</button>}
                     </article>)}
-                    {!loading && !filtered.length && <p className="team-card-usage__empty">{rows.length ? '검색에 맞는 내역이 없습니다.' : '조회 가능한 상세내역이 없습니다. 아래 원본에서 확인해 주세요.'}</p>}
+                    {!loading && !filtered.length && <p className="team-card-usage__empty">{rows.length ? '검색에 맞는 내역이 없습니다.' : '조회 가능한 상세내역이 없습니다. 연결된 원본에서 확인해 주세요.'}</p>}
                 </div>
                 {inline && (rows.length > 3 || expanded) && <button type="button" className="team-card-usage__more" aria-expanded={expanded} onClick={() => { setExpanded(value => !value); setSearch(''); setCategory('ALL'); setLimit(30); }}>{expanded ? '간단히 보기' : `전체 ${rows.length}건 펼치기`}</button>}
                 {expanded && filtered.length > limit && <button type="button" className="team-card-usage__more" onClick={() => setLimit(value => value + 30)}>사용내역 더 보기 ({filtered.length - limit}건)</button>}

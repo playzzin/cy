@@ -99,7 +99,8 @@ async function build() {
                 if (width === 390 || width === 1366) await page.screenshot({ path: path.join(output, `card-details-${width}.png`) });
                 const bounds = await detail.boundingBox();
                 assert.ok(bounds.x >= -1 && bounds.x + bounds.width <= width + 1);
-                await detail.getByRole('button', { name: '이 내역의 원본 보기', exact: true }).first().click();
+                assert.equal(await detail.locator('.team-card-usage__rows button').count(), 0, 'Usage rows contain details only');
+                await cards.locator('.trd-card-original__photos button').first().click();
                 await page.getByTitle('사용내역서.pdf PDF 원본').waitFor();
                 await page.getByRole('button', { name: '청구서 파일 닫기', exact: true }).click();
                 await detail.waitFor();
