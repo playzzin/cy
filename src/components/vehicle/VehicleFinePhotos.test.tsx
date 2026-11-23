@@ -5,9 +5,25 @@ import VehicleFinePhotos from './VehicleFinePhotos';
 import { vehicleFineImportService } from '../../services/vehicleFineImportService';
 import type { VehicleExpenseRecord } from '../../types/vehicle';
 
-jest.mock('../../services/vehicleFineImportService', () => ({ vehicleFineImportService: { getAttachment: jest.fn(), removeAttachment: jest.fn() } }));
+jest.mock('../../services/vehicleFineImportService', () => ({ vehicleFineImportService: { getDetails: jest.fn(), getAttachment: jest.fn(), removeAttachment: jest.fn() } }));
 jest.mock('../common/OriginalDocumentThumbnail', () => ({ VehicleFineThumbnail: ({ label }: { label: string }) => <span role="img" aria-label={label} /> }));
 const expenses = ['first', 'second'].map((id, index) => ({ id, vehicleId: 'test', date: `2026-11-0${index + 1}`, type: 'FINE', amount: 32000, payer: 'COMPANY', fineNotice: { sourceFileName: `${id}.png` } } as VehicleExpenseRecord));
+
+test('월대장의 고지서 상세는 자동 표시하고 남아 있는 사진은 연결된 원본으로 바로 연다', async () => {
+    const anchor = { ...expenses[0], id: 'vehicle-ledger__sample', fineNotice: undefined, amount: 64000 };
+    jest.mocked(vehicleFineImportService.getDetails).mockResolvedValue([{ expenseId: anchor.id, notices: [
+        { ...expenses[0], attachmentExpenseId: anchor.id, originalAvailable: true, fineNotice: { ...expenses[0].fineNotice!, sourceSha256: 'a'.repeat(64), violationLocation: '보존된 위반장소' } },
+        { ...expenses[1], attachmentExpenseId: anchor.id, originalAvailable: false },
+    ] }]);
+    render(<VehicleFinePhotos expenses={[anchor]} vehiclePlate="검증차량" gallery />);
+    expect(await screen.findByText('보존된 위반장소')).toBeVisible();
+    expect(screen.getByText('원본 파일 없음 · 상세정보 보존')).toBeVisible();
+    expect(vehicleFineImportService.getDetails).toHaveBeenCalledWith([anchor.id]);
+    fireEvent.click(screen.getByRole('button', { name: /2026-11-01.*원본 보기/ }));
+    await screen.findByAltText('과태료 고지서 원본');
+    expect(vehicleFineImportService.getAttachment).toHaveBeenLastCalledWith('first', anchor.id);
+    expect(screen.queryByRole('button', { name: '선택한 파일 삭제' })).not.toBeInTheDocument();
+});
 
 test('selected notice deletion is confirmed, failure is retryable and the second notice remains', async () => {
     const remove = jest.mocked(vehicleFineImportService.removeAttachment);
@@ -110,7 +126,7 @@ test('빠르게 닫은 뒤 완료된 요청은 사진 URL을 만들지 않는다
 test('고지서가 없는 기존 과태료는 금액을 유지하고 불필요한 원본 조회를 막는다', () => {
     render(<VehicleFinePhotos expenses={[{ ...expenses[0], fineNotice: undefined }]} vehiclePlate="12가3456" gallery />);
     expect(screen.getByText('32,000원')).toBeVisible();
-    expect(screen.getByRole('button', { name: '12가3456 등록된 고지서 없음' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /32,000원 원본 보기/ })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: /32,000원 원본 보기/ }));
     expect(vehicleFineImportService.getAttachment).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

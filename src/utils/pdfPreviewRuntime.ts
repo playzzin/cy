@@ -16,8 +16,10 @@ class LocalPdfDataFactory {
     }
 }
 
+export const openPdfDocument = (url: string) => getDocument({ url, BinaryDataFactory: LocalPdfDataFactory, useWorkerFetch: false });
+
 export function renderPdfThumbnail(url: string, canvas: HTMLCanvasElement) {
-    const task = getDocument({ url, BinaryDataFactory: LocalPdfDataFactory, useWorkerFetch: false });
+    const task = openPdfDocument(url);
     const promise = task.promise.then(async document => {
         const page = await document.getPage(1);
         const original = page.getViewport({ scale: 1 });

@@ -47,7 +47,47 @@ const buildExpense = (patch: Partial<VehicleExpenseRecord>): VehicleExpenseRecor
 
 const buildDependencies = (): jest.Mocked<VehicleMonthlyLedgerMutationDependencies> => ({
   applyExpenseChanges: jest.fn().mockResolvedValue(undefined),
-  recordOperation: jest.fn().mockResolvedValue(undefined)
+  recordOperation: jest.fn().mockResolvedValue(undefined),
+  resolveFineSources: jest.fn().mockImplementation(async ids => ids.map((expenseId: string) => ({ expenseId, notices: [] })))
+});
+
+test('월대장 저장은 원본을 합계에 연결하고 재저장·금액 수정·0원에서도 유지한다', async () => {
+  const dependencies = buildDependencies();
+  const source = buildExpense({ id: 'notice', type: 'FINE', amount: 32000, fineNotice: { sourceFileName: 'notice.png' } as any });
+  const input = { yearMonth: '2026-07', visibleRows: [{ row: buildRow({ amounts: { FINE: 40000 } }) }],
+    originalExpenses: [source], expenseTypes: ['FINE'] as VehicleExpenseType[], dependencies };
+  await saveVehicleMonthlyLedgerMutation(input);
+  const first = dependencies.applyExpenseChanges.mock.calls[0][0];
+  expect(first.upserts).toEqual([expect.objectContaining({ amount: 40000, fineSourceExpenseIds: ['notice'] })]);
+  expect(first.cancelIds).toEqual(['notice']);
+  dependencies.resolveFineSources.mockResolvedValue([{ expenseId: first.upserts[0].id, notices: [source] }]);
+  await saveVehicleMonthlyLedgerMutation({ ...input, originalExpenses: first.upserts as VehicleExpenseRecord[],
+    visibleRows: [{ row: buildRow({ amounts: { FINE: 0 } }) }] });
+  expect(dependencies.applyExpenseChanges.mock.calls[1][0].upserts).toEqual([expect.objectContaining({ amount: 0, fineSourceExpenseIds: ['notice'] })]);
+  expect(dependencies.applyExpenseChanges.mock.calls[1][0].cancelIds).toEqual([]);
+});
+
+test('기존 원본 연결을 확인할 수 없으면 금융 내역을 변경하기 전에 저장을 중단한다', async () => {
+  const dependencies = buildDependencies();
+  const aggregate = buildExpense({ id: 'vehicle-ledger__2026-07__vehicle-1__2026-07-01__2026-07-31__FINE__BILLING_TARGET', type: 'FINE', fineSourceExpenseIds: ['lost-source'] });
+  const input = { yearMonth: '2026-07', visibleRows: [{ row: buildRow({ amounts: { FINE: 10000 } }) }], originalExpenses: [aggregate], expenseTypes: ['FINE'] as VehicleExpenseType[], dependencies };
+  await expect(saveVehicleMonthlyLedgerMutation(input)).rejects.toThrow('고지서 연결');
+  expect(dependencies.applyExpenseChanges).not.toHaveBeenCalled();
+  dependencies.resolveFineSources.mockRejectedValue(new Error('offline'));
+  await expect(saveVehicleMonthlyLedgerMutation(input)).rejects.toThrow('offline');
+  expect(dependencies.applyExpenseChanges).not.toHaveBeenCalled();
+});
+
+test('배정 기간을 분리하면 각 기간 원본만 보존하고 겹치는 기간은 거부한다', async () => {
+  const dependencies = buildDependencies();
+  const sources = [10, 20].map(day => buildExpense({ id: `notice-${day}`, type: 'FINE', date: `2026-07-${day}`, fineNotice: {} as any }));
+  const rows = [{ row: buildRow({ segment: { startDate: '2026-07-01', endDate: '2026-07-15' } }) }, { row: buildRow({ segment: { startDate: '2026-07-16', endDate: '2026-07-31' } }) }];
+  const input = { yearMonth: '2026-07', visibleRows: rows, originalExpenses: sources, expenseTypes: ['FINE'] as VehicleExpenseType[], dependencies };
+  await saveVehicleMonthlyLedgerMutation(input);
+  expect(dependencies.applyExpenseChanges.mock.calls[0][0].upserts.map(row => row.fineSourceExpenseIds)).toEqual([['notice-10'], ['notice-20']]);
+  dependencies.applyExpenseChanges.mockClear();
+  await expect(saveVehicleMonthlyLedgerMutation({ ...input, visibleRows: [...rows, rows[0]] })).rejects.toThrow('기간');
+  expect(dependencies.applyExpenseChanges).not.toHaveBeenCalled();
 });
 
 test('정비대장 원본은 취소하거나 복제하지 않고 수동 추가분만 저장한다', async () => {
@@ -340,6 +380,7 @@ describe('vehicle ledger diagnostic isolation at the closed SDK boundary (not se
     }));
     dependencies = {
       applyExpenseChanges: jest.fn(params => actualVehicle.applyVehicleExpenseChanges(params)),
+      resolveFineSources: jest.fn().mockResolvedValue([]),
       recordOperation: jest.fn(async (_input: Parameters<VehicleMonthlyLedgerMutationDependencies['recordOperation']>[0]) => { events.push('record'); })
     };
   });

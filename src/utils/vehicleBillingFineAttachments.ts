@@ -7,7 +7,8 @@ export function getVehicleBillingFineExpenses(doc: VehicleBillingDocument, expen
   const expenseIds = new Set(expenses.map(expense => expense.id));
   const lines = (doc.lineItems || []).filter(line => line.sourceType !== 'manual' && normalizeVehicleExpenseType(line.category, line.label, line.id) === 'FINE');
   return expenses.filter(expense => {
-    if (!expense.fineNotice?.sourceSha256?.trim() || expense.fineNotice.attachmentRemoved || expense.status === 'CANCELLED' || expense.cancelledAt || expense.date.slice(0, 7) !== doc.yearMonth) return false;
+    const hasNotice = expense.fineNotice?.sourceSha256?.trim() || expense.fineSourceExpenseIds?.length || expense.id.startsWith('vehicle-ledger__');
+    if (!hasNotice || expense.fineNotice?.attachmentRemoved || expense.status === 'CANCELLED' || expense.cancelledAt || expense.date.slice(0, 7) !== doc.yearMonth) return false;
     if (doc.vehicleId ? expense.vehicleId !== doc.vehicleId : !doc.vehiclePlate || expense.vehiclePlate !== doc.vehiclePlate) return false;
     if (normalizeVehicleExpenseType(expense.type, expense.note, expense.id) !== 'FINE') return false;
     return lines.some(line => {

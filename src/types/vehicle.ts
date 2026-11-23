@@ -179,6 +179,8 @@ export interface VehicleExpenseRecord {
     evidenceUrl?: string; // Receipt Image
     importSource?: 'GEMINI_FINE_NOTICE' | 'GEMINI_TOLL_USAGE';
     fineNotice?: VehicleFineNoticeMeta;
+    /** Original notice records retained when a monthly aggregate replaces them. */
+    fineSourceExpenseIds?: string[];
     tollUsage?: VehicleTollUsageMeta;
     operationId?: string;
     lastOperationId?: string;
@@ -186,4 +188,10 @@ export interface VehicleExpenseRecord {
     createdAt?: Timestamp | FieldValue;
     updatedAt?: Timestamp | FieldValue;
     cancelledAt?: Timestamp | FieldValue | null;
+}
+
+/** Read-only document view; never used to add financial ledger rows. */
+export interface VehicleFineNoticeDetail extends VehicleExpenseRecord {
+    attachmentExpenseId?: string;
+    originalAvailable?: boolean;
 }

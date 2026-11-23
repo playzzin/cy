@@ -48,7 +48,7 @@ export async function readVehicleFineSource(hash: unknown) {
         return { base64, mimeType: fineSourceMimeType(bytes) };
     } catch (error) {
         if (Number((error as { code?: unknown }).code) === 404) {
-            throw new functions.https.HttpsError('not-found', '이전 등록 건은 사진이 저장되지 않았습니다. 과태료 AI 등록에서 같은 고지서를 다시 분석하면 기존 내역에 사진이 연결됩니다.');
+            throw new functions.https.HttpsError('not-found', '현재 원본 파일을 찾을 수 없습니다. 저장된 과태료 상세정보는 화면에서 확인할 수 있습니다.');
         }
         throw error;
     }

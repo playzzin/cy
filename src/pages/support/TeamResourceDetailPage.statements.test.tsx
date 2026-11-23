@@ -61,7 +61,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     (CardStatementFilesDialog as jest.Mock).mockImplementation(({ onClose }) => <div role="dialog" aria-label="원본 파일 확인"><button onClick={onClose}>원본 닫기</button></div>);
     (VehicleFinePhotos as jest.Mock).mockImplementation(({ triggerLabel }) => <button>{triggerLabel}</button>);
-    (TeamCardStatementDetails as jest.Mock).mockImplementation(({ onClose }) => <div role="dialog" aria-label="사용 상세"><button onClick={onClose}>상세 닫기</button></div>);
+    (TeamCardStatementDetails as jest.Mock).mockImplementation(({ onClose, inline }) => inline ? <div>자동 사용내역</div> : <div role="dialog" aria-label="사용 상세"><button onClick={onClose}>상세 닫기</button></div>);
     window.matchMedia = jest.fn().mockReturnValue({ matches: false });
     (accommodationService.getAccommodations as jest.Mock).mockResolvedValue([]);
     (accommodationService.getAssignments as jest.Mock).mockResolvedValue([]);
@@ -117,6 +117,7 @@ test('카드 원본 빠른보기에서 파일 수를 확인하고 바로 연다'
     const open = shortcuts.getByRole('button', { name: '검증카드 카드 원본 보기' });
     expect(open).toHaveTextContent('원본 2개');
     expect(shortcuts.getByText(/끝번호 1234/)).toBeVisible();
+    expect(shortcuts.getByText('자동 사용내역')).toBeVisible();
     expect(shortcuts.queryByRole('button', { name: '파일없는카드 카드 원본 보기' })).not.toBeInTheDocument();
     fireEvent.click(open);
     expect(await screen.findByRole('dialog')).toBeInTheDocument();

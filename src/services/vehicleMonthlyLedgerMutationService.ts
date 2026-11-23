@@ -50,6 +50,7 @@ export interface VehicleMonthlyLedgerMutationDependencies {
     operationId?: string;
   }) => Promise<void>;
   recordOperation: (input: CreateSupportWriteOperationLogInput) => Promise<unknown>;
+  resolveFineSources: (ids: string[]) => Promise<Array<{ expenseId: string; notices: VehicleExpenseRecord[] }>>;
 }
 
 export interface VehicleMonthlyLedgerSaveInput<TRow extends VehicleMonthlyLedgerMutationRow> {
@@ -71,7 +72,8 @@ export interface VehicleMonthlyLedgerSaveResult {
 
 const defaultDependencies: VehicleMonthlyLedgerMutationDependencies = {
   applyExpenseChanges: (params) => vehicleService.applyVehicleExpenseChanges(params),
-  recordOperation: (input) => supportWriteOperationLogService.recordOperation(input)
+  recordOperation: (input) => supportWriteOperationLogService.recordOperation(input),
+  resolveFineSources: async (ids) => (await import('./vehicleFineImportService')).vehicleFineImportService.getDetails(ids, false)
 };
 
 const buildDependencies = (
@@ -191,8 +193,27 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
 
   const expenseUpserts: Array<Partial<VehicleExpenseRecord> & { id: string }> = [];
   const expenseUpsertIds = new Set<string>();
+  const fineAnchors = expenseTypes.includes('FINE') ? originalExpenses.filter(expense => expense.type === 'FINE'
+    && expense.status !== 'CANCELLED' && !expense.cancelledAt && isVisibleExpense(expense)) : [];
+  const aggregates = fineAnchors.filter(expense => !expense.fineNotice
+    && (expense.id.startsWith('vehicle-ledger__') || expense.fineSourceExpenseIds?.length));
+  const resolved = aggregates.length ? await deps.resolveFineSources(aggregates.map(expense => expense.id)) : [];
+  for (const aggregate of aggregates) {
+    const result = resolved.find(item => item.expenseId === aggregate.id);
+    if (!result || aggregate.fineSourceExpenseIds?.some(id => !result.notices.some(notice => notice.id === id))) {
+      throw new Error('고지서 연결을 확인하지 못했습니다. 잠시 후 다시 저장해 주세요.');
+    }
+  }
+  const fineSources = Array.from(new Map([...fineAnchors.filter(expense => expense.fineNotice),
+    ...resolved.flatMap(item => item.notices)].map(expense => [expense.id, expense])).values());
+  if (fineSources.some(source => rowsToProcess.filter(({ row }) => source.vehicleId === row.vehicle.id
+    && source.date >= row.segment.startDate && source.date <= row.segment.endDate).length !== 1)) {
+    throw new Error('고지서와 월별대장 기간이 일치하지 않습니다. 배정 기간을 확인해 주세요.');
+  }
   rowsToProcess.forEach(({ row }) => {
     expenseTypes.forEach((type) => {
+      const sourceIds = type === 'FINE' ? fineSources.filter(source => source.vehicleId === row.vehicle.id
+        && source.date >= row.segment.startDate && source.date <= row.segment.endDate).map(source => source.id) : [];
       const repairAmount = type === 'REPAIR' ? originalExpenses.filter(expense =>
         isRepairLedgerExpense(expense) && expense.vehicleId === row.vehicle.id && expense.status !== 'CANCELLED'
         && expense.date >= row.segment.startDate && expense.date <= row.segment.endDate
@@ -201,7 +222,7 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
         ? Math.round(((row.amounts[type] ?? 0) - repairAmount) * 100) / 100
         : row.amounts[type] ?? 0;
       if (amount < 0) throw new Error('수리비가 연결된 정비내역보다 작습니다. 정비내역 대장에서 금액을 수정한 뒤 다시 조회해 주세요.');
-      if (amount <= 0) return;
+      if (amount <= 0 && !sourceIds.length) return;
       const id = buildExpenseId(yearMonth, row, type);
       expenseUpsertIds.add(id);
       expenseUpserts.push({
@@ -213,6 +234,7 @@ export const saveVehicleMonthlyLedgerMutation = async <TRow extends VehicleMonth
         amount,
         payer: 'COMPANY',
         fineChargeTarget: type === 'FINE' ? row.fineChargeTarget : undefined,
+        fineSourceExpenseIds: type === 'FINE' ? sourceIds : undefined,
         fineDriverBillingTarget: type === 'FINE' && row.fineChargeTarget === 'DRIVER'
           ? row.fineDriverBillingTarget
           : undefined,

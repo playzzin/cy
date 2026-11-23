@@ -74,13 +74,13 @@ export function CardStatementThumbnail({ path, label }: { path: string; label: s
     return <OriginalDocumentThumbnail key={path} load={load} label={label} />;
 }
 
-export function VehicleFineThumbnail({ expenseId, label }: { expenseId: string; label: string }) {
+export function VehicleFineThumbnail({ expenseId, attachmentExpenseId, label }: { expenseId: string; attachmentExpenseId?: string; label: string }) {
     const load = useCallback(async (): Promise<OriginalThumbnailSource> => {
         const { vehicleFineImportService } = await import('../../services/vehicleFineImportService');
-        const file = await vehicleFineImportService.getAttachment(expenseId);
+        const file = await vehicleFineImportService.getAttachment(expenseId, attachmentExpenseId);
         const bytes = Uint8Array.from(atob(file.base64), char => char.charCodeAt(0));
         const url = URL.createObjectURL(new Blob([bytes], { type: file.mimeType }));
         return { url, release: () => URL.revokeObjectURL(url), kind: file.mimeType === 'application/pdf' ? 'pdf' : file.mimeType.startsWith('image/') ? 'image' : 'file' };
-    }, [expenseId]);
-    return <OriginalDocumentThumbnail key={expenseId} load={load} label={label} />;
+    }, [expenseId, attachmentExpenseId]);
+    return <OriginalDocumentThumbnail key={`${expenseId}:${attachmentExpenseId || ''}`} load={load} label={label} />;
 }

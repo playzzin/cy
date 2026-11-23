@@ -1695,10 +1695,11 @@ const TeamResourceDetailPage: React.FC = () => {
                                                         aria-label={`${resource.card?.name || resource.cardLabel} 카드 원본 보기`}
                                                         onClick={() => setStatementSelection({ scope: statementScope, key: resource.key })}>
                                                         원본 {resource.statementPaths.length}개 보기</button>
-                                                    <button type="button" disabled={isBusy} className="trd-card-original__details"
-                                                        aria-label={`${resource.card?.name || resource.cardLabel} 사용 상세 보기`}
-                                                        onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, view: 'details' })}>사용 상세 보기</button>
+
                                                 </div>
+                                                <TeamCardStatementDetails inline yearMonth={selectedMonth} cardId={resource.cardId}
+                                                    cardLast4={resource.card?.last4 || ''} cardName={resource.card?.name || resource.cardLabel}
+                                                    paths={resource.statementPaths} transactions={resource.transactions} dateRanges={resource.dateRanges} />
                                             </article>)}
                                             {!selectedCardResources.some(resource => resource.statementPaths.length > 0) && <p>{isBusy ? '카드 원본을 불러오는 중…' : '선택한 달에 연결된 카드 원본이 없습니다.'}</p>}
                                         </div>

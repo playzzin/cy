@@ -19,6 +19,19 @@ const payload = { file: { storagePath: 'source.pdf', sha256: 'same-file', status
 const props = { yearMonth: '2026-11', cardId: 'card-a', cardLast4: '1234', cardName: '검증카드', paths: ['source.pdf'], transactions: [], dateRanges: [{ startDate: '2026-11-01', endDate: '2026-11-10' }], onClose: jest.fn() };
 beforeEach(() => { jest.clearAllMocks(); jest.mocked(cardStatementImportService.getFileDetail).mockResolvedValue(payload); });
 
+test('카드 상세는 화면 진입 시 자동 조회하고 같은 화면에서 전체 내역을 펼친다', async () => {
+    jest.mocked(cardStatementImportService.getFileDetail).mockResolvedValue({ ...payload, results: [{ ...payload.results[0], transactions: Array.from({ length: 5 }, (_, i) => ({ ...rows[0], id: `row-${i}`, merchant: `검증 가맹점 ${i}` })) }] } as any);
+    render(<TeamCardStatementDetails {...props} inline />);
+    await screen.findByText('검증 가맹점 0');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('article')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: '전체 5건 펼치기' }));
+    expect(screen.getAllByRole('article')).toHaveLength(5);
+    expect(cardStatementImportService.getFileDetail).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getAllByRole('button', { name: '이 내역의 원본 보기' })[0]);
+    expect(CardStatementFilesDialog).toHaveBeenLastCalledWith(expect.objectContaining({ initialPath: 'source.pdf' }), expect.anything());
+});
+
 test('다른 카드·다른 월·배정기간 밖의 상세와 중복 원본은 합계에서 제외한다', () => {
     const other = { ...payload, results: [...payload.results, { ...payload.results[0], id: 'other-card', matchedCardId: 'card-b' },
         { ...payload.results[0], id: 'other-dates', transactions: [{ ...rows[0], id: 'late', date: '2026-11-15' }, { ...rows[0], id: 'old', date: '2026-10-05' }] } as any] };
