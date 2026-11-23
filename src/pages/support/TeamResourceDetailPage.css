@@ -331,6 +331,7 @@
 
 .trd-tab-stack {
     display: grid;
+    min-width: 0;
     gap: 12px;
 }
 
@@ -339,8 +340,14 @@
 }
 
 .trd-ledger-table {
-    min-width: 980px;
+    min-width: 0;
+    width: 100%;
     table-layout: fixed;
+}
+
+.trd-page .trd-ledger-table :is(th, td) {
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .trd-ledger-table th {
@@ -730,33 +737,29 @@
     }
 
     .trd-page .tw-kpi-grid {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
-        overflow-x: auto;
-        overscroll-behavior-x: contain;
+        overflow: visible;
         padding: 0 1px 4px;
-        scroll-snap-type: x proximity;
-        -webkit-overflow-scrolling: touch;
     }
 
     .trd-detail-menu {
-        display: flex;
-        gap: 8px;
-        margin: 0 -2px;
-        padding: 0 2px 2px;
-        overflow-x: auto;
-        overscroll-behavior-x: contain;
-        -webkit-overflow-scrolling: touch;
-        scroll-snap-type: x proximity;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 4px;
+        margin: 0;
+        padding: 0;
     }
 
     .trd-detail-menu__item {
-        flex: 0 0 132px;
-        grid-template-columns: 34px minmax(0, 1fr);
-        grid-template-rows: auto auto;
+        min-width: 0;
+        grid-template-columns: minmax(0, 1fr);
+        justify-items: center;
+        text-align: center;
+        gap: 4px;
         min-height: 76px;
-        padding: 10px;
-        scroll-snap-align: start;
+        padding: 8px 2px;
     }
 
     .trd-detail-menu__icon {
@@ -769,37 +772,34 @@
     }
 
     .trd-detail-menu__meta {
-        grid-column: 2;
-        font-size: 12px;
-        white-space: normal;
+        display: none;
     }
 
     .trd-mobile-detail-tabs {
-        display: flex;
-        gap: 6px;
-        overflow-x: auto;
-        margin: 0 -2px 12px;
-        padding: 0 2px 3px;
-        overscroll-behavior-x: contain;
-        scroll-snap-type: x proximity;
-        -webkit-overflow-scrolling: touch;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 4px;
+        min-width: 0;
+        margin: 0 0 12px;
+        padding: 0;
     }
 
     .trd-mobile-detail-tabs__item {
-        flex: 0 0 auto;
-        min-height: 38px;
+        min-width: 0;
+        min-height: 54px;
         display: inline-flex;
+        flex-direction: column;
+        justify-content: center;
         align-items: center;
-        gap: 5px;
-        padding: 0 10px;
+        gap: 3px;
+        padding: 6px 2px;
         border: 1px solid #d8dee8;
-        border-radius: 999px;
+        border-radius: 10px;
         background: #fff;
         color: #64748b;
         font-size: 12px;
         font-weight: 900;
         white-space: nowrap;
-        scroll-snap-align: start;
     }
 
     .trd-mobile-detail-tabs__item--active {
@@ -826,6 +826,16 @@
     .trd-summary-list__total {
         min-height: 58px !important;
     }
+}
+
+@media screen {
+.trd-page .tw-detail-panel {
+    min-width: 0;
+    container-type: inline-size;
+}
+
+/* Use the available panel width, including tablet/desktop sidebars. */
+@container (max-width: 980px) {
 
     .trd-page .tw-output-table-wrap--v2 {
         display: block;
@@ -870,6 +880,7 @@
     }
 
     .trd-page .trd-ledger-table td {
+        height: auto;
         min-height: 34px;
         display: flex;
         align-items: flex-start;
@@ -895,6 +906,11 @@
         border-bottom: 0;
     }
 
+    .trd-page .trd-ledger-table td > * {
+        min-width: 0;
+        max-width: 100%;
+    }
+
     .trd-page .trd-ledger-table .tw-number {
         text-align: right;
     }
@@ -914,6 +930,16 @@
     .trd-page .trd-ledger-table .tw-table-empty::before {
         content: none;
     }
+}
+
+@container (min-width: 600px) and (max-width: 980px) {
+    .trd-page .trd-ledger-table tbody {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .trd-page .trd-ledger-table tr + tr { margin-top: 0; }
+}
 }
 
 @media screen and (max-width: 768px) {

@@ -58,7 +58,7 @@ async function build() {
     const browser = await launch();
     const results = [];
     try {
-        for (const width of [390, 360, 430, 768, 1366]) {
+        for (const width of [390, 360, 430, 768, 1024, 1366]) {
             const context = await browser.newContext({ viewport: { width, height: 844 } });
             await context.route('**/*', route => {
                 const url = new URL(route.request().url());
@@ -78,6 +78,22 @@ async function build() {
                 await page.goto(`${origin}/support/team-resource-detail`);
                 // Exercise scrollbars that consume layout width, even in headless Chrome.
                 await page.addStyleTag({ content: '.original-pdf__page::-webkit-scrollbar { width: 16px; height: 16px; }' });
+                await page.evaluate(() => document.fonts.ready);
+                for (const label of ['종합', '숙소', '차량', '카드', '경비']) {
+                    await page.getByRole('tab', { name: new RegExp(`^${label}`) }).click();
+                    const layout = await page.locator('.trd-page').evaluate(root => {
+                        const visible = el => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+                        const tabs = [...root.querySelectorAll('[role="tablist"]')].filter(el => visible(el) && el.querySelectorAll('[role="tab"]').length === 5);
+                        const overflowing = [...root.querySelectorAll('*')].filter(el => visible(el) && ['auto', 'scroll'].includes(getComputedStyle(el).overflowX) && el.scrollWidth > el.clientWidth + 1);
+                        const clippedCells = [...root.querySelectorAll('.trd-ledger-table td')].filter(el => visible(el) && el.scrollWidth > el.clientWidth + 1);
+                        return { allTabsFit: tabs.length > 0 && tabs.every(el => el.scrollWidth <= el.clientWidth + 1 && [...el.children].every(child => child.getBoundingClientRect().right <= innerWidth)), horizontalScrollers: overflowing.map(el => el.className), clippedCells: clippedCells.map(el => el.dataset.label), pageFits: document.documentElement.scrollWidth <= innerWidth + 1 };
+                    });
+                    assert.equal(layout.allTabsFit, true, `${width}px ${label}: all five tabs fit`);
+                    assert.deepEqual(layout.horizontalScrollers, [], `${width}px ${label}: no horizontal content scrolling`);
+                    assert.deepEqual(layout.clippedCells, [], `${width}px ${label}: long values wrap instead of clipping`);
+                    assert.equal(layout.pageFits, true, `${width}px ${label}: page fits`);
+                }
+                if (width === 390) await page.locator('.trd-mobile-detail-tabs').screenshot({ path: path.join(output, 'tabs-390.png') });
                 await page.getByRole('tab', { name: /^카드/ }).click();
                 const cards = page.getByRole('region', { name: '카드 원본 빠른보기' });
                 await cards.scrollIntoViewIfNeeded();
