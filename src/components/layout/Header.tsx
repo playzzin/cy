@@ -354,6 +354,9 @@ const Header: React.FC<HeaderProps> = ({
     const siteLandingPath = SITE_HOME_PATHS[currentSite];
     const isSiteLayerMode = Boolean(siteLandingPath);
     const featuredMenu = currentSite === 'nation' ? '모집공고' : currentSite === ALLIANCE_SITE_KEY ? INVESTMENT_LABEL : undefined;
+    const hidesCamera = !isSiteLayerMode
+        && [currentSite, currentPosition, resolvePositionLabel(currentPosition, positions), safeCurrentSiteData.name]
+            .some(value => ['팀장', 'leader', 'teamlead', 'teamleader'].includes(normalizePositionValue(value)));
     const hidesCalculator = !isSiteLayerMode && currentPosition !== 'full'
         && [currentPosition, resolvePositionLabel(currentPosition, positions), safeCurrentSiteData.name]
             .some(value => [
@@ -484,6 +487,7 @@ const Header: React.FC<HeaderProps> = ({
 
     const hasHeaderActionAccess = (item: MenuItem): boolean => {
         if (item.hide || (hidesCalculator && String(item.action || '').trim() === 'calculator')) return false;
+        if (hidesCamera && String(item.action || '').trim() === 'camera') return false;
         if (isPrivilegedHeaderUser || (canPreviewUsers && item.action === 'position')) return true;
 
         const allowedRoles = Array.isArray(item.roles)
