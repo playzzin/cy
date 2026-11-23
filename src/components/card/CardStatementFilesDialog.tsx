@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import OriginalDocumentPreview from '../common/OriginalDocumentPreview';
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import {
   cardStatementAttachmentService, getCardStatementAttachmentError, getCardStatementFileName,
@@ -43,13 +45,14 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
       setRemoveError(cause instanceof Error ? cause.message : '파일 삭제에 실패했습니다. 다시 시도해 주세요.');
     } finally { removingRef.current = false; setRemoving(false); }
   };
+  const returnFocus = useRef<HTMLElement | null>(null);
   const defaultPath = [...files].reverse().find(path => isImageName(fileNames?.[path] || getCardStatementFileName(path))) || files[files.length - 1] || '';
   const [selected, setSelected] = useState(() => defaultPath);
   const [loaded, setLoaded] = useState<{ path: string; link: CardStatementAttachmentLink } | null>(null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
-  const [previewError, setPreviewError] = useState(false);
   const activePath = files.includes(selected) ? selected : defaultPath;
+  const activeIndex = files.indexOf(activePath);
   const activeName = fileNames?.[activePath] || getCardStatementFileName(activePath);
   const link = loaded?.path === activePath ? loaded.link : null;
   const isImage = isImageName(getCardStatementFileName(activePath)) || isImageName(activeName);
@@ -61,7 +64,7 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
   useEffect(() => {
     let active = true;
     let release: (() => void) | undefined;
-    setLoaded(null); setError(''); setPreviewError(false);
+    setLoaded(null); setError('');
     if (activePath) {
       cardStatementAttachmentService.resolve(activePath).then(resolved => {
         if (!active) { resolved.release(); return; }
@@ -75,16 +78,24 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
   return (
     <Dialog.Root open onOpenChange={open => { if (!open && !removingRef.current) onClose(); }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[100] bg-slate-900/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-[101] max-h-[90vh] w-[calc(100%-1.5rem)] max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
-          <div className="flex items-start justify-between gap-3">
-            <div><Dialog.Title className="break-words text-lg font-extrabold text-slate-900">{title}</Dialog.Title><Dialog.Description className="mt-1 text-sm text-slate-500">연결된 {files.length}개 파일 중 확인할 원본을 선택해 주세요.</Dialog.Description></div>
-            <button type="button" disabled={removing} onClick={onClose} aria-label="청구서 파일 닫기" className="shrink-0 rounded-lg border px-3 py-2 text-sm">닫기</button>
+        <Dialog.Overlay className="original-files-overlay" />
+        <Dialog.Content className="original-files-dialog"
+          onOpenAutoFocus={() => { returnFocus.current = document.activeElement as HTMLElement; }}
+          onCloseAutoFocus={event => { event.preventDefault(); if (returnFocus.current?.isConnected) returnFocus.current.focus(); }}>
+          <div className="original-files-dialog__header">
+            <div><Dialog.Title>{title}</Dialog.Title><Dialog.Description>연결된 {files.length}개 파일 중 확인할 원본을 선택해 주세요.</Dialog.Description></div>
+            <button type="button" disabled={removing} onClick={onClose} aria-label="청구서 파일 닫기">닫기</button>
           </div>
-          <div className="my-4 max-h-64 space-y-2 overflow-y-auto" aria-label="청구서 파일 목록">
-            {files.map((path, index) => <div key={path} className="flex items-center gap-2"><button type="button" aria-pressed={activePath === path} onClick={() => setSelected(path)} className={`flex min-w-0 flex-1 gap-2 rounded-xl border p-3 text-left text-sm ${activePath === path ? 'border-indigo-400 bg-indigo-50 text-indigo-900' : 'border-slate-200 text-slate-700 hover:bg-slate-50'}`}><span className="shrink-0 text-slate-400">{index + 1}.</span><span className="break-all">{fileNames?.[path] || getCardStatementFileName(path)}</span></button>{/^card-(?:billing-statements|ledger-statements|statement-imports)\//.test(path) && <button type="button" disabled={removalDisabled || removing || !!confirmPath} aria-label={`${fileNames?.[path] || getCardStatementFileName(path)} 삭제`} onClick={() => { setConfirmPath(path); setRemoveError(''); }} className="shrink-0 rounded-lg border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700 disabled:opacity-40">삭제</button>}</div>)}
-            {!files.length && <p className="p-4 text-sm text-slate-500">연결된 파일이 없습니다. 업로드 내역에서 조회월과 원본을 확인해 주세요.</p>}
-          </div>
+          {!!files.length && <div className="original-files-dialog__navigation" aria-label="청구서 파일 목록">
+            <select disabled={removing || !!confirmPath} aria-label="청구서 원본 선택" value={activePath} onChange={event => setSelected(event.target.value)}>
+              {files.map((path, index) => <option key={path} value={path}>{index + 1}. {fileNames?.[path] || getCardStatementFileName(path)}</option>)}
+            </select>
+            <button type="button" aria-label="이전 원본" disabled={removing || !!confirmPath || activeIndex <= 0} onClick={() => setSelected(files[activeIndex - 1])}><ChevronLeft size={17} />이전</button>
+            <span aria-live="polite">{activeIndex + 1} / {files.length}</span>
+            <button type="button" aria-label="다음 원본" disabled={removing || !!confirmPath || activeIndex >= files.length - 1} onClick={() => setSelected(files[activeIndex + 1])}>다음<ChevronRight size={17} /></button>
+          </div>}
+          {!files.length && <p className="original-files-dialog__message">연결된 파일이 없습니다. 업로드 내역에서 조회월과 원본을 확인해 주세요.</p>}
+          {activePath && /^card-(?:billing-statements|ledger-statements|statement-imports)\//.test(activePath) && <button type="button" disabled={removalDisabled || removing || !!confirmPath} aria-label={`${activeName} 삭제`} onClick={() => { setConfirmPath(activePath); setRemoveError(''); }} className="self-start rounded border border-rose-200 px-3 py-2 text-sm font-bold text-rose-700 disabled:opacity-40">선택한 파일 삭제</button>}
           {removalDisabled && <p className="mb-3 text-sm text-amber-800">변경사항을 저장한 뒤 첨부파일을 삭제해 주세요.</p>}
           {confirmPath && <div role="group" aria-label="첨부파일 삭제 확인" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
             <p className="break-all font-bold">{fileNames?.[confirmPath] || getCardStatementFileName(confirmPath)}</p>
@@ -92,7 +103,7 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
             {removeError && <p role="alert" className="mt-2 font-bold">{removeError}</p>}
             <div className="mt-3 flex gap-2"><button type="button" disabled={removing} onClick={() => setConfirmPath('')} className="rounded-lg border bg-white px-3 py-2">돌아가기</button><button type="button" disabled={removing || removalDisabled} onClick={() => void remove()} className="rounded-lg bg-rose-700 px-3 py-2 font-bold text-white disabled:opacity-50">{removing ? '삭제 중…' : '확인, 파일 삭제'}</button></div>
           </div>}
-          {error && <div role="alert" className="rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800">
+          {error && <div role="alert" className="original-files-dialog__message">
             <p>{error}</p>
             {isDevAdminSessionEnabled() && <div className="mt-2">
               <p>개발용 샘플 계정은 실제 파일 조회용 로그인이 아닙니다. 실제 계정으로 전환한 뒤 파일을 다시 열어 주세요.</p>
@@ -100,21 +111,10 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
             </div>}
             <button type="button" onClick={() => setRetry(value => value + 1)} className="mt-2 rounded-lg border border-rose-200 bg-white px-3 py-2 font-bold">다시 시도</button>
           </div>}
-          {showDetailsLink && statementMonth && <a href={`/support/cards/statements?${detailParams.toString()}`} className="mb-4 inline-flex rounded-lg border border-indigo-200 px-4 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-50">Gemini 분석 · 상세내역 보기</a>}
-          {activePath && !error && !link && <p role="status" className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">원본 파일을 준비하는 중…</p>}
-          {link && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="break-all text-sm font-bold text-emerald-900">{activeName}</p>
-            {isImage && !previewError && <a href={link.url} target="_blank" rel="noopener noreferrer" aria-label="원본 사진 크게 보기" className="mt-3 block rounded-lg bg-white p-2">
-              <img key={activePath} src={link.url} alt={`${activeName} 원본 사진`} referrerPolicy="no-referrer" onError={() => setPreviewError(true)} className="mx-auto max-h-[55vh] max-w-full object-contain" />
-            </a>}
-            {isImage && previewError && <p role="status" className="mt-3 text-sm text-amber-900">사진 미리보기를 불러오지 못했습니다. 아래 원본 열기 버튼으로 확인해 주세요.</p>}
-            {isPdf && <iframe key={activePath} title={`${activeName} PDF 원본`} src={link.url} referrerPolicy="no-referrer" className="mt-3 h-[55vh] w-full rounded-lg border-0 bg-white" />}
-            <p className="mt-1 text-xs leading-5 text-emerald-800">아래 버튼을 눌러 원본을 여세요. 새 탭이 열리지 않으면 현재 탭에서 열 수 있습니다.</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <a href={link.url} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white">새 탭에서 원본 열기</a>
-              <a href={link.url} target="_self" referrerPolicy="no-referrer" className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700">현재 탭에서 열기</a>
-            </div>
-          </div>}
+          {showDetailsLink && statementMonth && <a href={`/support/cards/statements?${detailParams.toString()}`} className="original-files-dialog__details">Gemini 분석 · 상세내역 보기</a>}
+          {activePath && !error && !link && <p role="status" className="original-files-dialog__message">원본 파일을 준비하는 중…</p>}
+          {link && <OriginalDocumentPreview key={`${activePath}:${link.url}`} url={link.url} fileName={activeName}
+            kind={isImage ? 'image' : isPdf ? 'pdf' : 'file'} imageAlt={`${activeName} 원본 사진`} pdfTitle={`${activeName} PDF 원본`} />}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

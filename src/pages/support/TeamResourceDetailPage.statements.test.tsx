@@ -90,6 +90,19 @@ test('첨부 파일이 없는 카드의 원본 보기는 비활성화한다', as
     expect(row.queryByRole('button', { name: '상세내역' })).not.toBeInTheDocument();
 });
 
+test('카드 원본 빠른보기에서 파일 수를 확인하고 바로 연다', async () => {
+    setBills([makeBill({ statementAttachmentPaths: [firstPath, secondPath] })]);
+    await openTab();
+    const shortcuts = within(screen.getByRole('region', { name: '카드 원본 빠른보기' }));
+    const open = shortcuts.getByRole('button', { name: '검증카드 카드 원본 보기' });
+    expect(open).toHaveTextContent('원본 2개');
+    expect(open).toHaveTextContent('끝번호 1234');
+    expect(shortcuts.queryByRole('button', { name: '파일없는카드 카드 원본 보기' })).not.toBeInTheDocument();
+    fireEvent.click(open);
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(latestProps(CardStatementFilesDialog)).toMatchObject({ paths: [firstPath, secondPath], showDetailsLink: false });
+});
+
 test('카드 기본 정보가 없어도 청구서에 남은 원본을 연다', async () => {
     (cardService.getCards as jest.Mock).mockResolvedValue([]);
     setBills([makeBill({ cardId: 'archived-card', cardLabel: '이전카드' })]);
@@ -140,6 +153,8 @@ test('차량 청구에 연결된 과태료만 원본 보기로 전달한다', as
     (vehicleService.listAllVehicleExpenses as jest.Mock).mockResolvedValue([fine, { ...fine, id: 'other-fine' }, { ...fine, id: 'cancelled', status: 'CANCELLED' }]);
     await openTab('차량');
     await waitFor(() => expect(VehicleFinePhotos).toHaveBeenCalled());
+    expect(screen.getByRole('region', { name: '과태료 원본 빠른보기' })).toHaveTextContent('12가3456');
+    expect(screen.getByRole('region', { name: '과태료 원본 빠른보기' })).toHaveTextContent('32,000원');
     expect(latestProps(VehicleFinePhotos)).toMatchObject({ expenses: [fine], vehiclePlate: '12가3456', triggerLabel: '원본 보기' });
     expect(vehicleService.listAllVehicleExpenses).toHaveBeenCalledWith(undefined, month);
     // eslint-disable-next-line testing-library/no-unnecessary-act -- The month change also resolves a new expense fetch.
@@ -153,4 +168,13 @@ test('과태료 연결 조회 실패는 고지서 없음과 구분한다', async
     await openTab('차량');
     expect(await screen.findByText('조회 실패 · 새로고침해 주세요')).toBeInTheDocument();
     expect(VehicleFinePhotos).not.toHaveBeenCalled();
+});
+
+test('청구 합계가 0원이어도 연결된 과태료 원본은 빠른보기에서 열 수 있다', async () => {
+    setBills([], [{ ...vehicleBill, totalAmount: 0 }]);
+    (vehicleService.listAllVehicleExpenses as jest.Mock).mockResolvedValue([fine]);
+    await openTab('차량');
+    const shortcuts = within(screen.getByRole('region', { name: '과태료 원본 빠른보기' }));
+    expect(await shortcuts.findByRole('button', { name: '원본 보기' })).toBeEnabled();
+    expect(latestProps(VehicleFinePhotos).expenses).toEqual([fine]);
 });

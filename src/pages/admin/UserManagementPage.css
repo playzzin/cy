@@ -174,3 +174,55 @@
 .um-approval-notice.um-approval-success { justify-content: flex-start; background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
 
 .um-approval-search > div { min-width: 0; }
+
+.um-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.um-overview > button { text-align: left; padding: 16px 18px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; transition: border-color .15s, background .15s; }
+.um-overview > button:hover, .um-overview > button[aria-pressed=true] { border-color: #a5b4fc; background: #f8f9ff; }
+.um-overview span { color: #475569; font-size: 12px; font-weight: 650; }
+.um-overview strong { display: block; font-size: 28px; margin: 5px 0; letter-spacing: -.8px; color: #312e81; }
+.um-overview small { font-size: 12px; color: #64748b; margin-left: 5px; font-weight: 400; }
+.um-overview p { font-size: 11px; color: #64748b; margin: 0; }
+.um-list-position { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: #64748b; margin-top: 12px; }
+.um-list-position select { min-width: 0; max-width: 65%; padding: 7px 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; color: #334155; }
+.um-help { margin: 10px 0; }
+.um-role-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.um-role-options button { padding: 12px; text-align: left; border: 1px solid #dbe2eb; border-radius: 8px; color: #475569; }
+.um-role-options button[aria-pressed=true] { background: #eef2ff; border-color: #818cf8; color: #4338ca; box-shadow: 0 0 0 1px #818cf8; }
+.um-role-options strong { display: block; font-size: 13px; }
+.um-role-options small { display: block; font-size: 11px; line-height: 1.5; margin-top: 5px; }
+.um-change-preview { display: flex; flex-wrap: wrap; gap: 7px 18px; padding: 12px 18px; background: #eef2ff; color: #4338ca; font-size: 12px; }
+.um-change-preview strong { width: 100%; }
+.um-connection-dialog.cy-detail-dialog { width: min(900px, calc(100vw - 32px)); }
+.um-confirm-dialog.cy-detail-dialog { width: min(520px, calc(100vw - 32px)); }
+.um-confirm-dialog .cy-detail-dialog__header p { line-height: 1.8; overflow-wrap: anywhere; }
+.um-link-layout.um-link-layout-locked { grid-template-columns: minmax(0, 1fr); }
+.um-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px; }
+.um-button.um-danger { color: #be123c; border-color: #fecdd3 !important; background: #fff1f2; }
+.um-button.um-danger:hover { background: #ffe4e6; }
+.um-request-match { margin-top: 12px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; }
+.um-request-match .um-section-title { margin-bottom: 0; }
+.um-target-picker { margin-top: 10px; }
+.um-target-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.um-target-tools .um-checkbox { margin: 0; }
+.um-target-options { max-height: 290px; overflow-y: auto; }
+.um-target-option { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px; padding: 12px; margin: 5px 0; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; text-align: left; }
+.um-target-option > span:first-child { min-width: 0; flex: 1; }
+.um-target-option strong { font-size: 13px; }
+.um-target-option small { display: block; margin-top: 4px; color: #64748b; font-size: 11px; overflow-wrap: anywhere; }
+.um-target-option[aria-pressed=true], .um-target-original[aria-pressed=true] { border-color: #818cf8; background: #eef2ff; }
+.um-target-option:hover:enabled { border-color: #a5b4fc; }
+.um-target-reasons { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 45%; }
+.um-target-original { display: block; width: 100%; border: 1px solid #dbe2eb; border-radius: 8px; padding: 12px; text-align: left; margin-top: 12px; font-size: 12px; }
+.um-recommendations { background: #f5f8ff; padding: 12px; border-bottom: 1px solid #e0e7ff; }
+.um-recommendations > strong { font-size: 12px; color: #4338ca; }
+@media (max-width: 700px) {
+    .um-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .um-overview > button { padding: 12px; }
+    .um-overview strong { font-size: 24px; }
+    .um-role-options { gap: 6px; }
+    .um-role-options button { padding: 9px; }
+    .um-connection { flex-wrap: wrap; }
+    .um-connection-dialog.cy-detail-dialog, .um-confirm-dialog.cy-detail-dialog { width: 100%; }
+    .um-target-option { align-items: flex-start; flex-direction: column; gap: 6px; }
+    .um-target-reasons { max-width: 100%; justify-content: flex-start; }
+}

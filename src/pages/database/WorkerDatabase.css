@@ -1,0 +1,168 @@
+.worker-database-scroll {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+}
+
+.worker-database-list {
+    --selection-width: 36px;
+    --actions-width: 192px;
+    display: block;
+    min-width: 1320px;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.worker-database-list > tbody,
+.worker-database-head {
+    display: block;
+}
+
+.worker-database-head {
+    background: #f1f5f9;
+    color: #475569;
+    border-bottom: 1px solid #cbd5e1;
+}
+
+.worker-database-head > tr {
+    display: flex;
+    align-items: center;
+    min-height: 42px;
+}
+
+.worker-database-heading {
+    flex: 1;
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 12px;
+}
+
+.worker-database-heading-hint {
+    margin-left: 14px;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.worker-database-actions-heading {
+    width: var(--actions-width);
+    font-size: 12px;
+}
+
+.worker-database-row {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    padding-left: var(--selection-width);
+    padding-right: var(--actions-width);
+    min-height: 116px;
+    border-bottom: 1px solid #cbd5e1;
+}
+
+.worker-database-list .worker-database-select {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--selection-width);
+    flex-shrink: 0;
+}
+
+.worker-database-row > .worker-database-select {
+    position: absolute;
+    inset: 0 auto 0 0;
+}
+
+.worker-database-list .worker-database-cell {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.worker-database-cell[data-detail-row] {
+    border-top: 1px dashed #e2e8f0;
+    background-color: rgb(248 250 252 / 65%);
+}
+
+.worker-database-field-label {
+    color: #64748b;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+}
+
+.worker-database-field-value {
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+}
+
+.worker-database-field-value > div {
+    min-width: 0;
+    width: 100%;
+}
+
+/* Keep complete values visible without changing the shared popover controls. */
+.worker-database-cell .truncate {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+}
+
+.worker-database-field-value > .relative > .cursor-pointer,
+.worker-database-field-value > div > .relative > .cursor-pointer {
+    padding: 2px 0;
+}
+
+.worker-database-cell .justify-end {
+    justify-content: flex-start;
+}
+
+.worker-database-cell .text-sm {
+    font-size: 12px;
+}
+
+.worker-database-cell[data-column='name'] .worker-database-field-value {
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.worker-database-cell[data-column^='directPay'] {
+    background-color: rgb(238 242 255 / 65%);
+}
+
+.worker-database-cell[data-column^='directPay'] .worker-database-field-label {
+    color: #6366f1;
+}
+
+.worker-database-cell[data-column='signature'] button {
+    white-space: nowrap;
+}
+
+.worker-database-cell[data-column='status'] button {
+    flex-shrink: 0;
+}
+
+.worker-database-list .worker-database-actions {
+    position: absolute;
+    inset: 0 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: var(--actions-width);
+    padding: 10px 8px;
+    border-left: 1px solid #e2e8f0;
+    white-space: nowrap;
+}

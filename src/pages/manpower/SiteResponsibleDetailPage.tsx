@@ -26,6 +26,8 @@ import SiteMonthlyManDays from '../../components/manpower/SiteMonthlyManDays';
 import TeamResourceStatusControl from '../../components/manpower/TeamResourceStatusControl';
 import { isClosedSite, normalizeSiteStatus } from '../../utils/siteStatus';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
+import { useOptionalSiteMode } from '../../contexts/SiteModeContext';
+import { isTeamLeaderRole } from '../../utils/teamWorkflowPolicy';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -295,8 +297,8 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
     const [outputError, setOutputError] = useState('');
     const [refreshRevision, setRefreshRevision] = useState(0);
     const restrictedTeam = useRestrictedTeamWorkflow();
+    const siteMode = useOptionalSiteMode();
     const detailView = view ?? (restrictedTeam ? 'siteInfo' : selectedDetailView);
-    const monthlySitesOnly = restrictedTeam && detailView === 'siteInfo';
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
     const selectedYear = selectedMonth.slice(0, 4);
@@ -305,6 +307,14 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         ? Array.from({ length: 12 }, (_, index) => getMonthRange(`${queryPeriod}-${String(index + 1).padStart(2, '0')}`))
         : [getMonthRange(queryPeriod)], [queryPeriod]);
     const accessScope = useWorkerAccessScope(workers, teams);
+    // Menu presentation is independent of permissions: office/admin accounts
+    // can open the team-leader menu while retaining their broader read scope.
+    const teamSiteMenu = siteMode?.effectiveSite === 'pos_leader'
+        || isTeamLeaderRole(siteMode?.effectiveSite.replace(/^pos_/, ''))
+        || isTeamLeaderRole(siteMode?.currentPositionData?.name)
+        || isTeamLeaderRole(siteMode?.currentSiteData?.name);
+    const monthlySitesOnly = detailView === 'siteInfo'
+        && (restrictedTeam || accessScope.mode === 'team' || teamSiteMenu);
 
     useEffect(() => {
         let mounted = true;
@@ -886,7 +896,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
             </section>
 
             <div className="sr-filter-summary" aria-live="polite">
-                {monthlySitesOnly && <span>{selectedMonth} 내 팀 투입 현장</span>}
+                {monthlySitesOnly && <span>{selectedMonth} {accessScope.mode === 'all' ? '' : '내 팀 '}투입 현장</span>}
                 <span>전체 {selectedResponsibleStatusCounts.all.toLocaleString('ko-KR')}개</span>
                 <span>진행 {selectedResponsibleStatusCounts.active.toLocaleString('ko-KR')}개</span>
                 <span>예정 {selectedResponsibleStatusCounts.planned.toLocaleString('ko-KR')}개</span>

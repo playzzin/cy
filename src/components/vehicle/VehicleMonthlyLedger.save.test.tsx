@@ -67,7 +67,11 @@ jest.mock('@fortawesome/free-solid-svg-icons', () => ({
   faBuilding: {}, faCar: {}, faChevronLeft: {}, faChevronRight: {},
   faFileInvoiceDollar: {}, faSave: {}, faExclamationTriangle: {}, faUsers: {}, faUser: {}
 }));
-jest.mock('lucide-react', () => ({ Route: () => null, Sparkles: () => null, TriangleAlert: () => null }));
+jest.mock('lucide-react', () => ({
+  Route: () => null, Sparkles: () => null, TriangleAlert: () => null,
+  FileText: () => null, ChevronLeft: () => null, ChevronRight: () => null,
+  ExternalLink: () => null, Maximize: () => null, ZoomIn: () => null, ZoomOut: () => null,
+}));
 jest.mock('../../constants/iconMap', () => ({ iconMap: {} }));
 jest.mock('../../services/vehicleFineImportService', () => ({ vehicleFineImportService: { getAttachment: jest.fn() } }));
 jest.mock('./VehicleFineImportModal', () => ({ __esModule: true, default: () => null }));

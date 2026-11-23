@@ -1066,7 +1066,7 @@ const siteBelongsToCompany = (
     site.rentalCompanyId,
 ].map((value) => text(value, 180)).includes(companyId);
 
-export const approveAccountLinkRequest = protectedRegion.https.onCall(async (data, context) => {
+const handleApproveAccountLinkRequest = async (data: unknown, context: functions.https.CallableContext, matchedTargetId = '') => {
     const actor = await requireCallableAdmin(context);
     const input = (data || {}) as { linkId?: unknown; siteIds?: unknown };
     const linkId = text(input.linkId, 500);
@@ -1079,7 +1079,7 @@ export const approveAccountLinkRequest = protectedRegion.https.onCall(async (dat
 
     const initialLinkSnapshot = await linkRef.get();
     const initialLink = initialLinkSnapshot.data() || {};
-    const initialCompanyId = text(initialLink.entityId, 180);
+    const initialCompanyId = matchedTargetId || text(initialLink.entityId, 180);
     if (text(initialLink.entityType, 40) === 'company' && initialCompanyId && !initialCompanyId.startsWith('new_')) {
         const siteSnapshots = await Promise.all([
             db.collection('sites').where('clientCompanyId', '==', initialCompanyId).get(),
@@ -1095,6 +1095,9 @@ export const approveAccountLinkRequest = protectedRegion.https.onCall(async (dat
         if (!linkSnapshot.exists) throw new functions.https.HttpsError('not-found', '연결 요청을 찾을 수 없습니다.');
         const link = linkSnapshot.data() || {};
         if (text(link.status, 40) === 'active') {
+            if (matchedTargetId && text(link.entityId, 180) !== matchedTargetId) {
+                throw new functions.https.HttpsError('failed-precondition', '이미 다른 대상으로 승인된 요청입니다. 목록을 새로고침해 주세요.');
+            }
             targetUid = text(link.uid, 160);
             return { linkId, status: 'active', siteIds: uniqueTexts(link.siteIds), reused: true };
         }
@@ -1114,9 +1117,10 @@ export const approveAccountLinkRequest = protectedRegion.https.onCall(async (dat
             throw new functions.https.HttpsError('failed-precondition', '정지된 계정 요청은 승인할 수 없습니다.');
         }
 
-        let entityId = text(link.entityId, 180);
+        const originalEntityId = text(link.entityId, 180);
+        let entityId = matchedTargetId || originalEntityId;
         let entityName = text(link.entityName, 120);
-        let position = text(requested.role, 80);
+        let position = matchedTargetId ? '' : text(requested.role, 80);
         let department = text(requested.department, 80);
         let approvedSiteIds: string[] = [];
         let workerRef: admin.firestore.DocumentReference | null = null;
@@ -1161,10 +1165,13 @@ export const approveAccountLinkRequest = protectedRegion.https.onCall(async (dat
             const companySnapshot = entityId.startsWith('new_') ? null : await transaction.get(companyRef);
             if (companySnapshot && !companySnapshot.exists) throw new functions.https.HttpsError('not-found', '회사 정보를 찾을 수 없습니다.');
             companyData = companySnapshot?.data() || {};
+            if (matchedTargetId && accountTypeFromCompanyType(companyData.type) !== accountType) {
+                throw new functions.https.HttpsError('failed-precondition', '요청한 회사 유형과 연결 대상의 유형이 다릅니다.');
+            }
             createTarget = !companySnapshot;
             entityId = companyRef.id;
             entityName = text(companyData.name, 120) || text(requested.name, 120) || entityName;
-            position = position || text(link.entitySubType, 40);
+            position = matchedTargetId ? positionFromAccountLink({ entityType, entitySubType: companyData.type }, companyData).position : position || text(link.entitySubType, 40);
             const companySiteIds = Array.from(new Set([
                 ...uniqueTexts(companyData.siteIds),
                 ...discoveredCompanySiteIds,
@@ -1182,6 +1189,22 @@ export const approveAccountLinkRequest = protectedRegion.https.onCall(async (dat
 
         if (!position) {
             throw new functions.https.HttpsError('failed-precondition', '승인할 계정의 직책을 확인해 주세요.');
+        }
+
+        if (matchedTargetId && entityType !== 'company') {
+            const entity = entityType === 'worker' ? workerData : officeData;
+            const aliases = Array.from(new Set([entityId, text(entity.legacyId, 180)].filter(Boolean)));
+            const linkedIdsField = entityType === 'worker' ? 'linkedWorkerIds' : 'linkedOfficeStaffIds';
+            for (const alias of aliases) {
+                const [otherLinks, otherUsers] = await Promise.all([
+                    transaction.get(db.collection('account_links').where('entityId', '==', alias)),
+                    transaction.get(db.collection('users').where(linkedIdsField, 'array-contains', alias)),
+                ]);
+                if (otherLinks.docs.some(item => item.data().entityType === entityType && item.data().status === 'active' && item.data().uid !== uid)
+                    || otherUsers.docs.some(item => item.id !== uid)) {
+                    throw new functions.https.HttpsError('already-exists', '이미 다른 계정에 연결된 대상입니다. 목록을 새로고침해 주세요.');
+                }
+            }
         }
 
         const now = admin.firestore.FieldValue.serverTimestamp();
@@ -1268,6 +1291,7 @@ export const approveAccountLinkRequest = protectedRegion.https.onCall(async (dat
         transaction.update(linkRef, {
             entityId,
             entityName,
+            ...(matchedTargetId ? { matchedFromEntityId: originalEntityId, matchedAt: now } : {}),
             status: 'active',
             siteIds: approvedSiteIds,
             approvalMode: 'manual',
@@ -1298,6 +1322,7 @@ export const approveAccountLinkRequest = protectedRegion.https.onCall(async (dat
             linkId,
             entityType,
             entityId,
+            ...(matchedTargetId ? { originalEntityId, matchedTarget: true } : {}),
             siteIds: approvedSiteIds,
             createdAt: now,
         });
@@ -1311,6 +1336,16 @@ export const approveAccountLinkRequest = protectedRegion.https.onCall(async (dat
         });
     }
     return result;
+};
+
+export const approveAccountLinkRequest = protectedRegion.https.onCall((data, context) => handleApproveAccountLinkRequest(data, context));
+
+export const approveMatchedAccountLinkRequest = protectedRegion.https.onCall(async (data, context) => {
+    const targetId = typeof data?.targetEntityId === 'string' ? data.targetEntityId.trim() : '';
+    if (!targetId || targetId.length > 180 || targetId.includes('/') || targetId.startsWith('new_') || targetId === 'office') {
+        throw new functions.https.HttpsError('invalid-argument', '기존 등록된 연결 대상을 선택해 주세요.');
+    }
+    return handleApproveAccountLinkRequest(data, context, targetId);
 });
 
 export const rejectAccountLinkRequest = protectedRegion.https.onCall(async (data, context) => {

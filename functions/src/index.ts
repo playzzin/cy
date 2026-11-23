@@ -86,6 +86,7 @@ export {
 } from './roleClaims';
 export {
     approveAccountLinkRequest,
+    approveMatchedAccountLinkRequest,
     getMyAccountLinkCandidate,
     getMyAccountLinkStatus,
     linkAccountConnection,

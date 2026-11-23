@@ -1,0 +1,16 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const root = path.resolve(__dirname, '..');
+const output = path.join(root, 'artifacts/account-matching-emulator');
+fs.mkdirSync(output, { recursive: true });
+const config = path.join(output, 'firebase.json');
+fs.writeFileSync(config, JSON.stringify({ emulators: { firestore: { host: '127.0.0.1', port: 18329 }, auth: { host: '127.0.0.1', port: 19329 }, hub: { host: '127.0.0.1', port: 14329 }, logging: { host: '127.0.0.1', port: 15329 }, ui: { enabled: false }, singleProjectMode: true } }));
+const env = { ...process.env, GCLOUD_PROJECT: 'demo-account-matching', GOOGLE_CLOUD_PROJECT: 'demo-account-matching', FIREBASE_CONFIG: JSON.stringify({ projectId: 'demo-account-matching' }), CI: 'true', NO_UPDATE_NOTIFIER: '1' };
+delete env.GOOGLE_APPLICATION_CREDENTIALS;
+const java = path.join(env.ProgramFiles || 'C:/Program Files', 'Android/Android Studio/jbr');
+const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') || 'Path';
+env.JAVA_HOME = java; env[pathKey] = `${java}/bin${path.delimiter}${env[pathKey] || ''}`;
+const cli = path.join(env.APPDATA, 'npm/node_modules/firebase-tools/lib/bin/firebase.js');
+const result = spawnSync(process.execPath, [cli, 'emulators:exec', '--only', 'auth,firestore', '--project', 'demo-account-matching', '--config', config, 'node --test functions/lib/accountAccessMatching.test.js'], { cwd: root, env, stdio: 'inherit', windowsHide: true });
+process.exitCode = result.status ?? 1;

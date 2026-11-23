@@ -1102,6 +1102,12 @@ const TeamResourceDetailPage: React.FC = () => {
 
     const teamColor = selectedTeamRow?.color || getTeamColor(selectedTeam);
     const isBusy = loading || loadingResources || accessScope.loading;
+    const fineResources = selectedVehicleDocs.map(doc => ({
+        doc,
+        amount: summarizeVehicleBillingCosts(doc).fine,
+        expenses: vehicleExpenses.month === selectedMonth && !vehicleExpenses.loading && !isBusy
+            ? getVehicleBillingFineExpenses(doc, vehicleExpenses.rows) : [],
+    })).filter(resource => resource.amount > 0 || resource.expenses.length > 0);
     const detailMenuItems: Array<{
         id: DetailView;
         label: string;
@@ -1536,6 +1542,19 @@ const TeamResourceDetailPage: React.FC = () => {
 
                             {detailView === 'vehicle' && (
                                 <div className="trd-tab-stack">
+                                    <section className="trd-originals" aria-label="과태료 원본 빠른보기">
+                                        <div className="tw-output-section__header"><h3><FileText size={18} />과태료 고지서</h3><span>{selectedMonth}</span></div>
+                                        <div className="trd-originals__grid">
+                                            {fineResources.map(({ doc, amount, expenses: fineExpenses }) => {
+                                                return <div className="trd-originals__item" key={doc.id}>
+                                                    <div><strong>{doc.vehiclePlate || '차량'}</strong><small>과태료 {formatCurrency(amount)}</small></div>
+                                                    {fineExpenses.length > 0 ? <VehicleFinePhotos key={`${statementScope}:${doc.id}`} expenses={fineExpenses} vehiclePlate={doc.vehiclePlate || '차량'} triggerLabel="원본 보기" onRemoved={() => setStatementRevision(value => value + 1)} />
+                                                        : <span role="status">{isBusy || vehicleExpenses.month !== selectedMonth || vehicleExpenses.loading ? '불러오는 중…' : vehicleExpenses.error ? '조회 실패 · 새로고침해 주세요' : '연결된 고지서 없음'}</span>}
+                                                </div>;
+                                            })}
+                                            {!fineResources.length && <p>{isBusy ? '과태료 정보를 불러오는 중…' : '선택한 달의 과태료가 없습니다.'}</p>}
+                                        </div>
+                                    </section>
                                     <section className="tw-output-section">
                                         <div className="tw-output-section__header">
                                             <h3><CarFront size={18} />배정 차량</h3>
@@ -1608,8 +1627,6 @@ const TeamResourceDetailPage: React.FC = () => {
                                                     ) : (
                                                         selectedVehicleDocs.map(doc => {
                                                             const breakdown = summarizeVehicleBillingCosts(doc);
-                                                            const fineExpenses = vehicleExpenses.month === selectedMonth && !vehicleExpenses.loading && !isBusy
-                                                                ? getVehicleBillingFineExpenses(doc, vehicleExpenses.rows) : [];
                                                             return (
                                                                 <tr key={doc.id}>
                                                                     <td data-label="차량"><strong>{doc.vehiclePlate || EMPTY_TEXT}</strong></td>
@@ -1621,10 +1638,6 @@ const TeamResourceDetailPage: React.FC = () => {
                                                                     <td data-label="통행료" className="tw-number">{formatCurrency(breakdown.toll)}</td>
                                                                     <td data-label="과태료" className="tw-number">
                                                                         <div>{formatCurrency(breakdown.fine)}</div>
-                                                                        {fineExpenses.length > 0 ? <VehicleFinePhotos key={`${statementScope}:${doc.id}`} expenses={fineExpenses} vehiclePlate={doc.vehiclePlate || '차량'} triggerLabel="원본 보기" onRemoved={() => setStatementRevision(value => value + 1)} /> : breakdown.fine > 0 && <div className="trd-statement-actions">
-                                                                            <button type="button" disabled>원본 보기</button>
-                                                                            <small>{vehicleExpenses.month !== selectedMonth || vehicleExpenses.loading ? '불러오는 중…' : vehicleExpenses.error ? '조회 실패 · 새로고침해 주세요' : '연결된 고지서 없음'}</small>
-                                                                        </div>}
                                                                     </td>
                                                                     <td data-label="기타" className="tw-number">{formatCurrency(breakdown.other)}</td>
                                                                     <td data-label="합계" className="tw-number"><strong>{formatCurrency(breakdown.total)}</strong></td>
@@ -1641,6 +1654,20 @@ const TeamResourceDetailPage: React.FC = () => {
 
                             {detailView === 'card' && (
                                 <div className="trd-tab-stack">
+                                    <section className="trd-originals" aria-label="카드 원본 빠른보기">
+                                        <div className="tw-output-section__header"><h3><FileText size={18} />카드 사용내역서 원본</h3><span>{selectedMonth}</span></div>
+                                        <div className="trd-originals__grid">
+                                            {selectedCardResources.filter(resource => resource.statementPaths.length > 0).map(resource => <button
+                                                key={resource.key} type="button" className="trd-originals__item trd-originals__button" disabled={isBusy}
+                                                aria-label={`${resource.card?.name || resource.cardLabel} 카드 원본 보기`}
+                                                onClick={() => setStatementSelection({ scope: statementScope, key: resource.key })}>
+                                                <CreditCard size={22} /><span><strong>{resource.card?.name || resource.cardLabel}</strong>
+                                                    <small>{resource.card?.last4 ? `끝번호 ${resource.card.last4} · ` : ''}원본 {resource.statementPaths.length}개</small></span>
+                                                <span className="trd-originals__open">원본 보기</span>
+                                            </button>)}
+                                            {!selectedCardResources.some(resource => resource.statementPaths.length > 0) && <p>{isBusy ? '카드 원본을 불러오는 중…' : '선택한 달에 연결된 카드 원본이 없습니다.'}</p>}
+                                        </div>
+                                    </section>
                                     <section className="tw-output-section">
                                         <div className="tw-output-section__header">
                                             <h3><CreditCard size={18} />배정 카드</h3>

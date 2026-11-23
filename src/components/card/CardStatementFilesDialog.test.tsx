@@ -32,7 +32,7 @@ test('deletes only the confirmed PDF, preserves the other selection and prevents
   expect(remove).toHaveBeenCalledWith(second);
   await act(async () => finish());
   expect(screen.queryByRole('button', { name: 'second.pdf 삭제' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '1. first.pdf' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: '1. first.pdf' })).toBeInTheDocument();
   expect(await screen.findByRole('link', { name: '새 탭에서 원본 열기' })).toHaveAttribute('href', `https://example.com/${first}`);
   expect(onRemoved).toHaveBeenCalledWith(second);
 });
@@ -46,7 +46,7 @@ test('a rejected deletion preserves files and allows a retry; dirty ledgers disa
   fireEvent.click(screen.getByRole('button', { name: 'first.pdf 삭제' }));
   fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('삭제 권한');
-  expect(screen.getByRole('button', { name: '1. first.pdf' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: '1. first.pdf' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
   await screen.findByText(/연결된 파일이 없습니다/);
 });
@@ -58,7 +58,7 @@ test('offers all unique files and opens only the selected original through a nat
   expect(link).toHaveAttribute('href', 'https://example.com/folder/second.pdf');
   expect(link).toHaveAttribute('target', '_blank');
   expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-  fireEvent.click(screen.getByRole('button', { name: '1. first.pdf' }));
+  fireEvent.click(screen.getByRole('button', { name: '이전 원본' }));
   await waitFor(() => expect(screen.getByRole('link', { name: '새 탭에서 원본 열기' })).toHaveAttribute('href', 'https://example.com/folder/first.pdf'));
   expect(screen.getByRole('link', { name: '현재 탭에서 열기' })).toHaveAttribute('target', '_self');
 });
@@ -68,7 +68,7 @@ test('explains failed reads and retries without closing the file list', async ()
   render(<CardStatementFilesDialog paths={['folder/first.pdf']} fileNames={{ 'folder/first.pdf': '원본 청구서.pdf' }} onClose={jest.fn()} />);
   expect(await screen.findByRole('alert')).toHaveTextContent('파일 조회 권한');
   expect(screen.queryByRole('link')).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '1. 원본 청구서.pdf' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: '1. 원본 청구서.pdf' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '다시 시도' }));
   expect(await screen.findByRole('link', { name: '새 탭에서 원본 열기' })).toBeInTheDocument();
   expect(resolve).toHaveBeenCalledTimes(2);
@@ -93,7 +93,7 @@ test('releases stale asynchronous files and the active object URL on unmount', a
   resolve.mockImplementationOnce(() => new Promise(result => { finish = result; }))
     .mockResolvedValueOnce({ url: 'blob:active', release: activeRelease });
   const view = render(<CardStatementFilesDialog paths={['first.pdf', 'second.pdf']} onClose={jest.fn()} />);
-  fireEvent.click(screen.getByRole('button', { name: '1. first.pdf' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '청구서 원본 선택' }), { target: { value: 'first.pdf' } });
   expect(await screen.findByRole('link', { name: '새 탭에서 원본 열기' })).toHaveAttribute('href', 'blob:active');
   await act(async () => { finish({ url: 'blob:stale', release: staleRelease }); });
   expect(staleRelease).toHaveBeenCalledTimes(1);
@@ -114,12 +114,23 @@ test('empty attachments never make a request and the dialog can close', () => {
 test('previews the selected original photo, changes photos, and keeps native links when preview fails', async () => {
   render(<CardStatementFilesDialog paths={['receipts/first.jpg', 'receipts/second.PNG']} onClose={jest.fn()} />);
   expect(await screen.findByRole('img', { name: 'second.PNG 원본 사진' })).toHaveAttribute('src', 'https://example.com/receipts/second.PNG');
-  expect(screen.getByRole('link', { name: '원본 사진 크게 보기' })).toHaveAttribute('target', '_blank');
+  fireEvent.click(screen.getByRole('button', { name: '확대' }));
+  expect(screen.getByLabelText('확대 배율')).toHaveTextContent('150%');
   fireEvent.error(screen.getByRole('img'));
   expect(screen.getByRole('status')).toHaveTextContent('사진 미리보기를 불러오지 못했습니다');
   expect(screen.getByRole('link', { name: '새 탭에서 원본 열기' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '1. first.jpg' }));
+  fireEvent.click(screen.getByRole('button', { name: '이전 원본' }));
   expect(await screen.findByRole('img', { name: 'first.jpg 원본 사진' })).toHaveAttribute('src', 'https://example.com/receipts/first.jpg');
+  expect(screen.getByLabelText('확대 배율')).toHaveTextContent('100%');
+  expect(screen.getByRole('button', { name: '이전 원본' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '확대' }));
+  fireEvent.click(screen.getByRole('button', { name: '확대' }));
+  expect(screen.getByLabelText('확대 배율')).toHaveTextContent('200%');
+  fireEvent.click(screen.getByRole('button', { name: '화면에 맞추기' }));
+  expect(screen.getByLabelText('확대 배율')).toHaveTextContent('100%');
+  fireEvent.click(screen.getByRole('button', { name: '다음 원본' }));
+  await screen.findByRole('img', { name: 'second.PNG 원본 사진' });
+  expect(screen.getByRole('button', { name: '다음 원본' })).toBeDisabled();
 });
 
 test('previews a PDF immediately and hides details for the original-only view', async () => {

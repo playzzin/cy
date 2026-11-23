@@ -7,6 +7,8 @@ import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { siteService } from '../../services/siteService';
 import { teamResourceStatusService } from '../../services/teamResourceStatusService';
 import { showConfirmAlert } from '../../utils/swal';
+import { SiteModeProvider, SiteModeContextType } from '../../contexts/SiteModeContext';
+import { useWorkerAccessScope } from '../../hooks/useWorkerAccessScope';
 
 jest.mock('../../services/siteService', () => ({ siteService: { getSites: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [
@@ -16,7 +18,7 @@ jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorke
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getWorkerRows: jest.fn() } }));
 jest.mock('../../routes/TeamWorkflowGate', () => ({ useRestrictedTeamWorkflow: jest.fn() }));
 jest.mock('../../hooks/useWorkerAccessScope', () => ({
-    useWorkerAccessScope: () => ({ mode: 'team', loading: false }),
+    useWorkerAccessScope: jest.fn(),
     workerAccessMatchesReportRow: (_scope: unknown, row: { teamId: string }) => row.teamId === 'a',
     workerAccessMatchesTeamRef: (_scope: unknown, teamId: string) => teamId === 'a',
 }));
@@ -25,6 +27,7 @@ jest.mock('../../utils/swal', () => ({ showConfirmAlert: jest.fn(), toast: { err
 
 beforeEach(() => {
     jest.clearAllMocks();
+    (useWorkerAccessScope as jest.Mock).mockReturnValue({ mode: 'team', loading: false });
     (siteService.getSites as jest.Mock).mockResolvedValue([
         { id: 'site-a', name: '가상 가현장', responsibleTeamId: 'a', responsibleTeamName: '검증팀', status: 'active' },
         { id: 'site-b', name: '가상 나현장', responsibleTeamId: 'a', responsibleTeamName: '검증팀', status: 'active' },
@@ -261,10 +264,47 @@ test('팀장 현장정보는 조회월의 실제 내 팀 투입 현장만 세고
 
 test('사무실 현장정보는 투입 전 현장도 관리할 수 있다', async () => {
     (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (useWorkerAccessScope as jest.Mock).mockReturnValue({ mode: 'all', loading: false });
     (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([]);
     render(<SiteResponsibleDetailPage view="siteInfo" />);
     await screen.findByRole('button', { name: /가상 가현장.*진행중/ });
     expect(screen.getByRole('button', { name: /가상 나현장.*진행중/ })).toBeInTheDocument();
+});
+
+const menuContext = (overrides: Partial<SiteModeContextType> = {}): SiteModeContextType => ({
+    siteData: null, currentSite: 'admin', effectiveSite: 'admin', currentSiteData: null,
+    currentPosition: 'full', currentPositionData: null, positions: [],
+    changeSite: jest.fn(), changePosition: jest.fn(), isDarkMode: false, toggleDarkMode: jest.fn(),
+    ...overrides,
+});
+
+test.each([
+    { currentPositionData: { id: 'custom-lead', name: '팀장', icon: '', color: '' } },
+    { currentSiteData: { name: '팀장', icon: '', menu: [] }, effectiveSite: 'pos_custom-lead' },
+    { effectiveSite: 'pos_leader' },
+])('사무실 권한으로 팀장 메뉴를 열어도 미출력 현장을 숨긴다: %j', async menu => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (useWorkerAccessScope as jest.Mock).mockReturnValue({ mode: 'all', loading: false });
+    (dailyReportService.getWorkerRows as jest.Mock).mockImplementation(async ({ startDate }) => [
+        { date: startDate, siteId: 'site-a', teamId: 'a', manDay: 1 },
+    ]);
+    const { rerender } = render(<SiteModeProvider {...menuContext(menu)}><SiteResponsibleDetailPage /></SiteModeProvider>);
+    await screen.findByRole('button', { name: /가상 가현장.*진행중/ });
+    expect(screen.queryByRole('button', { name: /가상 나현장.*진행중/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '진행중 현장 (1)' })).toBeInTheDocument();
+
+    rerender(<SiteModeProvider {...menuContext()}><SiteResponsibleDetailPage /></SiteModeProvider>);
+    expect(await screen.findByRole('button', { name: /가상 나현장.*진행중/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '진행중 현장 (2)' })).toBeInTheDocument();
+});
+
+test('팀 조회 범위에서는 제한 권한 판정과 무관하게 출력 없는 현장을 숨긴다', async () => {
+    (useRestrictedTeamWorkflow as jest.Mock).mockReturnValue(false);
+    (dailyReportService.getWorkerRows as jest.Mock).mockResolvedValue([]);
+    render(<SiteResponsibleDetailPage view="siteInfo" />);
+    expect(await screen.findByText('선택한 달에 조건에 맞는 투입 현장이 없습니다.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /가상.*현장.*진행중/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '진행중 현장 (0)' })).toBeInTheDocument();
 });
 
 test('지원 인원은 현장 달력에 포함되며 지원 개인 급여를 0원으로 표시하지 않는다', async () => {

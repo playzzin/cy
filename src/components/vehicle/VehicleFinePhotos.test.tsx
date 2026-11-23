@@ -19,10 +19,10 @@ test('selected notice deletion is confirmed, failure is retryable and the second
     fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('다시 시도');
     fireEvent.click(screen.getByRole('button', { name: '확인, 파일 삭제' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /first.png/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('option', { name: /first.png/ })).not.toBeInTheDocument());
     expect(remove).toHaveBeenLastCalledWith('first');
-    expect(screen.queryByRole('button', { name: /first.png/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /second.png/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /first.png/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /second.png/ })).toBeInTheDocument();
     await waitFor(() => expect(vehicleFineImportService.getAttachment).toHaveBeenLastCalledWith('second'));
     expect(expenses.map(expense => expense.amount)).toEqual([32000, 32000]);
 });
@@ -47,13 +47,37 @@ test('다른 고지서의 PDF와 원본이 없는 기존 내역의 안내를 표
     fireEvent.click(screen.getByRole('button', { name: '12가3456 과태료 사진 보기' }));
     await screen.findByAltText('과태료 고지서 원본');
     (vehicleFineImportService.getAttachment as jest.Mock).mockResolvedValueOnce({ base64: 'cGRm', mimeType: 'application/pdf', fileName: 'notice.pdf' });
-    fireEvent.click(screen.getByRole('button', { name: /second.png/ }));
+    fireEvent.click(screen.getByRole('button', { name: '다음 고지서' }));
     await screen.findByTitle('과태료 PDF 원본');
     expect(vehicleFineImportService.getAttachment).toHaveBeenLastCalledWith('second');
     (vehicleFineImportService.getAttachment as jest.Mock).mockRejectedValueOnce(new Error('같은 고지서를 다시 분석하면 기존 내역에 사진이 연결됩니다.'));
-    fireEvent.click(screen.getByRole('button', { name: /first.png/ }));
+    fireEvent.change(screen.getByRole('combobox', { name: '과태료 고지서 선택' }), { target: { value: 'first' } });
     expect(await screen.findByRole('alert')).toHaveTextContent('다시 분석');
     expect(screen.queryByTitle('과태료 PDF 원본')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '다시 시도' }));
+    expect(await screen.findByAltText('과태료 고지서 원본')).toBeInTheDocument();
+});
+
+test('고지서를 넘기면 금액·위반일·기한과 확대 배율을 함께 갱신한다', async () => {
+    const rows = expenses.map((expense, index) => ({ ...expense, amount: index ? 64000 : 32000,
+        fineNotice: { ...expense.fineNotice!, violationDateTime: `2026-11-0${index + 1} 09:00`, dueDate: `2026-11-${index ? '30' : '20'}` },
+    }));
+    render(<VehicleFinePhotos expenses={rows} vehiclePlate="12가3456" />);
+    fireEvent.click(screen.getByRole('button', { name: '12가3456 과태료 사진 보기' }));
+    await screen.findByAltText('과태료 고지서 원본');
+    expect(screen.getByRole('button', { name: '이전 고지서' })).toBeDisabled();
+    expect(screen.getByLabelText('선택한 과태료 정보')).toHaveTextContent('32,000원');
+    expect(screen.getByLabelText('선택한 과태료 정보')).toHaveTextContent('2026-11-20');
+    fireEvent.click(screen.getByRole('button', { name: '확대' }));
+    expect(screen.getByLabelText('확대 배율')).toHaveTextContent('150%');
+    fireEvent.click(screen.getByRole('button', { name: '다음 고지서' }));
+    await screen.findByAltText('과태료 고지서 원본');
+    expect(screen.getByLabelText('확대 배율')).toHaveTextContent('100%');
+    expect(screen.getByLabelText('선택한 과태료 정보')).toHaveTextContent('64,000원');
+    expect(screen.getByLabelText('선택한 과태료 정보')).toHaveTextContent('2026-11-02 09:00');
+    expect(screen.getByLabelText('선택한 과태료 정보')).toHaveTextContent('2026-11-30');
+    expect(screen.getByRole('button', { name: '다음 고지서' })).toBeDisabled();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test-preview');
 });
 test('빠르게 닫은 뒤 완료된 요청은 사진 URL을 만들지 않는다', async () => {
     let finish!: (value: unknown) => void;
