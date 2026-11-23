@@ -83,6 +83,15 @@ function patchReactScriptsWebpack({ verifiedTypecheck = false, timings = false }
     configureBuildCache(config, webpackEnv);
     configureTypeChecker(config, webpackEnv === 'production' && verifiedTypecheck);
     configureReadableType(config.module?.rules);
+    // PDF.js loads this module directly in a browser worker. Babel's absolute
+    // runtime helper imports are not valid URLs in that standalone asset.
+    for (const rule of config.module?.rules || []) {
+      if (rule.oneOf) rule.oneOf.unshift({
+        test: /[\\/]pdfjs-dist[\\/]legacy[\\/]build[\\/]pdf\.worker(?:\.min)?\.mjs$/,
+        type: 'asset/resource',
+        generator: { filename: 'static/media/[name].[contenthash:8][ext]' },
+      });
+    }
     if (webpackEnv === 'production' && timings) {
       const { BuildTimingPlugin } = require('./build-timing.cjs');
       config.plugins.push(new BuildTimingPlugin({

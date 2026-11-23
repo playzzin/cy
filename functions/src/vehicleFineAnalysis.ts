@@ -14,26 +14,93 @@ import {
     resolveVehicleImportDuplicateExpenseId,
     isActiveVehicleImportExpense,
 } from './vehicleImportIdentity';
-import { saveVehicleFineSource, readVehicleFineSource } from './vehicleFineSource';
+import { saveVehicleFineSource, readVehicleFineSource, vehicleFineSourcePath } from './vehicleFineSource';
+import { loadFineNoticeLinks, publicFineNotice } from './vehicleFineLinks';
 
 declare const fetch: any;
+
+const validateFineId = (value: unknown): string => {
+    if (typeof value !== 'string' || !value.trim() || value.includes('/') || value.length > 200) {
+        throw new functions.https.HttpsError('invalid-argument', '과태료 항목을 선택해 주세요.');
+    }
+    return value.trim();
+};
+
+async function readAuthorizedFineLinks(ids: string[], context: functions.https.CallableContext) {
+    const auth = requireCallableAuth(context);
+    const profile = await admin.firestore().collection('users').doc(auth.uid).get();
+    if (!profile.exists || (profile.data()?.status !== undefined && profile.data()?.status !== 'active')) {
+        throw new functions.https.HttpsError('permission-denied', '활성 사용자만 고지서를 조회할 수 있습니다.');
+    }
+    let teamOnly = false;
+    try { await requireVehicleFineAccess(context); }
+    catch (error) {
+        if ((error as { code?: string }).code !== 'permission-denied') throw error;
+        teamOnly = true;
+    }
+    const items = await loadFineNoticeLinks(ids);
+    if (teamOnly) {
+        const { readTeamScopedData } = await import('./teamScopedRead');
+        const dates = items.flatMap(item => [item.anchor, ...item.notices].map(row => String(row.date))).sort();
+        const scoped = await readTeamScopedData({ collection: 'vehicleExpenses',
+            filters: { startDate: dates[0], endDate: dates[dates.length - 1] } }, context);
+        const allowed = new Set(scoped.rows.map((row: any) => row.id));
+        for (const item of items) {
+            if (!allowed.has(item.expenseId)) throw new functions.https.HttpsError('permission-denied', '소속 팀에 배정된 기간의 고지서만 조회할 수 있습니다.');
+            item.notices = item.notices.filter(row => allowed.has(row.id));
+        }
+    }
+    return items;
+}
+
+export const getVehicleFineNoticeDetails = functions
+    .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 5 })
+    .region('asia-northeast3')
+    .https.onCall(async (data: { expenseIds?: unknown; includeFileAvailability?: boolean }, context) => {
+        requireCallableAuth(context);
+        if (!Array.isArray(data?.expenseIds) || !data.expenseIds.length || data.expenseIds.length > 50) {
+            throw new functions.https.HttpsError('invalid-argument', '과태료 항목은 한 번에 50건까지 조회할 수 있습니다.');
+        }
+        const ids = Array.from(new Set(data.expenseIds.map(validateFineId)));
+        const items = await readAuthorizedFineLinks(ids, context);
+        const availability = new Map<string, boolean>();
+        if (data.includeFileAvailability !== false) {
+            const hashes = Array.from(new Set(items.flatMap(item => item.notices.map(row => row.fineNotice?.sourceSha256))
+                .filter((hash): hash is string => typeof hash === 'string' && /^[a-f0-9]{64}$/i.test(hash))));
+            for (let index = 0; index < hashes.length; index += 10) await Promise.all(hashes.slice(index, index + 10).map(async hash => {
+                const [exists] = await admin.storage().bucket().file(vehicleFineSourcePath(hash)).exists();
+                availability.set(hash, exists);
+            }));
+        }
+        // Re-read access and links after private storage calls, including account/assignment changes.
+        const current = await readAuthorizedFineLinks(ids, context);
+        return { items: current.map(item => ({ expenseId: item.expenseId, notices: item.notices.map(source => ({
+            ...publicFineNotice(source, item.expenseId),
+            ...(data.includeFileAvailability !== false ? { originalAvailable: source.fineNotice?.attachmentRemoved !== true
+                && availability.get(source.fineNotice?.sourceSha256) === true } : {}),
+        })) })) };
+    });
 
 export const getVehicleFineNoticeAttachment = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 5 })
     .region('asia-northeast3')
-    .https.onCall(async (data: { expenseId?: unknown }, context) => {
-        await requireVehicleFineAccess(context);
-        const expenseId = asString(data?.expenseId);
-        if (!expenseId || expenseId.includes('/') || expenseId.length > 200) {
-            throw new functions.https.HttpsError('invalid-argument', '과태료 항목을 선택해 주세요.');
+    .https.onCall(async (data: { expenseId?: unknown; attachmentExpenseId?: unknown }, context) => {
+        requireCallableAuth(context);
+        const expenseId = validateFineId(data?.expenseId);
+        const anchorId = data?.attachmentExpenseId === undefined ? expenseId : validateFineId(data.attachmentExpenseId);
+        const findSource = async () => {
+            const [item] = await readAuthorizedFineLinks([anchorId], context);
+            const source = item.notices.find(row => row.id === expenseId && !row.fineNotice?.attachmentRemoved);
+            if (!source) throw new functions.https.HttpsError('not-found', '연결된 고지서를 찾을 수 없습니다. 대장을 새로고침해 주세요.');
+            return source;
+        };
+        const expense = await findSource();
+        const source = await readVehicleFineSource(expense.fineNotice?.sourceSha256);
+        const current = await findSource();
+        if (current.fineNotice?.sourceSha256 !== expense.fineNotice?.sourceSha256) {
+            throw new functions.https.HttpsError('not-found', '고지서 정보가 변경되었습니다. 다시 조회해 주세요.');
         }
-        const snapshot = await admin.firestore().collection(VEHICLE_EXPENSE_COLLECTION).doc(expenseId).get();
-        const expense = snapshot.data();
-        if (!isActiveVehicleImportExpense(snapshot) || expense?.type !== 'FINE' || expense.fineNotice?.attachmentRemoved === true) {
-            throw new functions.https.HttpsError('not-found', '과태료 내역을 찾을 수 없습니다. 대장을 새로고침해 주세요.');
-        }
-        return { ...await readVehicleFineSource(expense.fineNotice?.sourceSha256),
-            fileName: asString(expense.fineNotice?.sourceFileName) || '과태료 고지서' };
+        return { ...source, fileName: asString(current.fineNotice?.sourceFileName) || '과태료 고지서' };
     });
 
 export const deleteVehicleFineNoticeAttachment = functions

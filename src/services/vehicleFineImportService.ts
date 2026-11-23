@@ -93,14 +93,23 @@ const createOperationId = (): string => {
 };
 
 export const vehicleFineImportService = {
+    async getDetails(expenseIds: string[], includeFileAvailability = true): Promise<Array<{ expenseId: string; notices: import('../types/vehicle').VehicleFineNoticeDetail[] }>> {
+        if (!expenseIds.length) return [];
+        const items: Array<{ expenseId: string; notices: import('../types/vehicle').VehicleFineNoticeDetail[] }> = [];
+        for (let index = 0; index < expenseIds.length; index += 50) {
+            const callable = httpsCallable<{ expenseIds: string[]; includeFileAvailability: boolean }, { items: typeof items }>(functions, 'getVehicleFineNoticeDetails', { timeout: 60_000 });
+            items.push(...(await callable({ expenseIds: expenseIds.slice(index, index + 50), includeFileAvailability })).data.items);
+        }
+        return items;
+    },
     async removeAttachment(expenseId: string): Promise<void> {
         await httpsCallable(functions, 'deleteVehicleFineNoticeAttachment', { timeout: 60_000 })({ expenseId });
     },
-    async getAttachment(expenseId: string): Promise<{ base64: string; mimeType: string; fileName: string }> {
-        const callable = httpsCallable<{ expenseId: string }, { base64: string; mimeType: string; fileName: string }>(
+    async getAttachment(expenseId: string, attachmentExpenseId?: string): Promise<{ base64: string; mimeType: string; fileName: string }> {
+        const callable = httpsCallable<{ expenseId: string; attachmentExpenseId?: string }, { base64: string; mimeType: string; fileName: string }>(
             functions, 'getVehicleFineNoticeAttachment', { timeout: 60_000 },
         );
-        return (await callable({ expenseId })).data;
+        return (await callable({ expenseId, ...(attachmentExpenseId ? { attachmentExpenseId } : {}) })).data;
     },
 
     validateFiles(files: File[]): void {

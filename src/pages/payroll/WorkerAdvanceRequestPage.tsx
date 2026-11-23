@@ -1,3 +1,4 @@
+import { TeamRequestTabs, TeamMobileDisclosure, TeamMobileSummary, useTeamRequestTabs } from '../../components/team-mobile/TeamMobileUI';
 import { getRequestWorkers } from '../../services/requestWorkerService';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -221,6 +222,8 @@ export default function WorkerAdvanceRequestPage() {
     const { currentUser } = useAuth();
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [canRequestForTeam, setCanRequestForTeam] = useState(false);
+    const tabs = useTeamRequestTabs('advance-request-history', true, currentUser?.uid);
+    const [submittedId, setSubmittedId] = useState('');
     const [profile, setProfile] = useState<UserData | null>(null);
     const [selectedWorkerId, setSelectedWorkerId] = useState('');
     const [selectedYearMonth, setSelectedYearMonth] = useState(() => getYearMonth());
@@ -240,7 +243,7 @@ export default function WorkerAdvanceRequestPage() {
     const [summaryError, setSummaryError] = useState('');
     const [loadedSummaryKey, setLoadedSummaryKey] = useState('');
     const summaryRequestId = useRef(0);
-    const [isMobile, setIsMobile] = useState(() => window.matchMedia?.('(max-width: 767px)').matches ?? false);
+    const [phoneLayout, setIsMobile] = useState(() => window.matchMedia?.('(max-width: 767px)').matches ?? false);
     useEffect(() => {
         const media = window.matchMedia?.('(max-width: 767px)');
         if (!media) return;
@@ -248,6 +251,7 @@ export default function WorkerAdvanceRequestPage() {
         media.addEventListener('change', update);
         return () => media.removeEventListener('change', update);
     }, []);
+    const isMobile = phoneLayout || tabs.active;
     const draftKeyFor = (workerId: string) => `${currentUser?.uid}:${selectedYearMonth}:${category}:${workerId}`;
     const draftKey = draftKeyFor(selectedWorkerId);
     const amountInput = amountDrafts[draftKey] || '';
@@ -318,8 +322,8 @@ export default function WorkerAdvanceRequestPage() {
     const openRequestHistory = (workerId: string) => {
         setSelectedWorkerId(workerId);
         setHistoryCategory('all');
-        historyHeadingRef.current?.focus({ preventScroll: true });
-        historyHeadingRef.current?.scrollIntoView({ block: 'start' });
+        if (tabs.active) tabs.showHistory();
+        else { historyHeadingRef.current?.focus({ preventScroll: true }); historyHeadingRef.current?.scrollIntoView({ block: 'start' }); }
     };
 
     const loadBaseData = useCallback(async () => {
@@ -513,12 +517,14 @@ export default function WorkerAdvanceRequestPage() {
                 accountHolder: normalizeText(selectedWorker.accountHolder || selectedWorker.name),
                 memo,
             }, submission.current.id);
+            setSubmittedId(submission.current.id);
             submission.current = null;
 
             setAmountInput('');
             setMemo('');
             await latestSummaryLoader.current();
             setMessage('가불 신청을 등록했습니다.');
+            setHistoryCategory('all'); tabs.showHistory();
         } catch (error) {
             console.error('[WorkerAdvanceRequestPage] Failed to submit request', error);
             setMessage(error instanceof Error && error.message === 'requested-amount-exceeds-available'
@@ -614,8 +620,11 @@ export default function WorkerAdvanceRequestPage() {
                 </div>
             </header>
 
-            <main className="advance-request-workspace grid min-h-0 grid-cols-1 gap-4 p-4 xl:grid-cols-[380px_minmax(0,1fr)]">
-                <aside className="min-h-0 rounded-lg border border-slate-200 bg-white">
+            <TeamRequestTabs tabs={tabs} disabled={saving} />
+            {tabs.active && message && <p role="status" className="tm-request-feedback">{message}</p>}
+            {tabs.active && summaryError && <p role="alert" className="tm-request-feedback">{summaryError}</p>}
+            <main className="tm-request-grid advance-request-workspace grid min-h-0 grid-cols-1 gap-4 p-4 xl:grid-cols-[380px_minmax(0,1fr)]">
+                <aside id={`${tabs.id}-entry`} {...tabs.panel('entry')} className="min-h-0 rounded-lg border border-slate-200 bg-white">
                     {!isMobile && <div className="border-b border-slate-200 p-4">
                         <div className="flex items-center justify-between gap-3">
                             <div>
@@ -636,6 +645,10 @@ export default function WorkerAdvanceRequestPage() {
                         </div>
                     </div>}
 
+                    {tabs.active && <TeamMobileSummary label={`${selectedWorker?.name || '작업자 선택'} 신청 가능액`} value={displaySummaryAmount(summary.availableAmount)}>
+                        <span>{selectedWorker?.bankName || '입금 은행 미등록'} · {selectedWorker?.accountNumber || '계좌 미등록'}</span>
+                        <span>예금주 {selectedWorker?.accountHolder || selectedWorker?.name || '—'}</span>
+                    </TeamMobileSummary>}
                     <div className="p-4">
                         {isMobile ? <AdvanceRequestMobileInput workers={filteredWorkers} selectedWorkerId={selectedWorkerId}
                             category={category} onCategory={setCategory} onSelect={setSelectedWorkerId} onHistory={openRequestHistory}
@@ -692,12 +705,12 @@ export default function WorkerAdvanceRequestPage() {
                             </div>
                         )}
 
-                        {message ? (
+                        {!tabs.active && message ? (
                             <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">
                                 {message}
                             </div>
                         ) : null}
-                        {summaryError ? (
+                        {!tabs.active && summaryError ? (
                             <div role="alert" className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800">
                                 {summaryError}
                             </div>
@@ -706,7 +719,8 @@ export default function WorkerAdvanceRequestPage() {
                 </aside>
 
                 <div className="grid min-h-0 grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1fr)_420px]">
-                    <section className="min-h-0 rounded-lg border border-slate-200 bg-white">
+                    <section hidden={tabs.active && tabs.view !== 'entry'} className="tm-advance-calculation min-h-0 rounded-lg border border-slate-200 bg-white">
+                        <TeamMobileDisclosure title="신청 가능액 계산·근무내역">
                         <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <div className="flex items-center gap-2 text-xs font-black text-slate-500">
@@ -894,9 +908,10 @@ export default function WorkerAdvanceRequestPage() {
                                 </div>}
                             </div>
                         </div>
+                        </TeamMobileDisclosure>
                     </section>
 
-                    <section className="min-h-0 rounded-lg border border-slate-200 bg-white">
+                    <section id="advance-request-history" {...tabs.panel('history')} className="min-h-0 rounded-lg border border-slate-200 bg-white">
                         <div className="flex items-center justify-between border-b border-slate-200 p-4">
                             <div>
                                 <div className="flex items-center gap-2 text-xs font-black text-slate-500">
@@ -934,7 +949,7 @@ export default function WorkerAdvanceRequestPage() {
                             ) : (
                                 <div className="space-y-3">
                                     {visibleWorkerRequests.map((request) => (
-                                        <article key={request.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                                        <article key={request.id} data-submitted={request.id === submittedId || undefined} className="rounded-lg border border-slate-200 bg-white p-4">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0">
                                                     <div className="text-lg font-black text-slate-950">{formatCurrency(request.requestedAmount)}</div>
