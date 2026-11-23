@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure } from '../../components/team-mobile/TeamMobileUI';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ResponsiveDetailDialog from '../../components/common/ResponsiveDetailDialog';
 import { teamAccountApprovalEnabled } from '../../utils/teamAccountApprovalFeature';
@@ -82,8 +83,8 @@ export default function TeamAccountApprovalPage() {
         } finally { if (current === generation.current) setBusy(false); running.current = false; }
     };
     if (!enabled) return <section className="team-account-page"><h1>팀원 계정 승인</h1><p>승인 기능을 준비 중입니다. 기존 사무실 계정 승인 창구를 이용해 주세요.</p></section>;
-    return <section className="team-account-page">
-        <header><div><h1>팀원 계정 승인</h1><p>내 팀에 등록된 일반 작업자의 로그인 계정 연결을 승인합니다.</p></div><button disabled={busy} onClick={() => { setResults([]); void load(); }}>새로고침</button></header>
+    return <section className="tm-page team-account-page">
+        <header className="tm-page-heading"><div><h1>팀원 계정 승인</h1><TeamMobileDisclosure title="승인 안내"><p>내 팀에 등록된 일반 작업자의 로그인 계정 연결을 승인합니다.</p></TeamMobileDisclosure></div><TeamPageActions><button disabled={busy} onClick={() => { setResults([]); void load(); }}>새로고침</button></TeamPageActions></header>
         <div className="team-account-filters">
             <label>불러온 목록 검색<input value={query} placeholder="이름 또는 팀 이름" onChange={event => { setQuery(event.target.value); setSelected([]); }} /></label>
             <label>상태<select value={status} onChange={event => { setStatus(event.target.value); setSelected([]); }}><option value="pending">승인 대기</option><option value="active">승인 완료·권한 갱신</option><option value="all">전체</option></select></label>

@@ -1,3 +1,4 @@
+import { useTeamMobile } from '../team-mobile/TeamMobileUI';
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import { CalendarDays, ChevronDown, Users } from 'lucide-react';
 import type { DailyReportWorkerRow } from '../../services/dailyReportService';
@@ -69,11 +70,13 @@ function SiteWorkDayDetails({ rows, teams }: { rows: DailyReportWorkerRow[]; tea
 }
 
 export default function WorkerWorkHistory({ rows, month, workerName, siteName, loading, error, teams = EMPTY_TEAMS }: Props) {
+    const mobile = useTeamMobile();
     const isSite = siteName !== undefined;
+    const canChooseView = isSite || mobile;
     const subjectName = siteName ?? workerName;
     const title = isSite ? '출력일보' : '근무내역';
-    const [siteMode, setMode] = useState<'calendar' | 'list'>('calendar');
-    const mode = isSite ? siteMode : 'calendar';
+    const [selectedMode, setMode] = useState<'calendar' | 'list' | null>(null);
+    const mode = canChooseView ? selectedMode ?? (mobile ? 'list' : 'calendar') : 'calendar';
     const [selectedDate, setSelectedDate] = useState('');
     const [expandedDate, setExpandedDate] = useState('');
     const id = useId();
@@ -103,11 +106,11 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
                 {mode === 'list' && supportDays > 0 && <span className="worker-history__support-total"> · 지원 {days(supportDays)}공수 포함</span>}
                 {hasOwnRows && <> · {hasRedactedWages ? '조회 가능 노무비 ' : ''}{money(totalAmount)}</>}</p>}
         </header>
-        {isSite && <div role="tablist" aria-label={`${title} 보기 방식`} className="worker-history__tabs">
+        {canChooseView && <div role="tablist" aria-label={`${title} 보기 방식`} className="worker-history__tabs">
             {(['calendar', 'list'] as const).map(value => <button key={value} type="button" role="tab" id={`${id}-${value}`}
                 aria-selected={mode === value} aria-controls={`${id}-panel`} onClick={() => setMode(value)}>{value === 'calendar' ? '달력보기' : '목록보기'}</button>)}
         </div>}
-        <div role={isSite ? 'tabpanel' : 'region'} id={`${id}-panel`} aria-labelledby={isSite ? `${id}-${mode}` : undefined} aria-label={isSite ? undefined : '근무내역 달력'}>
+        <div role={canChooseView ? 'tabpanel' : 'region'} id={`${id}-panel`} aria-labelledby={canChooseView ? `${id}-${mode}` : undefined} aria-label={canChooseView ? undefined : '근무내역 달력'}>
             {loading ? <p role="status">{title}{isSite ? '를' : '을'} 불러오는 중입니다.</p> : error ? <p role="alert">{error}</p> : mode === 'calendar' ? <>
                 <div className="worker-history__calendar-heading"><div><h4>{year}년 {monthNumber}월</h4>
                     <p className="worker-history__hint">{isSite ? '팀별 공수를 한눈에 확인하고 날짜를 눌러 작업자 내역을 보세요.' : '날짜를 누르면 현장과 금액을 자세히 볼 수 있습니다.'}</p></div>
@@ -184,7 +187,7 @@ export default function WorkerWorkHistory({ rows, month, workerName, siteName, l
                 </div>
             </>}
         </div>
-        <ResponsiveDetailDialog open={!!selectedDate && !loading && !error} onOpenChange={open => { if (!open) setSelectedDate(''); }}
+        <ResponsiveDetailDialog mobileBreakpoint={mobile ? 768 : 640} open={!!selectedDate && !loading && !error} onOpenChange={open => { if (!open) setSelectedDate(''); }}
             className={isSite ? 'work-day-dialog' : undefined}
             title={`${selectedDate} ${title}`} description={`${subjectName} · ${selectedRows.length}건`}>
             {isSite ? <SiteWorkDayDetails rows={selectedRows} teams={teams} /> : selectedRows.length === 0 ? <p>해당 날짜의 근무내역이 없습니다.</p> : selectedRows.map((row, index) => <article className="worker-history__detail" key={`${row.reportId}-${index}`}>

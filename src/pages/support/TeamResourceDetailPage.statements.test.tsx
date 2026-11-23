@@ -2,6 +2,7 @@ import React from 'react';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import TeamResourceDetailPage from './TeamResourceDetailPage';
+import TeamCardStatementDetails from '../../components/card/TeamCardStatementDetails';
 import CardStatementFilesDialog from '../../components/card/CardStatementFilesDialog';
 import VehicleFinePhotos from '../../components/vehicle/VehicleFinePhotos';
 import { accommodationService } from '../../services/accommodationService';
@@ -31,6 +32,8 @@ jest.mock('./hooks/useExpenseLedgerData', () => ({
 jest.mock('../../utils/swal', () => ({ toast: { error: jest.fn(), success: jest.fn(), warning: jest.fn() } }));
 jest.mock('../../components/card/CardStatementFilesDialog', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('../../components/vehicle/VehicleFinePhotos', () => ({ __esModule: true, default: jest.fn() }));
+jest.mock('../../components/common/OriginalDocumentThumbnail', () => ({ CardStatementThumbnail: ({ path }: { path: string }) => <span role="img" aria-label={path} /> }));
+jest.mock('../../components/card/TeamCardStatementDetails', () => ({ __esModule: true, default: jest.fn() }));
 
 const now = new Date();
 const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -58,6 +61,7 @@ beforeEach(() => {
     jest.clearAllMocks();
     (CardStatementFilesDialog as jest.Mock).mockImplementation(({ onClose }) => <div role="dialog" aria-label="원본 파일 확인"><button onClick={onClose}>원본 닫기</button></div>);
     (VehicleFinePhotos as jest.Mock).mockImplementation(({ triggerLabel }) => <button>{triggerLabel}</button>);
+    (TeamCardStatementDetails as jest.Mock).mockImplementation(({ onClose }) => <div role="dialog" aria-label="사용 상세"><button onClick={onClose}>상세 닫기</button></div>);
     window.matchMedia = jest.fn().mockReturnValue({ matches: false });
     (accommodationService.getAccommodations as jest.Mock).mockResolvedValue([]);
     (accommodationService.getAssignments as jest.Mock).mockResolvedValue([]);
@@ -72,10 +76,10 @@ beforeEach(() => {
     setBills([makeBill()]);
 });
 
-test('카드는 원본 보기만 남기고 선택 팀의 중복 없는 첨부를 전달한다', async () => {
+test('카드 원본과 사용 상세를 선택 팀의 중복 없는 첨부에 연결한다', async () => {
     setBills([makeBill({ statementAttachmentPaths: [firstPath, ` ${firstPath} `, ''] }), makeBill({ id: 'extra', statementAttachmentPaths: [secondPath] }), makeBill({ id: 'other-team', teamId: 'team-b', teamName: '다른검증팀', statementAttachmentPaths: ['other.pdf'] }), makeBill({ id: 'personal', issuedToType: 'worker', issuedToWorkerId: 'worker-a', statementAttachmentPaths: ['personal.pdf'] })]);
     const table = within(await openTab());
-    expect(screen.queryByRole('button', { name: '상세내역' })).not.toBeInTheDocument();
+    expect(within(table.getByRole('row', { name: /검증카드/ })).getByRole('button', { name: '사용 상세 보기' })).toBeEnabled();
     fireEvent.click(within(table.getByRole('row', { name: /검증카드/ })).getByRole('button', { name: '원본 보기' }));
     await screen.findByRole('dialog');
     expect(latestProps(CardStatementFilesDialog)).toMatchObject({ paths: [firstPath, secondPath], showDetailsLink: false });
@@ -87,7 +91,23 @@ test('첨부 파일이 없는 카드의 원본 보기는 비활성화한다', as
     const table = within(await openTab());
     const row = within(table.getByRole('row', { name: /파일없는카드/ }));
     expect(row.getByRole('button', { name: '원본 보기' })).toBeDisabled();
-    expect(row.queryByRole('button', { name: '상세내역' })).not.toBeInTheDocument();
+    expect(row.getByRole('button', { name: '사용 상세 보기' })).toBeDisabled();
+});
+
+test('선택 카드의 사용 상세에 배정기간과 취소되지 않은 거래만 전달한다', async () => {
+    setBills([makeBill({ lineItems: undefined })]);
+    (cardService.listAllCardAssignments as jest.Mock).mockResolvedValue([
+        { id: 'first-team', cardId: 'card-a', cardLabel: '검증카드', assigneeType: 'TEAM', assigneeId: 'team-a', startDate: `${month}-01`, endDate: `${month}-10` },
+        { id: 'second-team', cardId: 'card-a', cardLabel: '검증카드', assigneeType: 'TEAM', assigneeId: 'team-b', startDate: `${month}-11` },
+    ]);
+    (cardService.getTransactionsByMonth as jest.Mock).mockResolvedValue([makeTransaction(), makeTransaction({ id: 'outside', date: `${month}-15` }), makeTransaction({ id: 'cancelled', status: 'CANCELLED' })]);
+    const table = within(await openTab());
+    fireEvent.click(within(table.getByRole('row', { name: /검증카드/ })).getByRole('button', { name: '사용 상세 보기' }));
+    expect(await screen.findByRole('dialog', { name: '사용 상세' })).toBeInTheDocument();
+    expect(latestProps(TeamCardStatementDetails)).toMatchObject({ cardId: 'card-a', yearMonth: month,
+        dateRanges: [{ startDate: `${month}-01`, endDate: `${month}-10` }], transactions: [makeTransaction()] });
+    fireEvent.click(screen.getByRole('button', { name: '이전 달' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 });
 
 test('카드 원본 빠른보기에서 파일 수를 확인하고 바로 연다', async () => {
@@ -96,7 +116,7 @@ test('카드 원본 빠른보기에서 파일 수를 확인하고 바로 연다'
     const shortcuts = within(screen.getByRole('region', { name: '카드 원본 빠른보기' }));
     const open = shortcuts.getByRole('button', { name: '검증카드 카드 원본 보기' });
     expect(open).toHaveTextContent('원본 2개');
-    expect(open).toHaveTextContent('끝번호 1234');
+    expect(shortcuts.getByText(/끝번호 1234/)).toBeVisible();
     expect(shortcuts.queryByRole('button', { name: '파일없는카드 카드 원본 보기' })).not.toBeInTheDocument();
     fireEvent.click(open);
     expect(await screen.findByRole('dialog')).toBeInTheDocument();

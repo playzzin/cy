@@ -6,6 +6,7 @@ import { vehicleFineImportService } from '../../services/vehicleFineImportServic
 import type { VehicleExpenseRecord } from '../../types/vehicle';
 
 jest.mock('../../services/vehicleFineImportService', () => ({ vehicleFineImportService: { getAttachment: jest.fn(), removeAttachment: jest.fn() } }));
+jest.mock('../common/OriginalDocumentThumbnail', () => ({ VehicleFineThumbnail: ({ label }: { label: string }) => <span role="img" aria-label={label} /> }));
 const expenses = ['first', 'second'].map((id, index) => ({ id, vehicleId: 'test', date: `2026-11-0${index + 1}`, type: 'FINE', amount: 32000, payer: 'COMPANY', fineNotice: { sourceFileName: `${id}.png` } } as VehicleExpenseRecord));
 
 test('selected notice deletion is confirmed, failure is retryable and the second notice remains', async () => {
@@ -31,6 +32,21 @@ beforeEach(() => {
     URL.createObjectURL = jest.fn(() => 'blob:test-preview');
     URL.revokeObjectURL = jest.fn();
     (vehicleFineImportService.getAttachment as jest.Mock).mockResolvedValue({ base64: 'aGVsbG8=', mimeType: 'image/png', fileName: 'notice.png' });
+});
+
+test('사진 목록에 고지 금액·장소·기한을 표시하고 누른 고지서를 바로 연다', async () => {
+    const rows = expenses.map((expense, index) => ({ ...expense, amount: index ? 64000 : 32000,
+        fineNotice: { ...expense.fineNotice!, sourceSha256: 'a'.repeat(64), violationLocation: '가상 검증로', violationDescription: '주정차 위반', dueDate: '2026-11-30' },
+    }));
+    render(<VehicleFinePhotos expenses={rows} vehiclePlate="12가3456" gallery />);
+    expect(screen.getAllByText('가상 검증로')).toHaveLength(2);
+    const trigger = screen.getByRole('button', { name: '12가3456 2026-11-02 과태료 64,000원 원본 보기' });
+    fireEvent.click(trigger);
+    await screen.findByAltText('과태료 고지서 원본');
+    expect(vehicleFineImportService.getAttachment).toHaveBeenLastCalledWith('second');
+    expect(screen.getByLabelText('선택한 과태료 정보')).toHaveTextContent('64,000원');
+    fireEvent.click(screen.getByRole('button', { name: '닫기' }));
+    await waitFor(() => expect(trigger).toHaveFocus());
 });
 test('원본은 열 때만 조회하고 사진·다운로드를 표시하며 닫을 때 해제한다', async () => {
     render(<VehicleFinePhotos expenses={expenses} vehiclePlate="12가3456" />);
@@ -88,4 +104,14 @@ test('빠르게 닫은 뒤 완료된 요청은 사진 URL을 만들지 않는다
     finish({ base64: 'cGRm', mimeType: 'application/pdf', fileName: 'notice.pdf' });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(URL.createObjectURL).not.toHaveBeenCalled();
+});
+
+
+test('고지서가 없는 기존 과태료는 금액을 유지하고 불필요한 원본 조회를 막는다', () => {
+    render(<VehicleFinePhotos expenses={[{ ...expenses[0], fineNotice: undefined }]} vehiclePlate="12가3456" gallery />);
+    expect(screen.getByText('32,000원')).toBeVisible();
+    expect(screen.getByRole('button', { name: '12가3456 등록된 고지서 없음' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /32,000원 원본 보기/ }));
+    expect(vehicleFineImportService.getAttachment).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });

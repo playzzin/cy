@@ -1,3 +1,5 @@
+import { TeamPageActions, TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
+import MonthNavigator from '../../components/common/MonthNavigator';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { NavLink, useSearchParams } from 'react-router-dom';
 import {
@@ -1757,6 +1759,7 @@ export type TeamSettlementStatisticsPageProps = {
 };
 
 export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPageProps> = ({ view = 'team' }) => {
+  const mobile = useTeamMobile();
   const [searchParams] = useSearchParams();
   const [yearMonth, setYearMonth] = useState<string>(() => {
     const queryYearMonth = searchParams.get('yearMonth') ?? '';
@@ -1957,13 +1960,13 @@ export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPage
   ];
 
   return (
-    <div className="w-full p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="tm-page tm-statistics-page w-full p-6">
+      <div className="tm-page-heading flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900">{pageTitle}</h1>
-          <p className="mt-1 text-sm text-slate-500">{pageDescription}</p>
+          <TeamMobileDisclosure title="조회 안내"><p className="mt-1 text-sm text-slate-500">{pageDescription}</p></TeamMobileDisclosure>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <TeamPageActions><div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
@@ -1991,10 +1994,10 @@ export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPage
             <RefreshCw size={16} />
             새로고침
           </button>
-        </div>
+        </div></TeamPageActions>
       </div>
 
-      <div className="mt-6 border-b border-slate-200">
+      <div className="tm-statistics-nav mt-6 border-b border-slate-200">
         <div className="flex gap-2 overflow-x-auto">
           {navigationTabs.map((tab) => {
             const selected = view === tab.key;
@@ -2024,7 +2027,8 @@ export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPage
         </div>
       </div>
 
-      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
+      {mobile && <div className="tm-month-selector"><MonthNavigator value={yearMonth} onChange={setYearMonth} /></div>}
+      <div hidden={mobile} className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
         <div className="text-sm font-bold text-slate-800">정산월</div>
         <div className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-center">
           <div className="inline-flex w-fit items-center rounded-lg border border-slate-200 bg-slate-50 p-1">
@@ -2074,6 +2078,10 @@ export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPage
         </div>
       )}
 
+      {mobile && <TeamMobileSummary label="정산 잔액" value={loadState.status === 'loading' ? '조회 중' : loadState.status === 'error' ? '확인 필요' : `${formatCurrency(totals.net)}원`}>
+        <span>총수입 {loadState.status === 'idle' ? `${formatCurrency(totals.incomeTotal)}원` : '—'}</span><span>총지출 {loadState.status === 'idle' ? `${formatCurrency(totals.outgoingTotal)}원` : '—'}</span>
+      </TeamMobileSummary>}
+      <TeamMobileDisclosure title="추가 통계 지표">
       <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
         {metricCards.map((card) => (
           <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -2091,8 +2099,9 @@ export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPage
         ))}
       </div>
 
+      </TeamMobileDisclosure>
       {view === 'management' ? (
-        <>
+        <TeamMobileDisclosure title="경영 분석·상세 통계">
           <TeamSettlementExecutiveSummary
             title="월간 경영 요약"
             subtitle="팀 전체 정산 데이터를 수익성, 비용, 공수, 단가 기준으로 자동 진단합니다."
@@ -2136,7 +2145,7 @@ export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPage
           <div className="mt-4">
             <TeamSettlementWorkerStatisticTable rows={workerStats} />
           </div>
-        </>
+        </TeamMobileDisclosure>
       ) : (
         <div className="mt-4 rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
@@ -2149,7 +2158,8 @@ export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPage
           </div>
         </div>
 
-        <div className="overflow-auto">
+        {mobile && <TeamSettlementMobileRows key={yearMonth} rows={stats} loading={loadState.status === 'loading'} getKey={row => row.teamId} getLabel={row => row.teamName} />}
+        <div className="tm-statistics-desktop overflow-auto">
           <table className="w-full min-w-[1420px] text-sm">
             <thead>
               <tr className="bg-slate-50 text-xs font-bold text-slate-600">
@@ -2246,6 +2256,36 @@ export const TeamSettlementStatisticsPage: React.FC<TeamSettlementStatisticsPage
   );
 };
 
+export function TeamSettlementMobileRows<Row extends TeamSettlementStatRow>({ rows, loading, getKey, getLabel }: {
+  rows: Row[]; loading: boolean; getKey: (row: Row) => string; getLabel: (row: Row) => string;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const id = React.useId();
+  if (loading) return <p role="status" className="p-4">정산 통계를 불러오는 중입니다.</p>;
+  if (!rows.length) return <p className="p-4">조회된 정산 통계가 없습니다.</p>;
+  return <div className="tm-statistics-list">{rows.map(row => {
+    const key = getKey(row), open = expanded === key;
+    return <section key={key}>
+      <button type="button" className="tm-statistics-row" aria-expanded={open} aria-controls={`${id}-${key}`} onClick={() => setExpanded(open ? null : key)}>
+        <span><strong>{getLabel(row)}</strong><small>{row.doc.confirmedAt ? '확정' : '미확정'} · 상세 {open ? '접기' : '보기'}</small></span>
+        <span><strong>{formatCurrency(row.net)}원</strong><small>정산 잔액</small></span>
+      </button>
+      <p className="tm-statistics-caption">수입 {formatCurrency(row.incomeTotal)}원 · 지출 {formatCurrency(row.outgoingTotal)}원</p>
+      <div id={`${id}-${key}`} hidden={!open}>{open && <>
+        <dl className="tm-statistics-details">
+          {[
+            ['급여', `${formatCurrency(row.payrollTotal)}원`], ['경비', `${formatCurrency(row.expenseTotal)}원`],
+            ['정산차익', `${formatCurrency(row.grossProfit)}원`], ['현장총공수', formatManDay(row.directManDay)],
+            ['인원총공수', formatManDay(row.teamWorkerManDay)], ['팀평균단가', formatAverageCurrency(row.teamAverageUnitPrice)],
+            ['현장쓰꾸미', formatAverageCurrency(row.siteSkkumiUnitPrice)], ['정산율', formatPercent(row.netRate)],
+          ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+        </dl>
+        <TeamSettlementDetailTables detail={buildDetailBreakdown(row)} totals={row} />
+      </>}</div>
+    </section>;
+  })}</div>;
+}
+
 export const TeamSettlementDetailTables: React.FC<{
   detail: ReturnType<typeof buildDetailBreakdown>;
   totals: {
@@ -2256,6 +2296,7 @@ export const TeamSettlementDetailTables: React.FC<{
     directSalesTotal: number;
   };
 }> = ({ detail }) => {
+  const mobile = useTeamMobile();
   const sections: Array<{ title: string; rows: BreakdownRow[]; empty: string }> = [
     { title: '매출 상세', rows: detail.salesRows, empty: '매출 내역 없음' },
     { title: '매입 상세', rows: detail.purchaseRows, empty: '매입 내역 없음' },
@@ -2263,6 +2304,15 @@ export const TeamSettlementDetailTables: React.FC<{
     { title: '추가 상세', rows: detail.additionRows, empty: '추가 내역 없음' },
     { title: '현장별 쓰꾸미', rows: detail.siteRows, empty: '현장 내역 없음' }
   ];
+
+  if (mobile) return <div className="tm-statistics-breakdown">{sections.map(section => <details key={section.title} className="tm-disclosure">
+    <summary>{section.title} · {section.rows.length}건</summary>
+    <div className="tm-disclosure__body">{section.rows.length ? section.rows.map(row => <article key={row.key}>
+      <div className="tm-statistics-row"><strong>{row.label}</strong><strong>{formatCurrency(row.amount)}원</strong></div>
+      {row.note && <p>{row.note}</p>}
+      <p>공수 {formatManDay(row.manDay)} · 평균단가 {formatAverageCurrency(row.average)} · 비중 {formatPercent(row.share)}</p>
+    </article>) : <p>{section.empty}</p>}</div>
+  </details>)}</div>;
 
   return (
     <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">

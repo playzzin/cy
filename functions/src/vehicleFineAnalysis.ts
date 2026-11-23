@@ -22,17 +22,52 @@ export const getVehicleFineNoticeAttachment = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB', maxInstances: 5 })
     .region('asia-northeast3')
     .https.onCall(async (data: { expenseId?: unknown }, context) => {
-        await requireVehicleFineAccess(context);
+        const auth = requireCallableAuth(context);
         const expenseId = asString(data?.expenseId);
         if (!expenseId || expenseId.includes('/') || expenseId.length > 200) {
             throw new functions.https.HttpsError('invalid-argument', '과태료 항목을 선택해 주세요.');
         }
-        const snapshot = await admin.firestore().collection(VEHICLE_EXPENSE_COLLECTION).doc(expenseId).get();
+        const db = admin.firestore();
+        const profile = await db.collection('users').doc(auth.uid).get();
+        if (!profile.exists || (profile.data()?.status !== undefined && profile.data()?.status !== 'active')) {
+            throw new functions.https.HttpsError('permission-denied', '활성 사용자만 고지서를 조회할 수 있습니다.');
+        }
+        let teamOnly = false;
+        try { await requireVehicleFineAccess(context); }
+        catch (error) {
+            if ((error as { code?: string }).code !== 'permission-denied') throw error;
+            teamOnly = true;
+        }
+        const expenseRef = db.collection(VEHICLE_EXPENSE_COLLECTION).doc(expenseId);
+        const snapshot = await expenseRef.get();
         const expense = snapshot.data();
         if (!isActiveVehicleImportExpense(snapshot) || expense?.type !== 'FINE' || expense.fineNotice?.attachmentRemoved === true) {
             throw new functions.https.HttpsError('not-found', '과태료 내역을 찾을 수 없습니다. 대장을 새로고침해 주세요.');
         }
-        return { ...await readVehicleFineSource(expense.fineNotice?.sourceSha256),
+        const checkTeamScope = async () => {
+            if (!teamOnly) return;
+            // Reuse the existing server policy for linked workers, teams and
+            // vehicle assignment dates. Never trust a client-supplied team ID.
+            const { readTeamScopedData } = await import('./teamScopedRead');
+            const scoped = await readTeamScopedData({ collection: 'vehicleExpenses',
+                filters: { startDate: expense.date, endDate: expense.date } }, context);
+            const allowed = scoped.rows?.find((row: any) => row.id === expenseId);
+            if (!allowed || allowed.status === 'CANCELLED' || allowed.cancelledAt || allowed.fineNotice?.attachmentRemoved
+                || allowed.fineNotice?.sourceSha256 !== expense.fineNotice?.sourceSha256) {
+                throw new functions.https.HttpsError('permission-denied', '소속 팀에 배정된 기간의 고지서만 조회할 수 있습니다.');
+            }
+        };
+        await checkTeamScope();
+        const source = await readVehicleFineSource(expense.fineNotice?.sourceSha256);
+        // A reassignment, suspension or attachment removal during the download
+        // must not release the already-read private bytes.
+        await checkTeamScope();
+        const current = await expenseRef.get();
+        if (!isActiveVehicleImportExpense(current) || current.data()?.fineNotice?.attachmentRemoved
+            || current.data()?.fineNotice?.sourceSha256 !== expense.fineNotice?.sourceSha256) {
+            throw new functions.https.HttpsError('not-found', '고지서 정보가 변경되었습니다. 다시 조회해 주세요.');
+        }
+        return { ...source,
             fileName: asString(expense.fineNotice?.sourceFileName) || '과태료 고지서' };
     });
 

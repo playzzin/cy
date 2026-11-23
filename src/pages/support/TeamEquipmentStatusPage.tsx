@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure } from '../../components/team-mobile/TeamMobileUI';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -921,7 +922,7 @@ const TeamEquipmentStatusPage: React.FC = () => {
         {equipmentItems.map(item => <th key={item.id} scope="col" title={item.name}>{item.name}</th>)}
         <th scope="col">비고</th><th scope="col"><span className="sr-only">관리</span></th>
     </tr></thead>;
-    const renderTotals = (name: string, totals: Record<string, number>) => <section className="equipment-group-summary" aria-label={`${name} 총수량`}>
+    const renderTotals = (name: string, totals: Record<string, number>) => <TeamMobileDisclosure title={`${name} 장비 합계`} summary={`${equipmentItems.reduce((sum, item) => sum + totals[item.id], 0).toLocaleString('ko-KR')}대`}><section className="equipment-group-summary" aria-label={`${name} 총수량`}>
         <div className="equipment-summary-heading"><h3>{name} 총수량</h3>
             <strong aria-label={`${name} 전체 장비 수량`}>{equipmentItems.reduce((sum, item) => sum + totals[item.id], 0).toLocaleString('ko-KR')}<small>대</small></strong>
         </div>
@@ -931,34 +932,34 @@ const TeamEquipmentStatusPage: React.FC = () => {
                 <strong aria-label={`${name} ${item.name} 총수량`}>{totals[item.id].toLocaleString('ko-KR')}<small>대</small></strong>
             </div>)}
         </div>
-    </section>;
+    </section></TeamMobileDisclosure>;
     const renderTeamRow = (record: TeamEquipmentRecord) => {
         const quantities = getRecordDisplayQuantities(record, equipmentItems);
         const locked = record.isForemanBreakdown && record.useForemanTotals;
         return <tr key={record.id} className={changedIds.has(record.id) ? 'is-changed' : ''}>
             <th scope="row"><div className="equipment-team-name" title={record.teamName}><i style={{ backgroundColor: record.teamColor }} /><span>{record.teamName}</span></div>
                 {record.isForemanBreakdown && <small className="equipment-team-hint">{locked ? '반장별 합계' : '직접 입력'} · {record.foremen.length}명</small>}</th>
-            {equipmentItems.map(item => <td key={item.id}>{locked
+            {equipmentItems.map(item => <td key={item.id} data-label={item.name}>{locked
                 ? <output className="equipment-derived" aria-label={`${record.teamName} ${item.name} 합계`}>{toQuantity(quantities[item.id])}</output>
                 : <input type="number" min={0} step={1} aria-label={`${record.teamName} ${item.name} 수량`} value={quantities[item.id] ?? 0} disabled={controlsDisabled}
                     onChange={event => updateQuantity(record.id, item.id, event.target.value)} />}</td>)}
-            <td><input className="equipment-note" aria-label={`${record.teamName} 비고`} value={record.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateNote(record.id, event.target.value)} /></td>
+            <td data-label="비고"><input className="equipment-note" aria-label={`${record.teamName} 비고`} value={record.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateNote(record.id, event.target.value)} /></td>
             <td><button type="button" className={`equipment-icon-button ${changedIds.has(record.id) ? 'equipment-primary' : ''}`} aria-label={`${record.teamName} 저장`} title="팀 저장" disabled={controlsDisabled} onClick={() => saveRecord(record.id)}><FontAwesomeIcon icon={faFloppyDisk} /></button></td>
         </tr>;
     };
 
     return (
-        <div className="team-equipment-page">
+        <div className="tm-page team-equipment-page">
             <div className="equipment-workspace">
-                <header className="equipment-header">
+                <header className="tm-page-heading equipment-header">
                     <div className="equipment-heading">
                         <span className="equipment-heading-icon"><FontAwesomeIcon icon={faScrewdriverWrench} /></span>
-                        <div><h1>시공팀 장비 수량 현황</h1><p>본팀과 새끼팀의 보유 장비를 각각 확인하세요.</p></div>
+                        <div><h1>시공팀 장비 수량 현황</h1><TeamMobileDisclosure title="조회 안내"><p>본팀과 새끼팀의 보유 장비를 각각 확인하세요.</p></TeamMobileDisclosure></div>
                     </div>
-                    <div className="equipment-actions">
+                    <TeamPageActions><div className="equipment-actions">
                         <button type="button" onClick={() => navigate('/support/vehicles')}><FontAwesomeIcon icon={faArrowLeft} /> 차량 관리</button>
                         <button type="button" disabled={loading || saving} onClick={() => setRefreshKey(prev => prev + 1)}><FontAwesomeIcon icon={faRotateRight} /> 팀정보 새로고침</button>
-                    </div>
+                    </div></TeamPageActions>
                 </header>
 
                 <div className="equipment-toolbar">
@@ -1031,9 +1032,9 @@ const TeamEquipmentStatusPage: React.FC = () => {
                                             ? <tr><td colSpan={equipmentItems.length + 3} className="equipment-empty">아래에서 반장을 추가하세요.</td></tr>
                                             : record.foremen.map(foreman => <tr key={foreman.id}>
                                                 <th scope="row" title={foreman.name}><span className="equipment-foreman-name">{foreman.name}</span></th>
-                                                {equipmentItems.map(item => <td key={item.id}><input type="number" min={0} step={1} aria-label={`${record.teamName} ${foreman.name} ${item.name} 수량`}
+                                                {equipmentItems.map(item => <td key={item.id} data-label={item.name}><input type="number" min={0} step={1} aria-label={`${record.teamName} ${foreman.name} ${item.name} 수량`}
                                                     value={foreman.quantities[item.id] ?? 0} disabled={controlsDisabled} onChange={event => updateForemanQuantity(record.id, foreman.id, item.id, event.target.value)} /></td>)}
-                                                <td><input className="equipment-note" aria-label={`${record.teamName} ${foreman.name} 비고`} value={foreman.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateForemanNote(record.id, foreman.id, event.target.value)} /></td>
+                                                <td data-label="비고"><input className="equipment-note" aria-label={`${record.teamName} ${foreman.name} 비고`} value={foreman.note} placeholder="비고" disabled={controlsDisabled} onChange={event => updateForemanNote(record.id, foreman.id, event.target.value)} /></td>
                                                 <td><button type="button" className="equipment-icon-button equipment-danger" aria-label={`${foreman.name} 반장 삭제`} title="반장 삭제" disabled={controlsDisabled} onClick={() => removeForeman(record.id, foreman)}><FontAwesomeIcon icon={faTrash} /></button></td>
                                             </tr>)}</tbody>
                                         <tfoot><tr><th scope="row">반장별 합계</th>{equipmentItems.map(item => <td key={item.id}><output aria-label={`${record.teamName} 반장별 ${item.name} 합계`}>{totals[item.id]}</output></td>)}<td colSpan={2} /></tr></tfoot>

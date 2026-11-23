@@ -1,5 +1,5 @@
-.original-files-overlay { position: fixed; inset: 0; z-index: 100; background: rgb(15 23 42 / 65%); }
-.original-files-dialog { position: fixed; top: 50%; left: 50%; z-index: 101; transform: translate(-50%, -50%); display: flex; flex-direction: column; gap: 12px; width: min(1100px, calc(100vw - 32px)); height: min(900px, calc(100dvh - 40px)); padding: 20px; border-radius: 18px; background: #fff; color: #0f172a; box-shadow: 0 24px 80px #0005; overflow: hidden; }
+.original-files-overlay { position: fixed; inset: 0; z-index: 2100; background: rgb(15 23 42 / 65%); }
+.original-files-dialog { position: fixed; top: 50%; left: 50%; z-index: 2101; transform: translate(-50%, -50%); display: flex; flex-direction: column; gap: 12px; width: min(1100px, calc(100vw - 32px)); height: min(900px, calc(100dvh - 40px)); padding: 20px; border-radius: 18px; background: #fff; color: #0f172a; box-shadow: 0 24px 80px #0005; overflow: hidden; }
 .original-files-dialog * { box-sizing: border-box; }
 .original-files-dialog__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-shrink: 0; }
 .original-files-dialog__header > div { min-width: 0; }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Swal from 'sweetalert2';
 import { useTeamSettlementAccordion } from '../../hooks/useTeamSettlementAccordion';
+import { TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
 import { TeamSettlementDisclosure } from '../../components/payroll/TeamSettlementDisclosure';
 import './TeamSettlementPage.css';
 import { useTeamSettlementAccess } from '../../hooks/useTeamSettlementAccess';
@@ -661,6 +662,7 @@ const buildMonthRange = (yearMonth: string): { startDate: string; endDate: strin
 };
 
 export const TeamSettlementPage: React.FC = () => {
+  const isTeamMobile = useTeamMobile();
   const { canWrite, loading: accessLoading } = useTeamSettlementAccess();
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamListState, setTeamListState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -3658,6 +3660,11 @@ export const TeamSettlementPage: React.FC = () => {
 
       {doc && (
         <div className="team-settlement-page__overview mt-4 space-y-4">
+          {isTeamMobile && <TeamMobileSummary label="최종 정산" value={`${formatCurrency(totals.net)}원`}>
+            <span>{doc.confirmedAt ? '확정' : '미확정'} · {yearMonth}</span>
+            <span>{validationDisplay.totalCount ? `확인 필요 ${validationDisplay.totalCount}건` : '검증 항목 확인 완료'}</span>
+          </TeamMobileSummary>}
+          <TeamMobileDisclosure title="정산 계산 내역">
           <section aria-label="정산 요약">
             <p className="sr-only">매출 − 매입 − 공제 + 추가{totals.prevCarryover !== 0 || totals.deposit !== 0 ? ' + 이월·입금' : ''} = 최종 정산</p>
             <div className="team-settlement-page__summary-equation">
@@ -3692,6 +3699,7 @@ export const TeamSettlementPage: React.FC = () => {
             </div>
           </section>
 
+          </TeamMobileDisclosure>
           <TeamSettlementDisclosure id="settlement-validation" title="정산 검증" count={validationDisplay.validationCount}
             open={accordion.isOpen(['validation'])} onToggle={() => accordion.toggle(['validation'])}>
                 <div id="settlement-source-validation" className={`mt-1 text-xs font-semibold ${validationDisplay.validationCount > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>

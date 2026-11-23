@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure, TeamRequestTabs, useTeamRequestTabs } from '../../components/team-mobile/TeamMobileUI';
 import SecureExpenseReceipt from '../../components/SecureExpenseReceipt';
 import RequestDraftNotice from '../../components/RequestDraftNotice';
 import { readRequestDraft, saveRequestDraft, deleteRequestDraft } from '../../utils/requestDraftStore';
@@ -46,6 +47,8 @@ export default function TeamExpenseRequestPage() {
   const [draftOwner, setDraftOwner] = useState(currentUser?.uid);
   const [yearMonth, setYearMonth] = useState(() => today().slice(0, 7));
   const [data, setData] = useState<TeamExpenseRequestData | null>(null);
+  const tabs = useTeamRequestTabs('expense-request-history', data?.canReview === false, currentUser?.uid);
+  const [submittedId, setSubmittedId] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -240,6 +243,7 @@ export default function TeamExpenseRequestPage() {
       uploadedReceipts.current = { key: '', ids: new Set() };
       setForm(previous => ({ ...previous, description: '', amount: '', memo: '' }));
       setNotice('승인을 요청했습니다. 사무실 승인 후 경비내역과 팀 정산에 반영됩니다.');
+      setSubmittedId(requestId); setFilter('all'); setTeamFilter('all'); setHistoryTeamSearch(''); tabs.showHistory();
       // List refresh is independent of submission so the next entry is immediately usable.
       const submittedMonth = form.date.slice(0, 7);
       if (submittedMonth === yearMonth) void load(true, true);
@@ -281,21 +285,24 @@ export default function TeamExpenseRequestPage() {
   const receiptLocked = saving || loading || preparing || !payerTeam || Boolean(analysisReceipt) || confirmOpen;
 
   return <main className={`team-expense-request ${data && !data.canReview ? 'expense-quick-entry' : ''}`}>
-    <header className="expense-request-header expense-page-header"><div className="expense-page-heading"><span className="expense-page-icon"><ReceiptText size={25} aria-hidden="true" /></span><div><span className="expense-request-eyebrow">팀장 메뉴 · 경비관리</span><h1>{data?.canReview ? '팀장 경비 승인' : '팀 경비 신청'}</h1><p>{data?.canReview ? '사용팀·청구팀과 영수증을 확인한 뒤 승인해 주세요.' : '영수증 첨부부터 승인 확인까지, 팀 경비를 한곳에서 관리하세요.'}</p></div></div><div className="expense-page-actions">{data && !data.canReview && <a href="#expense-request-history"><FileText size={16} aria-hidden="true" />신청 내역</a>}<button type="button" onClick={() => void load(true)} disabled={loading || saving}><RefreshCw size={16} className={loading ? 'animate-spin' : undefined} aria-hidden="true" />새로고침</button></div></header>
-    <dl className="expense-request-summary" aria-label="경비 신청 요약" aria-busy={loading}>
+    <header className="expense-request-header expense-page-header"><div className="expense-page-heading"><span className="expense-page-icon"><ReceiptText size={25} aria-hidden="true" /></span><div><span className="expense-request-eyebrow">팀장 메뉴 · 경비관리</span><h1>{data?.canReview ? '팀장 경비 승인' : '팀 경비 신청'}</h1>{!tabs.active && <p>{data?.canReview ? '사용팀·청구팀과 영수증을 확인한 뒤 승인해 주세요.' : '영수증 첨부부터 승인 확인까지, 팀 경비를 한곳에서 관리하세요.'}</p>}</div></div><TeamPageActions><div className="expense-page-actions">{data && !data.canReview && <a href="#expense-request-history" onClick={tabs.showHistory}><FileText size={16} aria-hidden="true" />신청 내역</a>}<button type="button" onClick={() => void load(true)} disabled={loading || saving}><RefreshCw size={16} className={loading ? 'animate-spin' : undefined} aria-hidden="true" />새로고침</button></div></TeamPageActions></header>
+    <TeamRequestTabs tabs={tabs} disabled={saving || confirmOpen} />
+    <dl hidden={tabs.active && tabs.view === 'entry'} className="expense-request-summary" aria-label="경비 신청 요약" aria-busy={loading}>
       <div><dt><FileText size={16} aria-hidden="true" />전체 신청</dt><dd>{data ? data.requests.length.toLocaleString('ko-KR') : '—'}<span>건</span></dd><small>선택한 월 · 불러온 내역 기준</small></div>
       <div className="expense-summary-pending"><dt><Clock3 size={16} aria-hidden="true" />승인 대기</dt><dd>{data ? summary.pending.toLocaleString('ko-KR') : '—'}<span>건</span></dd><small>{data ? money(summary.pendingAmount) : loading ? '조회 중' : '조회 필요'}</small></div>
       <div><dt><CheckCircle2 size={16} aria-hidden="true" />승인 완료</dt><dd>{data ? summary.approved.toLocaleString('ko-KR') : '—'}<span>건</span></dd><small>경비·팀 정산 반영</small></div>
       <div><dt><ClipboardCheck size={16} aria-hidden="true" />반려</dt><dd>{data ? summary.rejected.toLocaleString('ko-KR') : '—'}<span>건</span></dd><small>처리 사유를 확인해 주세요</small></div>
     </dl>
+    <TeamMobileDisclosure title="경비 신청 안내">
     <ol className="expense-request-steps"><li><span>1</span>팀·경비 입력</li><li><span>2</span>영수증 첨부</li><li><span>3</span>사무실 승인 후 반영</li></ol>
     <p className="expense-request-note">사무실이 승인하면 청구팀의 경비에서 차감하고, 먼저 돈을 낸 사용팀에는 같은 금액을 환급합니다. 환급은 팀 정산에 반영됩니다.</p>
+    </TeamMobileDisclosure>
     {error && !confirmOpen && <div className="expense-request-error" role="alert" style={review ? { position: 'fixed', bottom: 20, left: '10%', right: '10%', zIndex: 1001 } : undefined}>{error}</div>}
     {notice && <div className="expense-request-success" role="status"><CheckCircle2 size={18} />{notice}</div>}
     {hasDraft && <RequestDraftNotice onDiscard={discardDraft} disabled={saving || preparing || confirmOpen} />}
     {loading && <div role="status" className="expense-request-loading-state"><p className="expense-request-loading"><Loader2 className="animate-spin" size={18} />{data ? '최신 경비 신청을 확인하고 있습니다.' : '경비 신청을 불러오는 중입니다.'}</p>{!data && <ExpenseRequestSkeleton />}</div>}
     {data && <div className={`expense-request-grid ${data.canReview ? 'review-only' : ''}`}>
-      {!data.canReview && <section className="expense-request-panel"><h2><Plus size={19} />새 경비 신청</h2><p className="expense-request-note">승인 전에는 경비와 정산 금액에 포함되지 않습니다.</p>
+      {!data.canReview && <section id={`${tabs.id}-entry`} {...tabs.panel('entry')} className="expense-request-panel"><h2><Plus size={19} />새 경비 신청</h2><p className="expense-request-note">승인 전에는 경비와 정산 금액에 포함되지 않습니다.</p>
         {!data.payerTeams.length && <p role="alert">연결된 소속팀이 없습니다. 사무실에 작업자·소속 팀 연결을 요청해 주세요.</p>}
         <form aria-label="새 경비 신청" onSubmit={submit}><fieldset disabled={saving || loading || !data.payerTeams.length || Boolean(analysisReceipt) || confirmOpen}>
           <div className="expense-request-team-fields">
@@ -327,13 +334,13 @@ export default function TeamExpenseRequestPage() {
           <div className="expense-submit-bar"><button className="primary expense-request-submit" type="submit" disabled={saving || preparing || !receipts.length}>{saving ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />}{saving ? progress : '등록 전 미리보기'}</button></div>
         </fieldset></form>
       </section>}
-      <section id="expense-request-history" className="expense-request-panel expense-request-history" aria-busy={loading || refreshing}><div className="expense-request-history-title"><h2><FileText size={19} aria-hidden="true" />{data.canReview ? '경비 신청 목록' : '내 신청 내역'}</h2><span>대기 {summary.pending}건 · {money(summary.pendingAmount)}</span></div>
+      <section id="expense-request-history" {...tabs.panel('history')} className="expense-request-panel expense-request-history" aria-busy={loading || refreshing}><div className="expense-request-history-title"><h2><FileText size={19} aria-hidden="true" />{data.canReview ? '경비 신청 목록' : '내 신청 내역'}</h2><span>대기 {summary.pending}건 · {money(summary.pendingAmount)}</span></div>
         {refreshing && <p role="status" className="expense-request-loading"><Loader2 className="animate-spin" size={18} />내역을 갱신하고 있습니다. 다음 경비를 입력할 수 있어요.</p>}
         <p className="expense-request-note">불러온 {data.requests.length}건 기준으로 필터와 대기 합계를 표시합니다.</p>
         {data.nextCursor && <button type="button" disabled={loading || loadingMore || saving} onClick={() => void loadMore()}>{loadingMore ? '추가 조회 중…' : '다음 100건 더 보기'}</button>}
         <div className="expense-request-filters"><label>조회 월<input type="month" aria-label="조회 월" value={yearMonth} disabled={saving} onChange={event => { if (event.target.value) setYearMonth(event.target.value); }} /></label><label>상태<select value={filter} onChange={event => setFilter(event.target.value)}><option value="all">전체 상태</option><option value="pending">승인 대기</option><option value="approved">승인 완료</option><option value="rejected">반려</option></select></label><label>내역 팀 검색<input type="search" placeholder="사용팀 또는 청구팀 이름" value={historyTeamSearch} onChange={event => setHistoryTeamSearch(event.target.value)} /></label>{data.canReview && <label>팀 필터<select value={teamFilter} onChange={event => setTeamFilter(event.target.value)}><option value="all">전체 팀</option>{data.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>}</div>
         {!rows.length && !loading && <div className="expense-request-empty"><FileText size={30} /><p>해당 조건의 경비 신청이 없습니다.</p></div>}
-        {rows.map(row => <article key={row.id} className="expense-request-card"><div className="expense-request-card-top"><span className={`expense-request-badge ${row.status}`}>{labels[row.status]}</span><strong>{money(row.amount)}</strong></div><h3>{row.description}</h3><RequestTeams row={row} teams={data.teams} /><p>{row.date} · {row.categoryLabel} · {row.paymentMethod}</p>{data.canReview && <p>신청자: {row.submitterName}</p>}{row.memo && <p className="expense-request-memo">{row.memo}</p>}<div className="expense-request-attachments">{row.attachments.map((attachment, index) => <SecureExpenseReceipt key={attachment.id} fullPath={attachment.fullPath} name={`영수증 ${index + 1}`} />)}</div>{row.reviewedAt && <p className="expense-request-note">{row.reviewerName} · {new Date(row.reviewedAt).toLocaleString('ko-KR')}{row.reviewReason && <><br />처리 사유: {row.reviewReason}</>}</p>}{data.canReview && row.status === 'pending' && <div className="expense-request-actions"><button type="button" disabled={saving || loading} onClick={() => { setReview({ row, decision: 'rejected' }); setReason(''); }}>반려</button><button type="button" className="primary" disabled={saving || loading} onClick={() => { setReview({ row, decision: 'approved' }); setReason(''); }}>승인 및 반영</button></div>}</article>)}
+        {rows.map(row => <article key={row.id} data-submitted={row.id === submittedId || undefined} className="expense-request-card"><div className="expense-request-card-top"><span className={`expense-request-badge ${row.status}`}>{labels[row.status]}</span><strong>{money(row.amount)}</strong></div><h3>{row.description}</h3><RequestTeams row={row} teams={data.teams} /><p>{row.date} · {row.categoryLabel} · {row.paymentMethod}</p>{data.canReview && <p>신청자: {row.submitterName}</p>}{row.memo && <p className="expense-request-memo">{row.memo}</p>}<div className="expense-request-attachments">{row.attachments.map((attachment, index) => <SecureExpenseReceipt key={attachment.id} fullPath={attachment.fullPath} name={`영수증 ${index + 1}`} />)}</div>{row.reviewedAt && <p className="expense-request-note">{row.reviewerName} · {new Date(row.reviewedAt).toLocaleString('ko-KR')}{row.reviewReason && <><br />처리 사유: {row.reviewReason}</>}</p>}{data.canReview && row.status === 'pending' && <div className="expense-request-actions"><button type="button" disabled={saving || loading} onClick={() => { setReview({ row, decision: 'rejected' }); setReason(''); }}>반려</button><button type="button" className="primary" disabled={saving || loading} onClick={() => { setReview({ row, decision: 'approved' }); setReason(''); }}>승인 및 반영</button></div>}</article>)}
       </section>
     </div>}
     {data?.canReview && <div className="expense-request-panel expense-draft-maintenance"><TeamRequestDraftMaintenance key={currentUser?.uid} service={teamExpenseRequestService} /></div>}

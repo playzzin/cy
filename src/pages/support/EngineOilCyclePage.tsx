@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure } from '../../components/team-mobile/TeamMobileUI';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -679,9 +680,9 @@ const EngineOilCyclePage: React.FC = () => {
     ];
 
     return (
-        <div className="engine-oil-page min-h-screen w-full min-w-0 max-w-full bg-slate-50 px-3 py-4 text-slate-900 sm:p-6 xl:p-8">
+        <div className="tm-page engine-oil-page min-h-screen w-full min-w-0 max-w-full bg-slate-50 px-3 py-4 text-slate-900 sm:p-6 xl:p-8">
             <div className="mx-auto flex max-w-[1500px] flex-col gap-4">
-                <header className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                <header className="tm-oil-heading rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="flex min-w-0 items-start gap-3">
                             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-lg text-white shadow-lg shadow-blue-100 sm:h-12 sm:w-12 sm:text-xl">
@@ -691,13 +692,13 @@ const EngineOilCyclePage: React.FC = () => {
                                 <h1 className="break-keep text-xl font-black tracking-tight text-slate-950 sm:text-4xl">
                                     엔진오일 교체주기 관제표
                                 </h1>
-                                <p className="mt-2 max-w-3xl text-xs font-medium leading-5 text-slate-500 sm:text-sm sm:leading-6">
+                                <TeamMobileDisclosure title="기록 안내"><p className="mt-2 max-w-3xl text-xs font-medium leading-5 text-slate-500 sm:text-sm sm:leading-6">
                                     차량번호와 팀은 차량 관리 데이터에서 자동으로 가져오고, 비고와 엔진오일 거리 기록은 차량별로 저장합니다.
-                                </p>
+                                </p></TeamMobileDisclosure>
                             </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
+                        <TeamPageActions><div className="flex flex-wrap items-center gap-2">
                             {!restricted && <button
                                 type="button"
                                 onClick={() => navigate('/support/vehicles')}
@@ -717,7 +718,7 @@ const EngineOilCyclePage: React.FC = () => {
                             <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">
                                 {restricted ? '내 팀 차량만 조회·수정' : '차량 관리 연동 · 차량번호/팀 자동반영 · 공용 DB 저장'}
                             </div>
-                        </div>
+                        </div></TeamPageActions>
                     </div>
                 </header>
 

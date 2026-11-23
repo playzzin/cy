@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Banknote,
@@ -20,6 +21,9 @@ import {
 import { accommodationService } from '../../services/accommodationService';
 import MonthNavigator from '../../components/common/MonthNavigator';
 import CardStatementFilesDialog from '../../components/card/CardStatementFilesDialog';
+import TeamCardStatementDetails, { type CardUsageDateRange } from '../../components/card/TeamCardStatementDetails';
+import { CardStatementThumbnail } from '../../components/common/OriginalDocumentThumbnail';
+import { getCardStatementFileName } from '../../services/cardStatementAttachmentService';
 import VehicleFinePhotos from '../../components/vehicle/VehicleFinePhotos';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import { cardService } from '../../services/cardService';
@@ -94,6 +98,8 @@ interface CardResource {
     assignments: CardAssignmentRecord[];
     monthlyBilling: number;
     statementPaths: string[];
+    transactions: CardTransaction[];
+    dateRanges: CardUsageDateRange[];
 }
 
 const EMPTY_TEXT = '-';
@@ -321,10 +327,11 @@ const DetailField: React.FC<{ label: string; value?: React.ReactNode; wide?: boo
 );
 
 const TeamResourceDetailPage: React.FC = () => {
+    const isTeamMobile = useTeamMobile();
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const isCurrentSelectedMonth = selectedMonth === getCurrentMonth();
     const [selectedTeamId, setSelectedTeamId] = useState<string>('all');
-    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list');
+    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('list', true);
     const [isTeamPickerOpen, setIsTeamPickerOpen] = useState(false);
     const [isMobileTeamPickerOpen, setIsMobileTeamPickerOpen] = useState(false);
     const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
@@ -341,7 +348,7 @@ const TeamResourceDetailPage: React.FC = () => {
     const [cardAssignments, setCardAssignments] = useState<CardAssignmentRecord[]>([]);
     const [cardTransactions, setCardTransactions] = useState<{ month: string; rows: CardTransaction[] }>({ month: '', rows: [] });
     const [statementRevision, setStatementRevision] = useState(0);
-    const [statementSelection, setStatementSelection] = useState<{ scope: string; key: string } | null>(null);
+    const [statementSelection, setStatementSelection] = useState<{ scope: string; key: string; path?: string; view?: 'original' | 'details' } | null>(null);
     const [vehicleExpenses, setVehicleExpenses] = useState<{ month: string; rows: VehicleExpenseRecord[]; loading: boolean; error: boolean }>({ month: '', rows: [], loading: false, error: false });
     const [workers, setWorkers] = useState<Worker[]>([]);
 
@@ -688,7 +695,7 @@ const TeamResourceDetailPage: React.FC = () => {
     const selectedCardResources = useMemo(() => {
         const map = new Map<string, CardResource>();
         const createResource = (key: string, cardId: string, cardLabel: string, card: Card | null): CardResource => ({
-            key, cardId, cardLabel, card, assignments: [], monthlyBilling: 0, statementPaths: [],
+            key, cardId, cardLabel, card, assignments: [], monthlyBilling: 0, statementPaths: [], transactions: [], dateRanges: [],
         });
 
         if (isCurrentSelectedMonth) {
@@ -710,6 +717,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 const current = map.get(key) ?? createResource(key, assignment.cardId, assignment.cardLabel, card);
                 if (!current.card && card) current.card = card;
                 current.assignments.push(assignment);
+                current.dateRanges.push({ startDate: assignment.startDate > startDate ? assignment.startDate : startDate, endDate: assignment.endDate && assignment.endDate < endDate ? assignment.endDate : endDate });
                 map.set(key, current);
             });
 
@@ -722,6 +730,9 @@ const TeamResourceDetailPage: React.FC = () => {
             if (!current.card && card) current.card = card;
             current.monthlyBilling += asNumber(doc.totalAmount);
             current.statementPaths.push(...(doc.statementAttachmentPaths ?? []));
+            const segments = (doc.lineItems || []).filter(line => line.sourceStartDate && line.sourceEndDate);
+            segments.forEach(line => current.dateRanges.push({ startDate: line.sourceStartDate! > startDate ? line.sourceStartDate! : startDate, endDate: line.sourceEndDate! < endDate ? line.sourceEndDate! : endDate }));
+            if (!segments.length && !cardAssignments.some(assignment => assignment.cardId === doc.cardId)) current.dateRanges.push({ startDate, endDate });
             map.set(key, current);
         });
 
@@ -737,7 +748,11 @@ const TeamResourceDetailPage: React.FC = () => {
                 const hasAssignmentHistory = cardAssignments.some(assignment => assignment.cardId === transaction.cardId);
                 const currentAssigneeMatches = !hasAssignmentHistory && isCurrentSelectedMonth && resource.card &&
                     matchesResourceAssignee(resource.card.currentAssigneeType, resource.card.currentAssigneeId, resource.card.currentAssigneeName);
-                if (assignedOnDate || currentAssigneeMatches) {
+                const linkedToBill = selectedCardDocs.some(doc => doc.cardId === transaction.cardId && (doc.lineItems ?? []).some(line => line.sourceLedgerRowId === transaction.id || line.id === transaction.id));
+                if (assignedOnDate || currentAssigneeMatches || linkedToBill) {
+                    resource.transactions.push(transaction);
+                    if (currentAssigneeMatches) resource.dateRanges.push({ startDate, endDate });
+                    else if (linkedToBill) resource.dateRanges.push({ startDate: transaction.date, endDate: transaction.date });
                     resource.statementPaths.push(...dedupeStatementPaths([transaction.evidenceUrl, ...(transaction.statementAttachmentPaths ?? [])]));
                 }
             });
@@ -749,7 +764,7 @@ const TeamResourceDetailPage: React.FC = () => {
     }, [cardAssignments, cardByKey, cards, cardTransactions, endDate, isCurrentSelectedMonth, matchesResourceAssignee, selectedCardDocs, selectedMonth, startDate]);
 
     const statementResource = statementSelection?.scope === statementScope && !loading && !accessScope.loading
-        ? selectedCardResources.find(resource => resource.key === statementSelection.key && resource.statementPaths.length > 0)
+        ? selectedCardResources.find(resource => resource.key === statementSelection.key && (resource.statementPaths.length > 0 || (statementSelection.view === 'details' && resource.transactions.length > 0)))
         : undefined;
 
     const selectedCostLines = useMemo<ResourceCostLine[]>(() => {
@@ -1160,10 +1175,10 @@ const TeamResourceDetailPage: React.FC = () => {
                         <WalletCards size={16} />
                         팀별 지원 배정 월별 조회
                     </div>
-                    <h1>팀별 숙소 · 차량 · 카드 · 경비 상세</h1>
+                    <h1>{isTeamMobile ? '팀 지원·경비' : '팀별 숙소 · 차량 · 카드 · 경비 상세'}</h1>
                 </div>
 
-                <div className="tw-header-actions">
+                <TeamPageActions><div className="tw-header-actions">
                     <button type="button" className="tw-icon-button" onClick={handleCsvDownload} disabled={isBusy} title="CSV 내보내기">
                         <Download size={18} />
                         <span>CSV</span>
@@ -1176,7 +1191,7 @@ const TeamResourceDetailPage: React.FC = () => {
                         <RefreshCw size={18} className={isBusy ? 'tw-spin' : ''} />
                         새로고침
                     </button>
-                </div>
+                </div></TeamPageActions>
             </header>
 
             <section className="tw-toolbar trd-toolbar">
@@ -1262,6 +1277,11 @@ const TeamResourceDetailPage: React.FC = () => {
                 )}
             </section>
 
+            {isTeamMobile && <TeamMobileSummary label="정산 반영 합계" value={loading || loadingResources ? '조회 중' : formatCurrency(selectedStats.total)}>
+                <span>{selectedTeam?.name || '팀 선택'} · {selectedMonth}</span>
+                <span>숙소 {selectedStats.accommodationCount} · 차량 {selectedStats.vehicleCount} · 카드 {selectedStats.cardCount}</span>
+            </TeamMobileSummary>}
+            <TeamMobileDisclosure title="항목별 금액·배정 요약">
             <section className="tw-kpi-grid" aria-label="선택 팀 지원 요약">
                 <div className="tw-kpi">
                     <BedDouble size={20} />
@@ -1289,6 +1309,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 </div>
             </section>
 
+            </TeamMobileDisclosure>
             <div className="tw-mobile-switch" role="tablist" aria-label="모바일 보기 전환">
                 <button
                     type="button"
@@ -1546,9 +1567,9 @@ const TeamResourceDetailPage: React.FC = () => {
                                         <div className="tw-output-section__header"><h3><FileText size={18} />과태료 고지서</h3><span>{selectedMonth}</span></div>
                                         <div className="trd-originals__grid">
                                             {fineResources.map(({ doc, amount, expenses: fineExpenses }) => {
-                                                return <div className="trd-originals__item" key={doc.id}>
-                                                    <div><strong>{doc.vehiclePlate || '차량'}</strong><small>과태료 {formatCurrency(amount)}</small></div>
-                                                    {fineExpenses.length > 0 ? <VehicleFinePhotos key={`${statementScope}:${doc.id}`} expenses={fineExpenses} vehiclePlate={doc.vehiclePlate || '차량'} triggerLabel="원본 보기" onRemoved={() => setStatementRevision(value => value + 1)} />
+                                                return <div className="trd-originals__item trd-originals__fine" key={doc.id}>
+                                                    <div><strong>{doc.vehiclePlate || '차량'}</strong><small>월 청구액 {formatCurrency(amount)}</small></div>
+                                                    {fineExpenses.length > 0 ? <VehicleFinePhotos key={`${statementScope}:${doc.id}`} expenses={fineExpenses} vehiclePlate={doc.vehiclePlate || '차량'} triggerLabel="원본 보기" gallery onRemoved={() => setStatementRevision(value => value + 1)} />
                                                         : <span role="status">{isBusy || vehicleExpenses.month !== selectedMonth || vehicleExpenses.loading ? '불러오는 중…' : vehicleExpenses.error ? '조회 실패 · 새로고침해 주세요' : '연결된 고지서 없음'}</span>}
                                                 </div>;
                                             })}
@@ -1656,15 +1677,29 @@ const TeamResourceDetailPage: React.FC = () => {
                                 <div className="trd-tab-stack">
                                     <section className="trd-originals" aria-label="카드 원본 빠른보기">
                                         <div className="tw-output-section__header"><h3><FileText size={18} />카드 사용내역서 원본</h3><span>{selectedMonth}</span></div>
-                                        <div className="trd-originals__grid">
-                                            {selectedCardResources.filter(resource => resource.statementPaths.length > 0).map(resource => <button
-                                                key={resource.key} type="button" className="trd-originals__item trd-originals__button" disabled={isBusy}
-                                                aria-label={`${resource.card?.name || resource.cardLabel} 카드 원본 보기`}
-                                                onClick={() => setStatementSelection({ scope: statementScope, key: resource.key })}>
-                                                <CreditCard size={22} /><span><strong>{resource.card?.name || resource.cardLabel}</strong>
-                                                    <small>{resource.card?.last4 ? `끝번호 ${resource.card.last4} · ` : ''}원본 {resource.statementPaths.length}개</small></span>
-                                                <span className="trd-originals__open">원본 보기</span>
-                                            </button>)}
+                                        <div className="trd-originals__grid trd-originals__grid--cards">
+                                            {selectedCardResources.filter(resource => resource.statementPaths.length > 0 || resource.transactions.length > 0).map(resource => <article
+                                                key={`${statementScope}:${resource.key}`} className="trd-card-original">
+                                                <header><CreditCard size={22} /><div><strong>{resource.card?.name || resource.cardLabel}</strong>
+                                                    <small>{resource.card?.last4 ? `끝번호 ${resource.card.last4} · ` : ''}월 청구액 {formatCurrency(resource.monthlyBilling)}</small></div></header>
+                                                <div className="trd-card-original__photos">
+                                                    {resource.statementPaths.slice(0, 3).map(path => <button type="button" key={path} disabled={isBusy}
+                                                        aria-label={`${resource.card?.name || resource.cardLabel} ${getCardStatementFileName(path)} 원본 보기`}
+                                                        onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, path })}>
+                                                        <CardStatementThumbnail path={path} label={getCardStatementFileName(path)} />
+                                                        <span>{getCardStatementFileName(path)}</span>
+                                                    </button>)}
+                                                </div>
+                                                <div className="trd-card-original__actions">
+                                                    <button type="button" disabled={isBusy || !resource.statementPaths.length}
+                                                        aria-label={`${resource.card?.name || resource.cardLabel} 카드 원본 보기`}
+                                                        onClick={() => setStatementSelection({ scope: statementScope, key: resource.key })}>
+                                                        원본 {resource.statementPaths.length}개 보기</button>
+                                                    <button type="button" disabled={isBusy} className="trd-card-original__details"
+                                                        aria-label={`${resource.card?.name || resource.cardLabel} 사용 상세 보기`}
+                                                        onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, view: 'details' })}>사용 상세 보기</button>
+                                                </div>
+                                            </article>)}
                                             {!selectedCardResources.some(resource => resource.statementPaths.length > 0) && <p>{isBusy ? '카드 원본을 불러오는 중…' : '선택한 달에 연결된 카드 원본이 없습니다.'}</p>}
                                         </div>
                                     </section>
@@ -1710,6 +1745,8 @@ const TeamResourceDetailPage: React.FC = () => {
                                                                                     onClick={() => setStatementSelection({ scope: statementScope, key: resource.key })}>
                                                                                     원본 보기
                                                                                 </button>
+                                                                                <button type="button" disabled={isBusy || (!resource.statementPaths.length && !resource.transactions.length)}
+                                                                                    onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, view: 'details' })}>사용 상세 보기</button>
                                                                             </div>
                                                                             <small>{resource.statementPaths.length ? `${resource.statementPaths.length}개 파일` : '등록된 파일 없음'}</small>
                                                                         </div>
@@ -1793,16 +1830,21 @@ const TeamResourceDetailPage: React.FC = () => {
                     )}
                 </section>
             </main>
-            {statementResource && (
+            {statementResource && (statementSelection?.view === 'details' ? <TeamCardStatementDetails
+                key={`${statementScope}:${statementResource.key}:details`} yearMonth={selectedMonth} cardId={statementResource.cardId}
+                cardLast4={statementResource.card?.last4 || ''} cardName={statementResource.card?.name || statementResource.cardLabel}
+                paths={statementResource.statementPaths} transactions={statementResource.transactions} dateRanges={statementResource.dateRanges}
+                onClose={() => setStatementSelection(null)} /> : (
                 <CardStatementFilesDialog
                     key={`${statementScope}:${statementResource.key}:original`}
                     paths={statementResource.statementPaths}
+                    initialPath={statementSelection?.path}
                     title={`${statementResource.card?.name || statementResource.cardLabel} 사용내역서 원본`}
                     onRemoved={() => { setStatementRevision(value => value + 1); void loadResourceData(); }}
                     showDetailsLink={false}
                     onClose={() => setStatementSelection(null)}
                 />
-            )}
+            ))}
         </div>
     );
 };

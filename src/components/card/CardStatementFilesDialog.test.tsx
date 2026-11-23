@@ -51,6 +51,12 @@ test('a rejected deletion preserves files and allows a retry; dirty ledgers disa
   await screen.findByText(/연결된 파일이 없습니다/);
 });
 
+test('썸네일에서 선택한 PDF를 다른 사진보다 먼저 연다', async () => {
+  render(<CardStatementFilesDialog paths={['statement.pdf', 'photo.jpg']} initialPath="statement.pdf" onClose={jest.fn()} />);
+  expect(await screen.findByTitle('statement.pdf PDF 원본')).toHaveAttribute('src', 'https://example.com/statement.pdf');
+  expect(resolve).toHaveBeenCalledWith('statement.pdf');
+});
+
 test('offers all unique files and opens only the selected original through a native link', async () => {
   render(<CardStatementFilesDialog paths={['folder/first.pdf', 'folder/second.pdf', 'folder/first.pdf', '']} onClose={jest.fn()} />);
   expect(screen.getByText('연결된 2개 파일 중 확인할 원본을 선택해 주세요.')).toBeInTheDocument();

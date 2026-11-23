@@ -52,6 +52,39 @@ test('등록→취소→재등록, AI 판독 변경, 실제 중복 방지와 사
         await Promise.all([saveVehicleFineSource({ base64: png, sourceSha256 }), saveVehicleFineSource({ base64: png, sourceSha256 })]);
         assert.deepEqual(await readVehicleFineSource(sourceSha256), { base64: png, mimeType: 'image/png' });
         assert.equal((await photo(changedId)).base64, png, '기존 기록도 같은 원본을 보관하면 연결');
+        const leader = { auth: { uid: 'fine-leader', token: {} } } as any;
+        await db.doc('users/fine-leader').set({ status: 'active', position: '팀장', linkedWorkerIds: ['fine-leader-worker'] });
+        await db.doc('teams/fine-team').set({ name: '검증 팀' });
+        await db.doc('workers/fine-leader-worker').set({ teamId: 'fine-team', role: '팀장', isActive: true });
+        const assignment = db.doc('vehicleAssignments/fine-team-assignment');
+        await assignment.set({ vehicleId: 'fine-vehicle', assigneeType: 'TEAM', assigneeId: 'fine-team', startDate: '2026-11-01', endDate: '2026-11-15' });
+        assert.equal((await photo(changedId, leader)).base64, png, '팀장도 본인 팀 배정 기간의 실제 보관 원본 조회');
+        const ownExpense = (await db.doc(`vehicleExpenses/${changedId}`).get()).data()!;
+        await db.doc('vehicleExpenses/fine-other-vehicle').set({ ...ownExpense, vehicleId: 'other-vehicle' });
+        await db.doc('vehicleExpenses/fine-other-period').set({ ...ownExpense, date: '2026-11-30' });
+        for (const id of ['fine-other-vehicle', 'fine-other-period']) await assert.rejects(photo(id, leader), denied('permission-denied'));
+        await assignment.update({ endDate: '2026-10-31' });
+        await assert.rejects(photo(changedId, leader), denied('permission-denied'), '배정 기간 밖 원본 차단');
+        await assignment.update({ endDate: '2026-11-15' });
+        for (const changes of [{ status: 'suspended' }, { status: 'active', linkedWorkerIds: [] }, { linkedWorkerIds: ['fine-leader-worker'], position: '작업자', accountType: 'worker' }]) {
+            await db.doc('users/fine-leader').update(changes);
+            await assert.rejects(photo(changedId, leader), denied('permission-denied'));
+        }
+        await db.doc('users/fine-leader').set({ status: 'active', position: '팀장', linkedWorkerIds: ['fine-leader-worker'] });
+        await assert.rejects(deleteVehicleFineNoticeAttachment.run({ expenseId: changedId }, leader), denied('permission-denied'), '팀장에게 삭제 권한은 추가하지 않음');
+        const sourceModule = await import('./vehicleFineSource');
+        const readSource = sourceModule.readVehicleFineSource;
+        try {
+            (sourceModule as any).readVehicleFineSource = async (hash: unknown) => {
+                const result = await readSource(hash);
+                await db.doc('workers/fine-leader-worker').update({ teamId: 'other-team' });
+                return result;
+            };
+            await assert.rejects(photo(changedId, leader), error => ['permission-denied', 'failed-precondition'].includes((error as any).code), '다운로드 중 소속 변경 시 원본 반환 차단');
+        } finally {
+            (sourceModule as any).readVehicleFineSource = readSource;
+            await db.doc('workers/fine-leader-worker').update({ teamId: 'fine-team' });
+        }
         await assert.rejects(photo(changedId, {}), denied('unauthenticated'));
         await assert.rejects(photo(changedId, { auth: { uid: 'ordinary', token: {} } }), denied('permission-denied'));
         await assert.rejects(photo('../private'), denied('invalid-argument'));
@@ -69,6 +102,7 @@ test('등록→취소→재등록, AI 판독 변경, 실제 중복 방지와 사
         assert.equal(afterRemoval.fineNotice.sourceSha256, beforeRemoval.fineNotice.sourceSha256);
         assert.equal(afterRemoval.fineNotice.attachmentRemoved, true);
         await assert.rejects(photo(changedId), denied('not-found'));
+        await assert.rejects(photo(changedId, leader), denied('not-found'));
         assert.equal((await readVehicleFineSource(sourceSha256)).base64, png, '다른 고지서가 공유하는 원본과 감사 이력은 보존');
 
         const signUp = await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-key`, {

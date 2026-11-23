@@ -10,16 +10,17 @@ interface Props {
     description: string;
     className?: string;
     contentStyle?: React.CSSProperties;
+    mobileBreakpoint?: 640 | 768;
     children: React.ReactNode;
 }
 
 /** A focus-trapped desktop dialog that becomes a scrollable sheet on phones. */
-export default function ResponsiveDetailDialog({ open, onOpenChange, title, description, className = '', contentStyle, children }: Props) {
+export default function ResponsiveDetailDialog({ open, onOpenChange, title, description, className = '', contentStyle, mobileBreakpoint = 640, children }: Props) {
     const returnFocus = useRef<HTMLElement | null>(null);
     const close = useRef(onOpenChange);
     close.current = onOpenChange;
     useEffect(() => {
-        if (!open || window.innerWidth > 640) return;
+        if (!open || window.innerWidth > mobileBreakpoint) return;
         const marker = `detail-${Date.now()}-${Math.random()}`;
         const initial = window.history.state;
         window.history.pushState({ ...initial, cyDetailDialog: marker }, '');
@@ -30,11 +31,11 @@ export default function ResponsiveDetailDialog({ open, onOpenChange, title, desc
             window.removeEventListener('popstate', onPop);
             if (!popped && window.history.state?.cyDetailDialog === marker) window.history.back();
         };
-    }, [open]);
+    }, [open, mobileBreakpoint]);
     return <Dialog.Root open={open} onOpenChange={onOpenChange}>
         <Dialog.Portal>
             <Dialog.Overlay className="cy-detail-dialog__overlay" />
-            <Dialog.Content className={`cy-detail-dialog ${className}`.trim()} style={contentStyle}
+            <Dialog.Content className={`cy-detail-dialog ${className}`.trim()} style={contentStyle} data-mobile-breakpoint={mobileBreakpoint}
                 onOpenAutoFocus={() => { returnFocus.current = document.activeElement as HTMLElement; }}
                 onCloseAutoFocus={event => { event.preventDefault(); if (returnFocus.current?.isConnected) returnFocus.current.focus(); }}>
                 <header className="cy-detail-dialog__header">
