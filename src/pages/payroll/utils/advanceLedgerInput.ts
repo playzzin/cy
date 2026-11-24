@@ -307,7 +307,14 @@ export const resolveInitialLedgerManualInput = (params: {
     && (params.settlementUpdatedAt as { _methodName?: unknown })._methodName === 'serverTimestamp'
   );
   if (advanceUpdatedAt > 0 && (settlementUpdatedAt > 0 || hasBrokenServerTimestamp)) {
-    return advanceUpdatedAt > settlementUpdatedAt ? advanceInput : settlementInput;
+    if (advanceUpdatedAt <= settlementUpdatedAt) return settlementInput;
+    // Only the payroll screen records the row's allocation choice.
+    if (!settlementInput.allocationMode) return advanceInput;
+    return {
+      ...advanceInput,
+      allocationMode: settlementInput.allocationMode,
+      assignmentType: settlementInput.assignmentType ?? advanceInput.assignmentType,
+    };
   }
 
   // Legacy drafts may not have timestamps. Preserve existing draft edits while

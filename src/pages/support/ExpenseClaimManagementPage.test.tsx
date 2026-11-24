@@ -1,13 +1,13 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ExpenseClaimManagementPage from './ExpenseClaimManagementPage';
 import { useExpenseLedgerData } from './hooks/useExpenseLedgerData';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { toast } from '../../utils/swal';
 
-jest.mock('../../components/SecureExpenseReceipt', () => () => null);
+jest.mock('../../components/SecureExpenseReceipt', () => ({ name }: { name: string }) => <button type="button">{name}</button>);
 jest.mock('../../components/support/SupportTeamFilterTabs', () => () => null);
 jest.mock('../../services/geminiService', () => ({ geminiService: {} }));
 jest.mock('../../services/storageService', () => ({ storageService: {} }));
@@ -100,4 +100,36 @@ it('음수 금액만 입력해도 미저장 변경으로 알린다', async () =>
   fireEvent.click(screen.getByRole('button', { name: /^기타청구 해당 팀/ }));
   fireEvent.change(screen.getByPlaceholderText('금액 입력'), { target: { value: '-1000' } });
   await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true));
+});
+
+it('후청구 목록에서 한 장은 바로 열고 여러 장은 같은 내용 칸에서 목록을 연다', async () => {
+  const data = mockUseData('2026-11', 'all');
+  const claim = {
+    yearMonth: '2026-11', date: '2026-11-01', claimType: 'otherExpense' as const,
+    payerTeamId: 'fixture-team', payerTeamName: '검증팀', category: 'etc', amount: 1000, status: 'charged' as const
+  };
+  const photo = { id: 'photo-1', name: '주차비.jpg', fullPath: 'claims/photo-1', url: 'https://example.test/photo-1.jpg' };
+  const receipt = { id: 'photo-2', name: '승인 영수증.jpg', fullPath: 'team-expense-receipts/photo-2', url: 'https://example.test/private.jpg' };
+  mockUseData.mockReturnValue({ ...data, rawDocs: { ...data.rawDocs, claims: [
+    { ...claim, id: 'single', description: '사진 한 장 경비', attachments: [photo] },
+    { ...claim, id: 'multiple', description: '사진 여러 장 경비', attachments: [photo, receipt] }
+  ] } });
+  render(<ExpenseClaimManagementPage embedded />);
+
+  const singleCell = await screen.findByRole('cell', { name: /사진 한 장 경비/ });
+  const thumbnail = within(singleCell).getByRole('link', { name: photo.name });
+  expect(thumbnail).toHaveAttribute('href', photo.url);
+  expect(thumbnail).toHaveAttribute('target', '_blank');
+
+  const multipleCell = screen.getByRole('cell', { name: /사진 여러 장 경비/ });
+  const attachmentButton = within(multipleCell).getByRole('button', { name: '첨부 사진 2장 보기' });
+  expect(attachmentButton).toHaveTextContent('+1');
+  fireEvent.click(attachmentButton);
+
+  const dialog = await screen.findByRole('dialog', { name: '첨부 사진' });
+  expect(within(dialog).getByRole('link', { name: photo.name })).toHaveAttribute('href', photo.url);
+  expect(within(dialog).getByRole('button', { name: receipt.name })).toBeInTheDocument();
+  expect(dialog.querySelector(`[href="${receipt.url}"]`)).toBeNull();
+  fireEvent.click(within(dialog).getByRole('button', { name: '상세 닫기' }));
+  await waitFor(() => expect(dialog).not.toBeInTheDocument());
 });
