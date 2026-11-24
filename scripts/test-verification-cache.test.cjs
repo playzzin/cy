@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
+const { releaseFixture } = require('./release-test-fixture.cjs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { MAX_AGE_MS, testEnvironment, testIdentity, proofPath, runTests } = require('./test-verification-cache.cjs');
@@ -11,13 +11,7 @@ const passed = { success: true, wasInterrupted: false, numFailedTests: 0, numFai
   numTotalTestSuites: 1, numPassedTestSuites: 1, numPendingTestSuites: 0 };
 
 function fixture(t) {
-  const parent = path.resolve(os.tmpdir());
-  const root = fs.mkdtempSync(path.join(parent, 'cy-test-proof-'));
-  t.after(() => {
-    assert.equal(path.dirname(root), parent);
-    assert.ok(path.basename(root).startsWith('cy-test-proof-'));
-    fs.rmSync(root, { recursive: true, force: true });
-  });
+  const root = releaseFixture(t, 'cy-test-proof-');
   const write = (name, value) => {
     const file = path.join(root, name);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -28,8 +22,6 @@ function fixture(t) {
   write('package.json', '{"name":"synthetic-test-proof","version":"1.0.0","private":true}');
   write('src/example.test.js', 'test("synthetic", () => expect(1).toBe(1));');
   write('node_modules/.package-lock.json', '{}');
-  fs.symlinkSync(path.dirname(require.resolve('react-scripts/package.json')), path.join(root, 'node_modules/react-scripts'),
-    process.platform === 'win32' ? 'junction' : 'dir');
   let calls = 0;
   const spawn = (_command, args, options) => {
     calls++;

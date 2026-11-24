@@ -30,12 +30,59 @@ test('npm entrypoints keep both old and new deployment commands on scoped paths'
   const app = require('../package.json').scripts;
   const functions = require('../functions/package.json').scripts;
   assert.equal(app['release:deploy'], app['deploy:hosting']);
+  assert.equal(app['release:deploy'], app['deploy:main']);
   assert.equal(app['deploy:functions'], 'node scripts/deploy-selected.cjs functions');
   assert.equal(app['deploy:rules'], 'node scripts/deploy-selected.cjs firestore:rules');
   assert.equal(functions.deploy, 'node ../scripts/deploy-selected.cjs functions');
   const config = require('../firebase.json');
   assert.deepEqual(config.functions.predeploy, ['npm --prefix functions run build']);
   assert.equal(config.hosting.predeploy.filter(command => command === 'npm run build').length, 1);
+});
+
+test('release checks use the registered CY transport, including SSH, and never trust another repository', () => {
+  const { publishedRemote } = require('./published-main.cjs');
+  for (const remote of ['https://github.com/playzzin/cy.git', 'git@github.com:playzzin/cy.git', 'ssh://git@github.com/playzzin/cy']) {
+    assert.equal(publishedRemote(remote), 'origin');
+  }
+  for (const remote of ['', 'https://example.test/playzzin/cy', 'git@github.com:someone/cy.git']) {
+    assert.equal(publishedRemote(remote), 'https://github.com/playzzin/cy.git');
+  }
+});
+
+test('the last production predeploy hook checks the built and published commits after the long build', async () => {
+  const { verifyMainBuild } = require('./published-main.cjs');
+  const commit = 'a'.repeat(40), built = { ...remote, commit, dirty: false };
+  let childOptions;
+  await deployHosting(['--require-main'], { getState: () => ({ ...state, commit }), readRemote: async () => built,
+    readMain: () => commit, verifyRelease: quiet, log: quiet,
+    execute: (_command, args, options) => { if (args.includes('--only')) childOptions = options; } });
+  const expected = childOptions.env.CY_DEPLOY_MAIN_COMMIT;
+  assert.equal(expected, commit);
+  assert.match(require('../firebase.json').hosting.predeploy.at(-1), /verify-hosting-target\.cjs production$/);
+  assert.doesNotThrow(() => verifyMainBuild(expected, built, () => commit));
+  assert.throws(() => verifyMainBuild(expected, built, () => 'b'.repeat(40)), /GitHub main/);
+  assert.throws(() => verifyMainBuild(expected, { ...built, dirty: true }, fail), /빌드한 커밋/);
+  assert.throws(() => verifyMainBuild(expected, { ...built, commit: 'different' }, fail), /빌드한 커밋/);
+});
+
+test('v1 records allow staging-only config changes after checking the recorded hash, while production changes still block', async () => {
+  const { backendFingerprintFormat } = require('./release-manifest.cjs');
+  const current = { ...state, backendFingerprintFormat };
+  const v1 = { ...remote, dirty: false, backendFingerprintFormat: 'git-tree-v1',
+    fingerprints: { ...remote.fingerprints, deployment: 'recorded-v1' } };
+  const options = { getState: () => current, readRemote: async () => v1,
+    getBackendFingerprints: (_sha, _root, format) => ({ deployment: format === 'git-tree-v1' ? 'recorded-v1' : current.fingerprints.deployment }),
+    execute: quiet, verifyRelease: quiet, log: quiet };
+  await deployHosting([], options);
+  await assert.rejects(deployHosting([], { ...options, execute: fail,
+    getBackendFingerprints: (_sha, _root, format) => ({ deployment: format === 'git-tree-v1' ? 'recorded-v1' : 'different-prod' }),
+  }), /서버·설정 변경.*deployment/);
+  await assert.rejects(deployHosting([], { ...options, execute: fail,
+    readRemote: async () => ({ ...v1, fingerprints: { ...v1.fingerprints, deployment: 'incorrect-record' } }),
+  }), /서버·설정 변경.*deployment/);
+  await assert.rejects(deployHosting([], { ...options, execute: fail,
+    readRemote: async () => ({ ...v1, fingerprints: { ...v1.fingerprints, firestore: 'changed' } }),
+  }), /서버·설정 변경.*firestore/);
 });
 
 test('function deployment requires explicit names and cannot broaden to all services', () => {

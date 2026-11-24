@@ -2,6 +2,27 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { compareRelease, sameSourceState, sourceState } = require('./release-manifest.cjs');
 const base = { schemaVersion: 1, fingerprints: { hosting: 'a', functions: 'b', firestore: 'c', storage: 'd', deployment: 'e' }, assetManifestHash: 'bundle-a' };
+test('production deployment fingerprints isolate staging config changes while preserving v1 comparison', t => {
+  const fs = require('node:fs'), path = require('node:path');
+  const { execFileSync } = require('node:child_process');
+  const { gitBackendFingerprints } = require('./release-manifest.cjs');
+  const root = require('./release-test-fixture.cjs').releaseFixture(t, 'cy-config-history-');
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  git('init', '--quiet');
+  const commit = (file, text) => {
+    fs.writeFileSync(path.join(root, file), text);
+    git('add', '--', file);
+    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qm', 'config fixture');
+    return git('rev-parse', 'HEAD');
+  };
+  const first = commit('firebase.json', '{}');
+  const stage = commit('firebase.staging.json', '{"hosting":{"public":"build-staging"}}');
+  const production = commit('firebase.json', '{"hosting":{"public":"other-build"}}');
+  const fingerprint = (sha, format) => gitBackendFingerprints(sha, root, format).deployment;
+  assert.equal(fingerprint(first), fingerprint(stage));
+  assert.notEqual(fingerprint(first, 'git-tree-v1'), fingerprint(stage, 'git-tree-v1'));
+  assert.notEqual(fingerprint(stage), fingerprint(production));
+});
 test('identifies server-only changes even when web assets match', () => {
   const result = compareRelease({ ...base, fingerprints: { ...base.fingerprints, functions: 'new' } }, base);
   assert.deepEqual(result.changed, ['functions']);

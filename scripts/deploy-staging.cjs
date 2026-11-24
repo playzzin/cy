@@ -1,12 +1,23 @@
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-const { sourceState, root } = require('./release-manifest.cjs');
+const { sourceState, sameSourceState } = require('./release-manifest.cjs');
 const { checkRelease } = require('./check-release.cjs');
-async function main() {
-    if (sourceState().dirty) throw new Error('변경 사항을 먼저 커밋해 주세요.');
-    const cli = path.join(process.env.APPDATA || '', 'npm/node_modules/firebase-tools/lib/bin/firebase.js');
-    const result = spawnSync(process.execPath, [cli, 'deploy', '--config', 'firebase.staging.json', '--project', 'cy-erp-staging-9c1e4', '--only', 'hosting', '--non-interactive'], { cwd: root, stdio: 'inherit' });
-    if (result.error || result.status !== 0) throw new Error('검증 서버 배포 실패');
-    await checkRelease('https://cy-erp-staging-9c1e4.web.app');
+const { firebaseCommand, run } = require('./deploy-selected.cjs');
+const { stagingOrigin } = require('./hosting-build-paths.cjs');
+const { site } = require('../firebase.staging.json').hosting;
+
+async function main(args = process.argv.slice(2), {
+    getState = sourceState, execute = run, verify = checkRelease, log = console.log,
+} = {}) {
+    if (args.some(arg => arg !== '--dry-run')) throw new Error('사용법: staging:deploy [--dry-run]');
+    const invocation = firebaseCommand(site, 'hosting', undefined, 'firebase.staging.json');
+    log(`검증 Hosting 대상 ${site}`);
+    if (args.includes('--dry-run')) return invocation;
+    const before = getState();
+    if (before.dirty) throw new Error('변경 사항을 먼저 커밋해 주세요.');
+    execute(invocation.command, invocation.args);
+    if (!sameSourceState(before, getState())) throw new Error('검증 서버 배포 중 코드가 바뀌었습니다.');
+    await verify(stagingOrigin);
+    return invocation;
 }
-main().catch(error => { console.error(error.message); process.exitCode = 1; });
+
+module.exports = { main };
+if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { resolveBuildDirectory, loadBuildEnvironment } = require('./hosting-build-paths.cjs');
+const { resolveBuildDirectory, loadBuildEnvironment, targetBuildEnvironment } = require('./hosting-build-paths.cjs');
 
 function verifyHostingBuild(workspaceRoot = path.resolve(__dirname, '..'), environment = process.env) {
   const buildDir = resolveBuildDirectory(workspaceRoot, environment);
@@ -62,6 +62,6 @@ function verifyHostingBuild(workspaceRoot = path.resolve(__dirname, '..'), envir
 }
 module.exports = { verifyHostingBuild };
 if (require.main === module) {
-  try { loadBuildEnvironment(); console.log(verifyHostingBuild()); }
+  try { loadBuildEnvironment(); console.log(verifyHostingBuild(undefined, targetBuildEnvironment(process.argv[2]))); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }

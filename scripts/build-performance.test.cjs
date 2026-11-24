@@ -1,43 +1,44 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
+const { releaseFixture, makeDirectoryLink } = require('./release-test-fixture.cjs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { workspaceCache, configureBuildCache, closeAfterRun } = require('./build-performance.cjs');
 
 function fixture(t) {
-  const parent = path.resolve(os.tmpdir());
-  const directory = fs.mkdtempSync(path.join(parent, 'cy-build-cache-test-'));
-  t.after(() => {
-    assert.ok(directory.startsWith(parent + path.sep) && path.basename(directory).startsWith('cy-build-cache-test-'));
-    fs.rmSync(directory, { recursive: true, force: true });
-  });
-  return directory;
+  return releaseFixture(t, 'cy-build-cache-test-');
 }
 
-test('worktrees sharing dependencies keep independent webpack, lint and TypeScript caches', t => {
+test('a shared node_modules junction still isolates real cache directories', t => {
   const directory = fixture(t);
   const shared = path.join(directory, 'dependencies');
   fs.mkdirSync(shared);
-  const roots = ['first', 'second'].map(name => {
+  const roots = [];
+  for (const name of ['first', 'second']) {
     const root = path.join(directory, name);
     fs.mkdirSync(root);
-    fs.symlinkSync(shared, path.join(root, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+    if (!makeDirectoryLink(t, shared, path.join(root, 'node_modules'))) return;
     fs.mkdirSync(workspaceCache(root), { recursive: true });
-    return root;
-  });
+    roots.push(root);
+  }
   assert.notEqual(fs.realpathSync(workspaceCache(roots[0])), fs.realpathSync(workspaceCache(roots[1])));
+});
+
+test('worktrees keep independent webpack, lint and TypeScript cache settings', t => {
+  const root = fixture(t);
   class ForkTsCheckerWebpackPlugin { constructor() { this.options = { typescript: {} }; } }
   class ESLintWebpackPlugin { constructor() { this.options = {}; } }
-  const config = { context: roots[0], cache: { type: 'filesystem' }, plugins: [new ForkTsCheckerWebpackPlugin(), new ESLintWebpackPlugin()],
+  const config = { context: root, cache: { type: 'filesystem' }, plugins: [new ForkTsCheckerWebpackPlugin(), new ESLintWebpackPlugin()],
     module: { rules: [{ oneOf: [{ loader: require.resolve('babel-loader'), options: { cacheDirectory: true } }] }] } };
   configureBuildCache(config, 'production');
-  assert.ok(config.cache.cacheDirectory.startsWith(workspaceCache(roots[0]) + path.sep));
+  assert.ok(config.cache.cacheDirectory.startsWith(workspaceCache(root) + path.sep));
   assert.ok(config.plugins[0].options.typescript.configOverwrite.compilerOptions.tsBuildInfoFile.includes('production'));
   assert.ok(config.plugins[1].options.cacheLocation.includes('production'));
-  assert.equal(config.module.rules[0].oneOf[0].options.cacheDirectory, path.join(workspaceCache(roots[0]), 'production', 'babel-loader'));
+  assert.equal(config.module.rules[0].oneOf[0].options.cacheDirectory, path.join(workspaceCache(root), 'production', 'babel-loader'));
   const productionCache = config.cache.cacheDirectory;
+  configureBuildCache(config, 'production', { BUILD_PATH: 'build-staging' });
+  assert.notEqual(config.cache.cacheDirectory, productionCache);
   configureBuildCache(config, 'development');
   assert.notEqual(config.cache.cacheDirectory, productionCache);
   assert.ok(config.module.rules[0].oneOf[0].options.cacheDirectory.includes('development'));

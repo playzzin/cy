@@ -2,6 +2,11 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const root = path.resolve(__dirname, '..');
+const stagingHosting = require('../firebase.staging.json').hosting;
+const stagingOrigin = `https://${stagingHosting.site}.web.app`;
+function targetBuildEnvironment(target, environment = process.env) {
+    return target === 'staging' ? { ...environment, BUILD_PATH: stagingHosting.public } : environment;
+}
 const resolveBuildDirectory = (workspaceRoot = root, environment = process.env) =>
     path.resolve(workspaceRoot, environment.BUILD_PATH || 'build');
 
@@ -17,4 +22,4 @@ function loadBuildEnvironment() {
     require('react-scripts/config/env');
 }
 
-module.exports = { resolveBuildDirectory, outputSuffix, loadBuildEnvironment };
+module.exports = { resolveBuildDirectory, outputSuffix, loadBuildEnvironment, targetBuildEnvironment, stagingOrigin };

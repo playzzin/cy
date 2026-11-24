@@ -7,20 +7,22 @@ const { resolveBuildDirectory, outputSuffix, loadBuildEnvironment } = require('.
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const git = (args, cwd = root) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const groups = {
-  hosting: ['src/', 'public/', 'scripts/', 'package.json', 'package-lock.json', 'tsconfig.json', 'tailwind.config.js', 'postcss.config.js'],
+  hosting: ['src/', 'public/', 'scripts/', 'package.json', 'package-lock.json', 'tsconfig.json', 'tailwind.config.js', 'postcss.config.js', 'firebase.staging.json'],
   functions: ['functions/src/', 'functions/package.json', 'functions/package-lock.json', 'functions/tsconfig.json'],
   firestore: ['firestore.rules', 'firestore.indexes.json'],
   storage: ['storage.rules'],
-  deployment: ['firebase.json', 'firebase.staging.json', '.firebaserc'],
+  deployment: ['firebase.json', '.firebaserc'],
 };
 const backendGroups = Object.entries(groups).filter(([group]) => group !== 'hosting');
-const backendFingerprintFormat = 'git-tree-v1';
+const backendFingerprintFormat = 'git-tree-v2';
 const inGroup = (file, prefixes) => prefixes.some(prefix => prefix.endsWith('/') ? file.startsWith(prefix) : file === prefix);
-function gitBackendFingerprints(commit, workspaceRoot = root) {
+function gitBackendFingerprints(commit, workspaceRoot = root, format = backendFingerprintFormat) {
   if (!/^[a-f0-9]{40}$/i.test(commit)) throw new Error('서버 소스를 비교할 Git 커밋이 올바르지 않습니다.');
-  const paths = backendGroups.flatMap(([, prefixes]) => prefixes);
+  const selectedGroups = backendGroups.map(([group, files]) =>
+    [group, format === 'git-tree-v1' && group === 'deployment' ? [...files, 'firebase.staging.json'] : files]);
+  const paths = selectedGroups.flatMap(([, prefixes]) => prefixes);
   const entries = git(['ls-tree', '-r', '-z', '--full-tree', commit, '--', ...paths], workspaceRoot).split('\0').filter(Boolean);
-  return Object.fromEntries(backendGroups.map(([group, prefixes]) => {
+  return Object.fromEntries(selectedGroups.map(([group, prefixes]) => {
     const records = entries.filter(entry => inGroup(entry.slice(entry.indexOf('\t') + 1), prefixes));
     return [group, hash(records.join('\0'))];
   }));

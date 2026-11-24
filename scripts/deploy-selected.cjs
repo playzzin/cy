@@ -18,18 +18,21 @@ function selectedTarget(args) {
   throw new Error('배포 대상을 명시해 주세요: functions 함수명 | firestore:rules | firestore:indexes | storage [--dry-run]');
 }
 
-function firebaseCommand(project, only, workspaceRoot = root) {
-  const cli = process.platform === 'win32'
+function firebaseCommand(project, only, workspaceRoot = root, config = 'firebase.json') {
+  const globalCli = process.platform === 'win32'
     ? path.join(process.env.APPDATA || '', 'npm/node_modules/firebase-tools/lib/bin/firebase.js') : null;
+  let cli = globalCli && fs.existsSync(globalCli) ? globalCli : null;
+  try { cli = require.resolve('firebase-tools/lib/bin/firebase.js', { paths: [workspaceRoot] }); }
+  catch (error) { if (!['MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED'].includes(error.code)) throw error; }
   return {
-    command: cli && fs.existsSync(cli) ? process.execPath : 'firebase',
-    args: [...(cli && fs.existsSync(cli) ? [cli] : []), 'deploy', '--config', path.join(workspaceRoot, 'firebase.json'),
+    command: cli ? process.execPath : 'firebase',
+    args: [...(cli ? [cli] : []), 'deploy', '--config', path.join(workspaceRoot, config),
       '--project', project, '--only', only, '--non-interactive'],
   };
 }
 
-function run(command, args) {
-  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: false });
+function run(command, args, { env = process.env } = {}) {
+  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: false, env });
   if (result.error || result.status !== 0 || result.signal) {
     throw new Error(result.error?.message || `검증 또는 배포 실패: ${command} (${result.signal || result.status})`);
   }

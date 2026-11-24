@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { root, hash, sourceState, compareRelease } = require('./release-manifest.cjs');
-const { resolveBuildDirectory, loadBuildEnvironment } = require('./hosting-build-paths.cjs');
+const { resolveBuildDirectory, loadBuildEnvironment, targetBuildEnvironment, stagingOrigin } = require('./hosting-build-paths.cjs');
 
 const transientCodes = new Set([
   'EAI_AGAIN', 'ENOTFOUND', 'ECONNABORTED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT',
@@ -60,7 +60,8 @@ async function waitForRelease(base, local, localAssets, { read = readRemoteJson,
 }
 async function checkRelease(base) {
   loadBuildEnvironment();
-  const directory = resolveBuildDirectory();
+  const target = new URL(base).origin === stagingOrigin ? 'staging' : 'production';
+  const directory = resolveBuildDirectory(root, targetBuildEnvironment(target));
   const local = JSON.parse(fs.readFileSync(path.join(directory, 'release.json'), 'utf8'));
   const state = sourceState();
   if (state.dirty || local.dirty || local.commit !== state.commit || Object.keys(state.fingerprints).some(key => state.fingerprints[key] !== local.fingerprints[key])) {

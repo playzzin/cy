@@ -5,21 +5,7 @@ const { root, sourceState, compareRelease, sameSourceState, gitBackendFingerprin
 const { checkRelease, readRemoteJson } = require('./check-release.cjs');
 const { firebaseCommand, deploymentProject, run } = require('./deploy-selected.cjs');
 
-function readPublishedMain() {
-  const result = spawnSync('git', [
-    'ls-remote', '--exit-code', 'https://github.com/playzzin/cy.git', 'refs/heads/main',
-  ], { cwd: root, encoding: 'utf8', timeout: 30000 });
-  const match = /^([a-f0-9]{40})\s+refs\/heads\/main$/.exec(result.stdout?.trim() || '');
-  if (result.error || result.status !== 0 || !match) throw new Error('GitHub main 커밋을 조회하지 못했습니다. GitHub 연결 및 Git 인증을 확인하세요.');
-  return match[1];
-}
-
-function assertPublishedMain(commit, readMain) {
-  const published = readMain();
-  if (commit !== published) {
-    throw new Error(`배포 중단. 로컬 ${commit.slice(0, 8)}, GitHub main ${published.slice(0, 8)}. 커밋과 푸시 상태를 확인하세요.`);
-  }
-}
+const { readPublishedMain, assertPublishedMain } = require('./published-main.cjs');
 
 function assertReleaseAncestry(localCommit, remoteCommit, runGit = args => spawnSync('git', args, {
   cwd: root, encoding: 'utf8', shell: false,
@@ -70,6 +56,16 @@ async function main(args = process.argv.slice(2), { getState = sourceState, exec
     backend = Object.keys(recorded).filter(group => state.fingerprints[group] !== recorded[group]);
     log(`이전 운영 기록의 서버 소스를 Git 커밋 ${remote.commit.slice(0, 8)} 기준으로 대조했습니다.`);
   }
+  if (backend.includes('deployment') && state.backendFingerprintFormat === backendFingerprintFormat
+      && remote?.backendFingerprintFormat === 'git-tree-v1' && remote.dirty === false) {
+    // v1 included the independent staging Hosting config. Authenticate that recorded
+    // fingerprint before comparing just the production paths from the same commit.
+    const previous = getBackendFingerprints(remote.commit, root, 'git-tree-v1');
+    if (remote.fingerprints.deployment === previous.deployment
+        && state.fingerprints.deployment === getBackendFingerprints(remote.commit).deployment) {
+      backend = backend.filter(group => group !== 'deployment');
+    }
+  }
   if ((!comparison.known || backend.length) && !initialize) throw new Error(`서버·설정 변경을 먼저 별도 검증하고 배포해야 합니다: ${backend.join(', ')}. 작업 기록을 확인한 뒤 --initialize-record로 새 기준을 설정하세요.`);
   if (remote && !comparison.known) throw new Error('운영 배포 기록 형식을 확인할 수 없습니다.');
   execute(process.execPath, [path.join(root, 'scripts', 'verify-project-health.js'), '--scope=hosting']);
@@ -81,7 +77,8 @@ async function main(args = process.argv.slice(2), { getState = sourceState, exec
   if (latest?.commit !== remote?.commit) throw new Error('검사 중 운영 배포 버전이 바뀌었습니다. 최신 운영 버전을 기준으로 다시 검증해 주세요.');
   // Standard firebase predeploy hooks remain active, including the final build check.
   if (requireMain) assertPublishedMain(state.commit, readMain);
-  execute(invocation.command, invocation.args);
+  execute(invocation.command, invocation.args, requireMain
+    ? { env: { ...process.env, CY_DEPLOY_MAIN_COMMIT: state.commit } } : undefined);
   await verifyRelease(base);
 }
 module.exports = { main, assertReleaseAncestry };

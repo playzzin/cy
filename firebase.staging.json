@@ -10,10 +10,10 @@
     "site": "cy-erp-staging-9c1e4",
     "predeploy": [
       "npm run build:staging",
-      "npm run verify:hosting-build",
+      "node scripts/verify-hosting-build.js staging",
       "node scripts/verify-hosting-target.cjs staging"
     ],
-    "public": "build",
+    "public": "build-staging",
     "ignore": [
       "firebase.json",
       "**/.*",

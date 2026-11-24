@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { outputSuffix, resolveBuildDirectory } = require('./hosting-build-paths.cjs');
 
 function workspaceCache(workspaceRoot = process.cwd()) {
   const root = fs.realpathSync(workspaceRoot);
@@ -10,8 +11,10 @@ function workspaceCache(workspaceRoot = process.cwd()) {
   return path.join(root, 'node_modules', '.cache', 'cy-workspaces', id);
 }
 
-function configureBuildCache(config, environment) {
-  const cacheRoot = path.join(workspaceCache(config.context), environment);
+function configureBuildCache(config, environment, buildEnvironment = process.env) {
+  const workspace = config.context || process.cwd();
+  const suffix = environment === 'production' ? outputSuffix(workspace, resolveBuildDirectory(workspace, buildEnvironment)) : '';
+  const cacheRoot = path.join(workspaceCache(workspace), environment + suffix);
   function configureLoaders(rules) {
     for (const rule of rules || []) {
       configureLoaders(rule.oneOf);

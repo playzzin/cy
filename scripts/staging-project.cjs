@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const project = 'cy-erp-staging-9c1e4';
-const appId = '1:78299075398:web:58147a7a35a65f7d8f0b47';
 const cli = path.join(process.env.APPDATA || '', 'npm/node_modules/firebase-tools/lib');
 async function clients() {
     const { getProjectDefaultAccount, getGlobalDefaultAccount } = require(path.join(cli, 'auth.js'));
@@ -15,6 +14,11 @@ async function clients() {
     return { Client, account };
 }
 async function main() {
+    if (process.argv[2] === 'config') {
+        await require('./staging-environment.cjs').refreshStagingSettings(root);
+        console.log('검증용 공개 앱 설정 준비 완료 (Git 제외 파일)');
+        return;
+    }
     const { Client, account } = await clients();
     if (process.argv[2] === 'enable') {
         const { ensure } = require(path.join(cli, 'ensureApiEnabled.js'));
@@ -39,21 +43,12 @@ async function main() {
             }
             console.log('검증 서버 Google·이메일 로그인 구성 완료');
         } finally { fs.unlinkSync(filename); }
-    } else if (process.argv[2] === 'config') {
-        const api = new Client({ urlPrefix: 'https://firebase.googleapis.com', apiVersion: 'v1beta1' });
-        const { body } = await api.get(`/projects/${project}/webApps/${appId}/config`, { skipLog: { resBody: true } });
-        if (body.projectId !== project) throw new Error('검증 프로젝트 설정 불일치');
-        const env = {
-            REACT_APP_DEPLOYMENT_ENV: 'staging', REACT_APP_FIREBASE_PROJECT_ID: project,
-            REACT_APP_FIREBASE_API_KEY: body.apiKey, REACT_APP_FIREBASE_AUTH_DOMAIN: body.authDomain,
-            REACT_APP_FIREBASE_APP_ID: body.appId, REACT_APP_FIREBASE_MESSAGING_SENDER_ID: body.messagingSenderId,
-            REACT_APP_FIREBASE_STORAGE_BUCKET: body.storageBucket || `${project}.firebasestorage.app`,
-            REACT_APP_FIREBASE_MEASUREMENT_ID: '', REACT_APP_USE_EMULATORS: 'false',
-        };
-        fs.mkdirSync(path.join(root, '.firebase'), { recursive: true });
-        fs.writeFileSync(path.join(root, '.firebase/staging-env.json'), JSON.stringify(env));
-        console.log('검증 빌드 설정 준비 완료 (Git 제외 파일)');
     } else throw new Error('사용: node scripts/staging-project.cjs enable|config|auth');
 }
 module.exports = { clients, project, root };
-if (require.main === module) main().catch(() => { console.error('검증 프로젝트 준비 실패. Firebase 권한과 API 설정을 확인해 주세요.'); process.exitCode = 1; });
+if (require.main === module) main().catch(error => {
+    console.error(process.argv[2] === 'config'
+        ? `검증 서버의 공개 앱 설정을 가져오지 못했습니다. ${error.cause?.code || error.message}`
+        : '검증 프로젝트 준비 실패. Firebase 권한과 API 설정을 확인해 주세요.');
+    process.exitCode = 1;
+});
