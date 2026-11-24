@@ -42,6 +42,20 @@ test('initialization accepts a 404 or verified SPA fallback and rejects unrelate
     await assert.rejects(read(() => Response.json(null)), /JSON 객체/);
 });
 
+test('reconnects when a previously idle proxy connection aborts before publication', async () => {
+    for (const code of ['ECONNABORTED', 'UND_ERR_SOCKET']) {
+        let calls = 0;
+        const record = await readRemoteJson('https://example.test', 'release.json', {
+            wait: async () => {}, request: async () => {
+                if (++calls === 1) throw new TypeError('fetch failed', { cause: Object.assign(new Error(), { code }) });
+                return Response.json(local);
+            },
+        });
+        assert.deepEqual(record, local);
+        assert.equal(calls, 2);
+    }
+});
+
 test('waits for release and asset manifests to converge without rebuilding or redeploying', async () => {
     let round = 0;
     const pauses = [];

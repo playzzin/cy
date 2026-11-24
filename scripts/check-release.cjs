@@ -3,7 +3,10 @@ const path = require('node:path');
 const { root, hash, sourceState, compareRelease } = require('./release-manifest.cjs');
 const { resolveBuildDirectory, loadBuildEnvironment } = require('./hosting-build-paths.cjs');
 
-const transientCodes = new Set(['EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'TimeoutError']);
+const transientCodes = new Set([
+  'EAI_AGAIN', 'ENOTFOUND', 'ECONNABORTED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET', 'TimeoutError',
+]);
 async function readRemoteJson(base, name, { allowMissing = false, request = fetch, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   async function get(file) {
     const url = new URL(file, `${base.replace(/\/$/, '')}/`);
