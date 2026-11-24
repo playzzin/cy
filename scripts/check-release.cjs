@@ -2,12 +2,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { root, hash, sourceState, compareRelease } = require('./release-manifest.cjs');
 const { resolveBuildDirectory, loadBuildEnvironment, targetBuildEnvironment, stagingOrigin } = require('./hosting-build-paths.cjs');
-const { releaseFetch, discardBody } = require('./hosting-network.cjs');
+const { releaseFetch, discardBody, networkErrorCode } = require('./hosting-network.cjs');
 
 const transientCodes = new Set([
   'EAI_AGAIN', 'ENOTFOUND', 'ECONNABORTED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT',
-  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET', 'TimeoutError',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET',
+  'TimeoutError', 'AbortError', 'ABORT_ERR',
 ]);
+const transientStatuses = new Set([408, 429, 500, 502, 503, 504]);
 async function readRemoteJson(base, name, { allowMissing = false, request = releaseFetch, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   async function get(file) {
     const url = new URL(file, `${base.replace(/\/$/, '')}/`);
@@ -15,10 +17,18 @@ async function readRemoteJson(base, name, { allowMissing = false, request = rele
       url.searchParams.set('releaseCheck', Date.now().toString());
       try {
         const response = await request(url, { signal: AbortSignal.timeout(15000), redirect: 'error', cache: 'no-store' });
-        if (attempt || ![429, 502, 503, 504].includes(response.status)) return response;
-        await discardBody(response);
+        if (!attempt && transientStatuses.has(response.status)) {
+          await discardBody(response);
+        } else {
+          const contentType = response.headers.get('content-type') || '';
+          const readBody = response.ok && (contentType.includes('json') || (allowMissing && contentType.includes('text/html')));
+          // A reset can arrive after the headers, while the body is still streaming.
+          const body = readBody ? await response.text() : null;
+          if (!readBody) await discardBody(response);
+          return { ok: response.ok, status: response.status, contentType, body };
+        }
       } catch (error) {
-        const code = error.cause?.code || error.name;
+        const code = networkErrorCode(error);
         if (attempt || !transientCodes.has(code)) throw new Error(`${url.hostname}/${file} 연결 실패 (${code}): ${error.message}`, { cause: error });
       }
       await wait(1000);
@@ -27,19 +37,16 @@ async function readRemoteJson(base, name, { allowMissing = false, request = rele
   const response = await get(name);
   if (allowMissing && response.status === 404) return null;
   if (!response.ok) throw new Error(`${name} 확인 실패 (HTTP ${response.status})`);
-  const contentType = response.headers.get('content-type') || '';
+  const { contentType, body } = response;
   if (!contentType.includes('json')) {
     // Firebase can serve the SPA's index.html with status 200 for a missing file.
-    if (allowMissing && contentType.includes('text/html')) {
-      const html = await response.text();
-      if (/<div\s+id=["']root["']/.test(html)) {
-        const index = await get('index.html');
-        if (index.ok && index.headers.get('content-type')?.includes('text/html') && await index.text() === html) return null;
-      }
+    if (allowMissing && contentType.includes('text/html') && /<div\s+id=["']root["']/.test(body)) {
+      const index = await get('index.html');
+      if (index.ok && index.contentType.includes('text/html') && index.body === body) return null;
     }
     throw new Error(`${name} 응답 형식 오류 (HTTP ${response.status}, ${contentType || 'Content-Type 없음'})`);
   }
-  const data = await response.json();
+  const data = JSON.parse(body);
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(`${name}에 유효한 JSON 객체가 없습니다.`);
   return data;
 }

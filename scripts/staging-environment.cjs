@@ -2,17 +2,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { stagingOrigin } = require('./hosting-build-paths.cjs');
+const { readRemoteJson } = require('./check-release.cjs');
 const { REQUIRED_FIREBASE_ENV_KEYS, validateFirebaseBuildEnvironment } = require('./validate-firebase-build-env.js');
 const project = require('../firebase.staging.json').hosting.site;
 const appId = '1:78299075398:web:58147a7a35a65f7d8f0b47';
 const settingsFile = root => path.join(root, '.firebase', 'staging-env.json');
 
-async function refreshStagingSettings(root, request = fetch) {
-    const response = await request(`${stagingOrigin}/__/firebase/init.json`, {
-        redirect: 'error', signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) throw new Error(`검증 서버 공개 앱 설정 조회 실패 (HTTP ${response.status})`);
-    const config = await response.json();
+async function refreshStagingSettings(root, request) {
+    const config = await readRemoteJson(stagingOrigin, '__/firebase/init.json', { request });
     if (config.projectId !== project || config.appId !== appId) throw new Error('검증 서버의 프로젝트 또는 앱 ID가 다릅니다.');
     const settings = {
         REACT_APP_DEPLOYMENT_ENV: 'staging', REACT_APP_FIREBASE_PROJECT_ID: config.projectId,

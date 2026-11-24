@@ -69,6 +69,17 @@ test('read-only diagnostics report the other endpoints even when one fails', asy
   await assert.rejects(diagnose(['unknown'], { readMain: unexpected }), /사용법/);
 });
 
+test('single-site diagnostics contact only the selected site', async () => {
+  for (const [target, site] of [['staging', 'cy-erp-staging-9c1e4'], ['production', 'cyee-9c1e4']]) {
+    const checks = [];
+    await diagnose([target], { readMain: () => commit, log: quiet,
+      checkApi: async project => checks.push(project),
+      readRecord: async (base, name) => { checks.push(`${base}/${name}`); return { commit }; },
+    });
+    assert.deepEqual(checks, [site, `https://${site}.web.app/release.json`]);
+  }
+});
+
 test('cloud production builds emit only the canonical app settings and reject environment-file injection', () => {
   const { productionSettings } = require('./ci-hosting-web-config.cjs');
   const site = 'cyee-9c1e4';
@@ -87,12 +98,20 @@ test('hosted uploads run from verified main, and a combined release waits for su
   const yaml = require('js-yaml');
   const workflow = name => yaml.load(fs.readFileSync(path.join(__dirname, '../.github/workflows', name), 'utf8'));
   const release = workflow('hosting-release.yml'), upload = workflow('hosting-upload.yml');
+  const connectivity = workflow('hosting-connectivity.yml');
+  assert.deepEqual(Object.keys(connectivity.on), ['pull_request']);
+  assert.deepEqual(connectivity.permissions, { contents: 'read' });
+  assert.deepEqual(connectivity.jobs.check.steps.filter(s => s.run).map(s => s.run), ['npm run deploy:check']);
+  assert.equal(connectivity.jobs.check.steps[0].with['persist-credentials'], false);
   assert.deepEqual(Object.keys(release.on).sort(), ['workflow_dispatch','workflow_run']);
   assert.deepEqual(release.on.workflow_run.branches, ['main']);
   assert.match(release.jobs.check.if, /head_repository.full_name == github.repository/);
   assert.match(release.jobs.check.if, /workflow_run.conclusion == 'success'/);
   assert.ok(release.jobs.check.steps.some(s => s.run?.includes('[deploy hosting]') && s.run.includes('git log -1')));
   assert.equal(release.jobs.check.permissions['id-token'], undefined);
+  const preflight = release.jobs.check.steps.find(s => s.env?.TARGET === '${{ steps.revision.outputs.target }}');
+  assert.match(preflight.run, /staging\|production\) npm run deploy:check -- "\$TARGET"/);
+  assert.match(preflight.run, /both\|check\) npm run deploy:check ;;/);
   assert.deepEqual(release.jobs.production.needs, ['check','staging']);
   assert.match(release.jobs.production.if, /needs.staging.result == 'success'/);
   assert.deepEqual(Object.keys(upload.on), ['workflow_call']);

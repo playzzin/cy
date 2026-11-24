@@ -66,7 +66,13 @@ jobs:
       - name: Read published revisions and contact Hosting APIs
         env:
           NODE_USE_ENV_PROXY: '1'
-        run: npm run deploy:check
+          TARGET: ${{ steps.revision.outputs.target }}
+        run: |
+          case "$TARGET" in
+            staging|production) npm run deploy:check -- "$TARGET" ;;
+            both|check) npm run deploy:check ;;
+            *) exit 1 ;;
+          esac
 
   staging:
     needs: check

@@ -15,6 +15,8 @@
 
 ### GitHub에서 Hosting 배포
 
+Hosting 배포 코드를 변경하는 이 저장소의 `main` 대상 PR에는 **Hosting connectivity** 검사가 표시된다. GitHub 실행기가 배포 권한 없이 현재 `main`, 두 Hosting API와 두 사이트의 `release.json`을 조회한다. 로컬에서 DNS 오류가 났을 때 이 결과로 GitHub 실행기에서도 같은 문제가 있는지 확인할 수 있다. 단일 사이트를 배포할 때는 선택한 사이트의 연결과 배포 기록만 검사한다.
+
 1. GitHub **Actions → Firebase Hosting release → Run workflow**에서 `main`을 선택한다. `check`는 연결과 현재 버전만 조회한다. `staging`, `production`, `both`는 해당 커밋의 Quality Gate 성공을 확인한 후 업로드한다. `both`는 검증 사이트의 실제 배포 버전이 확인된 뒤 운영 사이트를 배포한다.
 2. GitHub에서 검증까지 자동으로 이어갈 때는 배포할 커밋 메시지 **마지막 줄**에 `[deploy hosting]`을 넣는다. 이 커밋이 `main`에 반영되고 Quality Gate가 통과하면 두 사이트에 배포한다. 표시가 없는 커밋에서는 연결 상태만 확인한다.
 3. 각 GitHub Environment(`staging`, `production`)에 `CY_HOSTING_WIF_PROVIDER`를 설정한다. 서비스 계정을 가장하는 구성은 `CY_HOSTING_SERVICE_ACCOUNT`도 지정한다. Google Cloud의 신뢰 조건은 저장소 ID `1121336004`, 소유자 ID `221525849`, `refs/heads/main`, 해당 Environment와 Hosting 업로드 워크플로로 제한한다. 각 배포 주체에 해당 프로젝트의 Hosting 배포 권한만 부여한다. 이미 Firebase GitHub 연동을 구성한 저장소는 기존 프로젝트 전용 시크릿 `FIREBASE_SERVICE_ACCOUNT_CY_ERP_STAGING_9C1E4` 또는 `FIREBASE_SERVICE_ACCOUNT_CYEE_9C1E4`를 사용할 수 있다.

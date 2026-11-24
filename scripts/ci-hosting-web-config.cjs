@@ -1,5 +1,5 @@
 const fs = require('node:fs');
-const { releaseFetch } = require('./hosting-network.cjs');
+const { readRemoteJson } = require('./check-release.cjs');
 const { validateFirebaseBuildEnvironment } = require('./validate-firebase-build-env.js');
 const site = require('../firebase.json').hosting.site;
 
@@ -24,9 +24,8 @@ function productionSettings(config) {
 
 async function main() {
   if (process.env.GITHUB_ACTIONS !== 'true' || !process.env.GITHUB_ENV) throw new Error('GitHub Actions 환경 파일이 필요합니다.');
-  const response = await releaseFetch(`https://${site}.web.app/__/firebase/init.json`, { redirect: 'error', signal: AbortSignal.timeout(12000) });
-  if (!response.ok) throw new Error(`운영 웹 설정 조회 실패 (HTTP ${response.status})`);
-  const settings = productionSettings(await response.json());
+  const config = await readRemoteJson(`https://${site}.web.app`, '__/firebase/init.json');
+  const settings = productionSettings(config);
   fs.appendFileSync(process.env.GITHUB_ENV, Object.entries(settings).map(([key, value]) => `${key}=${value}\n`).join(''));
 }
 module.exports = { productionSettings };

@@ -15,7 +15,8 @@ test('cloud start and staging build use only validated public staging settings, 
     const config = { projectId: project, appId: stagingAppId, apiKey: 'demo-public-fixture',
         authDomain: project + '.firebaseapp.com', messagingSenderId: 'demo-sender', storageBucket: project + '.firebasestorage.app' };
     await refreshStagingSettings(root, async (url, options) => {
-        assert.equal(url, stagingOrigin + '/__/firebase/init.json');
+        assert.equal(url.origin, stagingOrigin);
+        assert.equal(url.pathname, '/__/firebase/init.json');
         assert.equal(options.redirect, 'error');
         return Response.json(config);
     });
