@@ -1,3 +1,5 @@
+import { TeamMobileSummary, TeamMobileDisclosure, useTeamMobile } from '../team-mobile/TeamMobileUI';
+import { TeamLeadQuickActions } from './TeamLeadQuickActions';
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, subDays } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -163,6 +165,7 @@ const SectionHeading: React.FC<{ title: string; description: string; actionLabel
 );
 
 export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ role, linkedWorker }) => {
+    const teamMobile = useTeamMobile();
     const runRouteAction = useRouteAction();
     const [reports, setReports] = useState<DailyReport[]>([]);
     const [loading, setLoading] = useState(true);
@@ -299,6 +302,22 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
             </div>
         );
     }
+
+    if (teamMobile && role === 'teamLead') return <div className="tm-team-home">
+        {!profileReady && <p role="status">작업자·소속팀 연결이 필요합니다.</p>}
+        <TeamMobileSummary label="오늘 팀 공수" value={profileReady ? `${formatManDay(todayManDay)} 공수` : '연결 필요'}>
+            <span>최근 30일 {profileReady ? `${formatManDay(monthManDay)} 공수` : '—'}</span>
+            <span>최근 30일 출역 {profileReady ? `${uniqueWorkers.size}명` : '—'}</span>
+        </TeamMobileSummary>
+        <p className="tm-home-status">{todayStatus}</p>
+        <TeamLeadQuickActions />
+        <TeamMobileDisclosure title="현장별 팀 운영" summary={`최근 30일 · ${uniqueSites.size}곳`}>
+            <div className="tm-home-list">{siteSummaries.length ? siteSummaries.map(site => <button type="button" key={site.id} onClick={() => runRouteAction(TEAM_SITE_PATH)}><span>{site.name}</span><strong>{formatManDay(site.manDay)} 공수</strong></button>) : <p>최근 30일 출역 기록이 없습니다.</p>}</div>
+        </TeamMobileDisclosure>
+        <TeamMobileDisclosure title="최근 근무 기록">
+            <div className="tm-home-list">{recentReports.length ? recentReports.map(report => <button type="button" key={`${report.id || report.date}-${report.siteId}`} onClick={() => runRouteAction(historyPath)}><span>{report.siteName || '현장 미지정'}<small>{report.date}</small></span><strong>{formatManDay(report.scopedManDay)} 공수</strong></button>) : <p>확인할 근무 기록이 없습니다.</p>}</div>
+        </TeamMobileDisclosure>
+    </div>;
 
     return (
         <div className="space-y-6">

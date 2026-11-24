@@ -112,7 +112,9 @@ export const vehicleExpenseSchema = z.object({
     note: z.string().optional(),
     evidenceUrl: z.string().optional(),
     importSource: z.enum(['GEMINI_FINE_NOTICE', 'GEMINI_TOLL_USAGE']).optional(),
+    fineSourceExpenseIds: z.array(z.string()).max(200).optional(),
     fineNotice: z.object({
+        attachmentRemoved: z.boolean().optional(),
         sourceFileName: z.string(),
         sourceSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         issuer: z.string(),

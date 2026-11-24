@@ -2597,7 +2597,7 @@ export function MemoPage() {
     );
 
     return (
-        <main className="min-h-[calc(100vh-var(--header-height))] bg-[#eef2f7] text-slate-900 lg:h-[calc(100vh-var(--header-height))] lg:overflow-hidden">
+        <main className="tm-page tm-memo-page min-h-[calc(100vh-var(--header-height))] bg-[#eef2f7] text-slate-900 lg:h-[calc(100vh-var(--header-height))] lg:overflow-hidden">
             <div className="flex min-h-[calc(100vh-var(--header-height))] w-full flex-col gap-2 p-2 lg:h-full lg:min-h-0">
                 <header className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-sm shadow-slate-200/60">
                     <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">

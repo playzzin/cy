@@ -32,6 +32,12 @@ test('원본 파일 연결 정보가 없는 과태료는 원본 목록에서 제
   expect(getVehicleBillingFineExpenses(doc(), [fine('fine-a', { fineNotice: undefined })])).toEqual([]);
 });
 
+test('월별대장 합계는 연결된 원본·상세를 조회할 기준 항목으로 선택한다', () => {
+  const aggregate = fine('vehicle-ledger__2026-11__vehicle-a__2026-11-01__2026-11-30__FINE__BILLING_TARGET', { fineNotice: undefined });
+  const bill = doc({ lineItems: [{ id: aggregate.id, label: '과태료', type: 'VARIABLE', category: 'FINE', amount: 32000, sourceType: 'vehicle_ledger' }] });
+  expect(getVehicleBillingFineExpenses(bill, [aggregate, fine('unrelated')])).toEqual([aggregate]);
+});
+
 test('삭제된 과태료 첨부를 원본 목록에 다시 표시하지 않는다', () => {
   expect(getVehicleBillingFineExpenses(doc(), [fine('fine-a', { fineNotice: { sourceSha256: 'a'.repeat(64), attachmentRemoved: true } as VehicleExpenseRecord['fineNotice'] })])).toEqual([]);
 });

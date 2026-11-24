@@ -3,6 +3,7 @@ import { useLocation, useNavigationType } from 'react-router-dom';
 import { useMobileShellScroll } from '../../hooks/useMobileScroll';
 import { useMobileSidebarHistory } from '../../hooks/useMobileSidebarHistory';
 import { useTeamLeaderTypography } from '../../hooks/useTeamLeaderTypography';
+import { TeamMobileProvider } from '../team-mobile/TeamMobileUI';
 import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
 // ROLE_SITE_MAP removed - now fully dynamic
@@ -508,10 +509,11 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         ? (siteData[effectiveSite] || siteData[fallbackSite] || null)
         : null;
     const restrictedTeam = useRestrictedTeamWorkflow();
-    useTeamLeaderTypography(!isSiteLayerMode && !userPreview && (
+    const isTeamPresentation = !isSiteLayerMode && !userPreview && (
         restrictedTeam || effectiveSite === 'pos_leader' ||
         isTeamLeaderRole(positions.find(position => position.id === currentPosition)?.name)
-    ));
+    );
+    useTeamLeaderTypography(isTeamPresentation);
     const currentSiteData = sourceSiteData && siteData
         ? { ...sourceSiteData, menu: restrictedTeam ? filterTeamWorkflowMenu(getPositionMenuView(siteData, effectiveSite)) : getPositionMenuView(siteData, effectiveSite),
             ...(restrictedTeam && sourceSiteData.headerActions ? { headerActions: filterTeamWorkflowMenu(sourceSiteData.headerActions) } : {}) }
@@ -719,8 +721,10 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
                 onPath={path => setUserPreview(previous => previous ? { ...previous, path } : previous)} onExit={exitUserPreview} />
         </SiteModeProvider>;
     }
-    const routedContent = isDevPreviewFrame
-        ? <DevPreviewRouteGuard siteData={siteData} positionId={currentPosition}>{children}</DevPreviewRouteGuard> : children;
+    const routedContent = <TeamMobileProvider enabled={isTeamPresentation}>
+        {isDevPreviewFrame
+            ? <DevPreviewRouteGuard siteData={siteData} positionId={currentPosition}>{children}</DevPreviewRouteGuard> : children}
+    </TeamMobileProvider>;
 
     // Layout Variant for Cheongyeon SITE (test) - Same structure as Admin ERP with video background
     if (isSiteLayerMode && siteData?.[currentSite]?.menu && currentSiteData) {

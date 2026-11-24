@@ -1,3 +1,4 @@
+import { TeamMobileProvider } from '../../components/team-mobile/TeamMobileUI';
 import { clearRequestDrafts } from '../../utils/requestDraftStore';
 import React from 'react';
 import '@testing-library/jest-dom';
@@ -174,4 +175,23 @@ test('상태 필터를 바꿔도 요약은 불러온 신청 전체를 기준으�
   expect(screen.queryByText('승인 작업자')).not.toBeInTheDocument();
   expect(summary).toHaveTextContent(/조회한 신청\s*3\s*건/);
   expect(summary).toHaveTextContent(/등록 완료\s*1\s*건/);
+});
+
+
+test('팀장 모바일에서 등록 정보와 신분증을 탭 전환 후에도 유지한다', async () => {
+  const original = window.matchMedia;
+  Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }) });
+  const view = render(<TeamMobileProvider enabled><TeamWorkerRequestPage /></TeamMobileProvider>);
+  try {
+    await fill();
+    const name = screen.getByLabelText('이름 *');
+    fireEvent.click(screen.getByRole('tab', { name: '신청 내역' }));
+    expect(name).not.toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: '신청하기' }));
+    expect(screen.getByLabelText('이름 *')).toBe(name);
+    expect(name).toHaveValue('테스트 작업자');
+    expect(screen.getByRole('img', { name: '신분증 원본' })).toBeVisible();
+    expect(service.submit).not.toHaveBeenCalled();
+    expect(service.upload).not.toHaveBeenCalled();
+  } finally { view.unmount(); Object.defineProperty(window, 'matchMedia', { configurable: true, value: original }); }
 });

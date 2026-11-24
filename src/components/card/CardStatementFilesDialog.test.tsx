@@ -51,6 +51,13 @@ test('a rejected deletion preserves files and allows a retry; dirty ledgers disa
   await screen.findByText(/연결된 파일이 없습니다/);
 });
 
+test('썸네일에서 선택한 PDF를 다른 사진보다 먼저 연다', async () => {
+  render(<CardStatementFilesDialog paths={['statement.pdf', 'photo.jpg']} initialPath="statement.pdf" onClose={jest.fn()} />);
+  expect(await screen.findByTitle('statement.pdf PDF 원본')).toBeVisible();
+  expect(screen.getByRole('link', { name: '새 탭에서 원본 열기' })).toHaveAttribute('href', 'https://example.com/statement.pdf');
+  expect(resolve).toHaveBeenCalledWith('statement.pdf');
+});
+
 test('offers all unique files and opens only the selected original through a native link', async () => {
   render(<CardStatementFilesDialog paths={['folder/first.pdf', 'folder/second.pdf', 'folder/first.pdf', '']} onClose={jest.fn()} />);
   expect(screen.getByText('연결된 2개 파일 중 확인할 원본을 선택해 주세요.')).toBeInTheDocument();
@@ -139,7 +146,7 @@ test('previews a PDF immediately and hides details for the original-only view', 
   expect(screen.queryByRole('img')).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: 'Gemini 분석 · 상세내역 보기' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /상세내역/ })).not.toBeInTheDocument();
-  expect(screen.getByTitle('statement.pdf PDF 원본')).toHaveAttribute('src', 'https://example.com/card-ledger-statements/2026-11/statement.pdf');
+  expect(screen.getByTitle('statement.pdf PDF 원본')).toBeVisible();
 });
 
 test('opens a photo immediately when photos and PDFs are attached together', async () => {

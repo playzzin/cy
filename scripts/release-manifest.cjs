@@ -13,17 +13,34 @@ const groups = {
   storage: ['storage.rules'],
   deployment: ['firebase.json', 'firebase.staging.json', '.firebaserc'],
 };
+const backendGroups = Object.entries(groups).filter(([group]) => group !== 'hosting');
+const backendFingerprintFormat = 'git-tree-v1';
+const inGroup = (file, prefixes) => prefixes.some(prefix => prefix.endsWith('/') ? file.startsWith(prefix) : file === prefix);
+function gitBackendFingerprints(commit, workspaceRoot = root) {
+  if (!/^[a-f0-9]{40}$/i.test(commit)) throw new Error('서버 소스를 비교할 Git 커밋이 올바르지 않습니다.');
+  const paths = backendGroups.flatMap(([, prefixes]) => prefixes);
+  const entries = git(['ls-tree', '-r', '-z', '--full-tree', commit, '--', ...paths], workspaceRoot).split('\0').filter(Boolean);
+  return Object.fromEntries(backendGroups.map(([group, prefixes]) => {
+    const records = entries.filter(entry => inGroup(entry.slice(entry.indexOf('\t') + 1), prefixes));
+    return [group, hash(records.join('\0'))];
+  }));
+}
 const buildStartPath = (workspaceRoot, directory) => path.join(workspaceRoot, '.firebase', `release-source-start${outputSuffix(workspaceRoot, directory)}.json`);
 function sourceState(workspaceRoot = root) {
   const prefixes = [...new Set(Object.values(groups).flat())];
   // New feature files affect the bundle before they are tracked by Git as well.
   const files = [...new Set(git(['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...prefixes], workspaceRoot).split('\0').filter(Boolean))].sort();
-  const fingerprints = Object.fromEntries(Object.entries(groups).map(([group, prefixes]) => {
-    const selected = files.filter(file => prefixes.some(prefix => prefix.endsWith('/') ? file.startsWith(prefix) : file === prefix));
+  const untrackedSource = git(['ls-files', '--others', '--exclude-standard', '--', ...prefixes], workspaceRoot);
+  const dirty = Boolean(git(['status', '--porcelain', '--untracked-files=no'], workspaceRoot)) || Boolean(untrackedSource);
+  const commit = git(['rev-parse', 'HEAD'], workspaceRoot);
+  // Clean backend sources are identified by Git paths, modes and blobs so a Windows checkout and CI agree.
+  const rawGroups = dirty ? Object.entries(groups) : [['hosting', groups.hosting]];
+  const fingerprints = Object.fromEntries(rawGroups.map(([group, prefixes]) => {
+    const selected = files.filter(file => inGroup(file, prefixes));
     return [group, hash(selected.map(file => `${file}\0${fs.existsSync(path.join(workspaceRoot, file)) ? hash(fs.readFileSync(path.join(workspaceRoot, file))) : 'deleted'}`).join('\n'))];
   }));
-  const untrackedSource = git(['ls-files', '--others', '--exclude-standard', '--', ...prefixes], workspaceRoot);
-  return { commit: git(['rev-parse', 'HEAD'], workspaceRoot), dirty: Boolean(git(['status', '--porcelain', '--untracked-files=no'], workspaceRoot)) || Boolean(untrackedSource), fingerprints };
+  if (dirty) return { commit, dirty, fingerprints };
+  return { commit, dirty, backendFingerprintFormat, fingerprints: { ...fingerprints, ...gitBackendFingerprints(commit, workspaceRoot) } };
 }
 function compareRelease(local, remote) {
   if (!remote || remote.schemaVersion !== 1 || !remote.fingerprints || !remote.assetManifestHash) {
@@ -62,5 +79,5 @@ function writeManifest(workspaceRoot = root, environment = process.env) {
   console.log(`배포 확인 기록 생성: ${state.commit.slice(0, 8)}${state.dirty ? ' (커밋 전 변경 포함)' : ''}`);
   return manifest;
 }
-module.exports = { root, hash, sourceState, compareRelease, sameSourceState, beginBuild, writeManifest };
+module.exports = { root, hash, sourceState, compareRelease, sameSourceState, beginBuild, writeManifest, gitBackendFingerprints, backendFingerprintFormat };
 if (require.main === module) { loadBuildEnvironment(); writeManifest(); }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ExternalLink, Maximize, ZoomIn, ZoomOut } from 'lucide-react';
 import './OriginalDocumentPreview.css';
+import OriginalPdfPreview from './OriginalPdfPreview';
 
 interface Props {
     url: string;
@@ -28,7 +29,7 @@ export default function OriginalDocumentPreview({ url, fileName, kind, imageAlt,
                 <img src={url} alt={imageAlt} referrerPolicy="no-referrer" onError={() => setImageError(true)} />
             </div>}
             {kind === 'image' && imageError && <p role="status" className="original-document__notice">사진 미리보기를 불러오지 못했습니다. 아래 원본 열기 버튼으로 확인해 주세요.</p>}
-            {kind === 'pdf' && <iframe title={pdfTitle} src={url} referrerPolicy="no-referrer" />}
+            {kind === 'pdf' && <OriginalPdfPreview key={url} url={url} title={pdfTitle} />}
             {kind === 'file' && <p className="original-document__notice">이 파일은 아래 원본 열기 버튼으로 확인해 주세요.</p>}
         </div>
         <footer className="original-document__actions">

@@ -1,6 +1,7 @@
 import React, { Suspense, useMemo } from 'react';
 import { DashboardHeader } from '../components/dashboard/DashboardHeader';
 import { TeamLeadQuickActions } from '../components/dashboard/TeamLeadQuickActions';
+import { TeamMobileDisclosure, useTeamMobile } from '../components/team-mobile/TeamMobileUI';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { useSiteMode } from '../contexts/SiteModeContext';
@@ -68,6 +69,7 @@ const DashboardSectionFallback: React.FC<{ minHeight?: string; label?: string }>
 );
 
 const DashboardPage: React.FC = () => {
+    const teamMobile = useTeamMobile();
     const { currentPosition, currentPositionData, positions, changePosition } = useSiteMode();
     const { loading, linkedWorker } = useLinkedWorker();
     const linkedWorkerRole = (linkedWorker as { role?: string } | null)?.role;
@@ -103,6 +105,17 @@ const DashboardPage: React.FC = () => {
     if (loading) {
         return <DashboardLoadingState />;
     }
+
+    if (teamMobile && isTeamLeadDashboard) return <div className="tm-dashboard">
+        <header className="tm-page-heading"><div><h1>우리 팀 현황</h1><p>{linkedWorker?.teamName || '팀장 메뉴'}</p></div></header>
+        <main>
+            <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[160px]" label="팀 현황을 준비하고 있습니다." />}>
+                <TeamLeadDashboardView linkedWorker={linkedWorker} />
+            </Suspense>
+            <TeamMobileDisclosure title="메시지 확인"><Suspense fallback={<p>메시지 조회 중</p>}><DashboardMessageWidget /></Suspense></TeamMobileDisclosure>
+            <TeamMobileDisclosure title="내일 일정 확인"><Suspense fallback={<p>일정 조회 중</p>}><TomorrowScheduleWidget /></Suspense></TeamMobileDisclosure>
+        </main>
+    </div>;
 
     // Optional: Profile Setup Check
     // if (!linkedWorker) {

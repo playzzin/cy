@@ -1,3 +1,4 @@
+import { TeamMobileProvider } from '../../components/team-mobile/TeamMobileUI';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -373,4 +374,22 @@ it('저장 중 월을 바꿔도 완료 후 현재 월을 다시 계산하며 요
     expect(screen.queryByText('계산 중')).not.toBeInTheDocument();
     expect(dailyReportService.getWorkerRows).toHaveBeenLastCalledWith({ startDate: '2024-12-01', endDate: '2025-01-31' });
     expect(advanceRequestService.createRequest).toHaveBeenCalledWith(expect.objectContaining({ yearMonth: month() }), 'fixture-request-id');
+});
+
+
+it('팀장 모바일에서 가불 입력을 보존하고 내역 탭에서 같은 작업자의 신청을 확인한다', async () => {
+  const original = window.matchMedia;
+  Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }) });
+  const view = render(<TeamMobileProvider enabled><WorkerAdvanceRequestPage /></TeamMobileProvider>);
+  try {
+    const amount = await screen.findByRole('textbox', { name: '테스트 팀장 1회차 신청 금액' });
+    fireEvent.change(amount, { target: { value: '15000' } });
+    fireEvent.click(screen.getByRole('tab', { name: '신청 내역' }));
+    expect(amount).not.toBeVisible();
+    expect(await screen.findByText('20,000원')).toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: '신청하기' }));
+    expect(screen.getByRole('textbox', { name: '테스트 팀장 1회차 신청 금액' })).toBe(amount);
+    expect(amount).toHaveValue('15000');
+    expect(advanceRequestService.createRequest).not.toHaveBeenCalled();
+  } finally { view.unmount(); Object.defineProperty(window, 'matchMedia', { configurable: true, value: original }); }
 });

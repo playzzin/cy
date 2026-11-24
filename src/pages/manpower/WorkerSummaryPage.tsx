@@ -756,7 +756,7 @@ const WorkerSummaryPage: React.FC = () => {
     if (loadError) return <p role="alert" className="p-6">작업자 정보를 불러오지 못했습니다. 소속 팀 연결과 조회 권한을 확인한 뒤 새로고침해 주세요.</p>;
 
     return (
-        <PageContainer className="worker-summary-page" data-mobile-view={mobileView}>
+        <PageContainer className="tm-page worker-summary-page" data-mobile-view={mobileView}>
             <div className="ws-mobile-header">
                 <span className="ws-eyebrow">인력 관리</span>
                 <h1>작업자 요약</h1>

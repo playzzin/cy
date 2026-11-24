@@ -9,4 +9,7 @@
 @media (max-width: 640px) {
     .cy-detail-dialog { top: auto; bottom: 0; left: 0; transform: none; width: 100%; max-height: 85dvh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); }
 }
+@media screen and (max-width: 768px) {
+    .cy-detail-dialog[data-mobile-breakpoint='768'] { top: auto; bottom: 0; left: 0; transform: none; width: 100%; max-height: 85dvh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+}
 @media print { .cy-detail-dialog, .cy-detail-dialog__overlay { display: none !important; } }

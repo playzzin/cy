@@ -18,7 +18,7 @@ test('등록→취소→재등록, AI 판독 변경, 실제 중복 방지와 사
     assert.equal(process.env.GCLOUD_PROJECT, 'demo-cy-vehicle-fine');
     assert(process.env.FIREBASE_STORAGE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST);
     const app = admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT, storageBucket: `${process.env.GCLOUD_PROJECT}.appspot.com` });
-    const { commitVehicleFineImports, getVehicleFineNoticeAttachment, deleteVehicleFineNoticeAttachment } = await import('./vehicleFineAnalysis');
+    const { commitVehicleFineImports, getVehicleFineNoticeAttachment, getVehicleFineNoticeDetails, deleteVehicleFineNoticeAttachment } = await import('./vehicleFineAnalysis');
     const db = app.firestore();
     const context = { auth: { uid: 'fine-support', token: { role: 'support' } } } as any;
     const denied = (code: string) => (error: any) => error.code === code;
@@ -52,6 +52,71 @@ test('등록→취소→재등록, AI 판독 변경, 실제 중복 방지와 사
         await Promise.all([saveVehicleFineSource({ base64: png, sourceSha256 }), saveVehicleFineSource({ base64: png, sourceSha256 })]);
         assert.deepEqual(await readVehicleFineSource(sourceSha256), { base64: png, mimeType: 'image/png' });
         assert.equal((await photo(changedId)).base64, png, '기존 기록도 같은 원본을 보관하면 연결');
+        const leader = { auth: { uid: 'fine-leader', token: {} } } as any;
+        await db.doc('users/fine-leader').set({ status: 'active', position: '팀장', linkedWorkerIds: ['fine-leader-worker'] });
+        await db.doc('teams/fine-team').set({ name: '검증 팀' });
+        await db.doc('workers/fine-leader-worker').set({ teamId: 'fine-team', role: '팀장', isActive: true });
+        const assignment = db.doc('vehicleAssignments/fine-team-assignment');
+        await assignment.set({ vehicleId: 'fine-vehicle', assigneeType: 'TEAM', assigneeId: 'fine-team', startDate: '2026-11-01', endDate: '2026-11-15' });
+        assert.equal((await photo(changedId, leader)).base64, png, '팀장도 본인 팀 배정 기간의 실제 보관 원본 조회');
+        const ownExpense = (await db.doc(`vehicleExpenses/${changedId}`).get()).data()!;
+        const anchorId = 'vehicle-ledger__2026-11__fine-vehicle__2026-11-01__2026-11-15__FINE__BILLING_TARGET';
+        const anchorRef = db.doc(`vehicleExpenses/${anchorId}`);
+        const sourceRef = db.doc(`vehicleExpenses/${changedId}`);
+        await sourceRef.update({ status: 'CANCELLED', cancelledAt: admin.firestore.FieldValue.serverTimestamp(), lastOperationId: 'vehicle-monthly-ledger:2026-11', fineChargeTarget: 'DRIVER' });
+        await anchorRef.set({ vehicleId: 'fine-vehicle', date: '2026-11-01', type: 'FINE', amount: 50000, status: 'ACTIVE', lastOperationId: 'vehicle-monthly-ledger:2026-11' });
+        const details = (actor = context) => getVehicleFineNoticeDetails.run({ expenseIds: [anchorId] }, actor);
+        assert.equal((await details()).items[0].notices[0].id, changedId, '청구 대상이 바뀐 기존 월대장의 원본도 유일한 차량/기간/작업으로 복원');
+        assert.equal((await details(leader)).items[0].notices[0].originalAvailable, true);
+        const conflictingId = anchorId.replace('__BILLING_TARGET', '__DRIVER');
+        await db.doc(`vehicleExpenses/${conflictingId}`).set({ ...(await anchorRef.get()).data(), fineChargeTarget: 'DRIVER' });
+        assert.equal((await details()).items[0].notices.length, 0, '현재 대장이 둘 이상 일치하면 과거 연결을 추정하지 않음');
+        await db.doc(`vehicleExpenses/${conflictingId}`).delete();
+        await assert.rejects(details({ auth: { uid: 'unlinked-reader', token: {} } }), denied('permission-denied'));
+        const linkedPhoto = () => getVehicleFineNoticeAttachment.run({ expenseId: changedId, attachmentExpenseId: anchorId }, leader);
+        assert.equal((await linkedPhoto()).base64, png);
+        await assert.rejects(photo(changedId, leader), denied('not-found'), '취소 원본 단독 접근은 허용하지 않음');
+        await anchorRef.update({ fineSourceExpenseIds: [changedId], lastOperationId: 'next-monthly-save', amount: 0 });
+        assert.equal((await details()).items[0].notices.length, 1, '금액 변경/반복 저장/0원에서도 원본 연결 보존');
+        const originalRead = (await import('./vehicleFineSource')).readVehicleFineSource;
+        const sourceModuleForLink = await import('./vehicleFineSource');
+        try {
+            (sourceModuleForLink as any).readVehicleFineSource = async (hash: unknown) => {
+                const bytes = await originalRead(hash); await anchorRef.update({ fineSourceExpenseIds: [] }); return bytes;
+            };
+            await assert.rejects(linkedPhoto(), denied('not-found'), '조회 중 연결 해제 시 원본 반환 차단');
+        } finally { (sourceModuleForLink as any).readVehicleFineSource = originalRead; }
+        assert.equal((await details()).items[0].notices.length, 0, '빈 명시 연결은 과거 기록으로 대체하지 않음');
+        await anchorRef.update({ fineSourceExpenseIds: [changedId] });
+        await sourceRef.update({ 'fineNotice.sourceSha256': 'f'.repeat(64) });
+        assert.equal((await details()).items[0].notices[0].originalAvailable, false, '파일이 없어도 상세정보는 조회');
+        await sourceRef.set(ownExpense);
+        await anchorRef.delete();
+        await db.doc('vehicleExpenses/fine-other-vehicle').set({ ...ownExpense, vehicleId: 'other-vehicle' });
+        await db.doc('vehicleExpenses/fine-other-period').set({ ...ownExpense, date: '2026-11-30' });
+        for (const id of ['fine-other-vehicle', 'fine-other-period']) await assert.rejects(photo(id, leader), denied('permission-denied'));
+        await assignment.update({ endDate: '2026-10-31' });
+        await assert.rejects(photo(changedId, leader), denied('permission-denied'), '배정 기간 밖 원본 차단');
+        await assignment.update({ endDate: '2026-11-15' });
+        for (const changes of [{ status: 'suspended' }, { status: 'active', linkedWorkerIds: [] }, { linkedWorkerIds: ['fine-leader-worker'], position: '작업자', accountType: 'worker' }]) {
+            await db.doc('users/fine-leader').update(changes);
+            await assert.rejects(photo(changedId, leader), denied('permission-denied'));
+        }
+        await db.doc('users/fine-leader').set({ status: 'active', position: '팀장', linkedWorkerIds: ['fine-leader-worker'] });
+        await assert.rejects(deleteVehicleFineNoticeAttachment.run({ expenseId: changedId }, leader), denied('permission-denied'), '팀장에게 삭제 권한은 추가하지 않음');
+        const sourceModule = await import('./vehicleFineSource');
+        const readSource = sourceModule.readVehicleFineSource;
+        try {
+            (sourceModule as any).readVehicleFineSource = async (hash: unknown) => {
+                const result = await readSource(hash);
+                await db.doc('workers/fine-leader-worker').update({ teamId: 'other-team' });
+                return result;
+            };
+            await assert.rejects(photo(changedId, leader), error => ['permission-denied', 'failed-precondition'].includes((error as any).code), '다운로드 중 소속 변경 시 원본 반환 차단');
+        } finally {
+            (sourceModule as any).readVehicleFineSource = readSource;
+            await db.doc('workers/fine-leader-worker').update({ teamId: 'fine-team' });
+        }
         await assert.rejects(photo(changedId, {}), denied('unauthenticated'));
         await assert.rejects(photo(changedId, { auth: { uid: 'ordinary', token: {} } }), denied('permission-denied'));
         await assert.rejects(photo('../private'), denied('invalid-argument'));
@@ -69,6 +134,7 @@ test('등록→취소→재등록, AI 판독 변경, 실제 중복 방지와 사
         assert.equal(afterRemoval.fineNotice.sourceSha256, beforeRemoval.fineNotice.sourceSha256);
         assert.equal(afterRemoval.fineNotice.attachmentRemoved, true);
         await assert.rejects(photo(changedId), denied('not-found'));
+        await assert.rejects(photo(changedId, leader), denied('not-found'));
         assert.equal((await readVehicleFineSource(sourceSha256)).base64, png, '다른 고지서가 공유하는 원본과 감사 이력은 보존');
 
         const signUp = await fetch(`http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-key`, {

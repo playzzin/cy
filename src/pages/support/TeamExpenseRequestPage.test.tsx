@@ -1,3 +1,4 @@
+import { TeamMobileProvider } from '../../components/team-mobile/TeamMobileUI';
 import { clearRequestDrafts } from '../../utils/requestDraftStore';
 import React from 'react';
 import '@testing-library/jest-dom';
@@ -522,4 +523,38 @@ test('다른 월 제출 후 조회가 실패해도 이전 월 내역을 새 월 
   expect(screen.queryByText('이전 조회 월 경비')).not.toBeInTheDocument();
   expect(screen.getByLabelText('금액 (원)')).toBeEnabled();
   expect(within(screen.getByLabelText('경비 신청 요약')).getAllByRole('definition')[0]).toHaveTextContent('0건');
+});
+
+
+test('팀장 모바일은 탭 왕복 중 경비·첨부를 보존하고 제출 성공 후 내역을 연다', async () => {
+  const original = window.matchMedia;
+  Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }) });
+  const view = render(<TeamMobileProvider enabled><TeamExpenseRequestPage /></TeamMobileProvider>);
+  try {
+    await fillRequest();
+    expect(screen.getByRole('tab', { name: '신청하기' })).toHaveAttribute('aria-selected', 'true');
+    const amount = screen.getByLabelText('금액 (원)');
+    fireEvent.click(screen.getByRole('tab', { name: '신청 내역' }));
+    expect(amount).not.toBeVisible();
+    expect(service.upload).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('tab', { name: '신청하기' }));
+    expect(screen.getByLabelText('금액 (원)')).toBe(amount);
+    expect(amount).toHaveValue(25000);
+    expect(screen.getByText('영수증.png')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
+    fireEvent.click(screen.getByRole('button', { name: '확인 후 승인 요청' }));
+    await waitFor(() => expect(service.submit).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('tab', { name: '신청 내역' })).toHaveAttribute('aria-selected', 'true'));
+  } finally { view.unmount(); Object.defineProperty(window, 'matchMedia', { configurable: true, value: original }); }
+});
+
+test('팀장 모바일 범위에서도 사무실 승인 화면에는 신청 탭을 만들지 않는다', async () => {
+  const original = window.matchMedia;
+  Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }) });
+  service.list.mockResolvedValue({ ...data, canReview: true, requests: [request] });
+  const view = render(<TeamMobileProvider enabled><TeamExpenseRequestPage /></TeamMobileProvider>);
+  try {
+    await screen.findByRole('heading', { name: '경비 신청 목록' });
+    expect(screen.queryByRole('tablist', { name: '신청 화면' })).not.toBeInTheDocument();
+  } finally { view.unmount(); Object.defineProperty(window, 'matchMedia', { configurable: true, value: original }); }
 });

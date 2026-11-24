@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure } from '../../components/team-mobile/TeamMobileUI';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ClipboardList } from 'lucide-react';
@@ -27,7 +28,7 @@ export default function OperationalWorkflowPage({
     const restricted = useRestrictedTeamWorkflow();
 
     return (
-        <div className="min-h-screen bg-slate-50 p-4 md:p-6">
+        <div className="tm-page tm-workflow-hub min-h-screen bg-slate-50 p-4 md:p-6">
             <div className="mx-auto max-w-5xl">
                 <div className="mb-5">
                     <div className="flex items-center gap-2 text-sm font-bold text-cyan-700">
@@ -35,7 +36,7 @@ export default function OperationalWorkflowPage({
                         {eyebrow}
                     </div>
                     <h1 className="mt-1 text-2xl font-black text-slate-900">{title}</h1>
-                    <p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-500">{description}</p>
+                    <TeamMobileDisclosure title="이용 안내"><p className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-slate-500">{description}</p></TeamMobileDisclosure>
                 </div>
 
                 <div className="grid gap-3 md:grid-cols-2">

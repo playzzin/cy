@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
 import SecureSignature from '../../components/SecureSignature';
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
@@ -333,6 +334,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
     const restrictedTeam = useRestrictedTeamWorkflow();
     const isDocumentView = detailView !== 'profile';
     const payslipRef = useRef<HTMLDivElement | null>(null);
+    const isTeamMobile = useTeamMobile();
     const [payslipReady, setPayslipReady] = useState(false);
     const attachPayslip = useCallback((node: HTMLDivElement | null) => {
         payslipRef.current = node;
@@ -828,7 +830,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                     <h1>{VIEW_TITLES[detailView]}</h1>
                 </div>
 
-                <div className="tw-header-actions">
+                <TeamPageActions><div className="tw-header-actions">
                     <button type="button" className="tw-icon-button" onClick={() => setShowSensitive(prev => !prev)} title={showSensitive ? '민감정보 숨기기' : '민감정보 표시'} aria-label={showSensitive ? '민감정보 숨기기' : '민감정보 표시'}>
                         {showSensitive ? <EyeOff size={18} /> : <Eye size={18} />}
                         <span>{showSensitive ? '숨김' : '표시'}</span>
@@ -845,7 +847,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                         <RefreshCw size={18} className={loadingMaster || loadingOutput || accessScope.loading ? 'tw-spin' : ''} />
                         새로고침
                     </button>
-                </div>
+                </div></TeamPageActions>
             </header>
 
             <section className="tw-mobile-filter-bar" aria-label="작업자 빠른 검색">
@@ -929,6 +931,11 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                 </section>
             )}
 
+            {isTeamMobile && <TeamMobileSummary label="재직 인원" value={`${teamStats.activeWorkers}명`}>
+                <span>{selectedMonth} · {monthlyPendingText ?? `${formatManDay(teamStats.totalManDay)} 공수`}</span>
+                <span>{monthlyPendingText ?? formatCurrency(teamStats.totalAmount)}</span>
+            </TeamMobileSummary>}
+            <TeamMobileDisclosure title="인원·서류 현황">
             <section className="tw-kpi-grid" aria-label="팀 요약">
                 <div className="tw-kpi" aria-label="팀 재직 인원">
                     <Users size={20} />
@@ -953,6 +960,21 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                     <small className="tw-kpi-note">재직 {teamStats.activeWorkers}명 기준</small>
                 </div>
             </section>
+
+                        <div className="tw-mobile-team-context" aria-label="선택한 팀의 이번 달 현황">
+                            <div>
+                                <span>이번 달 팀 실적</span>
+                                <strong>{monthlyPendingText ?? `${formatManDay(teamStats.totalManDay)}공수 · ${formatCurrency(teamStats.totalAmount)}`}</strong>
+                            </div>
+                            {!monthlyPendingText && teamFocusWorker && (
+                                <div>
+                                    <span>공수 상위 작업자</span>
+                                    <strong><UserRound size={14} />{teamFocusWorker.worker.name || EMPTY_TEXT} · {formatManDay(teamFocusWorker.manDay)}공수</strong>
+                                </div>
+                            )}
+                        </div>
+
+            </TeamMobileDisclosure>
 
             <div className="tw-mobile-switch" role="tablist" aria-label="모바일 보기 전환">
                 <button
@@ -1019,19 +1041,6 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                             ) : isTeamPickerOpen && (
                                 <div className="tw-team-picker-menu">
                                     {visibleTeams.map(renderTeamItem)}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="tw-mobile-team-context" aria-label="선택한 팀의 이번 달 현황">
-                            <div>
-                                <span>이번 달 팀 실적</span>
-                                <strong>{monthlyPendingText ?? `${formatManDay(teamStats.totalManDay)}공수 · ${formatCurrency(teamStats.totalAmount)}`}</strong>
-                            </div>
-                            {!monthlyPendingText && teamFocusWorker && (
-                                <div>
-                                    <span>공수 상위 작업자</span>
-                                    <strong><UserRound size={14} />{teamFocusWorker.worker.name || EMPTY_TEXT} · {formatManDay(teamFocusWorker.manDay)}공수</strong>
                                 </div>
                             )}
                         </div>

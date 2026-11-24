@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import {
@@ -286,11 +287,12 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
     const [outputRows, setOutputRows] = useState<DailyReportWorkerRow[]>([]);
     const [selectedResponsibleKey, setSelectedResponsibleKey] = useState('');
     const [selectedSiteKey, setSelectedSiteKey] = useState('');
+    const isTeamMobile = useTeamMobile();
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [statusFilter, setStatusFilter] = useState<SiteStatusFilter>('active');
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedDetailView, setDetailView] = useState<DetailView>('siteInfo');
-    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('sites');
+    const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('sites', true);
     const [isResponsiblePickerOpen, setIsResponsiblePickerOpen] = useState(false);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
@@ -827,10 +829,10 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                         <Building2 size={16} />
                         월별 현장담당 현장 조회
                     </div>
-                    <h1>{view === 'dailyReport' ? '현장 출력일보' : restrictedTeam || view === 'siteInfo' ? '현장정보' : '현장별 노임명세서 · 출력일보'}</h1>
+                    <h1>{view === 'dailyReport' ? '현장 출력일보' : restrictedTeam || view === 'siteInfo' ? '현장정보' : isTeamMobile ? '현장 현황' : '현장별 노임명세서 · 출력일보'}</h1>
                 </div>
 
-                <div className="tw-header-actions">
+                <TeamPageActions><div className="tw-header-actions">
                     <button type="button" className="tw-icon-button" onClick={handleCsvDownload} title="CSV 내보내기" disabled={loadingOutput || !!outputError}>
                         <Download size={18} />
                         <span>CSV</span>
@@ -843,7 +845,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                         <RefreshCw size={18} className={loadingMaster || loadingOutput || accessScope.loading ? 'tw-spin' : ''} />
                         새로고침
                     </button>
-                </div>
+                </div></TeamPageActions>
             </header>
 
             <section className="sr-mobile-filter-bar" aria-label="현장 빠른 검색">
@@ -904,6 +906,11 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                 <strong>현재 표시 {selectedResponsibleSites.length.toLocaleString('ko-KR')}개</strong>
             </div>
 
+            {isTeamMobile && <TeamMobileSummary label="조회 현장" value={loadingMaster ? '조회 중' : `${selectedResponsibleStats.siteCount}곳`}>
+                <span>{selectedMonth} · {loadingOutput ? '조회 중' : outputError ? '확인 필요' : `${formatManDay(selectedResponsibleStats.totalManDay)} 공수`}</span>
+                <span>출역 {loadingOutput ? '조회 중' : outputError ? '확인 필요' : `${selectedResponsibleStats.workerCount}명`}</span>
+            </TeamMobileSummary>}
+            <TeamMobileDisclosure title="현장 요약 더보기">
             <section className="tw-kpi-grid" aria-label="현장담당 요약">
                 <div className="tw-kpi">
                     <Building2 size={20} />
@@ -927,6 +934,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                 </div>
             </section>
 
+            </TeamMobileDisclosure>
             <div className="sr-mobile-switch" role="tablist" aria-label="모바일 현장 선택 안내">
                 <button
                     type="button"

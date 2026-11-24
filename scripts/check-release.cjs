@@ -3,12 +3,41 @@ const path = require('node:path');
 const { root, hash, sourceState, compareRelease } = require('./release-manifest.cjs');
 const { resolveBuildDirectory, loadBuildEnvironment } = require('./hosting-build-paths.cjs');
 
-async function readRemoteJson(base, name) {
-  const url = new URL(name, `${base.replace(/\/$/, '')}/`);
-  url.searchParams.set('releaseCheck', Date.now().toString());
-  const response = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: 'error', cache: 'no-store' });
-  if (!response.ok || !response.headers.get('content-type')?.includes('json')) throw new Error(`${name} 확인 실패 (${response.status})`);
-  return response.json();
+const transientCodes = new Set(['EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'TimeoutError']);
+async function readRemoteJson(base, name, { allowMissing = false, request = fetch, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  async function get(file) {
+    const url = new URL(file, `${base.replace(/\/$/, '')}/`);
+    for (let attempt = 0; ; attempt++) {
+      url.searchParams.set('releaseCheck', Date.now().toString());
+      try {
+        const response = await request(url, { signal: AbortSignal.timeout(15000), redirect: 'error', cache: 'no-store' });
+        if (attempt || ![429, 502, 503, 504].includes(response.status)) return response;
+        await response.body?.cancel();
+      } catch (error) {
+        const code = error.cause?.code || error.name;
+        if (attempt || !transientCodes.has(code)) throw new Error(`${url.hostname}/${file} 연결 실패 (${code}): ${error.message}`, { cause: error });
+      }
+      await wait(1000);
+    }
+  }
+  const response = await get(name);
+  if (allowMissing && response.status === 404) return null;
+  if (!response.ok) throw new Error(`${name} 확인 실패 (HTTP ${response.status})`);
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('json')) {
+    // Firebase can serve the SPA's index.html with status 200 for a missing file.
+    if (allowMissing && contentType.includes('text/html')) {
+      const html = await response.text();
+      if (/<div\s+id=["']root["']/.test(html)) {
+        const index = await get('index.html');
+        if (index.ok && index.headers.get('content-type')?.includes('text/html') && await index.text() === html) return null;
+      }
+    }
+    throw new Error(`${name} 응답 형식 오류 (HTTP ${response.status}, ${contentType || 'Content-Type 없음'})`);
+  }
+  const data = await response.json();
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(`${name}에 유효한 JSON 객체가 없습니다.`);
+  return data;
 }
 async function waitForRelease(base, local, localAssets, { read = readRemoteJson, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), delays = [0, 2000, 4000, 8000] } = {}) {
   let lastError;

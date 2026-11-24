@@ -13,6 +13,7 @@ interface Props {
   title?: string;
   fileNames?: Record<string, string>;
   showDetailsLink?: boolean;
+  initialPath?: string;
   onClose: () => void;
   onRemoved?: (path: string) => void;
   removalDisabled?: boolean;
@@ -26,7 +27,7 @@ const getRealAccountUrl = (): string => {
 
 const isImageName = (name: string) => /\.(?:png|jpe?g|webp|gif|bmp|avif)$/i.test(name);
 
-const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 파일', fileNames, showDetailsLink = true, onClose, onRemoved, removalDisabled }) => {
+const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 파일', fileNames, showDetailsLink = true, initialPath, onClose, onRemoved, removalDisabled }) => {
   const [removed, setRemoved] = useState<string[]>([]);
   const files = useMemo(() => Array.from(new Set(paths.map(path => path.trim()).filter(path => path && !removed.includes(path)))), [paths, removed]);
   const [confirmPath, setConfirmPath] = useState('');
@@ -47,7 +48,7 @@ const CardStatementFilesDialog: React.FC<Props> = ({ paths, title = '청구서 �
   };
   const returnFocus = useRef<HTMLElement | null>(null);
   const defaultPath = [...files].reverse().find(path => isImageName(fileNames?.[path] || getCardStatementFileName(path))) || files[files.length - 1] || '';
-  const [selected, setSelected] = useState(() => defaultPath);
+  const [selected, setSelected] = useState(() => initialPath && files.includes(initialPath) ? initialPath : defaultPath);
   const [loaded, setLoaded] = useState<{ path: string; link: CardStatementAttachmentLink } | null>(null);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);

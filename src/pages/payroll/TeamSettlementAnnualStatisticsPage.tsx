@@ -1,3 +1,4 @@
+import { TeamPageActions, TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { NavLink, useSearchParams } from 'react-router-dom';
 import {
@@ -27,6 +28,7 @@ import { companyService } from '../../services/companyService';
 import { teamService, type Team } from '../../services/teamService';
 import { teamSettlementService } from '../../services/teamSettlementService';
 import {
+  TeamSettlementMobileRows,
   TeamSettlementComparisonPanel,
   MONTH_BUTTON_OPTIONS,
   TeamSettlementDetailTables,
@@ -152,6 +154,7 @@ const TeamSettlementAnnualCharts: React.FC<{ rows: AnnualMonthStatRow[] }> = ({ 
 };
 
 export const TeamSettlementAnnualStatisticsPage: React.FC<TeamSettlementAnnualStatisticsPageProps> = ({ view = 'monthly' }) => {
+  const mobile = useTeamMobile();
   const [searchParams] = useSearchParams();
   const [year, setYear] = useState<number>(() => {
     const queryYear = Number(searchParams.get('year'));
@@ -354,13 +357,13 @@ export const TeamSettlementAnnualStatisticsPage: React.FC<TeamSettlementAnnualSt
   ];
 
   return (
-    <div id="team-annual-statistics-page" className="w-full p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div id="team-annual-statistics-page" className="tm-page tm-statistics-page w-full p-6">
+      <div className="tm-page-heading flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900">{pageTitle}</h1>
-          <p className="mt-1 text-sm text-slate-500">{pageDescription}</p>
+          <TeamMobileDisclosure title="조회 안내"><p className="mt-1 text-sm text-slate-500">{pageDescription}</p></TeamMobileDisclosure>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <TeamPageActions><div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
@@ -388,10 +391,10 @@ export const TeamSettlementAnnualStatisticsPage: React.FC<TeamSettlementAnnualSt
             <RefreshCw size={16} />
             새로고침
           </button>
-        </div>
+        </div></TeamPageActions>
       </div>
 
-      <div className="mt-6 border-b border-slate-200">
+      <div className="tm-statistics-nav mt-6 border-b border-slate-200">
         <div className="flex gap-2 overflow-x-auto">
           {navigationTabs.map((tab) => {
             const selected = view === tab.key;
@@ -475,6 +478,10 @@ export const TeamSettlementAnnualStatisticsPage: React.FC<TeamSettlementAnnualSt
         </div>
       )}
 
+      {mobile && <TeamMobileSummary label="정산 잔액" value={loadState.status === 'loading' ? '조회 중' : loadState.status === 'error' ? '확인 필요' : `${formatCurrency(totals.net)}원`}>
+        <span>총수입 {loadState.status === 'idle' ? `${formatCurrency(totals.incomeTotal)}원` : '—'}</span><span>총지출 {loadState.status === 'idle' ? `${formatCurrency(totals.outgoingTotal)}원` : '—'}</span>
+      </TeamMobileSummary>}
+      <TeamMobileDisclosure title="추가 통계 지표">
       <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
         {metricCards.map((card) => (
           <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -492,8 +499,9 @@ export const TeamSettlementAnnualStatisticsPage: React.FC<TeamSettlementAnnualSt
         ))}
       </div>
 
+      </TeamMobileDisclosure>
       {view === 'management' ? (
-        <>
+        <TeamMobileDisclosure title="경영 분석·상세 통계">
           <TeamSettlementExecutiveSummary
             title="연간 경영 요약"
             subtitle="선택 팀의 12개월 정산 흐름을 수익성, 비용, 공수, 단가 기준으로 자동 진단합니다."
@@ -541,7 +549,7 @@ export const TeamSettlementAnnualStatisticsPage: React.FC<TeamSettlementAnnualSt
           <div className="mt-4">
             <TeamSettlementWorkerStatisticTable rows={annualWorkerStats} />
           </div>
-        </>
+        </TeamMobileDisclosure>
       ) : (
         <div id="team-annual-statistics" className="mt-4 rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
@@ -554,7 +562,8 @@ export const TeamSettlementAnnualStatisticsPage: React.FC<TeamSettlementAnnualSt
           </div>
         </div>
 
-        <div className="overflow-auto">
+        {mobile && <TeamSettlementMobileRows key={`${selectedTeamId}:${year}`} rows={annualStats} loading={loadState.status === 'loading'} getKey={row => row.yearMonth} getLabel={row => `${row.month}월`} />}
+        <div className="tm-statistics-desktop overflow-auto">
           <table className="w-full min-w-[1420px] text-sm">
             <thead>
               <tr className="bg-slate-50 text-xs font-bold text-slate-600">

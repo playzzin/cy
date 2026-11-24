@@ -70,6 +70,7 @@ export {
     analyzeVehicleFineNotices,
     commitVehicleFineImports,
     getVehicleFineNoticeAttachment,
+    getVehicleFineNoticeDetails,
     deleteVehicleFineNoticeAttachment,
 } from './vehicleFineAnalysis';
 export {
