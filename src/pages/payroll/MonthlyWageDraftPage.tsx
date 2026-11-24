@@ -18,7 +18,7 @@ import { PayrollReviewCenter } from './components/PayrollReviewCenter';
 import { reviewPayroll, reviewTransferTotals, type PayrollReviewRow } from './utils/payrollReview';
 import { validatePayrollAccount } from './utils/payrollAccountValidation';
 import { resolveKBSalaryFilterFromPaymentId } from './utils/kbTransferExport';
-import { isFinalizedMonthlyPayrollRun, monthlyPayrollSettlementService, type MonthlyPayrollSavedManualInput, type MonthlyPayrollSettlement, type MonthlyPayrollSettlementSaveInput, type MonthlyPayrollRunStatus } from '../../services/monthlyPayrollSettlementService';
+import { isFinalizedMonthlyPayrollRun, monthlyPayrollSettlementService, type MonthlyPayrollSavedManualInput, type MonthlyPayrollSettlement, type MonthlyPayrollSettlementSaveInput, type MonthlyPayrollRunStatus, type PayrollAllocationChange } from '../../services/monthlyPayrollSettlementService';
 import { payrollConfigService, PayrollConfig, PayrollInsuranceConfig, DEFAULT_ADVANCE_ITEM_LABELS } from '../../services/payrollConfigService';
 import * as XLSX from 'xlsx-js-style';
 import html2canvas from 'html2canvas';
@@ -44,7 +44,7 @@ import { filterPayslipRowsBySalaryModel, resolvePayslipCalculationPolicy, resolv
 import { normalizePayrollBankKey, resolvePayrollBankCode } from './utils/payrollBankCode';
 import { usePayrollData } from './hooks/usePayrollData';
 import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, LedgerUtilityInputLike, InsuranceAppliedSiteSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
-import { isLedgerManualInputUnchanged, resolveInitialLedgerManualInput } from './utils/advanceLedgerInput';
+import { resolveInitialLedgerManualInput } from './utils/advanceLedgerInput';
 import { BANK_CODES, WITHHOLDING_MAX_MAN_DAY } from './constants/payroll.constants';
 import { ActionButton, ActionCluster, FieldCard, FieldLabel, MonthButton, MonthGrid, QuickRangeButton, QuickRangeGroup, SearchField, SegmentedButton, SegmentedGroup, SelectField, ToggleChipButton, ToggleChipGroup, ToolbarBadge, ToolbarCard, ToolbarCardBody, ToolbarCardDescription, ToolbarCardHeader, ToolbarCardTitle, ToolbarContainer, ToolbarGrid, ToolbarInline, ToolbarLead, ToolbarLeadMeta, ToolbarSectionDivider, YearButton, YearNavigator, YearText } from './MonthlyWageStyles';
 import { CUSTOM_PAYSLIP_CONTRACTOR_VALUE, DEFAULT_PAYSLIP_CONTRACTOR_NAME, DEFAULT_PAYSLIP_CONTRACTOR_OPTIONS, buildAdvanceLabelSet, buildDailyFeeDeductionLines, buildDeductionBreakdownFromRecords, buildDeductionLabelMapFromConfig, buildStandardDeductionLabelMap, buildUtilityDeductionLines, buildVisibleUtilityDeductionLines, buildWorkEntriesForLedgerRow, createEmptyDeductionBreakdown, ensureAdvanceLinesInBreakdown, extractLedgerTaxAmountsFromItem, floorWon, getTaxLinesForItem, isAppliedUtilityOrFeeLabel, isBusinessSectionTaxLabel, isInsuranceSectionTaxLabel, isWithholdingSectionTaxLabel, mergeDeductionBreakdownWithLines, normalizeLineLabel, rebuildDeductionBreakdown, resolveTaxLineRateText, resolveWithholdingDetailText, stripTemporaryDeductionLines, stripTemporaryTaxLines, sumBusinessSectionTax, sumInsuranceSectionTax, sumWithholdingSectionTax, toNumber } from './MonthlyWageModel';
@@ -202,6 +202,17 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
     const [ledgerInputs, setLedgerInputs] = useState<Record<string, LedgerManualInput>>({});
     const [ledgerComputedAmounts, setLedgerComputedAmounts] = useState<MonthlyAdvanceLedgerComputedAmount[]>([]);
     const [savedPayrollSettlements, setSavedPayrollSettlements] = useState<MonthlyPayrollSettlement[]>([]);
+    const allocationChangesRef = useRef(new Map<string, PayrollAllocationChange>());
+    const savedAllocationModes = useMemo(() => new Map(savedPayrollSettlements.flatMap(settlement =>
+        settlement.rows.map(row => [row.rowKey, row.manualInput?.allocationMode ?? 'split'] as const)
+    )), [savedPayrollSettlements]);
+    const recordAllocationChange = useCallback((keys: string[], to: PayrollAllocationChange['to']) => {
+        keys.forEach(key => {
+            const from = savedAllocationModes.get(key) ?? 'split';
+            if (from === to) allocationChangesRef.current.delete(key);
+            else allocationChangesRef.current.set(key, { from, to });
+        });
+    }, [savedAllocationModes]);
     const [payrollSettlementSaving, setPayrollSettlementSaving] = useState<boolean>(false);
     const [payrollSettlementLoading, setPayrollSettlementLoading] = useState<boolean>(false);
     const [payrollSettlementLoadError, setPayrollSettlementLoadError] = useState<string | null>(null);
@@ -815,18 +826,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
         });
     }, [filteredPaymentData, ledgerSalaryModelFilter, pageViewMode]);
 
+    const matchesSalaryModelFilter = useCallback((row: MonthlyAdvanceLedgerRow): boolean => {
+        if (ledgerSalaryModelFilter === 'all') return true;
+        const model = (row.salaryModel ?? '').trim();
+        const filter = model === '일급제' ? 'daily' : model === '용역팀' ? 'service' : 'monthly';
+        return filter === ledgerSalaryModelFilter;
+    }, [ledgerSalaryModelFilter]);
     const filteredLedgerRows = useMemo<MonthlyAdvanceLedgerRow[]>(() => {
-        const matchesSalaryModelFilter = (row: MonthlyAdvanceLedgerRow): boolean => {
-            if (ledgerSalaryModelFilter === 'all') return true;
-            const normalized = (row.salaryModel ?? '').trim();
-            const filterValue = normalized === '일급제'
-                ? 'daily'
-                : normalized === '용역팀'
-                    ? 'service'
-                    : 'monthly';
-            return filterValue === ledgerSalaryModelFilter;
-        };
-
         const sourceRows = new Map(ledgerRowsData.map(row => [row.rowKey, row]));
         const visiblePaymentIds = new Set(filteredPaymentData.map(item => item.id));
         finalizedSnapshotByPaymentId.forEach(({ payment, row: saved }, paymentId) => {
@@ -849,13 +855,17 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                 finalizedAmounts: { corporateNet, personalNet: netAmount - corporateNet },
             });
         });
-        const rows = Array.from(sourceRows.values()).filter(matchesSalaryModelFilter);
+        const allRows = Array.from(sourceRows.values());
+        const rows = transferPickerMode ? allRows.filter(matchesSalaryModelFilter) : allRows;
         if (filterMode === 'team') return rows;
         if (selectedWorkerId) {
             return rows.filter((item) => item.workerId === selectedWorkerId);
         }
         return filterRowsByWorkerName(rows, workerSearchText);
-    }, [filterMode, filteredPaymentData, finalizedSnapshotByPaymentId, ledgerRowsData, ledgerSalaryModelFilter, selectedWorkerId, workerSearchText]);
+    }, [filterMode, filteredPaymentData, finalizedSnapshotByPaymentId, ledgerRowsData, matchesSalaryModelFilter, transferPickerMode, selectedWorkerId, workerSearchText]);
+    const visibleLedgerRowKeys = useMemo(() => ledgerSalaryModelFilter === 'all' ? undefined
+        : new Set(filteredLedgerRows.filter(matchesSalaryModelFilter).map(row => row.rowKey)),
+    [filteredLedgerRows, ledgerSalaryModelFilter, matchesSalaryModelFilter]);
 
     const paymentDataByLedgerKey = useMemo(() => {
         const map = new Map<string, PaymentData>();
@@ -1025,118 +1035,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
         setTransferLedgerReadyToken(transferLedgerToken);
     }, [transferLedgerToken]);
 
-    const activeLedgerRowKeySet = useMemo<Set<string>>(() => {
-        const set = new Set<string>();
-        ledgerRows.forEach((row) => {
-            const key = String(row.rowKey || row.id || '').trim();
-            if (key) set.add(key);
-        });
-        return set;
-    }, [ledgerRows]);
-
-    const ledgerSideFieldNames: Array<keyof LedgerManualInput['invoice']> = useMemo(
-        () => [
-            'carry',
-            'carrySecond',
-            'currentAdvance',
-            'currentAdvanceSecond',
-            'lodging',
-            'electricity',
-            'gas',
-            'water',
-            'internet',
-            'management',
-            'fine',
-            'other',
-        ],
-        []
-    );
-
-    const isLedgerManualInputEffectivelyEmpty = useCallback(
-        (input: LedgerManualInput | undefined, baselineInput?: LedgerManualInput): boolean => {
-            if (!input) return true;
-
-            const resolveAssignmentType = (
-                assignmentType: LedgerManualInput['assignmentType'] | undefined,
-                fallback: 'corporate' | 'labor' = 'corporate'
-            ): 'corporate' | 'labor' => {
-                if (assignmentType === 'labor') return 'labor';
-                if (assignmentType === 'corporate') return 'corporate';
-                return fallback;
-            };
-
-            const isSideEmpty = (side: LedgerManualInput['invoice'] | undefined): boolean => {
-                const safeSide = side ?? ({} as LedgerManualInput['invoice']);
-                return ledgerSideFieldNames.every((field) => toNumber(safeSide[field]) === 0);
-            };
-
-            const memo = String(input.personalMemo ?? '').trim();
-            const assignments = input.itemAssignments ?? {};
-            const hasAssignment = Object.keys(assignments).some((key) => {
-                const value = assignments[key];
-                return (value === 'corporate' || value === 'labor') && String(key).trim().length > 0;
-            });
-
-            const baselineAllocationMode = baselineInput?.allocationMode ?? 'split';
-            const currentAllocationMode = input.allocationMode ?? 'split';
-            const hasCustomAllocationMode = currentAllocationMode !== baselineAllocationMode;
-            const hasAnyValue = !isSideEmpty(input.invoice)
-                || !isSideEmpty(input.labor)
-                || memo.length > 0
-                || hasAssignment
-                || hasCustomAllocationMode;
-            if (!hasAnyValue) return true;
-
-            const baselineAssignment = resolveAssignmentType(baselineInput?.assignmentType, 'corporate');
-            const currentAssignment = resolveAssignmentType(input.assignmentType, baselineAssignment);
-            const hasCustomAssignment = currentAssignment !== baselineAssignment;
-
-            return isSideEmpty(input.invoice)
-                && isSideEmpty(input.labor)
-                && memo.length === 0
-                && !hasAssignment
-                && !hasCustomAssignment
-                && !hasCustomAllocationMode;
-        },
-        [ledgerSideFieldNames]
-    );
-
-    const previousInitialLedgerInputsRef = useRef(initialLedgerInputs);
     useEffect(() => {
-        const previousInitialInputs = previousInitialLedgerInputsRef.current;
-        previousInitialLedgerInputsRef.current = initialLedgerInputs;
-        setLedgerInputs((prev) => {
-            const next: Record<string, LedgerManualInput> = {};
-
-            activeLedgerRowKeySet.forEach((key) => {
-                const prevInput = prev[key];
-                const loadedInput = initialLedgerInputs[key];
-
-                const unchangedSinceLoad = isLedgerManualInputUnchanged(prevInput, previousInitialInputs[key]);
-                const emptyBeforeLoad = !previousInitialInputs[key] && isLedgerManualInputEffectivelyEmpty(prevInput, loadedInput);
-                if (loadedInput && (!prevInput || unchangedSinceLoad || emptyBeforeLoad)) {
-                    next[key] = loadedInput;
-                    return;
-                }
-
-                if (prevInput) {
-                    next[key] = prevInput;
-                    return;
-                }
-
-                if (loadedInput) {
-                    next[key] = loadedInput;
-                }
-            });
-
-            const prevKeys = Object.keys(prev);
-            const nextKeys = Object.keys(next);
-            if (prevKeys.length !== nextKeys.length) return next;
-
-            const hasChanged = nextKeys.some((key) => prev[key] !== next[key]);
-            return hasChanged ? next : prev;
-        });
-    }, [activeLedgerRowKeySet, initialLedgerInputs, isLedgerManualInputEffectivelyEmpty]);
+        const activeKeys = new Set(ledgerRows.map(row => row.rowKey));
+        for (const key of Array.from(allocationChangesRef.current.keys())) {
+            if (!activeKeys.has(key)) allocationChangesRef.current.delete(key);
+        }
+    }, [ledgerRows]);
 
     const utilityInputByPaymentRowKey = useMemo(() => {
         const map = new Map<string, LedgerUtilityInputLike>();
@@ -3592,10 +3496,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
             hasLaborTax: boolean;
         }>();
 
-        filteredPaymentData.forEach((item) => {
+        const allocationChanges = new Map(allocationChangesRef.current);
+        for (const item of filteredPaymentData) {
             const yearMonth = String(item.month ?? '').trim();
             const teamId = String(item.teamId ?? '').trim();
-            if (!yearMonth || !teamId || !monthRangeSet.has(yearMonth)) return;
+            if (!yearMonth || !teamId || !monthRangeSet.has(yearMonth)) continue;
 
             const salaryModel = item.id.endsWith('__일급제')
                 ? '일급제'
@@ -3615,6 +3520,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                 ?? initialLedgerInputs[rowKey]
                 ?? ledgerRow?.manual
             );
+            const mode = manualInput.allocationMode ?? 'split';
+            if (mode !== (computedAmount?.allocationMode ?? 'split')) {
+                const message = '급여 분류와 계산 금액이 일치하지 않습니다. 다시 조회한 뒤 저장해 주세요.';
+                setPayrollSettlementFeedback(message);
+                alert(message);
+                return;
+            }
 
             const businessIncomeAppliedAmount = Math.max(
                 0,
@@ -3704,7 +3616,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                 || toNumber(item.insuranceAppliedSummary?.appliedAmount) > 0
                 || toNumber(item.withholdingAppliedSummary?.appliedAmount) > 0;
             grouped.set(groupKey, group);
-        });
+        }
 
         const settlements: MonthlyPayrollSettlementSaveInput[] = Array.from(grouped.values()).map((group) => {
             const businessIncomeAppliedAmount = group.rows.reduce(
@@ -3743,11 +3655,20 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
 
         setPayrollSettlementSaving(true);
         setPayrollSettlementFeedback('정산을 저장하고 있습니다...');
+        let saved = false;
         try {
             await monthlyPayrollSettlementService.saveSettlements(settlements, {
                 uid: currentUser?.uid,
                 name: currentUser?.displayName || currentUser?.email,
-            });
+            }, allocationChanges, savedPayrollSettlements);
+            saved = true;
+            for (const settlement of settlements) {
+                for (const { rowKey } of settlement.rows) {
+                    if (allocationChangesRef.current.get(rowKey) === allocationChanges.get(rowKey)) {
+                        allocationChangesRef.current.delete(rowKey);
+                    }
+                }
+            }
 
             const years = Array.from(new Set(settlements.map((settlement) => settlement.year)));
             const refreshed = (await Promise.all(
@@ -3770,8 +3691,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
             );
         } catch (error) {
             console.error('[MonthlyWageDraftPage] settlement save failed:', error);
-            setPayrollSettlementFeedback('정산 저장에 실패했습니다.');
-            alert('정산 저장 중 오류가 발생했습니다. 권한과 네트워크 상태를 확인해 주세요.');
+            const message = saved ? '초안은 저장됐습니다. 저장본을 불러오려면 다시 조회해 주세요.'
+                : error instanceof Error && !('code' in error) ? error.message
+                    : '정산 저장 중 오류가 발생했습니다. 권한과 네트워크 상태를 확인해 주세요.';
+            if (saved) setPayrollSettlementLoadError(message);
+            setPayrollSettlementFeedback(message);
+            alert(message);
         } finally {
             setPayrollSettlementSaving(false);
         }
@@ -4266,7 +4191,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                     primaryAccountSettings={<PagePrimaryAccountCard state={pagePrimaryAccount} />}
                     hideHeader={!!hideHeader}
                     rangeLabel={rangeLabel}
-                    targetCount={pageViewMode === 'ledger' ? filteredLedgerRows.length : filteredPaymentData.length}
+                    targetCount={pageViewMode === 'ledger' ? (visibleLedgerRowKeys?.size ?? filteredLedgerRows.length) : filteredPaymentData.length}
                     monthRangeLength={monthRange.length}
                     totalLoadCount={paymentData.length}
                     monthSelectionMode={monthSelectionMode}
@@ -5099,12 +5024,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                 />
             )}
 
-            {pageViewMode === 'ledger' && (
-                <div className="monthly-payroll-ledger-panel flex-1 min-h-0 flex flex-col overflow-hidden">
-                    <fieldset disabled={payrollDataBlocked} className="m-0 flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0">
+                <div className="monthly-payroll-ledger-panel flex-1 min-h-0 flex flex-col overflow-hidden" style={pageViewMode === 'ledger' ? undefined : { display: 'none' }}>
+                    <fieldset disabled={payrollDataBlocked || payrollSettlementSaving} className="m-0 flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0">
                     <MonthlyAdvanceLedger
                         ref={advanceLedgerRef}
                         rows={ledgerRows}
+                        visibleRowKeys={visibleLedgerRowKeys}
+                        hideTable={pageViewMode !== 'ledger'}
+                        onAllocationChange={recordAllocationChange}
                         payrollConfig={payrollConfig}
                         advanceItemLabels={payrollConfig?.advanceItemLabels}
                         withholdingThreshold={WITHHOLDING_MAX_MAN_DAY}
@@ -5122,8 +5049,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                     />
                     </fieldset>
                 </div>
-            )}
-
             </div>
 
             {showKBPreview && (

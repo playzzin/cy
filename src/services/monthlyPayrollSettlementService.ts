@@ -1,12 +1,10 @@
 import {
     collection,
-    getDoc,
     getDocs,
     query,
     runTransaction,
     serverTimestamp,
     where,
-    writeBatch,
     doc,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -99,6 +97,7 @@ export interface MonthlyPayrollSettlement {
     rows: MonthlyPayrollSavedRow[];
     /** Missing on legacy records; treated as a draft. */
     runStatus: MonthlyPayrollRunStatus;
+    draftRevision?: number;
     reviewedAt?: unknown;
     reviewedByUid?: string;
     reviewedByName?: string;
@@ -117,6 +116,7 @@ export type MonthlyPayrollSettlementSaveInput = Omit<
     MonthlyPayrollSettlement,
     | 'id'
     | 'runStatus'
+    | 'draftRevision'
     | 'reviewedAt'
     | 'reviewedByUid'
     | 'reviewedByName'
@@ -134,6 +134,11 @@ export type MonthlyPayrollSettlementSaveInput = Omit<
 export interface MonthlyPayrollSettlementActor {
     uid?: string | null;
     name?: string | null;
+}
+
+export interface PayrollAllocationChange {
+    from: NonNullable<MonthlyPayrollSavedManualInput['allocationMode']>;
+    to: NonNullable<MonthlyPayrollSavedManualInput['allocationMode']>;
 }
 
 const toText = (value: unknown): string => String(value ?? '').trim();
@@ -224,6 +229,7 @@ const normalizeSettlement = (id: string, raw: Record<string, unknown>): MonthlyP
         businessIncomeTaxAmount: toFiniteNumber(raw.businessIncomeTaxAmount),
         rows: rows as MonthlyPayrollSavedRow[],
         runStatus: normalizeRunStatus(raw.runStatus),
+        draftRevision: toFiniteNumber(raw.draftRevision),
         reviewedAt: raw.reviewedAt,
         reviewedByUid: toText(raw.reviewedByUid) || undefined,
         reviewedByName: toText(raw.reviewedByName) || undefined,
@@ -242,7 +248,9 @@ const normalizeSettlement = (id: string, raw: Record<string, unknown>): MonthlyP
 export const monthlyPayrollSettlementService = {
     async saveSettlements(
         settlements: MonthlyPayrollSettlementSaveInput[],
-        actor: MonthlyPayrollSettlementActor = {}
+        actor: MonthlyPayrollSettlementActor = {},
+        allocationChanges: ReadonlyMap<string, PayrollAllocationChange> = new Map(),
+        loadedSettlements?: readonly MonthlyPayrollSettlement[]
     ): Promise<void> {
         if (settlements.length === 0) return;
         if (settlements.length > 450) {
@@ -253,35 +261,45 @@ export const monthlyPayrollSettlementService = {
             settlement,
             id: makeMonthlyPayrollSettlementId(settlement.yearMonth, settlement.teamId),
         }));
-
-        // Once a run leaves draft state, its saved data is the review/confirmed
-        // snapshot. Refuse accidental overwrites from the normal save action.
-        const existing = await Promise.all(docs.map(async ({ id }) => ({
-            id,
-            snapshot: await getDoc(doc(db, COLLECTION_NAME, id)),
-        })));
-        const locked = existing.find(({ snapshot }) => (
-            snapshot.exists() && normalizeRunStatus(snapshot.data().runStatus) !== 'draft'
-        ));
-        if (locked) {
-            throw new Error('검토·확정 또는 지급완료된 급여입니다. 저장본을 덮어쓸 수 없습니다.');
-        }
-
-        const batch = writeBatch(db);
-        docs.forEach(({ settlement, id }) => {
-            const payload = cleanUndefinedDeep({
-                ...settlement,
-                id,
-                updatedByUid: toText(actor.uid),
-                updatedByName: toText(actor.name),
-                updatedAt: serverTimestamp(),
-            }) as Record<string, unknown>;
-
-            batch.set(doc(db, COLLECTION_NAME, id), payload, { merge: true });
-        });
+        const loadedRevisions = loadedSettlements && new Map(loadedSettlements.map(settlement => [
+            makeMonthlyPayrollSettlementId(settlement.yearMonth, settlement.teamId), settlement.draftRevision ?? 0,
+        ] as const));
 
         await withTimeout(
-            batch.commit(),
+            runTransaction(db, async (transaction) => {
+                const refs = docs.map(({ id }) => doc(db, COLLECTION_NAME, id));
+                const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+                docs.forEach(({ settlement, id }, index) => {
+                    const stored = snapshots[index].data();
+                    if (stored && normalizeRunStatus(stored.runStatus) !== 'draft') {
+                        throw new Error('검토·확정 또는 지급완료된 급여입니다. 저장본을 덮어쓸 수 없습니다.');
+                    }
+                    const revision = stored ? toFiniteNumber(stored.draftRevision) : undefined;
+                    if (loadedRevisions && loadedRevisions.get(id) !== revision) {
+                        throw new Error(`${settlement.teamName}의 급여 초안이 다른 화면에서 변경됐습니다. 다시 조회한 뒤 저장해 주세요.`);
+                    }
+                    const storedRows: MonthlyPayrollSavedRow[] = Array.isArray(stored?.rows) ? stored.rows : [];
+                    const savedModes = new Map(storedRows.map(row => [row.rowKey, row.manualInput?.allocationMode ?? 'split']));
+                    for (const row of settlement.rows) {
+                        const saved = savedModes.get(row.rowKey);
+                        const next = row.manualInput?.allocationMode ?? 'split';
+                        if (saved === undefined || saved === next) continue;
+                        const change = allocationChanges.get(row.rowKey);
+                        if (change?.from !== saved || change.to !== next) {
+                            throw new Error(`${settlement.teamName}의 저장된 급여 분류와 화면이 다릅니다. 다시 조회한 뒤 분류를 확인해 주세요.`);
+                        }
+                    }
+                    const payload = cleanUndefinedDeep({
+                        ...settlement,
+                        id,
+                        draftRevision: (revision ?? 0) + 1,
+                        updatedByUid: toText(actor.uid),
+                        updatedByName: toText(actor.name),
+                        updatedAt: serverTimestamp(),
+                    }) as Record<string, unknown>;
+                    transaction.set(refs[index], payload, { merge: true });
+                });
+            }),
             WRITE_TIMEOUT_MS,
             '월 급여 정산 저장 응답이 지연되고 있습니다.'
         );

@@ -29,6 +29,7 @@ import { teamExpenseCategoryService } from '../../services/teamExpenseCategorySe
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { toast } from '../../utils/swal';
 import { OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeAssignmentReference } from '../../utils/supportAssignmentTargets';
+import ExpenseClaimAttachments from './components/ExpenseClaimAttachments';
 import {
   buildDefaultDate,
   formatCurrency,
@@ -2044,39 +2045,17 @@ const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
                         </td>
                         <td className="border border-slate-200 px-2 py-2 text-center">{isStandalone ? '-' : claim.siteName || '-'}</td>
                         <td className="border border-slate-200 px-2 py-2">
-                          <div className="font-black text-slate-900">{claim.description}</div>
-                          <div className="mt-0.5 flex items-center gap-2 text-[11px] font-bold text-slate-500">
-                            <WalletCards size={12} />
-                            <span>{getCategoryLabel(claim.category, allCategoryOptions)}</span>
-                            {claim.memo ? <span className="truncate">· {claim.memo}</span> : null}
-                          </div>
-                          {(claim.attachments ?? []).length > 0 && (
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              {(claim.attachments ?? []).map((attachment) => (
-                                attachment.fullPath?.startsWith('team-expense-receipts/') ? <SecureExpenseReceipt key={attachment.id} fullPath={attachment.fullPath} name={attachment.name} /> : attachment.url ? (
-                                  <a
-                                    key={attachment.id || attachment.fullPath || attachment.url}
-                                    href={attachment.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    title={attachment.name}
-                                    className="inline-flex h-9 w-9 overflow-hidden rounded-md border border-slate-200 bg-white"
-                                  >
-                                    <img src={attachment.url} alt={attachment.name || '첨부 사진'} className="h-full w-full object-cover" />
-                                  </a>
-                                ) : (
-                                  <span
-                                    key={attachment.id || attachment.fullPath || attachment.name}
-                                    title={attachment.name}
-                                    className="inline-flex h-9 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-black text-slate-500"
-                                  >
-                                    <ImageIcon size={12} />
-                                    {attachment.name || '첨부'}
-                                  </span>
-                                )
-                              ))}
+                          <div className="flex items-center gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="break-words font-black text-slate-900">{claim.description}</div>
+                              <div className="mt-0.5 flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                                <WalletCards size={12} className="shrink-0" />
+                                <span>{getCategoryLabel(claim.category, allCategoryOptions)}</span>
+                                {claim.memo ? <span className="truncate">· {claim.memo}</span> : null}
+                              </div>
                             </div>
-                          )}
+                            {claim.attachments && <ExpenseClaimAttachments attachments={claim.attachments} />}
+                          </div>
                         </td>
                         <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-500">{isStandalone ? '-' : claim.cardLabel || '-'}</td>
                         <td className="border border-slate-200 px-2 py-2 text-right font-black tabular-nums text-slate-900">{formatCurrency(claim.amount)}</td>

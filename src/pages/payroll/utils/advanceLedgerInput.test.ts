@@ -9,9 +9,9 @@ import {
 
 const advanceRecord = (overrides: Partial<AdvancePayment> = {}): AdvancePayment => ({
   workerId: 'worker-1',
-  workerName: '김승희',
+  workerName: 'fixture-worker-name',
   teamId: 'team-1',
-  teamName: '이재욱팀',
+  teamName: 'fixture-team-name',
   salaryModel: '월급제',
   yearMonth: '2026-07',
   items: {},
@@ -141,7 +141,7 @@ describe('가불관리 → 통합급여 입력 변환', () => {
     const currentTeamRecord = advanceRecord({
       id: 'team-new_worker-1_2026-07_monthly',
       teamId: 'team-new',
-      teamName: '이재욱팀',
+      teamName: 'fixture-team-name',
       items: { laborAdvance3: 500000 },
     });
 
@@ -154,7 +154,7 @@ describe('가불관리 → 통합급여 입력 변환', () => {
     expect(pickAdvanceRecordForPayrollRow(
       [formerTeamRecord, currentTeamRecord],
       '2026-07',
-      { preferredTeamId: 'team-new', preferredTeamName: '이재욱팀', preferredSalaryModel: '월급제' }
+      { preferredTeamId: 'team-new', preferredTeamName: 'fixture-team-name', preferredSalaryModel: '월급제' }
     )).toBe(currentTeamRecord);
 
     expect(pickAdvanceRecordForPayrollRow(
@@ -200,6 +200,18 @@ describe('가불관리 → 통합급여 입력 변환', () => {
       settlementUpdatedAt: { _methodName: 'serverTimestamp' },
       settlementStatus: 'draft',
     })).toBe(source);
+  });
+
+  it.each(['corporate', 'labor', 'split'] as const)('가불을 0원으로 고쳐도 초안의 %s 분류는 보존한다', (allocationMode) => {
+    const source = buildManualInputFromAdvanceRecord(advanceRecord({ items: { laborAdvance3: 0 } }));
+    const saved = { ...manualInput({ currentAdvance: 500000 }), allocationMode, assignmentType: 'corporate' as const };
+    for (const savedAt of [{ _methodName: 'serverTimestamp' }, '2026-10-10T00:00:00Z']) {
+      const result = resolveInitialLedgerManualInput({
+        advanceInput: source, advanceUpdatedAt: '2026-11-10T00:00:00Z',
+        settlementInput: saved, settlementUpdatedAt: savedAt, settlementStatus: 'draft',
+      });
+      expect(result).toMatchObject({ allocationMode, assignmentType: saved.assignmentType, labor: { currentAdvance: 0 } });
+    }
   });
 
   it.each(['reviewed', 'confirmed', 'paid'])('저장 시각이 손상되어도 %s 급여의 검토·확정값은 보호한다', (status) => {

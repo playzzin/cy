@@ -3,13 +3,22 @@ import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import MonthlyWageDraftPage from './MonthlyWageDraftPage';
 import { dailyReportService } from '../../services/dailyReportService';
+import { advancePaymentService } from '../../services/advancePaymentService';
 import { monthlyPayrollSettlementService } from '../../services/monthlyPayrollSettlementService';
+import type { MonthlyPayrollSettlement, MonthlyPayrollSettlementSaveInput } from '../../services/monthlyPayrollSettlementService';
 import { manpowerService } from '../../services/manpowerService';
 import * as XLSX from 'xlsx-js-style';
 import { saveAs } from 'file-saver';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePagePrimaryAccount } from '../../hooks/usePagePrimaryAccount';
 import { readTransferHandoff } from '../../features/bank-transfer/transferHandoff';
+
+// Zero-filled identifiers keep these formatting tests independent of real accounts.
+const testAccountNumbers = {
+    exportRow: '000000000000',
+    primary: '000000000001',
+    original: '000000000002',
+} as const;
 
 jest.mock('xlsx-js-style', () => ({ ...jest.requireActual('xlsx-js-style'), writeFile: jest.fn() }));
 jest.mock('file-saver', () => ({ saveAs: jest.fn() }));
@@ -27,7 +36,7 @@ jest.mock('../../services/manpowerService', () => ({ manpowerService: { getWorke
     }))
 )) } }));
 jest.mock('../../services/dailyReportService', () => ({ dailyReportService: { getReportsByRange: jest.fn() } }));
-jest.mock('../../services/advancePaymentService', () => ({ advancePaymentService: { getAdvancePaymentsByYearMonth: async () => [] } }));
+jest.mock('../../services/advancePaymentService', () => ({ advancePaymentService: { getAdvancePaymentsByYearMonth: jest.fn() } }));
 jest.mock('../../services/statementOutputService', () => ({ statementOutputService: { getOutputsByMonth: async () => [] } }));
 jest.mock('../../services/monthlyPayrollSettlementService', () => ({
     isFinalizedMonthlyPayrollRun: (status: string) => status === 'confirmed' || status === 'paid',
@@ -47,20 +56,22 @@ jest.mock('./components/PayslipTemplate', () => {
     const React = require('react');
     return { PayslipTemplate: React.forwardRef((_props: any, ref: any) => <div ref={ref} className="payslip-template-card">검증용 명세서</div>) };
 });
-// Keep the real page, data hook and tax calculation; expose only the table inputs.
+let mockUseRealLedger = false;
 jest.mock('./components/MonthlyAdvanceLedger', () => {
     const React = require('react');
-    return { __esModule: true, default: React.forwardRef(({ rows }: any, _ref: any) => (
-        <div>{rows.map((row: any) => <output key={row.rowKey} data-testid={row.workerId}>
+    const RealLedger = jest.requireActual('./components/MonthlyAdvanceLedger').default;
+    return { __esModule: true, default: React.forwardRef((props: any, ref: any) => mockUseRealLedger
+        ? <RealLedger {...props} ref={ref} />
+        : <div>{props.rows.map((row: any) => <output key={row.rowKey} data-testid={row.workerId}>
             {JSON.stringify(row.statementTaxAmounts)}
-        </output>)}</div>
-    )) };
+        </output>)}</div>) };
 });
 jest.mock('./components/SimplePayrollToolbar', () => ({ PayrollToolbar: (props: any) => (
     <div>
         <button onClick={props.fetchData}>조회</button>
         <button onClick={() => props.setPageViewMode('simple')}>간편 마감</button>
         <button onClick={() => props.setPageViewMode('ledger')}>가불대장</button>
+        <button onClick={() => props.setLedgerSalaryModelFilter('monthly')}>월급제만</button>
         <button disabled={props.payrollSettlementDisabled || props.payrollSettlementSaving || props.payrollSettlementLoading} onClick={props.handleSavePayrollSettlement}>초안 저장</button>
         <button disabled={props.actionsDisabled} onClick={props.openPayslipPreview}>명세서</button>
         <button disabled={props.actionsDisabled} onClick={() => props.setShowKBPreview(true)}>은행 이체</button>
@@ -99,7 +110,7 @@ it('페이지 안에서 이체 설정을 파일에 반영하고 원래 급여 �
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue(
         ['월급제', '일급제', '용역팀'].map((payType, index) => ({
             id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
-            bankName: '국민은행', accountNumber: '123456789012', accountHolder: `검증${index}`,
+            bankName: '국민은행', accountNumber: testAccountNumbers.exportRow, accountHolder: `검증${index}`,
         }))
     );
     render(<MonthlyWageDraftPage />);
@@ -136,6 +147,9 @@ it('페이지 안에서 이체 설정을 파일에 반영하고 원래 급여 �
 
 beforeEach(() => {
     jest.clearAllMocks();
+    mockUseRealLedger = false;
+    (advancePaymentService.getAdvancePaymentsByYearMonth as jest.Mock).mockResolvedValue([]);
+    (monthlyPayrollSettlementService.saveSettlements as jest.Mock).mockReset().mockResolvedValue(undefined);
     (useAuth as jest.Mock).mockReturnValue({ currentUser: null });
     (usePagePrimaryAccount as jest.Mock).mockReturnValue({ account: null });
     sessionStorage.clear();
@@ -147,6 +161,62 @@ beforeEach(() => {
     );
     (dailyReportService.getReportsByRange as jest.Mock).mockResolvedValue(reports());
     (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockResolvedValue([]);
+});
+
+it('전체 노무를 저장한 뒤 새 화면에서 수정된 가불과 분류를 복원하고 메모만 재저장한다', async () => {
+    mockUseRealLedger = true;
+    let amount = 500000;
+    let stored: MonthlyPayrollSettlement[] = [];
+    (advancePaymentService.getAdvancePaymentsByYearMonth as jest.Mock).mockImplementation(async () => [{
+        id: 'advance', yearMonth: month, workerId: 'worker-0', teamId: 'team', salaryModel: '월급제',
+        items: { laborAdvance3: amount }, updatedAt: new Date(), assignmentType: 'corporate',
+    }]);
+    (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockImplementation(async () => stored);
+    const save = monthlyPayrollSettlementService.saveSettlements as jest.Mock;
+    save.mockImplementation(async (drafts: MonthlyPayrollSettlementSaveInput[]) => {
+        stored = drafts.map(draft => ({ ...draft, runStatus: 'draft', updatedAt: { _methodName: 'serverTimestamp' } }));
+    });
+    const saveButton = () => screen.getByRole('button', { name: '초안 저장' });
+    const allocation = () => screen.getByRole('button', { name: '검증0 공제 분류' });
+    const { unmount } = render(<MonthlyWageDraftPage />);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    fireEvent.click(await screen.findByRole('button', { name: '전체 노무' }));
+    await waitFor(() => expect(allocation()).toHaveTextContent('노무'));
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(stored[0]?.rows.map(row => row.manualInput.allocationMode)).toEqual(['labor', 'labor', 'labor']));
+    expect(save.mock.calls[0][2].size).toBe(3);
+    unmount();
+
+    amount = 300000;
+    render(<MonthlyWageDraftPage />);
+    await waitFor(() => expect(allocation()).toHaveTextContent('노무'));
+    expect(await screen.findByDisplayValue('300,000')).toBeInTheDocument();
+    fireEvent.change(screen.getAllByPlaceholderText('메모')[0], { target: { value: '급여 확인' } });
+    amount = 0;
+    fireEvent.click(screen.getByRole('button', { name: '조회' }));
+    await waitFor(() => expect(screen.queryByDisplayValue('300,000')).not.toBeInTheDocument());
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    expect(screen.getByDisplayValue('급여 확인')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '간편 마감' }));
+    fireEvent.click(screen.getAllByRole('button', { name: '초안 저장' })[0]);
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    const worker = stored[0].rows.find(row => row.workerId === 'worker-0');
+    expect(worker?.manualInput).toMatchObject({ allocationMode: 'labor', labor: { currentAdvance: 0 } });
+    expect(stored[0].rows.some(row => row.manualInput.personalMemo === '급여 확인')).toBe(true);
+    expect(stored[0].rows.every(row => row.invoiceGrossAmount === 0 && row.laborGrossAmount === row.grossAmount)).toBe(true);
+    expect(save.mock.calls[1][2].size).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: '가불대장' }));
+    fireEvent.click(screen.getByRole('button', { name: '월급제만' }));
+    fireEvent.click(screen.getByRole('button', { name: '전체 분리' }));
+    await waitFor(() => expect(allocation()).toHaveTextContent('분리'));
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(3));
+    expect(stored[0].rows.filter(row => row.manualInput.allocationMode === 'split').map(row => row.workerId)).toEqual(['worker-0']);
+    expect(save.mock.calls[2][2].get(worker?.rowKey)).toEqual({ from: 'labor', to: 'split' });
+    expect(save.mock.calls[2][2].size).toBe(1);
 });
 
 it('확인센터와 하단 경고가 현재 조회 결과의 지급계좌 확인 건수를 함께 갱신한다', async () => {
@@ -182,7 +252,7 @@ it('로그인하지 않은 상태에서는 미리보기 송금 목록 전달을 
 it('현재 세후 미리보기의 대표계좌와 원계좌·표시문구를 같은 로그인 계정 송금 목록으로 전달한다', async () => {
     (useAuth as jest.Mock).mockReturnValue({ currentUser: { uid: 'fixture-user' } });
     (usePagePrimaryAccount as jest.Mock).mockReturnValue({
-        account: { bankName: '신한은행', accountNumber: '000987654321', accountHolder: '검증대표계좌' },
+        account: { bankName: '신한은행', accountNumber: testAccountNumbers.primary, accountHolder: '검증대표계좌' },
     });
     const originalLocation = window.location;
     const assign = jest.fn();
@@ -204,7 +274,7 @@ it('현재 세후 미리보기의 대표계좌와 원계좌·표시문구를 같
         const rows = readTransferHandoff('fixture-user');
         expect(rows).toHaveLength(3);
         expect(rows?.find(row => row.name === '검증0')).toMatchObject({
-            amount: 1068535, bankCode: '088', accountNumber: '000987654321', accountHolder: '검증대표계좌',
+            amount: 1068535, bankCode: '088', accountNumber: testAccountNumbers.primary, accountHolder: '검증대표계좌',
             receiverDisplay: '검증급여', senderMemo: '검증0 정산',
         });
         expect(rows?.find(row => row.name === '검증1')).toMatchObject({
@@ -219,12 +289,12 @@ it('현재 세후 미리보기의 대표계좌와 원계좌·표시문구를 같
 
 it('오류 계좌는 다운로드에서 제외하고 전체 선택의 대표계좌 적용·원계좌 복원을 출력에 반영한다', async () => {
     (usePagePrimaryAccount as jest.Mock).mockReturnValue({
-        account: { bankName: '신한은행', accountNumber: '000987654321', accountHolder: '검증대표계좌' },
+        account: { bankName: '신한은행', accountNumber: testAccountNumbers.primary, accountHolder: '검증대표계좌' },
     });
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue(
         ['월급제', '일급제', '용역팀'].map((payType, index) => ({
             id: `worker-${index}`, name: `검증${index}`, teamId: 'team', teamName: '검증팀', payType,
-            bankName: '국민은행', accountNumber: index === 1 ? '' : '000123456789', accountHolder: `검증${index}`,
+            bankName: '국민은행', accountNumber: index === 1 ? '' : testAccountNumbers.original, accountHolder: `검증${index}`,
         }))
     );
     render(<MonthlyWageDraftPage />);
@@ -238,7 +308,7 @@ it('오류 계좌는 다운로드에서 제외하고 전체 선택의 대표계�
     fireEvent.click(download);
     const original = (XLSX.writeFile as jest.Mock).mock.calls[0][0].Sheets['국민은행용'];
     expect(original['!ref']).toBe('A1:E3');
-    expect(original.B2.v).toBe('000123456789');
+    expect(original.B2.v).toBe(testAccountNumbers.original);
 
     fireEvent.click(within(preview).getByRole('checkbox', { name: '작업자 선택' }));
     fireEvent.click(within(preview).getByRole('button', { name: '선택 → 대표계좌' }));
@@ -249,7 +319,7 @@ it('오류 계좌는 다운로드에서 제외하고 전체 선택의 대표계�
     expect(applied['!ref']).toBe('A1:E4');
     for (const index of [2, 3, 4]) {
         expect(applied[`A${index}`].v).toBe('088');
-        expect(applied[`B${index}`].v).toBe('000987654321');
+        expect(applied[`B${index}`].v).toBe(testAccountNumbers.primary);
         expect(applied[`C${index}`].v).toBe(1105000);
     }
 
@@ -397,6 +467,25 @@ it('정산 조회 실패 중 저장과 출력을 막고 재조회로 복구한�
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole('button', { name: '명세서' })).toBeEnabled());
     warning.mockRestore();
+});
+
+it('저장 후 다시 읽기만 실패하면 저장 완료를 알리고 중복 저장을 막는다', async () => {
+    const warning = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const alert = jest.spyOn(window, 'alert').mockImplementation(() => undefined);
+    try {
+        render(<MonthlyWageDraftPage />);
+        await ready();
+        const button = screen.getByRole('button', { name: '초안 저장' });
+        await waitFor(() => expect(button).toBeEnabled());
+        (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockRejectedValueOnce(new Error('read failed'));
+        fireEvent.click(button);
+        expect(await screen.findByRole('alert')).toHaveTextContent('초안은 저장됐습니다');
+        expect(button).toBeDisabled();
+        expect(monthlyPayrollSettlementService.saveSettlements).toHaveBeenCalledTimes(1);
+    } finally {
+        alert.mockRestore();
+        warning.mockRestore();
+    }
 });
 
 it('계좌와 세율이 없는 명세서도 확인창 없이 개별·일괄 Excel과 PDF를 출력한다', async () => {

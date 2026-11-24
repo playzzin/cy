@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx-js-style';
 import DeductionAllocationButton from './DeductionAllocationButton';
+import { isLedgerManualInputUnchanged } from '../utils/advanceLedgerInput';
 import {
     AdvanceItemLabelsConfig,
     DEFAULT_ADVANCE_ITEM_LABELS
@@ -141,6 +142,8 @@ interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {
 interface Props {
     /** Read saved inputs and publish computed amounts without mounting editing controls. */
     computeOnly?: boolean;
+    hideTable?: boolean;
+    visibleRowKeys?: ReadonlySet<string>;
     rows: MonthlyAdvanceLedgerRow[];
     payrollConfig: any | null;
     advanceItemLabels?: Partial<AdvanceItemLabelsConfig>;
@@ -153,6 +156,7 @@ interface Props {
     isInsuranceEligibleEntry?: (entry: MonthlyAdvanceLedgerWorkEntry, row: MonthlyAdvanceLedgerRow) => boolean;
     clientCompanyNameById?: Record<string, string>;
     onInputsChange?: (inputs: Record<string, LedgerManualInput>) => void;
+    onAllocationChange?: (rowKeys: string[], mode: MonthlyAdvanceAllocationMode) => void;
     onComputedAmountsChange?: (rows: MonthlyAdvanceLedgerComputedAmount[]) => void;
     initialInputs?: Record<string, LedgerManualInput>;
     visibleSections?: {
@@ -196,15 +200,6 @@ const createEmptyManualInput = (defaultAssignment?: 'corporate' | 'labor'): Ledg
     allocationMode: 'split',
     itemAssignments: {},
 });
-
-const resolveAssignmentType = (
-    assignmentType: LedgerManualInput['assignmentType'] | undefined,
-    fallback: 'corporate' | 'labor' = 'corporate'
-): 'corporate' | 'labor' => {
-    if (assignmentType === 'labor') return 'labor';
-    if (assignmentType === 'corporate') return 'corporate';
-    return fallback;
-};
 
 const SIDE_NUMBER_FIELDS: LedgerSideNumberField[] = [
     'carry',
@@ -260,44 +255,32 @@ const normalizeManualInput = (
     itemAssignments: input?.itemAssignments ?? {},
 });
 
-const isSideInputEmpty = (side: LedgerSideInput | undefined): boolean => {
-    const safeSide = { ...createEmptySideInput(), ...(side ?? {}) };
-    return SIDE_NUMBER_FIELDS.every((field) => Number(safeSide[field] ?? 0) === 0);
-};
-
-const isManualInputEffectivelyEmpty = (
-    input: LedgerManualInput | undefined,
-    defaultAssignment?: 'corporate' | 'labor'
-): boolean => {
-    if (!input) return true;
-    const memo = String(input.personalMemo ?? '').trim();
-    const assignments = input.itemAssignments ?? {};
-    const hasAssignment = Object.keys(assignments).some((key) => {
-        const value = assignments[key];
-        return (value === 'corporate' || value === 'labor') && String(key).trim().length > 0;
-    });
-
-    const baselineAssignment = resolveAssignmentType(defaultAssignment, 'corporate');
-    const currentAssignment = resolveAssignmentType(input.assignmentType, baselineAssignment);
-    const hasCustomAssignment = currentAssignment !== baselineAssignment;
-    const hasCustomAllocationMode = (input.allocationMode ?? 'split') !== 'split';
-    const hasAnyValue =
-        !isSideInputEmpty(input.invoice)
-        || !isSideInputEmpty(input.labor)
-        || memo.length > 0
-        || hasAssignment
-        || hasCustomAssignment
-        || hasCustomAllocationMode;
-    if (!hasAnyValue) return true;
-
-    return (
-        isSideInputEmpty(input.invoice)
-        && isSideInputEmpty(input.labor)
-        && memo.length === 0
-        && !hasAssignment
-        && !hasCustomAssignment
-        && !hasCustomAllocationMode
-    );
+// All three inputs are normalized. A refetch updates fields the user did not edit.
+const applyLocalLedgerEdits = (
+    loaded: LedgerManualInput, previous: LedgerManualInput, edited: LedgerManualInput
+): LedgerManualInput => {
+    const next = {
+        ...loaded,
+        invoice: { ...loaded.invoice },
+        labor: { ...loaded.labor },
+        itemAssignments: { ...loaded.itemAssignments },
+    };
+    for (const side of ['invoice', 'labor'] as const) {
+        for (const field of SIDE_NUMBER_FIELDS) {
+            if (edited[side][field] !== previous[side][field]) next[side][field] = edited[side][field];
+        }
+    }
+    if (edited.personalMemo !== previous.personalMemo) next.personalMemo = edited.personalMemo;
+    if (edited.allocationMode !== previous.allocationMode) {
+        next.allocationMode = edited.allocationMode;
+        next.assignmentType = edited.assignmentType;
+    } else if (edited.assignmentType !== previous.assignmentType) {
+        next.assignmentType = edited.assignmentType;
+    }
+    for (const [key, value] of Object.entries(edited.itemAssignments ?? {})) {
+        if (value !== previous.itemAssignments?.[key]) next.itemAssignments[key] = value;
+    }
+    return next;
 };
 
 const toSignedAmount = (value: string): number => {
@@ -402,6 +385,8 @@ const sumSideAdvances = (side: LedgerSideInput): number =>
 
 const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     computeOnly = false,
+    hideTable = false,
+    visibleRowKeys,
     rows,
     payrollConfig,
     advanceItemLabels,
@@ -414,6 +399,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     isInsuranceEligibleEntry,
     clientCompanyNameById = {},
     onInputsChange,
+    onAllocationChange,
     onComputedAmountsChange,
     initialInputs,
     visibleSections,
@@ -424,8 +410,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     const [inputsByRowKey, setInputsByRowKey] = useState<Record<string, LedgerManualInput>>({});
     const [showLaborGroupBasis, setShowLaborGroupBasis] = useState<boolean>(false);
     const [showRateGuide, setShowRateGuide] = useState<boolean>(false);
-    const touchedRowKeysRef = React.useRef<Set<string>>(new Set());
-    const previousInitialInputsRef = React.useRef<Props['initialInputs']>(initialInputs);
+    const previousInitialInputsRef = React.useRef<Record<string, LedgerManualInput>>({});
     const resolvedAdvanceItemLabels = useMemo<AdvanceItemLabelsConfig>(() => {
         const next: AdvanceItemLabelsConfig = { ...DEFAULT_ADVANCE_ITEM_LABELS };
         Object.entries(advanceItemLabels || {}).forEach(([key, val]) => {
@@ -444,93 +429,27 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
         + (showTaxes ? 712 : 0);
 
     useEffect(() => {
-        const previousInitialInputs = previousInitialInputsRef.current;
-        previousInitialInputsRef.current = initialInputs;
-        setInputsByRowKey((prev) => {
+        const previous = previousInitialInputsRef.current;
+        const loaded: Record<string, LedgerManualInput> = {};
+        rows.forEach(row => {
+            loaded[row.rowKey] = normalizeManualInput(initialInputs?.[row.rowKey], resolveDefaultMonthlyAdvanceAssignment(row));
+        });
+        previousInitialInputsRef.current = loaded;
+        setInputsByRowKey(current => {
             const next: Record<string, LedgerManualInput> = {};
-            let changed = false;
-
-            rows.forEach((row) => {
-                const defaultAssignment = resolveDefaultMonthlyAdvanceAssignment(row);
-                const prevInput = prev[row.rowKey];
-                const initialInput = initialInputs?.[row.rowKey];
-                const previousInitialInput = previousInitialInputs?.[row.rowKey];
-                const isTouchedRow = touchedRowKeysRef.current.has(row.rowKey);
-                const initialInputChanged = initialInput !== previousInitialInput;
-                const shouldAdoptInitial = Boolean(initialInput)
-                    && (!isTouchedRow || Boolean(row.finalizedAmounts))
-                    && (initialInputChanged || isManualInputEffectivelyEmpty(prevInput, defaultAssignment));
-                const existing = shouldAdoptInitial ? initialInput : (prevInput ?? initialInput);
-                if (shouldAdoptInitial && existing !== prevInput) {
-                    changed = true;
+            let changed = Object.keys(current).length !== rows.length;
+            rows.forEach(row => {
+                const key = row.rowKey;
+                const edit = current[key];
+                const baseline = previous[key];
+                let input = loaded[key];
+                if (edit && baseline && !row.finalizedAmounts && !isLedgerManualInputUnchanged(edit, baseline)) {
+                    input = applyLocalLedgerEdits(input, baseline, edit);
                 }
-                if (!existing) {
-                    changed = true;
-                    next[row.rowKey] = createEmptyManualInput(defaultAssignment);
-                    return;
-                }
-
-                const normalized = normalizeManualInput(existing, defaultAssignment);
-
-                const isSameInvoice =
-                    existing.invoice?.carry === normalized.invoice.carry
-                    && existing.invoice?.carrySecond === normalized.invoice.carrySecond
-                    && existing.invoice?.currentAdvance === normalized.invoice.currentAdvance
-                    && existing.invoice?.currentAdvanceSecond === normalized.invoice.currentAdvanceSecond
-                    && existing.invoice?.lodging === normalized.invoice.lodging
-                    && existing.invoice?.electricity === normalized.invoice.electricity
-                    && existing.invoice?.gas === normalized.invoice.gas
-                    && existing.invoice?.water === normalized.invoice.water
-                    && existing.invoice?.internet === normalized.invoice.internet
-                    && existing.invoice?.management === normalized.invoice.management
-                    && existing.invoice?.fine === normalized.invoice.fine
-                    && existing.invoice?.other === normalized.invoice.other;
-
-                const isSameLabor =
-                    existing.labor?.carry === normalized.labor.carry
-                    && existing.labor?.carrySecond === normalized.labor.carrySecond
-                    && existing.labor?.currentAdvance === normalized.labor.currentAdvance
-                    && existing.labor?.currentAdvanceSecond === normalized.labor.currentAdvanceSecond
-                    && existing.labor?.lodging === normalized.labor.lodging
-                    && existing.labor?.electricity === normalized.labor.electricity
-                    && existing.labor?.gas === normalized.labor.gas
-                    && existing.labor?.water === normalized.labor.water
-                    && existing.labor?.internet === normalized.labor.internet
-                    && existing.labor?.management === normalized.labor.management
-                    && existing.labor?.fine === normalized.labor.fine
-                    && existing.labor?.other === normalized.labor.other;
-
-                const existingAssignments = existing.itemAssignments ?? {};
-                const normalizedAssignments = normalized.itemAssignments ?? {};
-                const assignmentKeys = Array.from(
-                    new Set([...Object.keys(existingAssignments), ...Object.keys(normalizedAssignments)])
-                );
-                const isSameAssignments = assignmentKeys.every((assignmentKey) => (
-                    (existingAssignments[assignmentKey] ?? 'corporate') === (normalizedAssignments[assignmentKey] ?? 'corporate')
-                ));
-
-                const isSame =
-                    isSameInvoice
-                    && isSameLabor
-                    && (existing.personalMemo ?? '') === normalized.personalMemo
-                    && (existing.assignmentType ?? defaultAssignment) === normalized.assignmentType
-                    && (existing.allocationMode ?? 'split') === normalized.allocationMode
-                    && isSameAssignments;
-
-                if (!isSame) {
-                    changed = true;
-                    next[row.rowKey] = normalized;
-                    return;
-                }
-
-                next[row.rowKey] = existing;
+                next[key] = edit && isLedgerManualInputUnchanged(edit, input) ? edit : input;
+                if (next[key] !== edit) changed = true;
             });
-
-            if (Object.keys(prev).length !== rows.length) {
-                changed = true;
-            }
-
-            return changed ? next : prev;
+            return changed ? next : current;
         });
     }, [initialInputs, rows]);
 
@@ -575,7 +494,6 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     const updateSideField = useCallback(
         (rowKey: string, side: LedgerSide, field: LedgerSideNumberField, value: number) => {
             if (rows.some(row => row.rowKey === rowKey && row.finalizedAmounts)) return;
-            touchedRowKeysRef.current.add(rowKey);
             setInputsByRowKey((prev) => {
                 const base = prev[rowKey] ?? createEmptyManualInput();
                 return {
@@ -595,7 +513,6 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
     const updatePersonalMemo = useCallback((rowKey: string, value: string) => {
         if (rows.some(row => row.rowKey === rowKey && row.finalizedAmounts)) return;
-        touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const base = prev[rowKey] ?? createEmptyManualInput();
             return {
@@ -608,34 +525,14 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
         });
     }, [rows]);
 
-    const updateAllocationMode = useCallback((rowKey: string, value: MonthlyAdvanceAllocationMode) => {
-        if (rows.some(row => row.rowKey === rowKey && row.finalizedAmounts)) return;
-        touchedRowKeysRef.current.add(rowKey);
-        setInputsByRowKey((prev) => {
-            const sourceRow = rows.find((row) => row.rowKey === rowKey);
-            const defaultAssignment = sourceRow
-                ? resolveDefaultMonthlyAdvanceAssignment(sourceRow)
-                : 'corporate';
-            const base = prev[rowKey] ?? createEmptyManualInput(defaultAssignment);
-            return {
-                ...prev,
-                [rowKey]: {
-                    ...base,
-                    allocationMode: value,
-                    assignmentType: value === 'split' ? base.assignmentType : value,
-                },
-            };
-        });
-    }, [rows]);
-
-    const updateAllAllocationModes = useCallback((value: MonthlyAdvanceAllocationMode) => {
-        rows.filter(row => !row.finalizedAmounts).forEach((row) => touchedRowKeysRef.current.add(row.rowKey));
-        setInputsByRowKey((prev) => {
+    const updateAllocationModes = useCallback((targets: MonthlyAdvanceLedgerRow[], value: MonthlyAdvanceAllocationMode) => {
+        const editable = targets.filter(row => !row.finalizedAmounts);
+        if (!editable.length) return;
+        onAllocationChange?.(editable.map(row => row.rowKey), value);
+        setInputsByRowKey(prev => {
             const next = { ...prev };
-            rows.forEach((row) => {
-                if (row.finalizedAmounts) return;
-                const defaultAssignment = resolveDefaultMonthlyAdvanceAssignment(row);
-                const base = prev[row.rowKey] ?? createEmptyManualInput(defaultAssignment);
+            editable.forEach(row => {
+                const base = prev[row.rowKey] ?? createEmptyManualInput(resolveDefaultMonthlyAdvanceAssignment(row));
                 next[row.rowKey] = {
                     ...base,
                     allocationMode: value,
@@ -644,11 +541,10 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
             });
             return next;
         });
-    }, [rows]);
+    }, [onAllocationChange]);
 
     const updateItemAssignment = useCallback((rowKey: string, itemKey: string, value: 'corporate' | 'labor') => {
         if (rows.some(row => row.rowKey === rowKey && row.finalizedAmounts)) return;
-        touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const base = prev[rowKey] ?? createEmptyManualInput();
             return {
@@ -841,7 +737,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
 
 
-    const computedRows = useMemo<ComputedLedgerRow[]>(() => {
+    const allComputedRows = useMemo<ComputedLedgerRow[]>(() => {
         const toNumber = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
         const normalizeText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
@@ -1206,8 +1102,12 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
         withholdingThreshold,
     ]);
 
+    const computedRows = useMemo(() => visibleRowKeys
+        ? allComputedRows.filter(row => visibleRowKeys.has(row.rowKey))
+        : allComputedRows, [allComputedRows, visibleRowKeys]);
+
     useEffect(() => {
-        onComputedAmountsChange?.(computedRows.map((row) => ({
+        onComputedAmountsChange?.(allComputedRows.map((row) => ({
             rowKey: row.rowKey,
             month: row.month,
             teamId: row.teamId,
@@ -1219,7 +1119,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
             corporateNet: row.corporateNet,
             personalNet: row.personalNet,
         })));
-    }, [computedRows, onComputedAmountsChange]);
+    }, [allComputedRows, onComputedAmountsChange]);
 
     const groupedRows = useMemo(() => {
         const map = new Map<string, ComputedLedgerRow[]>();
@@ -1873,7 +1773,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     const allAssignedToLabor = computedRows.length > 0
         && computedRows.every((row) => row.allocationMode === 'labor');
 
-    if (computeOnly) return null;
+    if (computeOnly || hideTable) return null;
 
     return (
         <div className="monthly-advance-ledger-font flex-1 min-h-0 bg-white rounded-2xl border border-slate-300 shadow-sm flex flex-col overflow-hidden">
@@ -1897,7 +1797,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                             <button
                                 type="button"
                                 disabled={!computedRows.some(row => !row.finalizedAmounts)}
-                                onClick={() => updateAllAllocationModes('split')}
+                                onClick={() => updateAllocationModes(computedRows, 'split')}
                                 className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
                                     allAssignedToSplit
                                         ? 'bg-slate-700 text-white shadow-sm'
@@ -1909,7 +1809,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                             <button
                                 type="button"
                                 disabled={!computedRows.some(row => !row.finalizedAmounts)}
-                                onClick={() => updateAllAllocationModes('corporate')}
+                                onClick={() => updateAllocationModes(computedRows, 'corporate')}
                                 className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
                                     allAssignedToCorporate
                                         ? 'bg-blue-600 text-white shadow-sm'
@@ -1921,7 +1821,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                             <button
                                 type="button"
                                 disabled={!computedRows.some(row => !row.finalizedAmounts)}
-                                onClick={() => updateAllAllocationModes('labor')}
+                                onClick={() => updateAllocationModes(computedRows, 'labor')}
                                 className={`h-7 rounded-md px-3 text-[12px] font-bold transition-colors ${
                                     allAssignedToLabor
                                         ? 'bg-amber-500 text-white shadow-sm'
@@ -2124,7 +2024,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                         workerName={row.workerName}
                                                         disabled={Boolean(row.finalizedAmounts)}
                                                         value={row.allocationMode}
-                                                        onChange={(value) => updateAllocationMode(row.rowKey, value)}
+                                                        onChange={(value) => updateAllocationModes([row], value)}
                                                     />
                                                 </td>
                                                 <td className="sticky left-[240px] z-30 w-16 min-w-16 max-w-16 border border-slate-300 bg-blue-100 px-2 text-right font-bold text-blue-900">{formatManDay(row.invoiceManDay)}</td>

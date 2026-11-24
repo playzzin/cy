@@ -72,10 +72,10 @@
     gap: 14px;
     padding: 10px 12px;
     text-align: left;
-    font-size: 12px;
+    font-size: 13px;
 }
 
-.database-list-heading-hint { color: #64748b; font-size: 11px; font-weight: 400; }
+.database-list-heading-hint { color: #64748b; font-size: 12px; font-weight: 400; }
 .database-list-actions-heading { margin-left: auto; padding: 0 10px; }
 
 .database-list-table--two-line > tbody > tr[data-record] {
@@ -119,25 +119,31 @@
     border: 0;
     text-align: left;
     white-space: normal;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.5;
 }
 
 .database-list-table--two-line > tbody > tr[data-record] > [data-detail-row] {
-    border-top: 1px dashed #e2e8f0;
+    border-top: 1px solid #d8e0e9;
     background: rgb(248 250 252 / 65%);
 }
 
-.database-list-field-label { color: #64748b; font-size: 11px; font-weight: 500; line-height: 1; }
+.database-list-table--two-line > tbody > tr[data-record] > .database-list-cell:not([data-detail-row]) + .database-list-cell:not([data-detail-row], [data-column='manage']),
+.database-list-table--two-line > tbody > tr[data-record] > [data-detail-row] + [data-detail-row] {
+    border-inline-start: 1px solid #e2e8f0;
+}
+
+.database-list-field-label { color: #64748b; font-size: 12px; font-weight: 500; line-height: 1; }
 .database-list-field-value { display: flex; align-items: center; min-height: 28px; min-width: 0; word-break: keep-all; overflow-wrap: anywhere; }
 .database-list-field-value > div { min-width: 0; width: 100%; }
 .database-list-field-value .truncate { overflow: visible; text-overflow: clip; white-space: normal; }
 .database-list-field-value > .relative > .cursor-pointer,
 .database-list-field-value > div > .relative > .cursor-pointer { padding: 2px 0; }
 .database-list-field-value .justify-end { justify-content: flex-start; }
-.database-list-field-value .text-sm { font-size: 13px; }
+.database-list-field-value .text-sm { font-size: 14px; }
+.database-list-field-value .text-xs:not(svg) { font-size: 13px; }
 .database-list-field-value input, .database-list-field-value select { min-width: 0; max-width: 100%; }
-.database-list-cell[data-column='name'] > .database-list-field-value { color: #0f172a; font-size: 14px; font-weight: 700; }
+.database-list-cell[data-column='name'] > .database-list-field-value { color: #0f172a; font-size: 15px; font-weight: 700; }
 .database-list-cell[data-column='status'] > .database-list-field-value button { flex-shrink: 0; white-space: nowrap; }
 
 .database-list-table--two-line > tbody > tr[data-record] > [data-column='manage'] {
@@ -152,5 +158,9 @@
 .database-list-table--two-line > tbody > tr:not([data-record]) > td { display: block; width: 100%; }
 
 .database-list-table--standard { min-width: 1080px; }
+.database-list-table--standard > thead { font-size: 13px; }
+.database-list-table--standard > tbody { font-size: 15px; }
 .database-list-table--standard > thead > tr > th { white-space: nowrap; }
 .database-list-table--standard > tbody > tr[data-record] > td { padding: 12px 16px; }
+.database-list-table--standard .database-list-cell .text-sm { font-size: 15px; }
+.database-list-table--standard .database-list-cell .text-xs:not(svg) { font-size: 13px; }
