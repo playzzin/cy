@@ -49,7 +49,7 @@ const Login: React.FC = () => {
     setError(''); setBusy('google');
     try {
       await loginWithGoogle({ remember, returnPath });
-      // Keep the pending state until the successful redirect unloads this page.
+      // A redirect leaves this page. A successful popup updates currentUser and navigates above.
     } catch (cause) { setError(getGoogleAuthErrorMessage(cause)); setBusy(null); }
   };
 

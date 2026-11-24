@@ -2,12 +2,13 @@ import { setRequestDraftOwner } from '../utils/requestDraftStore';
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Auth, User } from 'firebase/auth';
+import { isStaging } from '../config/deploymentEnvironment';
 import { createDevAdminUser, disableDevAdminSession, isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { loginAccessTracker, writeAuthLog, writeLogoutLog } from '../services/loginAccessTracker';
 import { isDevPreviewFrame, postPreviewMessage, startDevPreviewAuth } from '../utils/devPreviewRuntime';
 import { clearGoogleLoginRedirect, readGoogleLoginRedirect, rememberGoogleLoginRedirect } from '../utils/googleLoginRedirect';
 import { getGoogleAuthErrorMessage } from '../utils/firebaseAuthError';
-import { clearLocalGoogleLogin, consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin } from '../utils/localGoogleLogin';
+import { clearLocalGoogleLogin, consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin, usesStagingGooglePopup } from '../utils/localGoogleLogin';
 
 type FirebaseAuthModule = typeof import('firebase/auth');
 type SessionCheck = 'checking' | 'delayed' | 'ready';
@@ -261,10 +262,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const provider = new authModule.GoogleAuthProvider();
+    const usePopup = usesStagingGooglePopup(window.location.origin, isStaging);
+    const finishPopupLogin = usePopup ? loginAccessTracker.beginInteractiveLogin() : undefined;
     try {
       setAuthError('');
       await authModule.setPersistence(auth, remember ? authModule.browserLocalPersistence : authModule.browserSessionPersistence);
-      if (usesLocalGoogleLogin()) {
+      if (usePopup) {
+        clearGoogleLoginRedirect();
+        const { user } = await authModule.signInWithPopup(auth, provider);
+        finishPopupLogin?.(user);
+        setCurrentUser(user);
+        setSessionCheck('ready');
+        void writeAuthLog({ action: 'login_success', provider: 'google', method: 'popup', user, email: user.email });
+      } else if (usesLocalGoogleLogin()) {
         rememberGoogleLoginRedirect(returnPath, 'local-google');
         await startLocalGoogleLogin(auth.app.options.apiKey || '');
       } else {
@@ -277,11 +287,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void writeAuthLog({
         action: 'login_failed',
         provider: 'google',
-        method: 'redirect',
+        method: usePopup ? 'popup' : 'redirect',
         errorCode: (error as { code?: string })?.code || null,
         errorMessage: getGoogleAuthErrorMessage(error),
       });
       throw error;
+    } finally {
+      finishPopupLogin?.();
     }
   }
 

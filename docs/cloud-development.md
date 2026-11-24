@@ -35,7 +35,7 @@ bash ops/cloud/server.sh check
 
 준비 검사는 시작 시점의 Git 커밋과 검증 프로젝트, webpack 컴파일, 실제 HTTP 화면과 JavaScript 번들을 확인한다. GitHub의 Linux 검사는 Chrome에서 `/login`을 열어 React가 이메일·비밀번호 입력란을 표시하는지도 확인한다. 코드를 편집하면 개발 서버가 자동으로 갱신한다. 다른 커밋으로 전환한 뒤에는 해당 개발 서버를 재시작해 시작 커밋을 맞춘다. 실행 로그는 `/tmp/cy-dev-server.log`에서 확인한다.
 
-9950X에서도 `npm run dev:cloud`를 실행할 수 있다. 기본 주소는 `127.0.0.1:3000`이다. PC에 설정 파일이 없으면 첫 실행 때 검증 Hosting에서 받는다. 작업 세션이 꺼진 뒤에도 열 수 있는 고정 주소는 [검증 사이트](https://cy-erp-staging-9c1e4.web.app)다. 여기에 반영하려면 아래의 검증 배포 명령을 실행한다.
+9950X에서도 `npm run dev:cloud`를 실행할 수 있다. 기본 주소는 `127.0.0.1:3000`이다. 이 주소의 Google 로그인은 Firebase 팝업을 사용하며, 검증 프로젝트의 Authentication → 설정 → 승인된 도메인에 `127.0.0.1`이 있어야 한다. PC에 설정 파일이 없으면 첫 실행 때 검증 Hosting에서 받는다. 작업 세션이 꺼진 뒤에도 열 수 있는 고정 주소는 [검증 사이트](https://cy-erp-staging-9c1e4.web.app)다. 여기에 반영하려면 아래의 검증 배포 명령을 실행한다.
 
 ## 평소 작업 순서
 
