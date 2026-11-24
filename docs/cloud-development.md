@@ -16,11 +16,13 @@
 | 저장소와 브랜치 | `playzzin/cy` · `develop` |
 | 작업 폴더 | `/workspace/cy` |
 | 런타임 | Node.js 22, npm |
-| 설치 명령 | `cd /workspace/cy && npm ci && npm --prefix functions ci` |
-| 시작 명령 | `cd /workspace/cy && HOST=0.0.0.0 npm run dev:cloud` |
-| 미리보기 | 클라우드의 비공개 포트 미리보기에서 3000 열기 |
+| 환경 설치 명령 | `cd /workspace/cy && npm run cloud:setup` |
+| 작업 세션에서 실행할 명령 | `cd /workspace/cy && HOST=0.0.0.0 npm run dev:cloud` |
+| 미리보기 | 비공개 포트 미리보기를 지원하는 환경에서 3000 열기 |
 
-9950X에서도 `npm run dev:cloud`를 실행할 수 있다. 기본 주소는 `127.0.0.1:3000`이다. 첫 실행 때 검증 Hosting에서 공개 웹 앱 설정을 받아 프로젝트와 앱 ID를 확인한 뒤 `.firebase/staging-env.json`에 저장한다. 이후에는 이 파일을 사용하며 `npm run staging:config`로 갱신할 수 있다. 설정 파일은 Git에서 제외한다. 개발 서버에 운영 환경 파일이나 Firebase 관리자 키를 복사할 필요가 없다.
+환경 설치 단계에서 npm 의존성과 검증 Hosting의 공개 웹 앱 설정을 받는다. 프로젝트와 앱 ID를 확인한 설정은 Git에서 제외한 `.firebase/staging-env.json`에 저장한다. 작업 세션은 이 파일로 개발 서버를 시작한다. 검증 Firebase에 로그인하거나 데이터를 조회하는 브라우저에는 인터넷 연결이 필요하다. 설정 갱신 명령은 `npm run staging:config`다.
+
+9950X에서도 `npm run dev:cloud`를 실행할 수 있다. 기본 주소는 `127.0.0.1:3000`이다. PC에 설정 파일이 없으면 첫 실행 때 검증 Hosting에서 받는다. 작업 세션이 꺼진 뒤에도 열 수 있는 고정 주소는 [검증 사이트](https://cy-erp-staging-9c1e4.web.app)다. 여기에 반영하려면 아래의 검증 배포 명령을 실행한다.
 
 ## 평소 작업 순서
 
