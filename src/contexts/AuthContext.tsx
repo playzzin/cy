@@ -2,14 +2,16 @@ import { setRequestDraftOwner } from '../utils/requestDraftStore';
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Auth, User } from 'firebase/auth';
+import { isStaging } from '../config/deploymentEnvironment';
 import { createDevAdminUser, disableDevAdminSession, isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { loginAccessTracker, writeAuthLog, writeLogoutLog } from '../services/loginAccessTracker';
 import { isDevPreviewFrame, postPreviewMessage, startDevPreviewAuth } from '../utils/devPreviewRuntime';
 import { clearGoogleLoginRedirect, readGoogleLoginRedirect, rememberGoogleLoginRedirect } from '../utils/googleLoginRedirect';
 import { getGoogleAuthErrorMessage } from '../utils/firebaseAuthError';
-import { clearLocalGoogleLogin, consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin } from '../utils/localGoogleLogin';
+import { clearLocalGoogleLogin, consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin, usesStagingGooglePopup } from '../utils/localGoogleLogin';
 
 type FirebaseAuthModule = typeof import('firebase/auth');
+type SessionCheck = 'checking' | 'delayed' | 'ready';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -73,30 +75,26 @@ export function useAuth() {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(() => createDevAdminUser());
-  const [loading, setLoading] = useState(() => !isDevAdminSessionEnabled());
+  const [sessionCheck, setSessionCheck] = useState<SessionCheck>(() => isDevAdminSessionEnabled() ? 'ready' : 'checking');
   const [previewError, setPreviewError] = useState('');
   const [authError, setAuthError] = useState('');
   useEffect(() => { setRequestDraftOwner(currentUser?.uid ?? null); }, [currentUser?.uid]);
 
   useEffect(() => {
-    if (isDevPreviewFrame) return startDevPreviewAuth(user => { setCurrentUser(user); setLoading(false); }, message => { setPreviewError(message); setLoading(false); });
+    if (isDevPreviewFrame) return startDevPreviewAuth(user => { setCurrentUser(user); setSessionCheck('ready'); }, message => { setPreviewError(message); setSessionCheck('ready'); });
     const devAdminUser = createDevAdminUser();
     if (devAdminUser) {
       loginAccessTracker.observe(devAdminUser);
       setCurrentUser(devAdminUser);
-      setLoading(false);
+      setSessionCheck('ready');
       return () => undefined;
     }
 
-    let resolved = false;
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
 
     const timeoutId = window.setTimeout(() => {
-      if (resolved || cancelled) return;
-      resolved = true;
-      setAuthError('로그인 상태 확인이 지연되고 있습니다. 연결을 확인하고 다시 시도해 주세요.');
-      setLoading(false);
+      if (!cancelled) setSessionCheck(state => state === 'checking' ? 'delayed' : state);
     }, 12000);
 
     const startAuthObserver = async () => {
@@ -114,11 +112,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         unsubscribe = authModule.onAuthStateChanged(auth, (user) => {
           if (cancelled) return;
           loginAccessTracker.observe(user);
-          resolved = true;
           window.clearTimeout(timeoutId);
 
           setCurrentUser(user);
-          setLoading(false);
+          setSessionCheck('ready');
           if (user) setAuthError('');
 
           if (user) {
@@ -136,9 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error('Failed to initialize Firebase auth.');
         if (cancelled) return;
         setAuthError('로그인 서비스를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');
-        resolved = true;
         window.clearTimeout(timeoutId);
-        setLoading(false);
+        setSessionCheck('ready');
       }
     };
 
@@ -162,7 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await authModule.signInWithEmailAndPassword(auth, email, password);
       finishAccess(result.user);
       setCurrentUser(result.user);
-      setLoading(false);
+      setSessionCheck('ready');
 
       void writeAuthLog({
         action: 'login_success',
@@ -195,7 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await authModule.createUserWithEmailAndPassword(auth, email, password);
       finishAccess(result.user);
       setCurrentUser(result.user);
-      setLoading(false);
+      setSessionCheck('ready');
       void writeAuthLog({ action: 'signup_success', provider: 'password', method: 'email/password', user: result.user, email });
     } finally {
       finishAccess();
@@ -212,7 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginAccessTracker.observe(null);
       disableDevAdminSession();
       setCurrentUser(null);
-      setLoading(false);
+      setSessionCheck('ready');
       return;
     }
 
@@ -259,17 +255,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await authModule.signOut(auth);
     loginAccessTracker.observe(null);
     setCurrentUser(null);
-    setLoading(false);
+    setSessionCheck('ready');
   }
 
   async function loginWithGoogle({ remember = true, returnPath = '/dashboard' } = {}) {
     if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const provider = new authModule.GoogleAuthProvider();
+    const usePopup = usesStagingGooglePopup(window.location.origin, isStaging);
+    const finishPopupLogin = usePopup ? loginAccessTracker.beginInteractiveLogin() : undefined;
     try {
       setAuthError('');
       await authModule.setPersistence(auth, remember ? authModule.browserLocalPersistence : authModule.browserSessionPersistence);
-      if (usesLocalGoogleLogin()) {
+      if (usePopup) {
+        clearGoogleLoginRedirect();
+        const { user } = await authModule.signInWithPopup(auth, provider);
+        finishPopupLogin?.(user);
+        setCurrentUser(user);
+        setSessionCheck('ready');
+        void writeAuthLog({ action: 'login_success', provider: 'google', method: 'popup', user, email: user.email });
+      } else if (usesLocalGoogleLogin()) {
         rememberGoogleLoginRedirect(returnPath, 'local-google');
         await startLocalGoogleLogin(auth.app.options.apiKey || '');
       } else {
@@ -282,11 +287,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void writeAuthLog({
         action: 'login_failed',
         provider: 'google',
-        method: 'redirect',
+        method: usePopup ? 'popup' : 'redirect',
         errorCode: (error as { code?: string })?.code || null,
         errorMessage: getGoogleAuthErrorMessage(error),
       });
       throw error;
+    } finally {
+      finishPopupLogin?.();
     }
   }
 
@@ -296,8 +303,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signup,
     logout,
     loginWithGoogle,
-    loading,
-    authError,
+    loading: sessionCheck === 'checking',
+    authError: authError || (sessionCheck === 'delayed' ? '로그인 상태 확인이 지연되고 있습니다. 연결을 확인하고 다시 시도해 주세요.' : ''),
   };
 
   if (isDevPreviewFrame && previewError) return <p role="alert" className="p-6">{previewError}</p>;
