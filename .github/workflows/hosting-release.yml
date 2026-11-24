@@ -1,0 +1,98 @@
+name: Firebase Hosting release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Hosting 대상
+        required: true
+        type: choice
+        default: check
+        options: [check, staging, production, both]
+  workflow_run:
+    workflows: [Quality Gate]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  check:
+    if: >-
+      github.repository == 'playzzin/cy' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+      target: ${{ steps.revision.outputs.target }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Check published main and its Quality Gate
+        id: revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.target || 'check' }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run && "$(git log -1 --format=%B | sed '/^[[:space:]]*$/d' | tail -n 1)" == '[deploy hosting]' ]]; then
+            TARGET=both
+          fi
+          case "$TARGET" in check|staging|production|both) ;; *) exit 1 ;; esac
+          main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$sha" != "$main" ]]; then
+            echo "::error::GitHub main이 갱신되어 이 버전의 배포를 중단합니다."
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$TARGET" != "check" ]]; then
+            passed=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs" -f branch=main -f event=push -f head_sha="$sha" -f status=success --jq '.total_count')
+            if [[ "$passed" == 0 ]]; then
+              echo "::error::이 main 커밋의 Quality Gate 성공 기록이 필요합니다."
+              exit 1
+            fi
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+      - name: Read published revisions and contact Hosting APIs
+        env:
+          NODE_USE_ENV_PROXY: '1'
+        run: npm run deploy:check
+
+  staging:
+    needs: check
+    if: needs.check.outputs.target == 'staging' || needs.check.outputs.target == 'both'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/hosting-upload.yml
+    with:
+      target: staging
+      revision: ${{ needs.check.outputs.sha }}
+    secrets:
+      existing_deploy_key: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CY_ERP_STAGING_9C1E4 }}
+
+  production:
+    needs: [check, staging]
+    if: >-
+      !cancelled() && needs.check.result == 'success' &&
+      (needs.check.outputs.target == 'production' ||
+       (needs.check.outputs.target == 'both' && needs.staging.result == 'success'))
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/hosting-upload.yml
+    with:
+      target: production
+      revision: ${{ needs.check.outputs.sha }}
+    secrets:
+      existing_deploy_key: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CYEE_9C1E4 }}

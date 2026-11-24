@@ -9,6 +9,18 @@
 3. 깨끗한 운영 작업 폴더에서 `npm run deploy:main`을 실행한다. 완료 시 출력된 커밋과 운영 사이트의 배포 기록을 확인한다.
 4. 실제 사이트에서 수정한 업무 흐름을 확인한 뒤 요청자에게 확인 방법을 남긴다.
 
+### GitHub 또는 Firebase에 연결되지 않을 때
+
+`npm run deploy:check`는 GitHub의 현재 `main`, 두 Firebase Hosting API, 검증·운영 사이트의 실제 배포 버전을 읽는다. 한 곳만 볼 때는 `npm run deploy:check -- staging`이나 `npm run deploy:check -- production`을 쓴다. `ENOTFOUND`는 해당 실행 환경의 DNS 조회 실패다. 공식 Git 전송이 실패하면 배포 명령은 GitHub의 HTTPS API에서 같은 저장소의 현재 `main`을 확인한다. 두 방법이 모두 실패하면 업로드를 중단한다. Hosting API의 HTTPS 연결은 타입 검사·빌드 전에 확인한다. 실제 업로드 권한은 Firebase CLI가 검사한다.
+
+### GitHub에서 Hosting 배포
+
+1. GitHub **Actions → Firebase Hosting release → Run workflow**에서 `main`을 선택한다. `check`는 연결과 현재 버전만 조회한다. `staging`, `production`, `both`는 해당 커밋의 Quality Gate 성공을 확인한 후 업로드한다. `both`는 검증 사이트의 실제 배포 버전이 확인된 뒤 운영 사이트를 배포한다.
+2. GitHub에서 검증까지 자동으로 이어갈 때는 배포할 커밋 메시지 **마지막 줄**에 `[deploy hosting]`을 넣는다. 이 커밋이 `main`에 반영되고 Quality Gate가 통과하면 두 사이트에 배포한다. 표시가 없는 커밋에서는 연결 상태만 확인한다.
+3. 각 GitHub Environment(`staging`, `production`)에 `CY_HOSTING_WIF_PROVIDER`를 설정한다. 서비스 계정을 가장하는 구성은 `CY_HOSTING_SERVICE_ACCOUNT`도 지정한다. Google Cloud의 신뢰 조건은 저장소 ID `1121336004`, 소유자 ID `221525849`, `refs/heads/main`, 해당 Environment와 Hosting 업로드 워크플로로 제한한다. 각 배포 주체에 해당 프로젝트의 Hosting 배포 권한만 부여한다. 이미 Firebase GitHub 연동을 구성한 저장소는 기존 프로젝트 전용 시크릿 `FIREBASE_SERVICE_ACCOUNT_CY_ERP_STAGING_9C1E4` 또는 `FIREBASE_SERVICE_ACCOUNT_CYEE_9C1E4`를 사용할 수 있다.
+
+운영 웹 설정은 운영 사이트의 Firebase 공개 설정에서 읽는다. 워크플로는 새 서비스 계정이나 키를 생성하지 않는다. Google Cloud 연결 설정은 [배포 파이프라인용 Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)에 설명되어 있다.
+
 배포할 커밋은 현재 운영 `release.json`에 기록된 커밋을 Git 이력에 포함해야 한다. 운영보다 이전에 만든 작업 폴더나 별도 브랜치에서는 최신 운영 변경을 먼저 합친다. 배포 명령은 이 조건과 검사 중 운영 버전 변경 여부를 확인하며, `--initialize-record`도 이력 검사를 생략하지 않는다.
 
 최초 도입 시 기존 사이트에는 `release.json`이 없다. 서버·권한 설정의 실제 반영을 먼저 확인한 경우에만 `npm run release:deploy -- --initialize-record`로 기준 기록을 만든다.

@@ -2,12 +2,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { root, hash, sourceState, compareRelease } = require('./release-manifest.cjs');
 const { resolveBuildDirectory, loadBuildEnvironment, targetBuildEnvironment, stagingOrigin } = require('./hosting-build-paths.cjs');
+const { releaseFetch, discardBody } = require('./hosting-network.cjs');
 
 const transientCodes = new Set([
   'EAI_AGAIN', 'ENOTFOUND', 'ECONNABORTED', 'ECONNRESET', 'EPIPE', 'ETIMEDOUT',
   'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET', 'TimeoutError',
 ]);
-async function readRemoteJson(base, name, { allowMissing = false, request = fetch, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+async function readRemoteJson(base, name, { allowMissing = false, request = releaseFetch, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   async function get(file) {
     const url = new URL(file, `${base.replace(/\/$/, '')}/`);
     for (let attempt = 0; ; attempt++) {
@@ -15,7 +16,7 @@ async function readRemoteJson(base, name, { allowMissing = false, request = fetc
       try {
         const response = await request(url, { signal: AbortSignal.timeout(15000), redirect: 'error', cache: 'no-store' });
         if (attempt || ![429, 502, 503, 504].includes(response.status)) return response;
-        await response.body?.cancel();
+        await discardBody(response);
       } catch (error) {
         const code = error.cause?.code || error.name;
         if (attempt || !transientCodes.has(code)) throw new Error(`${url.hostname}/${file} 연결 실패 (${code}): ${error.message}`, { cause: error });

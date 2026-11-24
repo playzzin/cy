@@ -32,3 +32,5 @@
 4. 운영 반영 시 `develop`에서 `main`으로 PR을 열고 검사를 확인한다. 병합된 `main` 커밋의 GitHub Actions가 성공하면 Firebase 배포 권한이 있는 한 곳에서 `npm run deploy:main`을 실행한다. 마지막 출력의 커밋과 운영 `release.json`이 일치해야 한다.
 
 검증 사이트에 공유할 때는 깨끗한 개발 커밋에서 `npm run staging:deploy`를 실행한다. 검증용 데이터, 파일 저장소와 서버 기능의 지원 범위는 [검증 환경 안내](staging-and-ledger-review.md)에 정리했다. 운영 배포와 서버 변경 대조 방법은 [배포 검증 안내](release-verification.md)를 따른다.
+
+작업 세션의 외부 연결 상태는 `npm run deploy:check`로 확인한다. GitHub 호스팅 실행기에서 같은 코드를 배포하는 방법은 [GitHub에서 Hosting 배포](release-verification.md#github에서-hosting-배포)에 정리했다.
