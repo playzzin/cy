@@ -153,14 +153,16 @@ it('clears redirect state and permits retry if redirect startup fails', async ()
   expect(loginLogService.safeCreateLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'login_failed', method: 'redirect' }));
 });
 
-it('signs in through the staging popup with the requested persistence and logs the verified user once', async () => {
+it.each([false, true])('uses the staging popup with the requested persistence when the legacy local origin matches=%s', async legacyLocalOrigin => {
   (usesStagingGooglePopup as jest.Mock).mockReturnValue(true);
+  (usesLocalGoogleLogin as jest.Mock).mockReturnValue(legacyLocalOrigin);
   (signInWithPopup as jest.Mock).mockImplementationOnce(async () => { observe(user); return { user }; });
   await open();
   await act(async () => current.loginWithGoogle({ remember: false, returnPath: '/payroll' }));
   expect(setPersistence).toHaveBeenCalledWith(expect.anything(), browserSessionPersistence);
   expect((setPersistence as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan((signInWithPopup as jest.Mock).mock.invocationCallOrder[0]);
   expect(signInWithRedirect).not.toHaveBeenCalled();
+  expect(startLocalGoogleLogin).not.toHaveBeenCalled();
   expect(readGoogleLoginRedirect()).toBeNull();
   expect(current.currentUser).toBe(user);
   await waitFor(() => expect(loginLogService.safeCreateLog).toHaveBeenCalledTimes(1));

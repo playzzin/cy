@@ -26,10 +26,13 @@ it('uses the local flow only for the registered local origin', () => {
   for (const origin of ['https://cyee-9c1e4.web.app', 'http://localhost:3000.attacker.test', 'http://localhost:4000']) expect(usesLocalGoogleLogin(origin)).toBe(false);
 });
 
-it('uses the Firebase popup only on the staging preview loopback origin', () => {
-  expect(usesStagingGooglePopup('http://127.0.0.1:3000', true)).toBe(true);
-  expect(usesStagingGooglePopup('http://127.0.0.1:3000', false)).toBe(false);
-  for (const origin of ['http://localhost:3000', 'http://127.0.0.1:4000', 'https://cy-erp-staging-9c1e4.web.app']) {
+it.each(['http://localhost:3000', 'http://127.0.0.1:3000'])('uses the Firebase popup on %s only in staging', origin => {
+  expect(usesStagingGooglePopup(origin, true)).toBe(true);
+  expect(usesStagingGooglePopup(origin, false)).toBe(false);
+});
+
+it('keeps the staging popup scoped to the local preview addresses', () => {
+  for (const origin of ['http://localhost:4000', 'http://127.0.0.1:4000', 'https://cy-erp-staging-9c1e4.web.app']) {
     expect(usesStagingGooglePopup(origin, true)).toBe(false);
   }
 });
