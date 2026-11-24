@@ -19,6 +19,23 @@ export function validateBankAccountPhoto(file: File): void {
     }
 }
 
+export async function snapshotBankAccountPhoto(file: File): Promise<File> {
+    validateBankAccountPhoto(file);
+    // A picker File can still reference the original on disk. Keep its bytes for preview, OCR and later upload.
+    const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        const rejectRead = () => reject(new Error('통장사본 파일을 읽을 수 없습니다. 파일을 다시 선택해 주세요.'));
+        reader.onload = () => {
+            if (reader.result instanceof ArrayBuffer && reader.result.byteLength === file.size) resolve(reader.result);
+            else rejectRead();
+        };
+        reader.onerror = rejectRead;
+        reader.onabort = rejectRead;
+        reader.readAsArrayBuffer(file);
+    });
+    return new File([bytes], file.name, { type: file.type, lastModified: file.lastModified });
+}
+
 const text = (value: unknown) => typeof value === 'string'
     ? value.normalize('NFKC').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 100) : '';
 

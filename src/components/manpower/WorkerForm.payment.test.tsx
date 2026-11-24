@@ -21,6 +21,8 @@ beforeEach(() => jest.clearAllMocks());
 it.each(['direct', 'delegate'] as const)('신규 작업자의 지급 방식 %s를 저장한다', async payment => {
     render(<WorkerForm {...props} />);
     expect(screen.getByRole('radio', { name: '직불' })).toBeChecked();
+    const paymentChoices = screen.getByRole('radiogroup', { name: '직불/위임' });
+    expect(paymentChoices.compareDocumentPosition(screen.getByRole('group', { name: '기본 계좌 등록' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText('이름 입력'), { target: { value: worker.name } });
     fireEvent.change(screen.getByPlaceholderText('000000-0000000'), { target: { value: worker.idNumber } });
     if (payment === 'delegate') fireEvent.click(screen.getByRole('radio', { name: '위임' }));
@@ -44,6 +46,9 @@ it.each(['direct', 'delegate'] as const)('기존 지급 방식 %s를 표시하�
 
 it('다른 작업자나 신규 등록으로 전환하면 이전 지급 방식을 남기지 않는다', () => {
     const { rerender } = render(<WorkerForm {...props} isEditMode initialData={{ ...worker, laborStatementPayType: 'delegate' }} />);
+    expect(screen.getByRole('radio', { name: '위임' })).toBeChecked();
+    const legacyWorker = { ...worker, id: 'legacy-delegate', laborPayType: '위임' };
+    rerender(<WorkerForm {...props} isEditMode initialData={legacyWorker} />);
     expect(screen.getByRole('radio', { name: '위임' })).toBeChecked();
     rerender(<WorkerForm {...props} isEditMode initialData={{ ...worker, id: 'legacy-worker' }} />);
     expect(screen.getByRole('radio', { name: '직불' })).toBeChecked();

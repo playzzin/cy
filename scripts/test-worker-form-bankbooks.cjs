@@ -2,29 +2,26 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const http = require('node:http');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || path.join(process.env.APPDATA, 'npm/node_modules/openclaw/node_modules/playwright-core'));
 const assets = path.resolve(__dirname, '../artifacts/worker-direct-pay-preview');
 const output = path.resolve(__dirname, '../artifacts/worker-form-bankbooks');
 
 (async () => {
     fs.mkdirSync(output, { recursive: true });
-    const server = http.createServer((req, res) => {
-        if (req.url === '/preview.js' || req.url === '/preview.css') {
-            res.setHeader('Content-Type', req.url.endsWith('.js') ? 'application/javascript' : 'text/css');
-            fs.createReadStream(path.join(assets, req.url.slice(1))).pipe(res);
-        } else {
-            res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            res.end('<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/preview.css"><body><div id="root"></div><script src="/preview.js"></script></body></html>');
-        }
-    });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const origin = `http://127.0.0.1:${server.address().port}`;
+    const origin = 'http://localhost:4199';
+    const html = '<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/preview.css"><body><div id="root"></div><script src="/preview.js"></script></body></html>';
     const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true });
     try {
         for (const width of [1440, 390]) {
             const context = await browser.newContext({ viewport: { width, height: 1000 } });
-            await context.route('**/*', route => route.request().url().startsWith(origin + '/') ? route.continue() : route.abort());
+            await context.route('**/*', route => {
+                const url = new URL(route.request().url());
+                if (url.origin !== origin) return route.abort();
+                if (url.pathname === '/preview.js' || url.pathname === '/preview.css') {
+                    return route.fulfill({ path: path.join(assets, url.pathname.slice(1)) });
+                }
+                return route.fulfill({ contentType: 'text/html; charset=utf-8', body: html });
+            });
             const page = await context.newPage(), errors = [];
             page.on('pageerror', error => errors.push(error.message));
             await page.goto(origin + '/worker-form');
@@ -34,11 +31,16 @@ const output = path.resolve(__dirname, '../artifacts/worker-form-bankbooks');
                 return page.getByRole('dialog');
             };
             const photo = { name: 'synthetic-bank.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') };
+            const source = path.join(output, 'synthetic-bank-' + width + '.png');
+            fs.writeFileSync(source, photo.buffer);
             await page.getByPlaceholder('이름 입력').fill('가상작업자');
             await page.getByLabel('주민·외국인등록번호', { exact: true }).fill('000000-1000000');
+            await page.getByRole('radio', { name: '위임', exact: true }).check();
             let dialog = await openAccount('기본 계좌');
-            await dialog.getByLabel('기본 계좌 사진 선택', { exact: true }).setInputFiles(photo);
+            await dialog.getByLabel('기본 계좌 사진 선택', { exact: true }).setInputFiles(source);
             await dialog.getByText('Gemini가 계좌정보를 자동입력했습니다.', { exact: false }).waitFor();
+            // The browser must upload the bytes already analyzed even if the original file changes.
+            fs.writeFileSync(source, 'changed after analysis');
             assert.equal(await dialog.getByLabel('기본 계좌 예금주', { exact: true }).inputValue(), '가상 분석예금주');
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
             await page.screenshot({ path: path.join(output, 'bankbook-gemini-' + width + '.png'), fullPage: true });
@@ -55,7 +57,11 @@ const output = path.resolve(__dirname, '../artifacts/worker-form-bankbooks');
             const first = await snapshot();
             assert.match(first.bankPhotoId, /^[a-f0-9]{32}$/); assert.match(first.directPayBankPhotoId, /^[a-f0-9]{32}$/);
             assert.notEqual(first.bankPhotoId, first.directPayBankPhotoId);
+            assert.equal(first.laborStatementPayType, 'delegate');
+            const savedPhoto = await page.evaluate(id => localStorage.getItem('worker-direct-pay-preview-photo-' + id), first.bankPhotoId);
+            assert.equal(savedPhoto, 'data:image/png;base64,' + photo.buffer.toString('base64'));
             await page.reload();
+            assert.equal(await page.getByRole('radio', { name: '위임', exact: true }).isChecked(), true);
             dialog = await openAccount('기본 계좌');
             await dialog.getByRole('button', { name: '등록된 사진 보기', exact: true }).click();
             await dialog.getByAltText('기본 계좌 사진 미리보기', { exact: true }).waitFor();
@@ -99,5 +105,5 @@ const output = path.resolve(__dirname, '../artifacts/worker-form-bankbooks');
             console.log('PASS ' + width + 'px: 신규 통장사본 Gemini 등록, 기본사진 복사, 수정·교체·조회, 사진 삭제, 계좌 전체 삭제, 취소 보존');
             await context.close();
         }
-    } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
+    } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

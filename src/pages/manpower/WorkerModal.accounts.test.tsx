@@ -94,5 +94,32 @@ test('기존 통장사본은 Gemini 결과를 수정한 뒤 원래 사진 버전
     fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ accountHolder: '타인명의' }), 'worker');
-    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('worker', file, expect.stringMatching(/^[a-f0-9]{32}$/), 'old-basic', 'default');
+    const [snapshot] = (analyzeBankAccountPhoto as jest.Mock).mock.calls[0];
+    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('worker', snapshot, expect.stringMatching(/^[a-f0-9]{32}$/), 'old-basic', 'default');
+});
+
+test('통장사본을 읽을 수 없으면 입력 적용 전에 안내하고 같은 파일을 다시 선택할 수 있다', async () => {
+    open(true);
+    const dialog = within(openAccount('기본 계좌'));
+    const picker = dialog.getByLabelText('기본 계좌 사진 선택');
+    const read = jest.spyOn(FileReader.prototype, 'readAsArrayBuffer').mockImplementationOnce(function (this: FileReader) {
+        this.dispatchEvent(new ProgressEvent('error'));
+    });
+    try {
+        fireEvent.change(picker, { target: { files: [file] } });
+        expect(await dialog.findByRole('alert')).toHaveTextContent('파일을 다시 선택해 주세요');
+        expect(dialog.getByRole('button', { name: '입력 적용' })).toBeDisabled();
+        expect(analyzeBankAccountPhoto).not.toHaveBeenCalled();
+        expect(save).not.toHaveBeenCalled();
+        fireEvent.change(picker, { target: { files: [file] } });
+        await waitFor(() => expect(dialog.getByRole('button', { name: '입력 적용' })).toBeEnabled());
+        fireEvent.click(dialog.getByRole('button', { name: '입력 적용' }));
+        expect(save).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: '변경사항 저장' }));
+        await waitFor(() => expect(close).toHaveBeenCalled());
+        expect(save).toHaveBeenCalledTimes(1);
+        expect(saveWorkerBankPhoto).toHaveBeenCalledTimes(1);
+    } finally {
+        read.mockRestore();
+    }
 });

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { manpowerService, Worker } from '../../services/manpowerService';
-import { BANK_PHOTO_ACCEPT, deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto, validateWorkerBankPhoto } from '../../services/workerBankPhotoService';
-import { analyzeBankAccountPhoto, isCompleteBankAccount, normalizeBankAccountFields } from '../../services/bankAccountPhotoService';
+import { BANK_PHOTO_ACCEPT, deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
+import { analyzeBankAccountPhoto, isCompleteBankAccount, normalizeBankAccountFields, snapshotBankAccountPhoto } from '../../services/bankAccountPhotoService';
 import { getWorkerAccount, WorkerAccountPurpose, workerAccountLabel, workerAccountPatch, workerPhotoField } from '../../utils/workerAccount';
 import { directPayAccountHolderError } from '../../utils/workerDirectPayAccount';
 import { isForeignWorker } from '../../utils/workerForeignStatus';
@@ -66,18 +66,21 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
         }
     };
 
-    const selectPhoto = (file: File) => {
-        analysisVersion.current += 1;
-        setAnalyzing(false); setNotice('');
+    const selectPhoto = async (file: File) => {
+        const requestVersion = ++analysisVersion.current;
+        setAnalyzing(true); setNotice(''); setError('');
         try {
-            validateWorkerBankPhoto(file);
-            setPhoto({ file, id: newPhotoId() }); setViewedPhoto(null);
+            const snapshot = await snapshotBankAccountPhoto(file);
+            if (requestVersion !== analysisVersion.current) return;
+            setPhoto({ file: snapshot, id: newPhotoId() }); setViewedPhoto(null);
             setFields(normalizeBankAccountFields({}));
             setInvalidPhoto(false);
             setCopiedPhotoRequired(false);
-            void analyzePhoto(file);
+            await analyzePhoto(snapshot);
         } catch (failure) {
-            setInvalidPhoto(true); setError((failure as Error).message);
+            if (requestVersion !== analysisVersion.current) return;
+            setAnalyzing(false); setInvalidPhoto(true);
+            setError(failure instanceof Error ? failure.message : '통장사본 파일을 읽을 수 없습니다. 파일을 다시 선택해 주세요.');
         }
     };
 
@@ -203,9 +206,9 @@ export default function WorkerAccountRegistrationModal({ worker, purpose, onSave
                         {!!expectedPhotoId.current && !photo && !copiedPhotoRequired && <button type="button" disabled={analyzing} className="text-sm text-indigo-700 underline disabled:opacity-50" onClick={() => void viewPhoto()}>등록된 사진 보기</button>}
                     </div>
                     <input type="file" accept={BANK_PHOTO_ACCEPT} aria-label={`${label} 사진 선택`} className="w-full text-sm" onChange={event => {
-                        const file = event.target.files?.[0]; event.target.value = '';
-                        if (!file) return;
-                        selectPhoto(file);
+                        const file = event.currentTarget.files?.[0];
+                        if (file) void selectPhoto(file);
+                        event.currentTarget.value = '';
                     }} />
                     <p className="mt-2 text-xs text-slate-500">JPG · PNG · WEBP / 5MB 이하. 사진을 선택하면 이 계좌의 기존 사진을 교체합니다.</p>
                     {analysisFile && <button type="button" disabled={analyzing || invalidPhoto} onClick={() => void analyzePhoto(analysisFile)}

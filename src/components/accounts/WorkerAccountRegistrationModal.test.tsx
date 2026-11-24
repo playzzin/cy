@@ -3,7 +3,7 @@ import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import WorkerAccountRegistrationModal from './WorkerAccountRegistrationModal';
 import { manpowerService, Worker } from '../../services/manpowerService';
-import { deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto, validateWorkerBankPhoto } from '../../services/workerBankPhotoService';
+import { deleteWorkerDirectPayAccount, readWorkerBankPhoto, saveWorkerBankPhoto } from '../../services/workerBankPhotoService';
 import { analyzeBankAccountPhoto, BankAccountFields } from '../../services/bankAccountPhotoService';
 jest.mock('../../services/manpowerService', () => ({ manpowerService: { updateWorker: jest.fn() } }));
 jest.mock('../../services/aiSettingsService', () => ({ aiSettingsService: {} }));
@@ -11,7 +11,7 @@ jest.mock('../../services/bankAccountPhotoService', () => ({
     ...jest.requireActual('../../services/bankAccountPhotoService'), analyzeBankAccountPhoto: jest.fn(),
 }));
 jest.mock('../../services/workerBankPhotoService', () => ({
-    BANK_PHOTO_ACCEPT: 'image/png', deleteWorkerDirectPayAccount: jest.fn(), validateWorkerBankPhoto: jest.fn(), readWorkerBankPhoto: jest.fn(), saveWorkerBankPhoto: jest.fn(),
+    BANK_PHOTO_ACCEPT: 'image/png', deleteWorkerDirectPayAccount: jest.fn(), readWorkerBankPhoto: jest.fn(), saveWorkerBankPhoto: jest.fn(),
 }));
 const worker: Worker = { id: 'one', name: '검증 작업자', bankName: '검증은행', accountNumber: '001234567890', accountHolder: '검증 작업자', bankPhotoId: 'basic-photo', directPayBankPhotoId: 'old-direct' };
 const file = new File(['synthetic'], 'bank.png', { type: 'image/png' });
@@ -201,9 +201,8 @@ test('등록된 직불 사진 조회는 직불 용도로 읽고 재업로드하�
 
 test('지원하지 않는 사진을 선택하면 이전 사진이 저장되지 않도록 차단한다', async () => {
     open(); await copy();
-    (validateWorkerBankPhoto as jest.Mock).mockImplementationOnce(() => { throw new Error('사진 형식 오류'); });
     fireEvent.change(screen.getByLabelText('직불용 계좌 사진 선택'), { target: { files: [new File(['invalid'], 'bad.pdf', { type: 'application/pdf' })] } });
-    expect(screen.getByRole('alert')).toHaveTextContent('사진 형식 오류');
+    expect(await screen.findByRole('alert')).toHaveTextContent('JPG, PNG, WEBP');
     expect(screen.getByRole('button', { name: '직불용 계좌 저장' })).toBeDisabled();
     expect(saveWorkerBankPhoto).not.toHaveBeenCalled();
     expect(analyzeBankAccountPhoto).not.toHaveBeenCalled();
@@ -216,7 +215,9 @@ test('직불 사진 선택 시 Gemini로 자동입력하고 저장 시 직불 �
     await waitFor(() => expect(screen.getByLabelText('직불용 계좌 계좌번호')).toHaveValue('000222333444'));
     expect(screen.getByLabelText('직불용 계좌 은행명')).toHaveValue('분석은행');
     expect(screen.getByLabelText('직불용 계좌 예금주')).toHaveValue('검증 작업자');
-    expect(analyzeBankAccountPhoto).toHaveBeenCalledWith(file);
+    const [snapshot] = (analyzeBankAccountPhoto as jest.Mock).mock.calls[0];
+    expect(snapshot).not.toBe(file);
+    expect(snapshot).toMatchObject({ name: file.name, size: file.size, type: file.type });
     expect(manpowerService.updateWorker).not.toHaveBeenCalled();
     expect(saveWorkerBankPhoto).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '직불용 계좌 저장' }));
@@ -224,7 +225,7 @@ test('직불 사진 선택 시 Gemini로 자동입력하고 저장 시 직불 �
     expect(manpowerService.updateWorker).toHaveBeenCalledWith('one', {
         directPayBankName: '분석은행', directPayAccountNumber: '000222333444', directPayAccountHolder: '검증 작업자',
     });
-    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', file, expect.any(String), 'old-direct', 'directPay');
+    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', snapshot, expect.any(String), 'old-direct', 'directPay');
 });
 
 test('일부만 인식되면 이전 계좌정보를 섞지 않고 빈 항목의 수동 입력을 안내한다', async () => {
@@ -242,7 +243,7 @@ test('분석 실패 후 같은 사진으로 다시 분석할 수 있다', async 
     (analyzeBankAccountPhoto as jest.Mock).mockRejectedValueOnce(new Error('Gemini 연결 실패'));
     open({ ...worker, directPayBankName: '이전은행', directPayAccountNumber: '000123456789', directPayAccountHolder: '이전예금주' });
     fireEvent.change(screen.getByLabelText('직불용 계좌 사진 선택'), { target: { files: [file] } });
-    expect(await screen.findByRole('alert')).toHaveTextContent('다시 분석하거나 계좌정보를 직접 입력');
+    expect(await screen.findByText(/다시 분석하거나 계좌정보를 직접 입력/)).toHaveAttribute('role', 'alert');
     expect(screen.getByLabelText('직불용 계좌 계좌번호')).toBeEnabled();
     expect(screen.getByLabelText('직불용 계좌 계좌번호')).toHaveValue('');
     expect(screen.getByRole('button', { name: '직불용 계좌 저장' })).toBeDisabled();
@@ -259,6 +260,7 @@ test('사진을 바꾼 뒤 도착한 이전 분석 결과는 새 계좌를 덮�
     fireEvent.change(screen.getByLabelText('직불용 계좌 사진 선택'), { target: { files: [file] } });
     expect(screen.getByRole('button', { name: '직불용 계좌 저장' })).toBeDisabled();
     expect(screen.getByLabelText('직불용 계좌 계좌번호')).toBeDisabled();
+    await waitFor(() => expect(analyzeBankAccountPhoto).toHaveBeenCalledTimes(1));
     const nextFile = new File(['second-synthetic'], 'second.png', { type: 'image/png' });
     fireEvent.change(screen.getByLabelText('직불용 계좌 사진 선택'), { target: { files: [nextFile] } });
     await waitFor(() => expect(screen.getByLabelText('직불용 계좌 계좌번호')).toHaveValue(analyzedAccount.accountNumber));
@@ -266,7 +268,9 @@ test('사진을 바꾼 뒤 도착한 이전 분석 결과는 새 계좌를 덮�
     expect(screen.getByLabelText('직불용 계좌 계좌번호')).toHaveValue(analyzedAccount.accountNumber);
     fireEvent.click(screen.getByRole('button', { name: '직불용 계좌 저장' }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
-    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', nextFile, expect.any(String), 'old-direct', 'directPay');
+    const [secondSnapshot] = (analyzeBankAccountPhoto as jest.Mock).mock.calls[1];
+    expect(secondSnapshot).toMatchObject({ name: nextFile.name });
+    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', secondSnapshot, expect.any(String), 'old-direct', 'directPay');
 });
 
 test('분석 중 취소할 수 있으며 늦게 도착한 결과를 저장하지 않는다', async () => {
@@ -274,6 +278,7 @@ test('분석 중 취소할 수 있으며 늦게 도착한 결과를 저장하지
     (analyzeBankAccountPhoto as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     const view = open();
     fireEvent.change(screen.getByLabelText('직불용 계좌 사진 선택'), { target: { files: [file] } });
+    await waitFor(() => expect(analyzeBankAccountPhoto).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: '취소' }));
     expect(onClose).toHaveBeenCalledTimes(1);
     view.unmount();
@@ -301,6 +306,7 @@ test('기본 계좌 사진의 분석 결과는 기본 계좌와 사진에만 저
     fireEvent.click(screen.getByRole('button', { name: '기본 계좌 저장' }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(manpowerService.updateWorker).toHaveBeenCalledWith('one', analyzedAccount);
-    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', file, expect.any(String), 'basic-photo', 'default');
+    const [snapshot] = (analyzeBankAccountPhoto as jest.Mock).mock.calls[0];
+    expect(saveWorkerBankPhoto).toHaveBeenCalledWith('one', snapshot, expect.any(String), 'basic-photo', 'default');
     expect(onSaved).toHaveBeenLastCalledWith({ bankPhotoId: 'new-direct' });
 });
