@@ -74,6 +74,49 @@ it.each(['/', '/login'])('restores the saved session immediately on %s without t
   expect(signInWithEmailAndPassword).not.toHaveBeenCalled();
 });
 
+it('clears the restore timeout when Firebase later confirms the browser is signed out', async () => {
+  jest.useFakeTimers();
+  try {
+    (onAuthStateChanged as jest.Mock).mockImplementation((_auth, listener) => {
+      observe = listener;
+      return jest.fn();
+    });
+    await open();
+    expect(current.loading).toBe(true);
+    act(() => { jest.advanceTimersByTime(12000); });
+    expect(current.authError).toContain('로그인 상태 확인이 지연');
+    expect(current.loading).toBe(false);
+
+    act(() => { observe(null); });
+    expect(current.currentUser).toBeNull();
+    expect(current.loading).toBe(false);
+    expect(current.authError).toBe('');
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('preserves a real redirect failure across a timeout and a later signed-out notification', async () => {
+  jest.useFakeTimers();
+  try {
+    rememberGoogleLoginRedirect('/dashboard');
+    (getRedirectResult as jest.Mock).mockRejectedValueOnce({ code: 'auth/network-request-failed' });
+    (onAuthStateChanged as jest.Mock).mockImplementation((_auth, listener) => {
+      observe = listener;
+      return jest.fn();
+    });
+    await open();
+    await waitFor(() => expect(current.authError).not.toBe(''));
+    const redirectError = current.authError;
+    act(() => { jest.advanceTimersByTime(12000); });
+    expect(current.authError).toBe(redirectError);
+    act(() => { observe(null); });
+    expect(current.authError).toBe(redirectError);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it.each([true, false])('applies remember=%s before email authentication', async remember => {
   await open();
   (signInWithEmailAndPassword as jest.Mock).mockResolvedValue({ user });
