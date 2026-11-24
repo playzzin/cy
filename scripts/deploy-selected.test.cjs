@@ -119,6 +119,35 @@ test('hosting refuses deployment if source changes during checks and propagates 
   }), /release mismatch/);
 });
 
+test('initializing cannot bypass a network failure or overwrite a release created during checks', async () => {
+  const options = { getState: () => state, log: quiet, execute: fail, verifyRelease: fail };
+  await assert.rejects(deployHosting(['--initialize-record'], {
+    ...options, readRemote: async () => { throw new Error('ENOTFOUND'); },
+  }), /이전 배포 기록.*ENOTFOUND/);
+  let calls = 0, reads = 0;
+  await assert.rejects(deployHosting(['--initialize-record'], {
+    ...options, execute: () => { calls++; }, readRemote: async () => ++reads === 1 ? null : remote,
+  }), /검사 중 운영 배포 버전/);
+  assert.equal(calls, 1);
+});
+
+test('a clean legacy release is compared against its recorded Git backend sources; real backend changes still block', async () => {
+  const { backendFingerprintFormat } = require('./release-manifest.cjs');
+  const current = { ...state, backendFingerprintFormat };
+  const legacy = { ...remote, fingerprints: { ...remote.fingerprints, functions: 'raw-checkout-hash' } };
+  const { hosting, ...server } = current.fingerprints;
+  const options = { getState: () => current, readRemote: async () => legacy, verifyRelease: quiet, log: quiet };
+  const calls = [];
+  await deployHosting([], { ...options, execute: quiet, getBackendFingerprints: commit => { calls.push(commit); return server; } });
+  assert.deepEqual(calls, [legacy.commit]);
+  await assert.rejects(deployHosting([], { ...options, execute: fail,
+    getBackendFingerprints: () => ({ ...server, functions: 'different-git-blob' }),
+  }), /서버·설정 변경.*functions/);
+  await assert.rejects(deployHosting([], { ...options, execute: fail, getBackendFingerprints: fail,
+    readRemote: async () => ({ ...legacy, backendFingerprintFormat }),
+  }), /서버·설정 변경.*functions/);
+});
+
 test('hosting blocks stale or unrelated releases even when backend fingerprints match', async () => {
   const localCommit = 'a'.repeat(40), remoteCommit = 'b'.repeat(40);
   const gitCalls = [];

@@ -48,3 +48,33 @@ test('untracked feature and verification-script edits change release fingerprint
     fs.rmSync(target, { recursive: true, force: true });
   }
 });
+
+test('clean backend fingerprints survive checkout line endings and change when committed backend content changes', t => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const { execFileSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cy-backend-git-test-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+  git('init', '--quiet');
+  git('config', 'core.autocrlf', 'true');
+  git('config', 'user.email', 'fixture@example.test');
+  git('config', 'user.name', 'Test Fixture');
+  fs.writeFileSync(path.join(dir, '.gitattributes'), '* text=auto\n');
+  const source = path.join(dir, 'functions/src/worker.ts');
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  fs.writeFileSync(source, 'export const value = 1;\n');
+  git('add', '.');
+  git('commit', '-qm', 'initial backend');
+  const before = sourceState(dir);
+  fs.unlinkSync(source);
+  git('checkout-index', '--force', '--', 'functions/src/worker.ts');
+  assert.equal(fs.readFileSync(source, 'utf8'), 'export const value = 1;\r\n');
+  git('add', '--', 'functions/src/worker.ts');
+  const after = sourceState(dir);
+  assert.equal(after.dirty, false);
+  assert.equal(after.fingerprints.functions, before.fingerprints.functions);
+  fs.writeFileSync(source, 'export const value = 2;\r\n');
+  assert.equal(sourceState(dir).dirty, true);
+  git('commit', '-qam', 'update backend');
+  assert.notEqual(sourceState(dir).fingerprints.functions, before.fingerprints.functions);
+});

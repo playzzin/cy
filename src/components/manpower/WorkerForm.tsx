@@ -12,6 +12,7 @@ import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
 import SingleSelectPopover from '../common/SingleSelectPopover';
 import { prepareIdCardAnalysisImage } from '../../utils/idCardAnalysisImage';
 import { employmentToday, validateEmploymentPeriod } from '../../utils/workerEmploymentPeriod';
+import { getWorkerMasterLaborStatementPayType } from '../../utils/payrollLaborStatementDefaults';
 import { assertWorkerDirectPayAccount } from '../../utils/workerDirectPayAccount';
 import { hasForeignRegistrationNumber, isForeignWorker } from '../../utils/workerForeignStatus';
 import WorkerAccountRegistrationModal from '../accounts/WorkerAccountRegistrationModal';
@@ -216,7 +217,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         if (initialData) {
             setFormData({
                 ...initialData,
-                laborStatementPayType: initialData.laborStatementPayType === 'delegate' ? 'delegate' : 'direct',
+                laborStatementPayType: getWorkerMasterLaborStatementPayType(initialData) ?? 'direct',
             });
         } else {
             setFormData({
@@ -863,39 +864,6 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                             </div>
                         </div>
 
-                        <div className="col-span-12 space-y-4 p-4">
-                            <p className="text-xs text-slate-600">계좌정보를 입력한 뒤 아래 {isEditMode ? '변경사항 저장' : '등록 완료'} 버튼을 눌러 주세요.</p>
-                            {ACCOUNT_SECTIONS.map(account => <fieldset key={account.label} className="min-w-0 rounded-lg border border-slate-200 px-3 pb-3">
-                                <legend className="px-1 font-bold text-slate-800">{account.label} 등록</legend>
-                                <p className="mb-3 text-xs text-slate-600">{account.label === '직불용 계좌' && foreignWorker
-                                    ? '외국인 작업자는 이름과 예금주가 달라도 저장할 수 있습니다. 예금주는 입력해 주세요.'
-                                    : account.description}</p>
-                                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                    {account.fields.map(field => <label key={field.key} className="min-w-0 text-xs font-semibold text-slate-700">
-                                        {field.label}
-                                        <input type="text" name={field.key} value={formData[field.key] || ''} onChange={handleChange}
-                                            aria-label={`${account.label} ${field.label}`} placeholder={field.label} maxLength={100} autoComplete="off"
-                                            inputMode={field.label === '계좌번호' ? 'numeric' : 'text'}
-                                            aria-invalid={field.key === 'directPayAccountHolder' && !!directPayError}
-                                            aria-describedby={field.key === 'directPayAccountHolder' && directPayError ? directPayErrorId : undefined}
-                                            className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm font-normal focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
-                                    </label>)}
-                                </div>
-                                {account.label === '직불용 계좌' && directPayError && <p id={directPayErrorId} role="alert" className="mt-2 text-sm text-red-700">{directPayError}</p>}
-                                <div className="mt-3 flex flex-wrap items-center gap-3">
-                                    <button type="button" aria-label={`${account.label} 통장사본 등록·수정`} disabled={isAnalyzing || !formData.name?.trim()}
-                                        onClick={() => setAccountPurpose(account.purpose)} className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 disabled:opacity-50">
-                                        통장사본 첨부·Gemini 등록
-                                    </button>
-                                    <span className="text-xs text-slate-600">{accountPhotos[account.purpose] === null ? '통장사본 삭제 대기'
-                                        : accountPhotos[account.purpose] ? '통장사본 저장 대기'
-                                        : formData[workerPhotoField(account.purpose)] ? '통장사본 등록됨' : '통장사본 미등록'}</span>
-                                </div>
-                                {!formData.name?.trim() && <p className="mt-1 text-xs text-slate-500">작업자 이름을 먼저 입력해 주세요.</p>}
-                                {incompletePhotoAccount?.purpose === account.purpose && <p role="alert" className="mt-2 text-sm text-red-700">사진을 저장하려면 은행명·계좌번호·예금주를 모두 확인해 주세요.</p>}
-                            </fieldset>)}
-                        </div>
-
                         <div className="col-span-12 grid grid-cols-12">
                             <div className="col-span-3 md:col-span-2 bg-slate-50 flex items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
                                 직불/위임
@@ -927,6 +895,39 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                 </div>
                                 <p className="mt-2 text-xs text-slate-600">노무비 명세서의 기본 지급 방식으로 사용됩니다.</p>
                             </div>
+                        </div>
+
+                        <div className="col-span-12 space-y-4 p-4">
+                            <p className="text-xs text-slate-600">계좌정보를 입력한 뒤 아래 {isEditMode ? '변경사항 저장' : '등록 완료'} 버튼을 눌러 주세요.</p>
+                            {ACCOUNT_SECTIONS.map(account => <fieldset key={account.label} className="min-w-0 rounded-lg border border-slate-200 px-3 pb-3">
+                                <legend className="px-1 font-bold text-slate-800">{account.label} 등록</legend>
+                                <p className="mb-3 text-xs text-slate-600">{account.label === '직불용 계좌' && foreignWorker
+                                    ? '외국인 작업자는 이름과 예금주가 달라도 저장할 수 있습니다. 예금주는 입력해 주세요.'
+                                    : account.description}</p>
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                                    {account.fields.map(field => <label key={field.key} className="min-w-0 text-xs font-semibold text-slate-700">
+                                        {field.label}
+                                        <input type="text" name={field.key} value={formData[field.key] || ''} onChange={handleChange}
+                                            aria-label={`${account.label} ${field.label}`} placeholder={field.label} maxLength={100} autoComplete="off"
+                                            inputMode={field.label === '계좌번호' ? 'numeric' : 'text'}
+                                            aria-invalid={field.key === 'directPayAccountHolder' && !!directPayError}
+                                            aria-describedby={field.key === 'directPayAccountHolder' && directPayError ? directPayErrorId : undefined}
+                                            className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm font-normal focus:border-brand-500 focus:ring-1 focus:ring-brand-500" />
+                                    </label>)}
+                                </div>
+                                {account.label === '직불용 계좌' && directPayError && <p id={directPayErrorId} role="alert" className="mt-2 text-sm text-red-700">{directPayError}</p>}
+                                <div className="mt-3 flex flex-wrap items-center gap-3">
+                                    <button type="button" aria-label={`${account.label} 통장사본 등록·수정`} disabled={isAnalyzing || !formData.name?.trim()}
+                                        onClick={() => setAccountPurpose(account.purpose)} className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-bold text-indigo-700 disabled:opacity-50">
+                                        통장사본 첨부·Gemini 등록
+                                    </button>
+                                    <span className="text-xs text-slate-600">{accountPhotos[account.purpose] === null ? '통장사본 삭제 대기'
+                                        : accountPhotos[account.purpose] ? '통장사본 저장 대기'
+                                        : formData[workerPhotoField(account.purpose)] ? '통장사본 등록됨' : '통장사본 미등록'}</span>
+                                </div>
+                                {!formData.name?.trim() && <p className="mt-1 text-xs text-slate-500">작업자 이름을 먼저 입력해 주세요.</p>}
+                                {incompletePhotoAccount?.purpose === account.purpose && <p role="alert" className="mt-2 text-sm text-red-700">사진을 저장하려면 은행명·계좌번호·예금주를 모두 확인해 주세요.</p>}
+                            </fieldset>)}
                         </div>
 
                         {/* Row 2: File & Color */}
