@@ -1,17 +1,18 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { installedDependencyLock } = require('./installed-dependency-lock.cjs');
 const { spawnSync } = require('node:child_process');
 const { root, hash, sourceState } = require('./release-manifest.cjs');
 const { workspaceCache } = require('./build-performance.cjs');
 
 function typecheckIdentity(workspaceRoot = root) {
-  const installedLock = path.join(workspaceRoot, 'node_modules', '.package-lock.json');
+  const installedLock = installedDependencyLock(workspaceRoot);
   return {
     schemaVersion: 1,
     hosting: sourceState(workspaceRoot).fingerprints.hosting,
     node: process.version,
     typescript: require(require.resolve('typescript/package.json', { paths: [workspaceRoot] })).version,
-    installedDependencies: fs.existsSync(installedLock) ? hash(fs.readFileSync(installedLock)) : null,
+    installedDependencies: installedLock ? hash(fs.readFileSync(installedLock)) : null,
   };
 }
 
@@ -22,7 +23,8 @@ function proofPath(workspaceRoot = root) {
 function hasVerifiedTypecheck(workspaceRoot = root) {
   try {
     const proof = JSON.parse(fs.readFileSync(proofPath(workspaceRoot), 'utf8'));
-    return JSON.stringify(proof.identity) === JSON.stringify(typecheckIdentity(workspaceRoot));
+    return Boolean(proof.identity?.installedDependencies)
+      && JSON.stringify(proof.identity) === JSON.stringify(typecheckIdentity(workspaceRoot));
   } catch {
     return false;
   }
@@ -48,7 +50,7 @@ function runTypecheck(args = [], workspaceRoot = root) {
   }
   // Custom compiler flags may weaken checking. Only the default full check
   // authorizes reuse by the production build.
-  if (args.length === 0) {
+  if (args.length === 0 && after.installedDependencies) {
     fs.writeFileSync(destination, JSON.stringify({ identity: after }));
   }
   console.log(`TypeScript 검사 완료 (${((performance.now() - startedAt) / 1000).toFixed(1)}초).`);

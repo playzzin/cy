@@ -19,6 +19,8 @@ test('only a successful unchanged full check can suppress duplicate build checki
   fs.writeFileSync(path.join(directory, '.gitignore'), 'node_modules/\n');
   fs.writeFileSync(path.join(directory, 'tsconfig.json'), JSON.stringify({ compilerOptions: { strict: true, skipLibCheck: true, types: [] }, include: ['src'] }));
   fs.mkdirSync(path.join(directory, 'node_modules'));
+  const installed = path.join(directory, 'node_modules/.package-lock.json');
+  fs.writeFileSync(installed, '{}');
   fs.symlinkSync(path.dirname(require.resolve('typescript/package.json')), path.join(directory, 'node_modules/typescript'), process.platform === 'win32' ? 'junction' : 'dir');
   const source = path.join(directory, 'src/example.ts');
   fs.writeFileSync(source, 'export const value: number = 1;');
@@ -43,5 +45,8 @@ test('only a successful unchanged full check can suppress duplicate build checki
   fs.writeFileSync(proof, 'invalid JSON');
   assert.equal(hasVerifiedTypecheck(directory), false);
   runTypecheck(['--noCheck'], directory);
+  assert.equal(hasVerifiedTypecheck(directory), false);
+  fs.unlinkSync(installed);
+  runTypecheck([], directory);
   assert.equal(hasVerifiedTypecheck(directory), false);
 });

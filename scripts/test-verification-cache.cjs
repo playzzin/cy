@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { installedDependencyLock } = require('./installed-dependency-lock.cjs');
 const crypto = require('node:crypto');
 const { execFileSync, spawnSync } = require('node:child_process');
 const { workspaceCache } = require('./build-performance.cjs');
@@ -63,8 +64,8 @@ function testIdentity(root, env = process.env, now = Date.now()) {
   const listed = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
     { cwd: root, maxBuffer: 32 * 1024 * 1024 }).toString().split('\0').filter(Boolean);
   const files = [...new Set([...listed, '.env', '.env.test', '.env.test.local'])].sort();
-  const installedLock = path.join(root, 'node_modules', '.package-lock.json');
-  if (!fs.existsSync(installedLock)) throw new Error('설치된 의존성 확인 기록이 없습니다.');
+  const installedLock = installedDependencyLock(root);
+  if (!installedLock) throw new Error('설치된 의존성 확인 기록이 없습니다.');
   const environment = testEnvironment(env);
   const date = new Date(now);
   return {

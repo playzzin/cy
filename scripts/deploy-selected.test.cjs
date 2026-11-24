@@ -10,6 +10,22 @@ const remote = { ...state, schemaVersion: 1, assetManifestHash: 'assets' };
 const fail = () => { throw new Error('Unexpected side effect'); };
 const quiet = () => {};
 
+test('deploy:main requires the same pushed commit before checks and again before uploading', async () => {
+  assert.equal(require('../package.json').scripts['deploy:main'], 'node scripts/deploy-verified.cjs --require-main');
+  const commit = 'a'.repeat(40), other = 'b'.repeat(40);
+  const calls = [];
+  const options = { getState: () => ({ ...state, commit }), readRemote: async () => ({ ...remote, commit }),
+    execute: (_cmd, args) => calls.push(args), verifyRelease: quiet, log: quiet };
+  await assert.rejects(deployHosting(['--require-main'], { ...options, readMain: () => other }), /GitHub main/);
+  assert.equal(calls.length, 0);
+  let reads = 0;
+  await assert.rejects(deployHosting(['--require-main'], { ...options, readMain: () => ++reads === 1 ? commit : other }), /GitHub main/);
+  assert.equal(calls.length, 1);
+  calls.length = 0;
+  await deployHosting(['--require-main'], { ...options, readMain: () => commit });
+  assert.equal(calls.length, 2);
+});
+
 test('npm entrypoints keep both old and new deployment commands on scoped paths', () => {
   const app = require('../package.json').scripts;
   const functions = require('../functions/package.json').scripts;

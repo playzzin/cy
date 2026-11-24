@@ -5,6 +5,22 @@ const { root, sourceState, compareRelease, sameSourceState, gitBackendFingerprin
 const { checkRelease, readRemoteJson } = require('./check-release.cjs');
 const { firebaseCommand, deploymentProject, run } = require('./deploy-selected.cjs');
 
+function readPublishedMain() {
+  const result = spawnSync('git', [
+    'ls-remote', '--exit-code', 'https://github.com/playzzin/cy.git', 'refs/heads/main',
+  ], { cwd: root, encoding: 'utf8', timeout: 30000 });
+  const match = /^([a-f0-9]{40})\s+refs\/heads\/main$/.exec(result.stdout?.trim() || '');
+  if (result.error || result.status !== 0 || !match) throw new Error('GitHub main 커밋을 조회하지 못했습니다. GitHub 연결 및 Git 인증을 확인하세요.');
+  return match[1];
+}
+
+function assertPublishedMain(commit, readMain) {
+  const published = readMain();
+  if (commit !== published) {
+    throw new Error(`배포 중단. 로컬 ${commit.slice(0, 8)}, GitHub main ${published.slice(0, 8)}. 커밋과 푸시 상태를 확인하세요.`);
+  }
+}
+
 function assertReleaseAncestry(localCommit, remoteCommit, runGit = args => spawnSync('git', args, {
   cwd: root, encoding: 'utf8', shell: false,
 })) {
@@ -23,8 +39,8 @@ function assertReleaseAncestry(localCommit, remoteCommit, runGit = args => spawn
 
 async function main(args = process.argv.slice(2), { getState = sourceState, execute = run,
   readRemote = readRemoteJson, verifyRelease = checkRelease, checkAncestry = assertReleaseAncestry,
-  getBackendFingerprints = gitBackendFingerprints, log = console.log } = {}) {
-  if (args.some(arg => !['--initialize-record', '--dry-run'].includes(arg))) throw new Error('사용법: deploy:hosting [--dry-run] [--initialize-record]');
+  getBackendFingerprints = gitBackendFingerprints, readMain = readPublishedMain, log = console.log } = {}) {
+  if (args.some(arg => !['--initialize-record', '--dry-run', '--require-main'].includes(arg))) throw new Error('사용법: deploy:hosting [--dry-run] [--initialize-record] [--require-main]');
   // Project/site are read from the existing config; this command does not create cloud resources.
   const config = JSON.parse(fs.readFileSync(path.join(root, 'firebase.json'), 'utf8'));
   const project = deploymentProject();
@@ -39,6 +55,8 @@ async function main(args = process.argv.slice(2), { getState = sourceState, exec
   const state = getState();
   if (state.dirty) throw new Error('변경 사항을 먼저 커밋해 주세요. 커밋한 버전만 배포할 수 있습니다.');
   const initialize = args.includes('--initialize-record');
+  const requireMain = args.includes('--require-main');
+  if (requireMain) assertPublishedMain(state.commit, readMain);
   async function readBaseline() {
     try { return await readRemote(base, 'release.json', { allowMissing: initialize }); }
     catch (error) { throw new Error(`사이트의 이전 배포 기록을 확인할 수 없습니다. ${error.message}`, { cause: error }); }
@@ -62,6 +80,7 @@ async function main(args = process.argv.slice(2), { getState = sourceState, exec
   if (latest) checkAncestry(state.commit, latest.commit);
   if (latest?.commit !== remote?.commit) throw new Error('검사 중 운영 배포 버전이 바뀌었습니다. 최신 운영 버전을 기준으로 다시 검증해 주세요.');
   // Standard firebase predeploy hooks remain active, including the final build check.
+  if (requireMain) assertPublishedMain(state.commit, readMain);
   execute(invocation.command, invocation.args);
   await verifyRelease(base);
 }

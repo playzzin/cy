@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { installedDependencyLock } = require('./installed-dependency-lock.cjs');
 const { root, hash, sourceState } = require('./release-manifest.cjs');
 const { workspaceCache } = require('./build-performance.cjs');
 const { resolveBuildDirectory, outputSuffix } = require('./hosting-build-paths.cjs');
@@ -7,7 +8,7 @@ const { resolveBuildDirectory, outputSuffix } = require('./hosting-build-paths.c
 const BUILD_ENV = /^(?:REACT_APP_|NODE_ENV$|NODE_OPTIONS$|PUBLIC_URL$|BUILD_PATH$|GENERATE_SOURCEMAP$|INLINE_RUNTIME_CHUNK$|IMAGE_INLINE_SIZE_LIMIT$|CI$|DISABLE_ESLINT_PLUGIN$|ESLINT_NO_DEV_ERRORS$|TSC_COMPILE_ON_ERROR$|DISABLE_FORK_TS_CHECKER$|FORK_TS_CHECKER_MEMORY_MB$|FAST_REFRESH$)/;
 
 function inputIdentity(workspaceRoot = root, environment = process.env) {
-    const installedLock = path.join(workspaceRoot, 'node_modules', '.package-lock.json');
+    const installedLock = installedDependencyLock(workspaceRoot);
     const buildEnvironment = Object.keys(environment).filter(key => BUILD_ENV.test(key)).sort().map(key => [key, environment[key]]);
     return {
         schemaVersion: 3,
@@ -15,7 +16,7 @@ function inputIdentity(workspaceRoot = root, environment = process.env) {
         source: sourceState(workspaceRoot),
         runtime: [process.version, process.platform, process.arch],
         environment: hash(JSON.stringify(buildEnvironment)),
-        installedDependencies: fs.existsSync(installedLock) ? hash(fs.readFileSync(installedLock)) : null,
+        installedDependencies: installedLock ? hash(fs.readFileSync(installedLock)) : null,
     };
 }
 

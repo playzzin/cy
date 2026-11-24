@@ -10,6 +10,31 @@ const { beginBuild, writeManifest } = require('./release-manifest.cjs');
 const { resolveBuildDirectory } = require('./hosting-build-paths.cjs');
 const { verifyHostingBuild } = require('./verify-hosting-build.js');
 const { assertHostingDirectory } = require('./verify-hosting-target.cjs');
+const { installedDependencyLock } = require('./installed-dependency-lock.cjs');
+
+test('nested checkouts reuse a matching parent installation until a local package shadows it', t => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'cy-nested-install-'));
+    t.after(() => { if (path.dirname(parent) === path.resolve(os.tmpdir())) fs.rmSync(parent, { recursive: true, force: true }); });
+    const child = path.join(parent, 'tmp', 'checkout');
+    const modules = path.join(child, 'node_modules');
+    fs.mkdirSync(path.join(modules, '.cache'), { recursive: true });
+    fs.mkdirSync(path.join(parent, 'node_modules'));
+    const lock = path.join(parent, 'node_modules', '.package-lock.json');
+    fs.writeFileSync(lock, '{}');
+    fs.writeFileSync(path.join(parent, 'package-lock.json'), '{}\r\n');
+    const expected = path.join(child, 'package-lock.json');
+    assert.equal(installedDependencyLock(child), null);
+    fs.writeFileSync(expected, '{}\n');
+    assert.equal(installedDependencyLock(child), lock);
+    fs.writeFileSync(expected, '{"version":2}');
+    assert.equal(installedDependencyLock(child), null);
+    fs.writeFileSync(expected, '{}\n');
+    fs.mkdirSync(path.join(modules, 'react'));
+    assert.equal(installedDependencyLock(child), null);
+    const local = path.join(modules, '.package-lock.json');
+    fs.writeFileSync(local, '{}');
+    assert.equal(installedDependencyLock(child), local);
+});
 
 for (const absolute of [false, true]) test(`custom output is used for manifest, cache and verification (${absolute ? 'absolute' : 'relative'})`, t => {
     const parent = path.resolve(os.tmpdir());
