@@ -80,12 +80,19 @@ test('single-site diagnostics contact only the selected site', async () => {
   }
 });
 
-test('cloud production builds emit only the canonical app settings and reject environment-file injection', () => {
-  const { productionSettings } = require('./ci-hosting-web-config.cjs');
+test('production builds and live development load only the canonical Hosting app settings', async () => {
+  const { productionSettings, readProductionSettings } = require('./ci-hosting-web-config.cjs');
   const site = 'cyee-9c1e4';
   const config = { projectId: site, authDomain: site + '.firebaseapp.com', storageBucket: site + '.firebasestorage.app',
     apiKey: 'synthetic-web-key', messagingSenderId: '111', appId: '1:111:web:demo', measurementId: 'G-DEMO', unrelated: 'omit' };
-  const settings = productionSettings(config);
+  const settings = await readProductionSettings((url, options) => {
+    assert.equal(url.origin, 'https://cyee-9c1e4.web.app');
+    assert.equal(url.pathname, '/__/firebase/init.json');
+    assert.equal(options.redirect, 'error');
+    return Response.json(config);
+  });
+  assert.equal(settings.REACT_APP_DEPLOYMENT_ENV, 'production');
+  assert.equal(settings.REACT_APP_FIREBASE_PROJECT_ID, site);
   assert.equal(settings.REACT_APP_FIREBASE_MEASUREMENT_ID, 'G-DEMO');
   assert.equal(settings.unrelated, undefined);
   assert.throws(() => productionSettings({ ...config, projectId: 'different' }), /운영/);

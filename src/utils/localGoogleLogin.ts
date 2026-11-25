@@ -8,9 +8,9 @@ const LOCAL_ORIGIN = 'http://localhost:3000';
 export const LOCAL_GOOGLE_CALLBACK = '/__/local-google-auth.html';
 
 export const usesLocalGoogleLogin = (origin = window.location.origin): boolean => origin === LOCAL_ORIGIN;
-// The staging preview and its Firebase-hosted OAuth helper have different origins.
-export const usesStagingGooglePopup = (origin: string, staging: boolean): boolean =>
-  staging && (origin === LOCAL_ORIGIN || origin === 'http://127.0.0.1:3000');
+// A local development page and its Firebase-hosted OAuth helper have different origins.
+export const usesLocalFirebasePopup = (origin: string, enabled: boolean): boolean =>
+  enabled && (origin === LOCAL_ORIGIN || origin === 'http://127.0.0.1:3000');
 const failure = (code = 'auth/invalid-credential') => Object.assign(new Error('Google login could not be verified'), { code });
 const randomValue = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join('');
 

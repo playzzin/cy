@@ -5,10 +5,10 @@ import { AuthProvider, useAuth } from './AuthContext';
 import { loginLogService } from '../services/loginLogService';
 import { loginAccessTracker } from '../services/loginAccessTracker';
 import { rememberGoogleLoginRedirect, readGoogleLoginRedirect } from '../utils/googleLoginRedirect';
-import { consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin, usesStagingGooglePopup } from '../utils/localGoogleLogin';
+import { consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin, usesLocalFirebasePopup } from '../utils/localGoogleLogin';
 
 jest.mock('../config/firebaseAuth', () => ({ auth: { currentUser: null, app: { options: { apiKey: 'synthetic-api-key' } } } }));
-jest.mock('../utils/localGoogleLogin', () => ({ clearLocalGoogleLogin: jest.fn(), consumeLocalGoogleCredential: jest.fn(), startLocalGoogleLogin: jest.fn(), usesLocalGoogleLogin: jest.fn(), usesStagingGooglePopup: jest.fn() }));
+jest.mock('../utils/localGoogleLogin', () => ({ clearLocalGoogleLogin: jest.fn(), consumeLocalGoogleCredential: jest.fn(), startLocalGoogleLogin: jest.fn(), usesLocalGoogleLogin: jest.fn(), usesLocalFirebasePopup: jest.fn() }));
 jest.mock('../services/loginLogService', () => ({ loginLogService: { safeCreateLog: jest.fn() } }));
 jest.mock('../services/userService', () => ({ userService: { saveUser: jest.fn() } }));
 jest.mock('../utils/devAdminSession', () => ({ createDevAdminUser: () => null, isDevAdminSessionEnabled: () => false, disableDevAdminSession: jest.fn() }));
@@ -36,7 +36,7 @@ beforeEach(() => {
   (getRedirectResult as jest.Mock).mockResolvedValue(null);
   (signInWithRedirect as jest.Mock).mockResolvedValue(undefined);
   (usesLocalGoogleLogin as jest.Mock).mockReturnValue(false);
-  (usesStagingGooglePopup as jest.Mock).mockReturnValue(false);
+  (usesLocalFirebasePopup as jest.Mock).mockReturnValue(false);
   (startLocalGoogleLogin as jest.Mock).mockResolvedValue(undefined);
   loginAccessTracker.observe(null);
   window.history.replaceState({}, '', '/admin/login-logs');
@@ -153,8 +153,8 @@ it('clears redirect state and permits retry if redirect startup fails', async ()
   expect(loginLogService.safeCreateLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'login_failed', method: 'redirect' }));
 });
 
-it.each([false, true])('uses the staging popup with the requested persistence when the legacy local origin matches=%s', async legacyLocalOrigin => {
-  (usesStagingGooglePopup as jest.Mock).mockReturnValue(true);
+it.each([false, true])('uses the Firebase popup with the requested persistence when the legacy local origin matches=%s', async legacyLocalOrigin => {
+  (usesLocalFirebasePopup as jest.Mock).mockReturnValue(true);
   (usesLocalGoogleLogin as jest.Mock).mockReturnValue(legacyLocalOrigin);
   (signInWithPopup as jest.Mock).mockImplementationOnce(async () => { observe(user); return { user }; });
   await open();
@@ -170,7 +170,7 @@ it.each([false, true])('uses the staging popup with the requested persistence wh
 });
 
 it('returns the Firebase popup failure and allows a fresh login attempt', async () => {
-  (usesStagingGooglePopup as jest.Mock).mockReturnValue(true);
+  (usesLocalFirebasePopup as jest.Mock).mockReturnValue(true);
   (signInWithPopup as jest.Mock).mockRejectedValueOnce({ code: 'auth/popup-closed-by-user' });
   await open();
   await act(async () => { await expect(current.loginWithGoogle()).rejects.toMatchObject({ code: 'auth/popup-closed-by-user' }); });

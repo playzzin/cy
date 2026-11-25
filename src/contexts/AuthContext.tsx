@@ -2,13 +2,13 @@ import { setRequestDraftOwner } from '../utils/requestDraftStore';
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Auth, User } from 'firebase/auth';
-import { isStaging } from '../config/deploymentEnvironment';
+import { isLiveDevelopment, isStaging } from '../config/deploymentEnvironment';
 import { createDevAdminUser, disableDevAdminSession, isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { loginAccessTracker, writeAuthLog, writeLogoutLog } from '../services/loginAccessTracker';
 import { isDevPreviewFrame, postPreviewMessage, startDevPreviewAuth } from '../utils/devPreviewRuntime';
 import { clearGoogleLoginRedirect, readGoogleLoginRedirect, rememberGoogleLoginRedirect } from '../utils/googleLoginRedirect';
 import { getGoogleAuthErrorMessage } from '../utils/firebaseAuthError';
-import { clearLocalGoogleLogin, consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin, usesStagingGooglePopup } from '../utils/localGoogleLogin';
+import { clearLocalGoogleLogin, consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin, usesLocalFirebasePopup } from '../utils/localGoogleLogin';
 
 type FirebaseAuthModule = typeof import('firebase/auth');
 type SessionCheck = 'checking' | 'delayed' | 'ready';
@@ -262,7 +262,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isDevPreviewFrame) throw new Error('미리보기에서는 로그인 정보를 변경할 수 없습니다.');
     const { auth, authModule } = await loadFirebaseAuth();
     const provider = new authModule.GoogleAuthProvider();
-    const usePopup = usesStagingGooglePopup(window.location.origin, isStaging);
+    const usePopup = usesLocalFirebasePopup(window.location.origin, isStaging || isLiveDevelopment);
     const finishPopupLogin = usePopup ? loginAccessTracker.beginInteractiveLogin() : undefined;
     try {
       setAuthError('');
