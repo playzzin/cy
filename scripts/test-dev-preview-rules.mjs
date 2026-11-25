@@ -55,6 +55,17 @@ try {
     fixtures['settings/menus_v12'].pos_ceo = {name:'CEO',icon:'',menu};
     for (const [path,data] of Object.entries(fixtures)) await db.doc(path).set(data);
     await bucket.file('profiles/leader-a/avatar.png').save(Buffer.from('fixture'),{metadata:{contentType:'image/png'}});
+    const self = await client('cy-preview-self-fixture', previewClaims('leader-a', {
+        previewSelf: true, previewActorUid: 'leader-a', previewDevRole: '팀장',
+    }));
+    assert.equal((await getDoc(doc(self.db,'workers','wa'))).data().teamId,'ta'); checks++;
+    await denied(getDoc(doc(self.db,'workers','wb')));
+    await denied(updateDoc(doc(self.db,'workers','wa'),{name:'fixture-updated'}));
+    await denied(deleteDoc(doc(self.db,'workers','wa')));
+    await denied(uploadBytes(ref(self.storage,'profiles/leader-a/test.png'),new Uint8Array([1])), 'storage/unauthorized');
+    const ownRows = (await httpsCallable(self.functions,'getTeamScopedData')({collection:'workers',filters:{}})).data.rows;
+    assert.deepEqual(ownRows.map(row=>row.id).sort(),['wa','wc']); checks++;
+    await denied(httpsCallable(self.functions,'teamWorkerRequests')({action:'review',id:'fixture'}));
     const a = await client('cy-preview-rules-a',previewClaims('leader-a'));
     assert.equal((await getDoc(doc(a.db,'users','leader-a'))).data().displayName,'검증 팀장 A'); checks++;
     assert.equal((await getDoc(doc(a.db,'workers','wa'))).data().teamId,'ta'); checks++;

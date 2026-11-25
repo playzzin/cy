@@ -17,7 +17,13 @@ export function guardDevPreviewEndpoint<T>(name: string, endpoint: T): T {
                 if (!permitsPreviewCall(name, req.body?.data)) throw new Error('readonly');
                 const db = admin.firestore();
                 const [actor, target, menu] = await db.getAll(db.doc(`users/${token.previewActorUid}`), db.doc(`users/${token.previewTargetUid}`), db.doc('settings/menus_v12'));
-                if (!previewActorRole(actor.data(), menu.data()?.admin?.positionConfig) || target.data()?.status !== 'active') throw new Error('revoked');
+                const membership = actor.data();
+                const roleStillPresent = [membership?.position, membership?.role, membership?.systemRole,
+                    ...(membership?.roles || []), ...(membership?.additionalPositions || [])].includes(token.previewDevRole);
+                const permittedActor = token.previewSelf === true
+                    ? token.previewActorUid === token.previewTargetUid && roleStillPresent
+                    : previewActorRole(membership, menu.data()?.admin?.positionConfig);
+                if (!permittedActor || membership?.status !== 'active' || target.data()?.status !== 'active') throw new Error('revoked');
             } catch {
                 res.set('Access-Control-Allow-Origin', String(req.headers?.origin || '*'));
                 res.set('Vary', 'Origin');

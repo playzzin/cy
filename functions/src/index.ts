@@ -4,6 +4,7 @@ import * as admin from 'firebase-admin';
 admin.initializeApp();
 admin.firestore().settings({ ignoreUndefinedProperties: true });
 
+export { privateReviewSession } from './privateReview';
 export { getDevPreviewAccounts, createDevPreviewSession } from './devUserPreview';
 
 export { recordGeminiClientUsage, listGeminiUsageLogs } from './geminiUsageLogs';
