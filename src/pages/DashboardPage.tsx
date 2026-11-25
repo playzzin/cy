@@ -1,5 +1,5 @@
-import React, { Suspense, useMemo } from 'react';
-import { DashboardHeader } from '../components/dashboard/DashboardHeader';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import { DashboardHeader, DashboardLogo } from '../components/dashboard/DashboardHeader';
 import { TeamLeadQuickActions } from '../components/dashboard/TeamLeadQuickActions';
 import { TeamMobileDisclosure, useTeamMobile } from '../components/team-mobile/TeamMobileUI';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -7,6 +7,8 @@ import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { useSiteMode } from '../contexts/SiteModeContext';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { useLinkedWorker } from '../hooks/useLinkedWorker';
+import { teamService } from '../services/teamService';
+import { getReadableAccentColor, hexToRgba, normalizeHexColor } from '../utils/color';
 import { lazyNamed } from '../utils/lazyNamed';
 import {
     getDashboardModeConfigForPosition,
@@ -95,6 +97,26 @@ const DashboardPage: React.FC = () => {
     const isWorkerDashboard = modeConfig.id === 'worker';
     const isDedicatedFieldDashboard = isTeamLeadDashboard || isForemanDashboard || isWorkerDashboard;
 
+    const teamId = isTeamLeadDashboard ? linkedWorker?.teamId : undefined;
+    const [teamAccent, setTeamAccent] = useState<{ id: string; color: string }>();
+    useEffect(() => {
+        if (!teamId) return;
+        let active = true;
+        teamService.getTeams().then((teams) => {
+            const team = teams.find(({ id }) => id === teamId)
+                ?? teams.find(({ legacyId }) => legacyId === teamId);
+            if (active) setTeamAccent({ id: teamId, color: normalizeHexColor(team?.color, '') });
+        }).catch(() => {
+            if (active) setTeamAccent(undefined);
+        });
+        return () => { active = false; };
+    }, [teamId]);
+
+    const teamColor = teamId
+        ? (teamAccent?.id === teamId && teamAccent.color) || normalizeHexColor(linkedWorker?.color, '')
+        : '';
+    const dashboardTint = teamColor ? hexToRgba(teamColor, 0.09) : undefined;
+
     useDocumentMeta({
         title: `${modeConfig.shortLabel} 대시보드 | 청연ENG ERP`,
         description: `${modeConfig.label} 기준으로 현장, 일보, 공수, 업무 요청 운영 지표를 확인합니다.`,
@@ -106,8 +128,15 @@ const DashboardPage: React.FC = () => {
         return <DashboardLoadingState />;
     }
 
-    if (teamMobile && isTeamLeadDashboard) return <div className="tm-dashboard">
-        <header className="tm-page-heading"><div><h1>우리 팀 현황</h1><p>{linkedWorker?.teamName || '팀장 메뉴'}</p></div></header>
+    if (teamMobile && isTeamLeadDashboard) return <div className="tm-dashboard" style={teamColor ? {
+        '--tm-dashboard-accent': teamColor,
+        '--tm-dashboard-tint': dashboardTint,
+        '--tm-dashboard-text': getReadableAccentColor(teamColor),
+    } as React.CSSProperties : undefined}>
+        <header className="tm-page-heading">
+            <DashboardLogo compact />
+            <div><h1>우리 팀 현황</h1><p>{linkedWorker?.teamName || '팀장 메뉴'}</p></div>
+        </header>
         <main>
             <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[160px]" label="팀 현황을 준비하고 있습니다." />}>
                 <TeamLeadDashboardView linkedWorker={linkedWorker} />
@@ -127,13 +156,14 @@ const DashboardPage: React.FC = () => {
     // }
 
     return (
-        <div className="min-h-screen bg-slate-50 font-['Pretendard']">
+        <div className="min-h-screen bg-slate-50 font-['Pretendard']" style={{ backgroundColor: dashboardTint }}>
             <DashboardHeader
                 user={linkedWorker || { name: '관리자', role: '최고관리자' }}
                 modeConfig={modeConfig}
                 positions={positions}
                 currentPosition={currentPosition}
                 onPositionChange={changePosition}
+                teamColor={teamColor}
             />
 
             <main className="relative z-10 mx-auto -mt-12 min-w-0 w-full max-w-none overflow-hidden px-3 pb-28 sm:-mt-16 sm:px-5 md:pb-12 lg:px-8 2xl:px-10">

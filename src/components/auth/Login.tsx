@@ -41,7 +41,12 @@ const Login: React.FC = () => {
     try {
       await login(email.trim(), password, remember);
       navigate(returnPath, { replace: true });
-    } catch { setError('로그인하지 못했습니다. 이메일과 비밀번호를 확인해 주세요.'); }
+    } catch (cause) {
+      const code = (cause as { code?: string } | null)?.code;
+      setError(code === 'auth/network-request-failed'
+        ? 'Firebase 로그인 서버에 연결할 수 없습니다. 브라우저의 인터넷 연결과 네트워크 접근 설정을 확인한 뒤 다시 시도해 주세요.'
+        : '로그인하지 못했습니다. 이메일과 비밀번호를 확인해 주세요.');
+    }
     finally { setBusy(null); }
   };
   const handleGoogleLogin = async () => {

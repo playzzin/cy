@@ -54,3 +54,16 @@ it('supports password manager autofill and submits persistent email login', asyn
   await waitFor(() => expect(login).toHaveBeenCalledWith('test@example.test', 'synthetic-password', true));
   expect(await screen.findByText('업무 화면')).toBeInTheDocument();
 });
+
+it.each([
+  ['auth/network-request-failed', 'Firebase 로그인 서버에 연결할 수 없습니다'],
+  ['auth/invalid-credential', '이메일과 비밀번호를 확인해 주세요'],
+])('shows the email sign-in failure for %s and allows retry', async (code, message) => {
+  login.mockRejectedValueOnce({ code });
+  mount();
+  fireEvent.change(screen.getByLabelText('이메일'), { target: { value: 'test@example.test' } });
+  fireEvent.change(screen.getByLabelText('비밀번호'), { target: { value: 'synthetic-password' } });
+  fireEvent.click(screen.getByRole('button', { name: '로그인' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(message);
+  expect(screen.getByRole('button', { name: '로그인' })).toBeEnabled();
+});
