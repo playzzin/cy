@@ -2,6 +2,7 @@ import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faXmark, faUserTie } from '@fortawesome/free-solid-svg-icons';
 import { PositionItem, SiteDataType } from '../../types/menu';
+import { isStaging } from '../../config/deploymentEnvironment';
 import { resolveIcon } from '../../constants/iconMap';
 
 interface PositionPanelProps {
@@ -27,7 +28,9 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
     currentSite,
     changeSite
 }) => {
-    const [activeTab, setActiveTab] = React.useState<'site' | 'position'>(userPreviewMode ? 'position' : 'site');
+    const [activeTab, setActiveTab] = React.useState<'site' | 'position'>(
+        isStaging || userPreviewMode ? 'position' : 'site'
+    );
 
     // Filter sites for display
     const filteredSites = React.useMemo(() => {
