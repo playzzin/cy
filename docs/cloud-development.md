@@ -25,6 +25,15 @@ ChatGPT 설정 → Codex Cloud → Environments에서 청연 환경을 생성하
 
 설치 명령은 앱과 Functions의 각 lockfile을 사용하고 검증 Hosting(`cy-erp-staging-9c1e4.web.app`)에서 공개 웹 앱 설정을 받는다. 제한된 네트워크에서는 패키지 레지스트리와 이 검증 도메인의 HTTPS 연결이 필요하다. 설정은 프로젝트와 앱 ID를 확인한 뒤 Git에서 제외한 `.firebase/staging-env.json`에 저장한다. 새 작업의 서버는 저장된 설정으로 시작한다. 인증과 데이터 조회는 브라우저에서 검증 Firebase에 연결한다.
 
+공유 Chrome에서 이메일 로그인과 팀별 자료 조회를 테스트할 때는 Cloud 환경의 **Internet access**에서 아래 HTTPS 도메인을 허용한다. 9950X 브라우저로 접속하면 해당 브라우저의 네트워크에서 Firebase에 연결한다.
+
+| 기능 | 대상 도메인 |
+|---|---|
+| 이메일 로그인 및 세션 갱신 | `identitytoolkit.googleapis.com`, `securetoken.googleapis.com` |
+| Firebase 로그인 도우미 | `cy-erp-staging-9c1e4.firebaseapp.com` |
+| Firestore 조회 | `firestore.googleapis.com` |
+| 팀장 계정의 팀별 자료 조회 함수 | `asia-northeast3-cy-erp-staging-9c1e4.cloudfunctions.net` |
+
 처음 띄우거나 서버를 재시작할 때는 클라우드 터미널에서 다음과 같이 실행한다. 포트가 이미 사용 중이면 먼저 `check`로 현재 작업의 서버인지 확인한다.
 
 ```bash

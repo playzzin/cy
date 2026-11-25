@@ -188,3 +188,22 @@
     html[data-team-mobile='true'] .tm-memo-page > div > header { box-shadow: none; border-radius: 10px; }
     html[data-team-mobile='true'] .tm-page [hidden] { display: none !important; }
 }
+
+html[data-team-mobile='true'] .tm-dashboard > .tm-page-heading {
+    justify-content: flex-start;
+    padding: 12px;
+    gap: 12px;
+    border-radius: 12px;
+    border-inline-start: 4px solid var(--tm-dashboard-accent, #64748b);
+    background: var(--tm-dashboard-tint, #f1f5f9);
+}
+
+html[data-team-mobile='true'] .tm-dashboard > .tm-page-heading p {
+    color: var(--tm-dashboard-text, #475569);
+    overflow-wrap: anywhere;
+}
+
+html[data-team-mobile='true'] .tm-dashboard .tm-summary {
+    border-inline-start: 4px solid var(--tm-dashboard-accent, #dfe5ef);
+    background: var(--tm-dashboard-tint, #fff);
+}
