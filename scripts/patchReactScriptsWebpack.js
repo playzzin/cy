@@ -110,7 +110,7 @@ function patchReactScriptsWebpack({ verifiedTypecheck = false, timings = false }
   };
 }
 
-function patchReactScriptsWebpackDevServer(cloudIdentity) {
+function patchReactScriptsWebpackDevServer(cloudIdentity, live = false) {
   const createDevServerConfig = require(webpackDevServerConfigPath);
 
   require.cache[webpackDevServerConfigPath].exports = (...args) => {
@@ -119,7 +119,7 @@ function patchReactScriptsWebpackDevServer(cloudIdentity) {
     const afterSetup = config.onAfterSetupMiddleware;
     const existingSetup = config.setupMiddlewares;
 
-    if (!beforeSetup && !afterSetup && !cloudIdentity) {
+    if (!beforeSetup && !afterSetup && !cloudIdentity && !live) {
       return config;
     }
 
@@ -127,6 +127,13 @@ function patchReactScriptsWebpackDevServer(cloudIdentity) {
     delete config.onAfterSetupMiddleware;
 
     config.setupMiddlewares = (middlewares, devServer) => {
+      if (live) {
+        // Production Firebase Auth has registered localhost as the local sign-in domain.
+        devServer.app.get('*', (request, response, next) => {
+          if (request.hostname !== '127.0.0.1') return next();
+          response.set('Cache-Control', 'no-store').redirect(302, 'http://localhost:3000' + request.originalUrl);
+        });
+      }
       if (cloudIdentity) {
         devServer.app.get('/__cy_dev/status', (_request, response) => {
           devServer.middleware.waitUntilValid(stats => {

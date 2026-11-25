@@ -22,11 +22,15 @@ function productionSettings(config) {
   return settings;
 }
 
+async function readProductionSettings(request) {
+  const config = await readRemoteJson(`https://${site}.web.app`, '__/firebase/init.json', { request });
+  return productionSettings(config);
+}
+
 async function main() {
   if (process.env.GITHUB_ACTIONS !== 'true' || !process.env.GITHUB_ENV) throw new Error('GitHub Actions 환경 파일이 필요합니다.');
-  const config = await readRemoteJson(`https://${site}.web.app`, '__/firebase/init.json');
-  const settings = productionSettings(config);
+  const settings = await readProductionSettings();
   fs.appendFileSync(process.env.GITHUB_ENV, Object.entries(settings).map(([key, value]) => `${key}=${value}\n`).join(''));
 }
-module.exports = { productionSettings };
+module.exports = { productionSettings, readProductionSettings };
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -61,6 +61,19 @@ it('keeps the local CEO login disabled in production', () => {
     expect(createDevAdminUser()).toBeNull();
 });
 
+it('requires a real account for live development even with a saved or requested local CEO session', () => {
+    process.env = { ...process.env, REACT_APP_DEPLOYMENT_ENV: 'production', REACT_APP_LIVE_DEVELOPMENT: 'true' };
+    jest.isolateModules(() => {
+        const session: typeof import('./devAdminSession') = require('./devAdminSession');
+        expect(session.isDevAdminAllowed()).toBe(false);
+        expect(session.createDevAdminUser()).toBeNull();
+        expect(window.localStorage.getItem(session.DEV_ADMIN_STORAGE_KEY)).toBeNull();
+        window.history.replaceState({}, '', '/login');
+        window.localStorage.setItem(session.DEV_ADMIN_STORAGE_KEY, '1');
+        expect(session.isDevAdminSessionEnabled()).toBe(false);
+    });
+});
+
 it.each(['대표', '사장'])('updates the retired %s title only in the saved local CEO menu', title => {
     const saved = {
         admin: { name: '관리자', icon: '', menu: [], positionConfig: [{ id: 'ceo', name: title, icon: '', color: '' }] },

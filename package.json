@@ -71,6 +71,7 @@
   "scripts": {
     "start": "node scripts/react-scripts-start.js",
     "dev:cloud": "node scripts/react-scripts-start.js --staging",
+    "dev:live": "node scripts/react-scripts-start.js --live",
     "cloud:setup": "npm ci && npm --prefix functions ci && npm run staging:config",
     "start:checked": "node scripts/react-scripts-start.js --typecheck",
     "build": "node --max-old-space-size=8192 scripts/react-scripts-build.js",

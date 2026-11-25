@@ -37,6 +37,10 @@ bash ops/cloud/server.sh check
 
 9950X에서도 `npm run dev:cloud`를 실행할 수 있다. 기본 주소는 `127.0.0.1:3000`이며 `localhost:3000`으로도 접속할 수 있다. 두 주소의 Google 로그인은 Firebase 팝업을 사용한다. 검증 프로젝트의 Authentication → 설정 → 승인된 도메인에 `127.0.0.1`과 `localhost`를 각각 등록한다. PC에 설정 파일이 없으면 첫 실행 때 검증 Hosting에서 받는다. 작업 세션이 꺼진 뒤에도 열 수 있는 고정 주소는 [검증 사이트](https://cy-erp-staging-9c1e4.web.app)다. 여기에 반영하려면 아래의 검증 배포 명령을 실행한다.
 
+### 9950X에서 운영 자료로 작업하기
+
+근로자·현장·일보·정산을 운영 ERP와 함께 읽고 수정할 때는 기존 3000번 서버의 터미널에서 `Ctrl+C`를 누르고 `npm run dev:live`를 실행한다. [로컬 로그인 화면](http://localhost:3000/login)에서 평소 운영 계정으로 로그인한다. `127.0.0.1:3000`으로 접속하면 운영 로그인에 등록된 `localhost:3000`으로 이동한다. 화면 상단에 **운영 데이터 연결**이 표시된다. 저장·수정·삭제는 해당 계정의 권한으로 운영 Firebase 프로젝트 `cyee-9c1e4`에 반영된다.
+
 ## 평소 작업 순서
 
 1. 9950X의 깨끗한 작업 폴더에서 `git fetch origin` 후 `git switch -c codex/9950x-작업명 origin/develop`으로 시작한다. 기존 폴더에 미커밋 작업이 있으면 별도 checkout을 사용한다.

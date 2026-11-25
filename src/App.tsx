@@ -2,7 +2,7 @@ import { TEAM_REQUEST_ACTIONS } from './constants/teamWorkflowActions';
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { isStaging } from './config/deploymentEnvironment';
+import { isLiveDevelopment, isStaging } from './config/deploymentEnvironment';
 import PrivateRoute from './components/auth/PrivateRoute';
 import Login from './components/auth/Login';
 import AppIntroScreen from './components/common/AppIntroScreen';
@@ -266,6 +266,7 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       {isStaging && <div role="note" className="sticky top-0 z-[100] bg-amber-200 px-4 py-2 text-center text-sm font-bold text-amber-950">검증 서버 · 시험 자료만 입력해 주세요 · 운영 서버와 분리되어 있습니다</div>}
+      {isLiveDevelopment && <div role="note" className="sticky top-0 z-[100] bg-red-100 px-4 py-2 text-center text-sm font-bold text-red-950">운영 데이터 연결 · 저장·수정·삭제가 실제 청연 ERP에 반영됩니다.</div>}
       <Router future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
         <RouteDocumentTitle />
         {!isDevPreviewFrame && <AnalyticsRouteTracker />}
