@@ -23,6 +23,9 @@ const requireEnv = (key: RequiredEnvKey): string => {
 };
 
 export const app = (() => {
+  if (process.env.REACT_APP_PRIVATE_REVIEW === 'true' && !isDevPreviewFrame) {
+    throw new Error('비공개 검증 주소에서 조회 전용 세션을 다시 시작해 주세요.');
+  }
   const existing = getApps().filter(candidate => candidate.name === (isDevPreviewFrame ? 'cy-dev-preview' : '[DEFAULT]'));
   if (existing.length > 0) {
     if (existing[0].options?.projectId) assertDeploymentEnvironment(existing[0].options.projectId, typeof window === 'undefined' ? '' : window.location.hostname);

@@ -92,3 +92,19 @@ for (const [name, scenario] of revokedScenarios) {
         assert.equal(fixture.response.json.mock.calls[0].arguments[0].error.status, 'PERMISSION_DENIED');
     });
 }
+
+for (const [label, action, targetUid, permitted] of [
+    ['own team reads', 'list', 'synthetic-dev', true],
+    ['cannot select another account', 'list', 'synthetic-leader', false],
+    ['cannot save', 'save', 'synthetic-dev', false],
+] as const) {
+    test('private review: ' + label, async t => {
+        const fixture = previewHarness(t, {
+            actor: { status: 'active', position: '팀장' },
+            claims: { previewSelf: true, previewDevRole: '팀장', previewTargetUid: targetUid },
+        });
+        await fixture.invoke(action);
+        assert.equal(fixture.endpoint.mock.callCount(), permitted ? 1 : 0);
+        if (!permitted) assert.equal(fixture.response.status.mock.calls[0].arguments[0], 403);
+    });
+}

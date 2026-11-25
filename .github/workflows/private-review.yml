@@ -1,0 +1,75 @@
+name: Private ERP review
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'ops/review/**'
+      - 'functions/src/privateReview*'
+      - 'functions/src/devPreview*'
+      - 'src/config/firebaseBase.ts'
+      - 'scripts/test-dev-preview-rules.mjs'
+      - '.github/workflows/private-review.yml'
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: private-erp-review-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.event_name == 'pull_request' || vars.CY_REVIEW_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '22', cache: npm }
+      - run: npm ci && npm --prefix functions ci
+      - run: npm --prefix functions run build
+      - run: node --test ops/review/server.test.cjs functions/lib/privateReview.test.js functions/lib/devPreviewPolicy.test.js functions/lib/devPreviewEndpoint.test.js
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - name: Check team read scope and write denial on synthetic data
+        run: |
+          npm install --global firebase-tools@15.1.0
+          GCLOUD_PROJECT=demo-dev-user-preview firebase emulators:exec --project demo-dev-user-preview --only auth,firestore,storage,functions 'node scripts/test-dev-preview-rules.mjs'
+  publish:
+    needs: verify
+    if: github.repository == 'playzzin/cy' && github.ref == 'refs/heads/develop' && vars.CY_REVIEW_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    environment: private-review
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      REVIEW_PROJECT: ${{ vars.CY_REVIEW_CLOUD_PROJECT }}
+      REVIEW_REGION: asia-northeast3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: '22', cache: npm }
+      - run: npm ci && npm --prefix functions ci
+      - run: node ops/review/build.cjs
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ vars.CY_REVIEW_WIF_PROVIDER }}
+          service_account: ${{ vars.CY_REVIEW_DEPLOYER }}
+      - name: Update the dedicated review service
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$REVIEW_PROJECT"
+          if [[ "$(git ls-remote --exit-code origin refs/heads/develop | cut -f1)" != "$GITHUB_SHA" ]]; then
+            echo "A newer develop revision is ready; skipping this upload."
+            exit 0
+          fi
+          gcloud run services describe cy-erp-review --project="$REVIEW_PROJECT" --region="$REVIEW_REGION" >/dev/null
+          gcloud run deploy cy-erp-review --project="$REVIEW_PROJECT" --region="$REVIEW_REGION" \
+            --source=".tmp/private-review/$GITHUB_SHA" --iap --no-allow-unauthenticated --quiet
+          url=$(gcloud run services describe cy-erp-review --project="$REVIEW_PROJECT" --region="$REVIEW_REGION" --format='value(status.url)')
+          echo "Private review $GITHUB_SHA — $url" >> "$GITHUB_STEP_SUMMARY"
