@@ -3519,7 +3519,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         quarterVatPaymentReady, loading, savingQuarterVatPayment]);
 
     const canRegisterReceipt = summaryFilter.mode === '미수금' || summaryFilter.mode === '미지급금';
-    const canOpenReceiptHistory = canRegisterReceipt;
+    const showSalesReceiptHistory = summaryFilter.mode === '매출';
     const summarySettlementType: WorkbookTransactionType = summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '매입' : '매출';
     const summarySettlementLabels = getSettlementLabels(summarySettlementType);
 
@@ -5616,7 +5616,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '지급일' : '입금일'}</th>
                                 <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '지급금액' : '수금금액'}</th>
                                 <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '미지급금' : '미수금'}</th>
-                                <th>{summarySettlementLabels.advance}</th>
+                                <th>{showSalesReceiptHistory ? summarySettlementLabels.history : summarySettlementLabels.advance}</th>
                                 <th>비고</th>
                                 <th>팀명</th>
                                 {canRegisterReceipt && <th>처리</th>}
@@ -5632,7 +5632,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 const rowAdvanceCandidates = (advanceRowsByPartnerKey.get(normalizePartnerMatchKey(row.partnerName)) ?? [])
                                     .filter((sourceRow) => sourceRow.id !== row.id && sourceRow.advanceAmount > 0);
                                 const rowAvailableAdvance = rowAdvanceCandidates.reduce((total, sourceRow) => total + sourceRow.advanceAmount, 0);
-                                const canApplyAdvance = canRegisterReceipt && row.outstandingAmount > 0 && rowAvailableAdvance > 0;
+                                const canApplyAdvance = row.outstandingAmount > 0 && rowAvailableAdvance > 0;
 
                                 const isSelectedForPayment = summaryFilter.mode === '미지급금'
                                     && selectedSummaryRowIdSet.has(row.id);
@@ -5673,7 +5673,22 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         </td>
                                         <td className="align-right">{formatNumber(getSummaryDisplayedSettledAmount(row))}</td>
                                         <td className="align-right">{formatNumber(row.outstandingAmount)}</td>
-                                        <td className="align-right">{row.advanceAmount > 0 ? formatNumber(row.advanceAmount) : '-'}</td>
+                                        {showSalesReceiptHistory ? (
+                                            <td>
+                                                {row.totalAmount > 0 ? (
+                                                    <button
+                                                        type="button"
+                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                        onClick={() => handleOpenReceiptHistory(row)}
+                                                        disabled={summaryActionsBlocked || saving}
+                                                    >
+                                                        {summarySettlementLabels.history}
+                                                    </button>
+                                                ) : '-'}
+                                            </td>
+                                        ) : (
+                                            <td className="align-right">{row.advanceAmount > 0 ? formatNumber(row.advanceAmount) : '-'}</td>
+                                        )}
                                         <td>{row.note || '-'}</td>
                                         <td>{row.teamName || '-'}</td>
                                         {canRegisterReceipt && (
@@ -5687,27 +5702,25 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                     >
                                                         {summarySettlementLabels.action}
                                                     </button>
-                                                    {canApplyAdvance && (
+                                                    {(summaryFilter.mode === '미수금' || canApplyAdvance) && (
                                                         <button
                                                             type="button"
                                                             className="workbook-toolbar-button workbook-inline-button"
                                                             onClick={() => handleApplyAdvanceToSummaryRow(row)}
-                                                            disabled={summaryActionsBlocked || saving}
+                                                            disabled={summaryActionsBlocked || saving || !canApplyAdvance}
                                                             title={`사용 가능 ${summarySettlementLabels.advance} ${formatNumber(rowAvailableAdvance)}원`}
                                                         >
                                                             {summarySettlementLabels.advance}{summaryFilter.mode === '미지급금' && '사용'}
                                                         </button>
                                                     )}
-                                                    {canOpenReceiptHistory && (
-                                                        <button
-                                                            type="button"
-                                                            className="workbook-toolbar-button workbook-inline-button"
-                                                            onClick={() => handleOpenReceiptHistory(row)}
-                                                            disabled={saving}
-                                                        >
-                                                            내역
-                                                        </button>
-                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                        onClick={() => handleOpenReceiptHistory(row)}
+                                                        disabled={saving}
+                                                    >
+                                                        내역
+                                                    </button>
                                                 </div>
                                             </td>
                                         )}
@@ -5728,7 +5741,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <td />
                                 <td className="align-right">{formatNumber(summaryTotals.settledAmount)}</td>
                                 <td className="align-right">{formatNumber(summaryTotals.outstandingAmount)}</td>
-                                <td className="align-right">{formatNumber(summaryTotals.advanceAmount)}</td>
+                                <td className="align-right">{showSalesReceiptHistory ? null : formatNumber(summaryTotals.advanceAmount)}</td>
                                 <td colSpan={canRegisterReceipt ? 3 : 2} />
                             </tr>
                         </tfoot>
@@ -6503,15 +6516,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
                 {receiptHistoryTargetId && (
                     <div className="workbook-modal-overlay" onClick={handleCloseReceiptHistory}>
-                        <div className="workbook-modal" onClick={(event) => event.stopPropagation()}>
+                        <div className="workbook-modal" role="dialog" aria-modal="true" aria-labelledby="workbook-receipt-history-title" onClick={(event) => event.stopPropagation()}>
                             <div className="workbook-modal-header">
                                 <div>
-                                    <h2>{receiptHistoryLabels.history}</h2>
-                                    <p>선택한 {receiptHistoryLabels.outstanding} 행에 연결된 {receiptHistoryLabels.history}을 수정하거나 삭제합니다.</p>
+                                    <h2 id="workbook-receipt-history-title">{receiptHistoryLabels.history}</h2>
+                                    {canRegisterReceipt && <p>연결된 {receiptHistoryLabels.history}을 수정하거나 삭제할 수 있습니다.</p>}
                                 </div>
                                 <button
                                     type="button"
                                     className="workbook-modal-close"
+                                    aria-label="내역 닫기"
                                     onClick={handleCloseReceiptHistory}
                                 >
                                     <FontAwesomeIcon icon={faXmark} />
@@ -6531,71 +6545,73 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         <div><strong>{receiptHistoryLabels.advance}</strong><span>{formatNumber(receiptHistoryAdvanceAmount)}원</span></div>
                                     </div>
 
-                                    <div className="workbook-editor-card">
-                                        <div className="workbook-editor-header">
-                                            <h3>원본 행</h3>
-                                        </div>
+                                    {canRegisterReceipt && (
+                                        <div className="workbook-editor-card">
+                                            <div className="workbook-editor-header">
+                                                <h3>원본 행</h3>
+                                            </div>
 
-                                        <div className="sheet-table-wrapper compact">
-                                            <table className="sheet-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>구분</th>
-                                                        <th>일자</th>
-                                                        <th>현장명</th>
-                                                        <th>내용</th>
-                                                        <th>공급가액</th>
-                                                        <th>세액</th>
-                                                        <th>합계</th>
-                                                        <th>{receiptHistoryLabels.amount}</th>
-                                                        <th>비고</th>
-                                                        <th>팀명</th>
-                                                        <th>처리</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <tr>
-                                                        <td>{receiptHistoryInvoice.transactionType}</td>
-                                                        <td>{receiptHistoryInvoice.date}</td>
-                                                        <td>{receiptHistoryInvoice.siteName || '-'}</td>
-                                                        <td>{receiptHistoryInvoice.description || '-'}</td>
-                                                        <td className="align-right">{formatNumber(receiptHistoryInvoice.supplyAmount)}</td>
-                                                        <td className="align-right">{formatNumber(receiptHistoryInvoice.taxAmount)}</td>
-                                                        <td className="align-right">{formatNumber(receiptHistoryInvoice.totalAmount)}</td>
-                                                        <td className="align-right">{formatNumber(receiptHistoryInvoice.paymentAmount)}</td>
-                                                        <td>{getVisibleWorkbookRemark(receiptHistoryInvoice.note) || '-'}</td>
-                                                        <td>{receiptHistoryInvoice.teamName || '-'}</td>
-                                                        <td>
-                                                            <div className="workbook-inline-actions">
-                                                                <button
-                                                                    type="button"
-                                                                    className="workbook-toolbar-button workbook-inline-button"
-                                                                    onClick={() => handleEditDbEntry(receiptHistoryInvoice)}
-                                                                    disabled={dbActionLoading || receiptActionLoading}
-                                                                >
-                                                                    <FontAwesomeIcon icon={faPenToSquare} />
-                                                                    수정
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
-                                                                    onClick={() => handleDeleteDbEntry(receiptHistoryInvoice)}
-                                                                    disabled={dbActionLoading || receiptActionLoading}
-                                                                >
-                                                                    <FontAwesomeIcon icon={faTrashCan} />
-                                                                    삭제
-                                                                </button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
+                                            <div className="sheet-table-wrapper compact">
+                                                <table className="sheet-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>구분</th>
+                                                            <th>일자</th>
+                                                            <th>현장명</th>
+                                                            <th>내용</th>
+                                                            <th>공급가액</th>
+                                                            <th>세액</th>
+                                                            <th>합계</th>
+                                                            <th>{receiptHistoryLabels.amount}</th>
+                                                            <th>비고</th>
+                                                            <th>팀명</th>
+                                                            <th>처리</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr>
+                                                            <td>{receiptHistoryInvoice.transactionType}</td>
+                                                            <td>{receiptHistoryInvoice.date}</td>
+                                                            <td>{receiptHistoryInvoice.siteName || '-'}</td>
+                                                            <td>{receiptHistoryInvoice.description || '-'}</td>
+                                                            <td className="align-right">{formatNumber(receiptHistoryInvoice.supplyAmount)}</td>
+                                                            <td className="align-right">{formatNumber(receiptHistoryInvoice.taxAmount)}</td>
+                                                            <td className="align-right">{formatNumber(receiptHistoryInvoice.totalAmount)}</td>
+                                                            <td className="align-right">{formatNumber(receiptHistoryInvoice.paymentAmount)}</td>
+                                                            <td>{getVisibleWorkbookRemark(receiptHistoryInvoice.note) || '-'}</td>
+                                                            <td>{receiptHistoryInvoice.teamName || '-'}</td>
+                                                            <td>
+                                                                <div className="workbook-inline-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                                        onClick={() => handleEditDbEntry(receiptHistoryInvoice)}
+                                                                        disabled={dbActionLoading || receiptActionLoading}
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faPenToSquare} />
+                                                                        수정
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
+                                                                        onClick={() => handleDeleteDbEntry(receiptHistoryInvoice)}
+                                                                        disabled={dbActionLoading || receiptActionLoading}
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faTrashCan} />
+                                                                        삭제
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
 
                                     {legacyMatchedGap > 0 && (
                                         <div className="workbook-modal-warning">
-                                            기존 자동매칭 수금 {formatNumber(legacyMatchedGap)}원은 개별 이력이 연결되지 않아 여기서 수정/삭제할 수 없습니다.
+                                            기존 자동매칭 수금 {formatNumber(legacyMatchedGap)}원의 개별 이력이 연결되어 있지 않습니다.
                                         </div>
                                     )}
 
@@ -6606,13 +6622,13 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                     <th>{receiptHistoryLabels.date}</th>
                                                     <th>{receiptHistoryLabels.amount}</th>
                                                     <th>비고</th>
-                                                    <th>처리</th>
+                                                    {canRegisterReceipt && <th>처리</th>}
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {receiptHistoryOriginalPaymentAmount <= 0 && receiptHistoryEntries.length === 0 && receiptHistoryLegacyEntries.length === 0 && legacyMatchedGap <= 0 && (
                                                     <tr>
-                                                        <td colSpan={4} className="sheet-empty-state">등록된 {receiptHistoryLabels.history}이 없습니다.</td>
+                                                        <td colSpan={canRegisterReceipt ? 4 : 3} className="sheet-empty-state">등록된 {receiptHistoryLabels.history}이 없습니다.</td>
                                                     </tr>
                                                 )}
                                                 {receiptHistoryInvoice && receiptHistoryOriginalPaymentAmount > 0 && (
@@ -6620,28 +6636,30 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         <td>{receiptHistoryInvoice.date}</td>
                                                         <td className="align-right">{formatNumber(receiptHistoryOriginalPaymentAmount)}</td>
                                                         <td>{getVisibleWorkbookRemark(receiptHistoryInvoice.note) || '원본 업로드 행'}</td>
-                                                        <td>
-                                                            <div className="workbook-inline-actions">
-                                                                <button
-                                                                    type="button"
-                                                                    className="workbook-toolbar-button workbook-inline-button"
-                                                                    onClick={() => handleEditDbEntry(receiptHistoryInvoice)}
-                                                                    disabled={dbActionLoading || receiptActionLoading}
-                                                                >
-                                                                    <FontAwesomeIcon icon={faPenToSquare} />
-                                                                    원본수정
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
-                                                                    onClick={() => handleDeleteDbEntry(receiptHistoryInvoice)}
-                                                                    disabled={dbActionLoading || receiptActionLoading}
-                                                                >
-                                                                    <FontAwesomeIcon icon={faTrashCan} />
-                                                                    원본삭제
-                                                                </button>
-                                                            </div>
-                                                        </td>
+                                                        {canRegisterReceipt && (
+                                                            <td>
+                                                                <div className="workbook-inline-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                                        onClick={() => handleEditDbEntry(receiptHistoryInvoice)}
+                                                                        disabled={dbActionLoading || receiptActionLoading}
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faPenToSquare} />
+                                                                        원본수정
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
+                                                                        onClick={() => handleDeleteDbEntry(receiptHistoryInvoice)}
+                                                                        disabled={dbActionLoading || receiptActionLoading}
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faTrashCan} />
+                                                                        원본삭제
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        )}
                                                     </tr>
                                                 )}
                                                 {receiptHistoryEntries.map((entry) => (
@@ -6649,28 +6667,30 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         <td>{entry.date}</td>
                                                         <td className="align-right">{formatNumber(entry.paymentAmount)}</td>
                                                         <td>{isAdvanceUsageEntry(entry) ? `${receiptHistoryLabels.advance} 사용${entry.note ? ` · ${getVisibleWorkbookRemark(entry.note)}` : ''}` : (getVisibleWorkbookRemark(entry.note) || '-')}</td>
-                                                        <td>
-                                                            <div className="workbook-inline-actions">
-                                                                <button
-                                                                    type="button"
-                                                                    className="workbook-toolbar-button workbook-inline-button"
-                                                                    onClick={() => handleStartEditReceipt(entry)}
-                                                                    disabled={receiptActionLoading}
-                                                                >
-                                                                    <FontAwesomeIcon icon={faPenToSquare} />
-                                                                    수정
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
-                                                                    onClick={() => handleDeleteSettlement(entry)}
-                                                                    disabled={receiptActionLoading}
-                                                                >
-                                                                    <FontAwesomeIcon icon={faTrashCan} />
-                                                                    삭제
-                                                                </button>
-                                                            </div>
-                                                        </td>
+                                                        {canRegisterReceipt && (
+                                                            <td>
+                                                                <div className="workbook-inline-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                                        onClick={() => handleStartEditReceipt(entry)}
+                                                                        disabled={receiptActionLoading}
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faPenToSquare} />
+                                                                        수정
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
+                                                                        onClick={() => handleDeleteSettlement(entry)}
+                                                                        disabled={receiptActionLoading}
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faTrashCan} />
+                                                                        삭제
+                                                                    </button>
+                                                                </div>
+                                                            </td>
+                                                        )}
                                                     </tr>
                                                 ))}
                                                 {receiptHistoryLegacyEntries.map((entry) => (
@@ -6678,9 +6698,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         <td>{entry.date}</td>
                                                         <td className="align-right">{formatNumber(entry.paymentAmount)}</td>
                                                         <td>{getVisibleWorkbookRemark(entry.note) || '자동매칭 입금'}</td>
-                                                        <td>
-                                                            <span className="workbook-linked-badge">자동매칭</span>
-                                                        </td>
+                                                        {canRegisterReceipt && <td><span className="workbook-linked-badge">자동매칭</span></td>}
                                                     </tr>
                                                 ))}
                                                 {legacyMatchedGap > 0 && (
@@ -6688,76 +6706,76 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         <td>-</td>
                                                         <td className="align-right">{formatNumber(legacyMatchedGap)}</td>
                                                         <td>자동매칭 합계</td>
-                                                        <td>
-                                                            <span className="workbook-linked-badge">미연결</span>
-                                                        </td>
+                                                        {canRegisterReceipt && <td><span className="workbook-linked-badge">미연결</span></td>}
                                                     </tr>
                                                 )}
                                             </tbody>
                                         </table>
                                     </div>
 
-                                    <div className="workbook-editor-card">
-                                        <div className="workbook-editor-header">
-                                            <h3>{receiptHistoryLabels.history} 수정</h3>
-                                            {editingReceiptDraft && (
-                                                <button
-                                                    type="button"
-                                                    className="workbook-toolbar-button workbook-inline-button"
-                                                    onClick={handleCancelEditReceipt}
-                                                    disabled={receiptActionLoading}
-                                                >
-                                                    취소
-                                                </button>
-                                            )}
-                                        </div>
-
-                                        {editingReceiptDraft ? (
-                                            <div className="workbook-editor-grid">
-                                                <label>
-                                                    <span>{receiptHistoryLabels.date}</span>
-                                                    <input
-                                                        type="date"
-                                                        value={editingReceiptDraft.date}
-                                                        onChange={(event) => handleChangeEditingReceipt('date', event.target.value)}
-                                                        disabled={receiptActionLoading}
-                                                    />
-                                                </label>
-                                                <label>
-                                                    <span>{receiptHistoryLabels.amount}</span>
-                                                    <input
-                                                        type="text"
-                                                        inputMode="numeric"
-                                                        value={editingReceiptDraft.paymentAmount}
-                                                        onChange={(event) => handleChangeEditingReceipt('paymentAmount', formatAmountInputValue(event.target.value))}
-                                                        disabled={receiptActionLoading}
-                                                    />
-                                                </label>
-                                                <label className="workbook-editor-wide">
-                                                    <span>비고</span>
-                                                    <input
-                                                        type="text"
-                                                        value={editingReceiptDraft.note}
-                                                        onChange={(event) => handleChangeEditingReceipt('note', event.target.value)}
-                                                        disabled={receiptActionLoading}
-                                                    />
-                                                </label>
-                                                <div className="workbook-editor-actions">
+                                    {canRegisterReceipt && (
+                                        <div className="workbook-editor-card">
+                                            <div className="workbook-editor-header">
+                                                <h3>{receiptHistoryLabels.history} 수정</h3>
+                                                {editingReceiptDraft && (
                                                     <button
                                                         type="button"
-                                                        className="excel-button excel-button-green"
-                                                        onClick={handleSaveEditedSettlement}
+                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                        onClick={handleCancelEditReceipt}
                                                         disabled={receiptActionLoading}
                                                     >
-                                                        <FontAwesomeIcon icon={receiptActionLoading ? faSpinner : faPenToSquare} spin={receiptActionLoading} />
-                                                        수정 저장
+                                                        취소
                                                     </button>
-                                                </div>
+                                                )}
                                             </div>
-                                        ) : (
-                                            <div className="sheet-empty-state">수정할 {receiptHistoryLabels.history}을 선택하세요.</div>
-                                        )}
-                                    </div>
+
+                                            {editingReceiptDraft ? (
+                                                <div className="workbook-editor-grid">
+                                                    <label>
+                                                        <span>{receiptHistoryLabels.date}</span>
+                                                        <input
+                                                            type="date"
+                                                            value={editingReceiptDraft.date}
+                                                            onChange={(event) => handleChangeEditingReceipt('date', event.target.value)}
+                                                            disabled={receiptActionLoading}
+                                                        />
+                                                    </label>
+                                                    <label>
+                                                        <span>{receiptHistoryLabels.amount}</span>
+                                                        <input
+                                                            type="text"
+                                                            inputMode="numeric"
+                                                            value={editingReceiptDraft.paymentAmount}
+                                                            onChange={(event) => handleChangeEditingReceipt('paymentAmount', formatAmountInputValue(event.target.value))}
+                                                            disabled={receiptActionLoading}
+                                                        />
+                                                    </label>
+                                                    <label className="workbook-editor-wide">
+                                                        <span>비고</span>
+                                                        <input
+                                                            type="text"
+                                                            value={editingReceiptDraft.note}
+                                                            onChange={(event) => handleChangeEditingReceipt('note', event.target.value)}
+                                                            disabled={receiptActionLoading}
+                                                        />
+                                                    </label>
+                                                    <div className="workbook-editor-actions">
+                                                        <button
+                                                            type="button"
+                                                            className="excel-button excel-button-green"
+                                                            onClick={handleSaveEditedSettlement}
+                                                            disabled={receiptActionLoading}
+                                                        >
+                                                            <FontAwesomeIcon icon={receiptActionLoading ? faSpinner : faPenToSquare} spin={receiptActionLoading} />
+                                                            수정 저장
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="sheet-empty-state">수정할 {receiptHistoryLabels.history}을 선택하세요.</div>
+                                            )}
+                                        </div>
+                                    )}
                                 </>
                             ) : (
                                 <div className="sheet-empty-state">대상 매출을 찾을 수 없습니다.</div>

@@ -38,6 +38,83 @@ const setSearch = (label: string, value: string) => fireEvent.change(screen.getB
 const submit = () => fireEvent.click(screen.getByRole('button', { name: '조회' }));
 const resultCells = (value: string) => within(screen.getByRole('table')).queryAllByRole('cell', { name: value });
 
+describe('sales and receivables payment history', () => {
+    const withAdvance = makeInvoice('with-advance', '테스트건설 A', '선수금 보유 현장', '검증 팀');
+    const withoutAdvance = makeInvoice('without-advance', '테스트건설 B', '선수금 없는 현장', '검증 팀');
+    const paidInvoice = makeInvoice('fully-paid', '테스트건설 A', '완납 현장', '검증 팀');
+    const paidReceipt = {
+        ...paidInvoice,
+        id: 'linked-receipt',
+        date: '2026-09-02',
+        supplyAmount: 0,
+        taxAmount: 0,
+        totalAmount: 0,
+        paymentAmount: 130000,
+        matchedEntryId: paidInvoice.id,
+        note: '계좌 입금 확인',
+    };
+    const partialReceipt = {
+        ...paidReceipt,
+        id: 'partial-receipt',
+        siteName: withAdvance.siteName,
+        matchedEntryId: withAdvance.id,
+        paymentAmount: 20000,
+    };
+
+    const resultRow = (name: RegExp) => within(screen.getByRole('row', { name }));
+
+    beforeEach(() => {
+        window.sessionStorage.clear();
+        window.sessionStorage.setItem('workbook-ledger:cheongyeon:active-tab', 'summary');
+        mockGetEntries.mockReset().mockImplementation(async (options) => (
+            [withAdvance, withoutAdvance, paidInvoice, paidReceipt, partialReceipt].filter((entry) => (
+                entry.transactionType === options.transactionType
+                && (!options.startDate || entry.date >= options.startDate)
+                && (!options.endDate || entry.date <= options.endDate)
+            ))
+        ));
+    });
+
+    const mountSummary = async () => {
+        render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><WorkbookLedgerPage /></MemoryRouter>);
+        setSearch('검색시작일', '2026-09-01');
+        setSearch('검색종료일', '2026-09-01');
+        submit();
+        await waitFor(() => expect(resultRow(/선수금 보유 현장/).getByRole('button', { name: '선수금' })).toBeEnabled());
+    };
+
+    it('keeps the same receivables actions on every row and enables advance use only for an eligible partner', async () => {
+        await mountSummary();
+        for (const site of [/선수금 보유 현장/, /선수금 없는 현장/]) {
+            expect(resultRow(site).getAllByRole('button').map((button) => button.textContent)).toEqual(['입금', '선수금', '내역']);
+        }
+        expect(resultRow(/선수금 없는 현장/).getByRole('button', { name: '선수금' })).toBeDisabled();
+        expect(screen.queryByRole('row', { name: /완납 현장/ })).not.toBeInTheDocument();
+
+        fireEvent.click(resultRow(/선수금 보유 현장/).getByRole('button', { name: '내역' }));
+        const history = within(screen.getByRole('dialog', { name: '입금내역' }));
+        const payment = within(history.getByRole('row', { name: /20,000 계좌 입금 확인/ }));
+        expect(payment.getByRole('button', { name: '수정' })).toBeEnabled();
+    });
+
+    it('shows read-only receipt details for a fully paid sale and an empty history for an unpaid sale', async () => {
+        await mountSummary();
+        fireEvent.click(screen.getByRole('tab', { name: '매출' }));
+        expect(screen.queryByRole('columnheader', { name: '선수금' })).not.toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: '입금내역' })).toBeInTheDocument();
+        await waitFor(() => expect(resultRow(/완납 현장/).getByRole('button', { name: '입금내역' })).toBeEnabled());
+
+        fireEvent.click(resultRow(/완납 현장/).getByRole('button', { name: '입금내역' }));
+        const history = within(screen.getByRole('dialog', { name: '입금내역' }));
+        expect(history.getByRole('row', { name: '2026-09-02 130,000 계좌 입금 확인' })).toBeInTheDocument();
+        expect(history.getAllByRole('button')).toEqual([history.getByRole('button', { name: '내역 닫기' })]);
+        fireEvent.click(history.getByRole('button', { name: '내역 닫기' }));
+
+        fireEvent.click(resultRow(/선수금 없는 현장/).getByRole('button', { name: '입금내역' }));
+        expect(within(screen.getByRole('dialog', { name: '입금내역' })).getByText('등록된 입금내역이 없습니다.')).toBeInTheDocument();
+    });
+});
+
 describe.each(['ledger', 'summary'] as const)('%s combined search', (tab) => {
     beforeEach(() => {
         window.sessionStorage.clear();
