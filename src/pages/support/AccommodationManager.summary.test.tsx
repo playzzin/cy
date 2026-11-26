@@ -100,6 +100,31 @@ it('계약만료일이 남은 종료 숙소를 운영 중 합계에서 제외하
     expect(screen.getByText('2026-09 조회 숙소의 계약 월세 기준')).toBeInTheDocument();
 });
 
+it.each([
+    ['2027-11-20', '2027-08-20'],
+    ['2028-05-31', '2028-02-29'],
+])('만료일 %s는 한국 날짜 %s부터 목록과 카드에서 빨갛게 표시한다', async (endDate, warningDate) => {
+    const accommodation = room('만료예정', 500000, 1000000);
+    accommodation.contract.endDate = endDate;
+    jest.mocked(accommodationService.listAllAccommodations).mockResolvedValue([accommodation]);
+    const warningStart = new Date(`${warningDate}T00:00:00+09:00`);
+
+    jest.useFakeTimers();
+    try {
+        jest.setSystemTime(warningStart.getTime() - 60_000);
+        render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><AccommodationManager /></MemoryRouter>);
+        expect(await screen.findByText(endDate)).toHaveClass('text-slate-500');
+
+        jest.setSystemTime(warningStart);
+        fireEvent.click(screen.getByRole('button', { name: '카드' }));
+        expect(screen.getByText(`계약만료: ${endDate}`)).toHaveClass('text-red-700');
+        fireEvent.click(screen.getByRole('button', { name: '목록' }));
+        expect(screen.getByText(endDate)).toHaveClass('text-red-700');
+    } finally {
+        jest.useRealTimers();
+    }
+});
+
 it('전체와 보관/종료 상태 필터에서도 상하단 합계가 조회 목록을 따른다', async () => {
     await renderPage();
     fireEvent.click(screen.getByRole('button', { name: '전체 4호' }));
