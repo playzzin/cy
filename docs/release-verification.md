@@ -36,7 +36,7 @@ Hosting 배포 코드를 변경하는 이 저장소의 `main` 대상 PR에는 **
 
 저장소 안쪽에 만든 릴리스 작업 폴더도 상위 폴더의 npm 설치를 사용할 수 있습니다. 두 폴더의 `package-lock.json`이 일치하고 중간에 일부 패키지만 설치된 폴더가 없으면 빌드와 검사에서 같은 설치 기록을 사용합니다. 소스, 실행 환경, 출력 파일과 테스트 유효기간에 대한 기존 검사는 계속 적용됩니다.
 
-GitHub Quality Gate가 `frontend`, `server`, `rules` 전체를 검사한다. 로컬에서 전체 검사가 필요할 때는 `npm run verify:project`를 실행한다. Firebase 권한이 있는 로컬 환경에서 웹을 수동 배포할 때는 Quality Gate가 성공한 최신 `main`의 깨끗한 작업 폴더에서 `npm run deploy:main`을 실행한다. 같은 폴더에서 소스·설정·설치 의존성·실행 환경·날짜가 같고 1시간 이내면 전체 React 검사 통과 기록을 재사용한다.
+GitHub Quality Gate가 `frontend`, `server`, `rules` 전체를 검사한다. 자동 배포는 현재 `main` 커밋의 검사 성공을 GitHub에서 확인한 뒤 운영 설정으로 웹을 빌드한다. 로컬에서 전체 검사가 필요할 때는 `npm run verify:project`를 실행한다. Firebase 권한이 있는 로컬 환경에서 웹을 수동 배포할 때는 Quality Gate가 성공한 최신 `main`의 깨끗한 작업 폴더에서 `npm run deploy:main`을 실행한다. 같은 폴더에서 소스·설정·설치 의존성·실행 환경·날짜가 같고 1시간 이내면 전체 React 검사 통과 기록을 재사용한다.
 
 React 검사 환경에서는 npm 호출 설명과 `CODEX_TOOL_CALL_ID`만 제거한다. 이 값들은 테스트 자식 프로세스에도 전달하지 않는다. 실제 앱 환경 변수, `PATH`, 임시 폴더, 알 수 없는 환경 변수는 계속 검증 입력에 포함한다. 외부 엑셀 자료·에뮬레이터를 사용하는 검사, 선택 검사, 강제 검사 및 실패한 검사는 재사용하지 않는다.
 
