@@ -99,7 +99,7 @@ test('production builds and live development load only the canonical Hosting app
   assert.throws(() => productionSettings({ ...config, apiKey: 'demo\nOTHER=value' }), /형식/);
 });
 
-test('hosted uploads run from verified main, and a combined release waits for successful staging', () => {
+test('successful main pushes deploy production, and manual retries must verify the selected main commit', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const yaml = require('js-yaml');
@@ -111,20 +111,32 @@ test('hosted uploads run from verified main, and a combined release waits for su
   assert.deepEqual(connectivity.jobs.check.steps.filter(s => s.run).map(s => s.run), ['npm run deploy:check']);
   assert.equal(connectivity.jobs.check.steps[0].with['persist-credentials'], false);
   assert.deepEqual(Object.keys(release.on).sort(), ['workflow_dispatch','workflow_run']);
+  assert.deepEqual(release.on.workflow_run.workflows, ['Quality Gate']);
+  assert.deepEqual(release.on.workflow_run.types, ['completed']);
   assert.deepEqual(release.on.workflow_run.branches, ['main']);
+  assert.deepEqual(release.on.workflow_dispatch.inputs.target.options, ['staging', 'production']);
+  assert.equal(release.on.workflow_dispatch.inputs.target.default, 'staging');
+  assert.match(release.jobs.check.if, /github\.ref == 'refs\/heads\/main'/);
   assert.match(release.jobs.check.if, /head_repository.full_name == github.repository/);
+  assert.match(release.jobs.check.if, /workflow_run.event == 'push'/);
   assert.match(release.jobs.check.if, /workflow_run.conclusion == 'success'/);
-  assert.ok(release.jobs.check.steps.some(s => s.run?.includes('[deploy hosting]') && s.run.includes('git log -1')));
   assert.equal(release.jobs.check.permissions['id-token'], undefined);
-  const preflight = release.jobs.check.steps.find(s => s.env?.TARGET === '${{ steps.revision.outputs.target }}');
-  assert.match(preflight.run, /staging\|production\) npm run deploy:check -- "\$TARGET"/);
-  assert.match(preflight.run, /both\|check\) npm run deploy:check ;;/);
-  assert.deepEqual(release.jobs.production.needs, ['check','staging']);
-  assert.match(release.jobs.production.if, /needs.staging.result == 'success'/);
+  const gate = release.jobs.check.steps.find(step => step.id === 'revision');
+  assert.equal(gate.env.REVISION, '${{ github.event.workflow_run.head_sha || github.sha }}');
+  assert.equal(gate.env.TARGET, "${{ github.event_name == 'workflow_run' && 'production' || inputs.target || 'staging' }}");
+  assert.ok(gate.run.includes('"$REVISION" != "$main"'));
+  assert.match(gate.run, /workflow_dispatch[\s\S]*quality\.yml\/runs[\s\S]*head_sha="\$REVISION" -f status=success/);
+  for (const target of ['staging', 'production']) {
+    const job = release.jobs[target];
+    assert.equal(job.needs, 'check');
+    assert.equal(job.if, `needs.check.outputs.target == '${target}'`);
+    assert.deepEqual(job.with, { target, revision: '${{ needs.check.outputs.sha }}' });
+  }
   assert.deepEqual(Object.keys(upload.on), ['workflow_call']);
   const job = upload.jobs.upload;
   assert.match(job.if, /refs\/heads\/main/);
   assert.equal(job.environment, '${{ inputs.target }}');
+  assert.equal(job.steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref, '${{ inputs.revision }}');
   assert.ok(job.steps.find(s => s.name === 'Deploy and verify staging').env.CY_DEPLOY_MAIN_COMMIT);
   assert.ok(job.steps.some(s => s.run === 'npm run deploy:main'));
 });
