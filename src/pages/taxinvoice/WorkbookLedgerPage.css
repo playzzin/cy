@@ -1768,7 +1768,7 @@
 }
 
 .workbook-summary-table .workbook-summary-col-action {
-    width: 164px;
+    width: 192px;
 }
 
 .workbook-summary-table th:first-child,
@@ -1957,10 +1957,6 @@
 
     .workbook-summary-table .workbook-summary-col-team {
         width: 60px;
-    }
-
-    .workbook-summary-table .workbook-summary-col-action {
-        width: 154px;
     }
 
     .workbook-summary-table th,
