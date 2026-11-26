@@ -151,6 +151,21 @@ test('hosting keeps frontend checks, a single hooked build and final release ver
   assert.equal(calls[2], 'verified');
 });
 
+test('hosted deployment requires the current GitHub check before invoking only Hosting', async () => {
+  const commit = 'a'.repeat(40);
+  const args = ['--require-main', '--checked-in-github'];
+  const options = { getState: () => ({ ...state, commit }), readRemote: async () => ({ ...remote, commit }),
+    readMain: () => commit, log: quiet };
+  await assert.rejects(deployHosting(args, { ...options, execute: fail, verifyRelease: fail,
+    verifyQualityGate: () => { throw new Error('Required check failed'); } }), /Required check failed/);
+  const calls = [];
+  await deployHosting(args, { ...options, verifyQualityGate: sha => calls.push(sha),
+    execute: (_command, flags) => calls.push(flags[flags.indexOf('--only') + 1]),
+    verifyRelease: () => calls.push('verified') });
+  assert.deepEqual(calls, [commit, 'hosting', 'verified']);
+  await assert.rejects(deployHosting([...args, '--initialize-record'], options), /사용법/);
+});
+
 test('hosting still rejects backend drift, missing records, dirty sources and failed checks', async () => {
   const options = { getState: () => state, readRemote: async () => remote,
     execute: fail, verifyRelease: fail, log: quiet };
