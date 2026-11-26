@@ -1,0 +1,82 @@
+name: Firebase Hosting release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 수동 배포 대상
+        required: true
+        type: choice
+        default: staging
+        options: [staging, production]
+  workflow_run:
+    workflows: [Quality Gate]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  check:
+    if: >-
+      github.repository == 'playzzin/cy' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
+      target: ${{ steps.revision.outputs.target }}
+    steps:
+      - name: Check published main and its Quality Gate
+        id: revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
+          TARGET: ${{ github.event_name == 'workflow_run' && 'production' || inputs.target || 'staging' }}
+        run: |
+          set -euo pipefail
+          case "$TARGET" in staging|production) ;; *) exit 1 ;; esac
+          main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$REVISION" != "$main" ]]; then
+            echo "::error::GitHub main이 갱신되어 이 버전의 배포를 중단합니다."
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            passed=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs" -f branch=main -f event=push -f head_sha="$REVISION" -f status=success --jq '.total_count')
+            if [[ ! "$passed" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::이 main 커밋의 Quality Gate 성공 기록이 필요합니다."
+              exit 1
+            fi
+          fi
+          echo "sha=$REVISION" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+
+  staging:
+    needs: check
+    if: needs.check.outputs.target == 'staging'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/hosting-upload.yml
+    with:
+      target: staging
+      revision: ${{ needs.check.outputs.sha }}
+    secrets:
+      existing_deploy_key: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CY_ERP_STAGING_9C1E4 }}
+
+  production:
+    needs: check
+    if: needs.check.outputs.target == 'production'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/hosting-upload.yml
+    with:
+      target: production
+      revision: ${{ needs.check.outputs.sha }}
+    secrets:
+      existing_deploy_key: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_CYEE_9C1E4 }}

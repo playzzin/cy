@@ -27,8 +27,8 @@
 ## 평소 작업 순서
 
 1. 9950X의 깨끗한 작업 폴더에서 `git fetch origin` 후 `git switch -c codex/9950x-작업명 origin/develop`으로 시작한다. 기존 폴더에 미커밋 작업이 있으면 별도 checkout을 사용한다.
-2. 기능을 수정하고 관련 테스트를 실행한다. 수정한 파일을 지정해서 커밋하고 `git push -u origin HEAD`로 올린 뒤 `develop` 대상 PR을 연다.
-3. 병합 전에 클라우드에서 확인하려면 개발 서버용 checkout에서 같은 작업 브랜치와 커밋을 선택한다. `git rev-parse HEAD`로 양쪽 버전을 대조한다. PR이 통과해 병합되면 클라우드의 깨끗한 `develop`에서 `git pull --ff-only origin develop` 후 미리보기를 확인한다. 잠금 파일이 바뀌면 설치 명령도 다시 실행한다.
-4. 운영 반영 시 `develop`에서 `main`으로 PR을 열고 검사를 확인한다. 병합된 `main` 커밋의 GitHub Actions가 성공하면 Firebase 배포 권한이 있는 한 곳에서 `npm run deploy:main`을 실행한다. 마지막 출력의 커밋과 운영 `release.json`이 일치해야 한다.
+2. 기능을 수정하고 로컬에서 확인한다. 저장·삭제 테스트에는 검증 환경을 사용한다. 수정한 파일을 커밋하고 `git push -u origin HEAD`로 올린 뒤 `develop` 대상 PR을 연다. PR의 **Quality Gate → verify**가 성공하면 병합한다.
+3. 클라우드에서 9950X의 수정본을 보려면 해당 브랜치를 선택하고 `git rev-parse HEAD`로 커밋을 대조한다. `develop` 병합 후에는 깨끗한 개발 사본에서 `git pull --ff-only origin develop`을 실행하고 서버를 다시 시작한다. 잠금 파일이 바뀌면 이 사본의 서버를 종료한 뒤 설치 명령도 다시 실행한다. **Cloud development server** 검사 로그에는 Linux에서 실제 실행해 확인한 SHA와 Firebase 프로젝트가 표시된다.
+4. 운영에 올릴 때 `develop`에서 `main`으로 PR을 열고 검사를 확인한다. 병합한 `main`의 Quality Gate가 성공하면 **Firebase Hosting release**가 운영 웹을 자동 배포한다. 첫 연결과 운영 버전 확인은 [배포 절차](release-verification.md)를 따른다.
 
 검증 사이트에 공유할 때는 깨끗한 개발 커밋에서 `npm run staging:deploy`를 실행한다. 검증용 데이터, 파일 저장소와 서버 기능의 지원 범위는 [검증 환경 안내](staging-and-ledger-review.md)에 정리했다. 운영 배포와 서버 변경 대조 방법은 [배포 검증 안내](release-verification.md)를 따른다.

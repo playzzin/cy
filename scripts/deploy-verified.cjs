@@ -6,6 +6,7 @@ const { checkRelease, readRemoteJson } = require('./check-release.cjs');
 const { firebaseCommand, deploymentProject, run } = require('./deploy-selected.cjs');
 
 const { readPublishedMain, assertPublishedMain } = require('./published-main.cjs');
+const { checkHostingApi } = require('./hosting-network.cjs');
 
 function assertReleaseAncestry(localCommit, remoteCommit, runGit = args => spawnSync('git', args, {
   cwd: root, encoding: 'utf8', shell: false,
@@ -25,7 +26,7 @@ function assertReleaseAncestry(localCommit, remoteCommit, runGit = args => spawn
 
 async function main(args = process.argv.slice(2), { getState = sourceState, execute = run,
   readRemote = readRemoteJson, verifyRelease = checkRelease, checkAncestry = assertReleaseAncestry,
-  getBackendFingerprints = gitBackendFingerprints, readMain = readPublishedMain, log = console.log } = {}) {
+  getBackendFingerprints = gitBackendFingerprints, readMain = readPublishedMain, checkNetwork = checkHostingApi, log = console.log } = {}) {
   if (args.some(arg => !['--initialize-record', '--dry-run', '--require-main'].includes(arg))) throw new Error('사용법: deploy:hosting [--dry-run] [--initialize-record] [--require-main]');
   // Project/site are read from the existing config; this command does not create cloud resources.
   const config = JSON.parse(fs.readFileSync(path.join(root, 'firebase.json'), 'utf8'));
@@ -42,7 +43,8 @@ async function main(args = process.argv.slice(2), { getState = sourceState, exec
   if (state.dirty) throw new Error('변경 사항을 먼저 커밋해 주세요. 커밋한 버전만 배포할 수 있습니다.');
   const initialize = args.includes('--initialize-record');
   const requireMain = args.includes('--require-main');
-  if (requireMain) assertPublishedMain(state.commit, readMain);
+  if (requireMain) await assertPublishedMain(state.commit, readMain);
+  await checkNetwork(project);
   async function readBaseline() {
     try { return await readRemote(base, 'release.json', { allowMissing: initialize }); }
     catch (error) { throw new Error(`사이트의 이전 배포 기록을 확인할 수 없습니다. ${error.message}`, { cause: error }); }
@@ -76,7 +78,7 @@ async function main(args = process.argv.slice(2), { getState = sourceState, exec
   if (latest) checkAncestry(state.commit, latest.commit);
   if (latest?.commit !== remote?.commit) throw new Error('검사 중 운영 배포 버전이 바뀌었습니다. 최신 운영 버전을 기준으로 다시 검증해 주세요.');
   // Standard firebase predeploy hooks remain active, including the final build check.
-  if (requireMain) assertPublishedMain(state.commit, readMain);
+  if (requireMain) await assertPublishedMain(state.commit, readMain);
   execute(invocation.command, invocation.args, requireMain
     ? { env: { ...process.env, CY_DEPLOY_MAIN_COMMIT: state.commit } } : undefined);
   await verifyRelease(base);

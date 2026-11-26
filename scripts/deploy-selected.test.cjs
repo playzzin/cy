@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { selectedTarget, deploySelected } = require('./deploy-selected.cjs');
-const { main: deployHosting, assertReleaseAncestry } = require('./deploy-verified.cjs');
+const { main: runHosting, assertReleaseAncestry } = require('./deploy-verified.cjs');
 
 const state = { commit: 'synthetic-commit', dirty: false, fingerprints: {
   hosting: 'web', functions: 'server', firestore: 'rules', storage: 'storage', deployment: 'config',
@@ -9,6 +9,7 @@ const state = { commit: 'synthetic-commit', dirty: false, fingerprints: {
 const remote = { ...state, schemaVersion: 1, assetManifestHash: 'assets' };
 const fail = () => { throw new Error('Unexpected side effect'); };
 const quiet = () => {};
+const deployHosting = (args, options) => runHosting(args, { checkNetwork: quiet, ...options });
 
 test('deploy:main requires the same pushed commit before checks and again before uploading', async () => {
   assert.equal(require('../package.json').scripts['deploy:main'], 'node scripts/deploy-verified.cjs --require-main');
@@ -59,10 +60,10 @@ test('the last production predeploy hook checks the built and published commits 
   const expected = childOptions.env.CY_DEPLOY_MAIN_COMMIT;
   assert.equal(expected, commit);
   assert.match(require('../firebase.json').hosting.predeploy.at(-1), /verify-hosting-target\.cjs production$/);
-  assert.doesNotThrow(() => verifyMainBuild(expected, built, () => commit));
-  assert.throws(() => verifyMainBuild(expected, built, () => 'b'.repeat(40)), /GitHub main/);
-  assert.throws(() => verifyMainBuild(expected, { ...built, dirty: true }, fail), /빌드한 커밋/);
-  assert.throws(() => verifyMainBuild(expected, { ...built, commit: 'different' }, fail), /빌드한 커밋/);
+  await verifyMainBuild(expected, built, () => commit);
+  await assert.rejects(verifyMainBuild(expected, built, () => 'b'.repeat(40)), /GitHub main/);
+  await assert.rejects(verifyMainBuild(expected, { ...built, dirty: true }, fail), /빌드한 커밋/);
+  await assert.rejects(verifyMainBuild(expected, { ...built, commit: 'different' }, fail), /빌드한 커밋/);
 });
 
 test('v1 records allow staging-only config changes after checking the recorded hash, while production changes still block', async () => {

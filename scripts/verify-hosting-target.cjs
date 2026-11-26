@@ -11,7 +11,7 @@ function assertHostingDirectory(publicDirectory, workspaceRoot = path.resolve(__
     }
 }
 module.exports = { assertHostingTarget, assertHostingDirectory };
-if (require.main === module) {
+async function main() {
     loadBuildEnvironment();
     const environment = process.argv[2];
     const config = JSON.parse(fs.readFileSync(path.join(__dirname, '..', environment === 'staging' ? 'firebase.staging.json' : 'firebase.json'), 'utf8'));
@@ -19,6 +19,7 @@ if (require.main === module) {
     assertHostingDirectory(config.hosting.public, undefined, buildEnvironment);
     const release = JSON.parse(fs.readFileSync(path.join(resolveBuildDirectory(undefined, buildEnvironment), 'release.json'), 'utf8'));
     assertHostingTarget(release, environment);
-    if (environment === 'production') require('./published-main.cjs').verifyMainBuild(process.env.CY_DEPLOY_MAIN_COMMIT, release);
+    await require('./published-main.cjs').verifyMainBuild(process.env.CY_DEPLOY_MAIN_COMMIT, release);
     console.log('배포 주소와 데이터 연결 일치 확인');
 }
+if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

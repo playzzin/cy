@@ -2,12 +2,27 @@
 
 ## 웹 배포
 
-운영 담당자는 GitHub `main`의 검증된 커밋에서 `npm run deploy:main`을 실행합니다. `release:deploy`와 `deploy:hosting`도 같은 절차를 사용합니다. 전체 검사 전, Firebase CLI 실행 직전, Firebase 사전 빌드가 끝난 직후에 GitHub `main`을 확인합니다. 검사하거나 빌드하는 중 다른 PC가 `main`을 갱신하면 업로드 전에 중단합니다.
+1. 9950X의 작업 브랜치에서 수정하고 로컬로 확인한다. 커밋·푸시 후 `develop` 대상 PR을 열고 **Quality Gate → verify**가 성공하면 병합한다.
+2. 운영에 올릴 때 `develop`에서 `main`으로 PR을 연다. 이번에 나갈 변경과 검사 결과를 확인하고 병합한다.
+3. `main` 커밋의 Quality Gate가 성공하면 **Firebase Hosting release**가 운영 웹을 자동 배포한다. Actions에서 배포 성공을 확인하고, [운영 버전 기록](https://cyee-9c1e4.web.app/release.json)의 `commit`과 배포한 커밋을 대조한다. 실제 사이트에서 바뀐 화면을 확인한다.
 
-1. 변경 파일을 검토하고 커밋·푸시한다. 개인 자료나 비밀 설정은 포함하지 않는다.
-2. GitHub Quality Gate 성공을 확인한다.
-3. 깨끗한 운영 작업 폴더에서 `npm run deploy:main`을 실행한다. 완료 시 출력된 커밋과 운영 사이트의 배포 기록을 확인한다.
-4. 실제 사이트에서 수정한 업무 흐름을 확인한 뒤 요청자에게 확인 방법을 남긴다.
+서버 함수·권한·인덱스가 포함된 배포는 아래의 [별도 서버 배포 절차](#서버-기능권한인덱스-변경)를 먼저 확인한다. 최신 운영 버전을 포함하지 않거나 서버 변경이 확인되지 않으면 웹 배포가 중단된다.
+
+### GitHub 또는 Firebase에 연결되지 않을 때
+
+`npm run deploy:check`는 GitHub의 현재 `main`, 두 Firebase Hosting API, 검증·운영 사이트의 실제 배포 버전을 읽는다. 한 곳만 볼 때는 `npm run deploy:check -- staging`이나 `npm run deploy:check -- production`을 쓴다. `ENOTFOUND`는 해당 실행 환경의 DNS 조회 실패다. 공식 Git 전송이 실패하면 배포 명령은 GitHub의 HTTPS API에서 같은 저장소의 현재 `main`을 확인한다. 두 방법이 모두 실패하면 업로드를 중단한다. Hosting API의 HTTPS 연결은 타입 검사·빌드 전에 확인한다. 실제 업로드 권한은 Firebase CLI가 검사한다.
+
+### GitHub에서 Hosting 배포
+
+Hosting 배포 코드를 변경하는 이 저장소의 `main` 대상 PR에는 **Hosting connectivity** 검사가 표시된다. GitHub 실행기가 배포 권한 없이 현재 `main`, 두 Hosting API와 두 사이트의 `release.json`을 조회한다. 로컬에서 DNS 오류가 났을 때 이 결과로 GitHub 실행기에서도 같은 문제가 있는지 확인할 수 있다. 단일 사이트를 배포할 때는 선택한 사이트의 연결과 배포 기록만 검사한다.
+
+검증 사이트에 수동으로 공유하거나 같은 버전을 다시 배포할 때는 GitHub **Actions → Firebase Hosting release → Run workflow**에서 `main`과 대상 사이트를 선택한다. 기본은 `staging`이며, 운영에 다시 게시할 때는 `production`을 선택한다. 두 대상 모두 현재 `main`의 Quality Gate 성공 기록을 확인한다.
+
+### 처음 연결할 때
+
+배포 워크플로가 GitHub 기본 브랜치인 `main`에 있어야 한다. 각 GitHub Environment(`staging`, `production`)에 `CY_HOSTING_WIF_PROVIDER`를 설정한다. 서비스 계정을 가장하는 구성은 `CY_HOSTING_SERVICE_ACCOUNT`도 지정한다. Google Cloud의 신뢰 조건은 저장소 ID `1121336004`, 소유자 ID `221525849`, `refs/heads/main`, 해당 Environment와 Hosting 업로드 워크플로로 제한한다. 각 배포 주체에 해당 프로젝트의 Hosting 배포 권한만 부여한다. 기존 Firebase 연동에서는 프로젝트 전용 시크릿 `FIREBASE_SERVICE_ACCOUNT_CY_ERP_STAGING_9C1E4` 또는 `FIREBASE_SERVICE_ACCOUNT_CYEE_9C1E4`를 사용할 수 있다.
+
+운영 웹 설정은 운영 사이트의 Firebase 공개 설정에서 읽는다. 워크플로는 새 서비스 계정이나 키를 생성하지 않는다. Google Cloud 연결 설정은 [배포 파이프라인용 Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)에 설명되어 있다.
 
 배포할 커밋은 현재 운영 `release.json`에 기록된 커밋을 Git 이력에 포함해야 한다. 운영보다 이전에 만든 작업 폴더나 별도 브랜치에서는 최신 운영 변경을 먼저 합친다. 배포 명령은 이 조건과 검사 중 운영 버전 변경 여부를 확인하며, `--initialize-record`도 이력 검사를 생략하지 않는다.
 
@@ -17,14 +32,11 @@
 
 `npm run release:verify`는 운영 사이트의 웹 버전과 현재 커밋·배포 파일을 비교한다. 다른 검증 사이트는 `npm run release:verify -- https://검증사이트.web.app`으로 확인한다. 기록이 없거나 통신에 실패하면 성공으로 처리하지 않는다.
 
-## 검사 재사용과 실행 순서
+## 로컬 검사와 수동 배포
 
 저장소 안쪽에 만든 릴리스 작업 폴더도 상위 폴더의 npm 설치를 사용할 수 있습니다. 두 폴더의 `package-lock.json`이 일치하고 중간에 일부 패키지만 설치된 폴더가 없으면 빌드와 검사에서 같은 설치 기록을 사용합니다. 소스, 실행 환경, 출력 파일과 테스트 유효기간에 대한 기존 검사는 계속 적용됩니다.
 
-1. 서버 자원 설정 등 배포에 필요한 코드 수정을 먼저 마무리한다. 전체 검사를 마친 뒤 소스를 다시 수정하면 통과 기록을 재사용할 수 없다.
-2. 최종 소스에서 `npm run verify:project`를 한 번 실행하고 커밋·푸시한다. 같은 파일 내용으로 커밋만 만든 경우 React 검사 기록은 유지된다.
-3. GitHub Quality Gate의 최종 `verify` 성공을 확인한다. `frontend`, `server`, `rules`는 독립적으로 실행하며, 하나라도 실패·취소·생략되면 `verify`도 실패한다. CI에서는 로컬 통과 기록을 재사용하지 않는다.
-4. 필요한 서버 배포·확인 후 웹 배포 명령을 실행한다. 같은 작업 폴더에서 소스·설정·설치 의존성·실행 환경·날짜가 같고 1시간 이내면 전체 React 검사 통과 기록을 재사용한다. 검증 생략 옵션은 사용하지 않는다.
+GitHub Quality Gate가 `frontend`, `server`, `rules` 전체를 검사한다. 로컬에서 전체 검사가 필요할 때는 `npm run verify:project`를 실행한다. Firebase 권한이 있는 로컬 환경에서 웹을 수동 배포할 때는 Quality Gate가 성공한 최신 `main`의 깨끗한 작업 폴더에서 `npm run deploy:main`을 실행한다. 같은 폴더에서 소스·설정·설치 의존성·실행 환경·날짜가 같고 1시간 이내면 전체 React 검사 통과 기록을 재사용한다.
 
 React 검사 환경에서는 npm 호출 설명과 `CODEX_TOOL_CALL_ID`만 제거한다. 이 값들은 테스트 자식 프로세스에도 전달하지 않는다. 실제 앱 환경 변수, `PATH`, 임시 폴더, 알 수 없는 환경 변수는 계속 검증 입력에 포함한다. 외부 엑셀 자료·에뮬레이터를 사용하는 검사, 선택 검사, 강제 검사 및 실패한 검사는 재사용하지 않는다.
 
