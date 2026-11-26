@@ -56,6 +56,50 @@ test('reconnects when a previously idle proxy connection aborts before publicati
     }
 });
 
+test('retries a proxy reset and a body interrupted after HTTP 200, with one retry per file', async () => {
+    const reset = Object.assign(new Error('socket reset'), { name: 'FetchError', code: 'ECONNRESET' });
+    for (const fail of [
+        () => { throw reset; },
+        () => new Response(new ReadableStream({ start(controller) { controller.error(reset); } }),
+            { headers: { 'content-type': 'application/json' } }),
+    ]) {
+        for (const recover of [true, false]) {
+            let requests = 0;
+            const result = readRemoteJson('https://example.test', 'release.json', {
+                wait: async () => {},
+                request: async () => (++requests === 2 && recover) ? Response.json(local) : fail(),
+            });
+            if (recover) assert.deepEqual(await result, local);
+            else await assert.rejects(result, /example\.test\/release\.json.*ECONNRESET/);
+            assert.equal(requests, 2);
+        }
+    }
+});
+
+test('keeps an invalid JSON record distinct from a temporary transport failure', async () => {
+    let requests = 0;
+    await assert.rejects(readRemoteJson('https://example.test', 'release.json', {
+        request: async () => {
+            requests++;
+            return new Response('{', { headers: { 'content-type': 'application/json' } });
+        },
+    }), SyntaxError);
+    assert.equal(requests, 1);
+});
+
+test('retries a native fetch timeout with a numeric DOMException code', async () => {
+    let requests = 0;
+    const record = await readRemoteJson('https://example.test', 'release.json', {
+        wait: async () => {},
+        request: async () => {
+            if (++requests === 1) throw new DOMException('timed out', 'TimeoutError');
+            return Response.json(local);
+        },
+    });
+    assert.deepEqual(record, local);
+    assert.equal(requests, 2);
+});
+
 test('waits for release and asset manifests to converge without rebuilding or redeploying', async () => {
     let round = 0;
     const pauses = [];
