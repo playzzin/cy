@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBuilding, faFileInvoiceDollar, faFileExcel, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faBoxArchive, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory, faSearch, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
+import { format, isValid, parseISO, subMonths } from 'date-fns';
 import Swal from 'sweetalert2';
 import { iconMap } from '../../constants/iconMap';
 import { accommodationService } from '../../services/accommodationService';
@@ -40,6 +41,7 @@ import { SupportCancellationHistory } from '../../components/support/SupportCanc
 import { SupportCancellationModal, type SupportCancellationFormValue } from '../../components/support/SupportCancellationModal';
 import { supportCancellationLogService } from '../../services/supportCancellationLogService';
 import { getContrastingTextColor } from '../../utils/color';
+import { getKoreanDateKey } from '../../utils/koreanBusinessDate';
 import { getSupportManagementYearMonth, subscribeSupportManagementYearMonth } from '../../utils/supportManagementState';
 import { getAccommodationContractAmounts, overlapsAccommodationMonth } from '../../utils/accommodationMonthSummary';
 import { getAccommodationStatusForMonth, isAccommodationContractInMonth, isAccommodationBillingEndMonth, getAccommodationBillingEndMonth } from '../../utils/accommodationLifecycle';
@@ -90,6 +92,14 @@ const getContractEndDateInfo = (rawDate?: string) => {
     };
 };
 
+const shouldHighlightContractEndDate = (endDate: string, today: string): boolean => {
+    const dateKey = endDate.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return false;
+
+    const expirationDate = parseISO(dateKey);
+    return isValid(expirationDate) && today >= format(subMonths(expirationDate, 3), 'yyyy-MM-dd');
+};
+
 const normalizeSortKey = (value: unknown): string => String(value ?? '').trim();
 
 const compareTeamThenAccommodation = (leftTeam: string, rightTeam: string, leftName: string, rightName: string): number => {
@@ -138,6 +148,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
     const [savingCancellation, setSavingCancellation] = useState(false);
     const [filterStatus, setFilterStatus] = useState<AccommodationStatusFilter>('active');
     const [viewMode, setViewMode] = useState<'list' | 'card'>(getInitialSupportViewMode);
+    const todayDateKey = getKoreanDateKey();
 
     // Team Search State
     const [teams, setTeams] = useState<Team[]>([]);
@@ -2017,7 +2028,6 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                                         const tc = primaryTeamInfo?.color;
                                                         const tcText = tc ? getContrastingTextColor(tc) : undefined;
                                                         const paymentDay = acc.contract.paymentDay || acc.contract.rentPayDate;
-                                                        const isContractExpired = acc.contract.endDate && new Date(acc.contract.endDate) < new Date();
 
                                                         const needsWork = acc.status === 'active' && activeList.length === 0;
 
@@ -2204,7 +2214,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     {acc.contract.endDate ? (
-                                                                        <span className={`text-xs font-medium ${isContractExpired ? 'text-rose-500 font-bold' : 'text-slate-500'}`}>
+                                                                        <span className={`text-xs ${shouldHighlightContractEndDate(acc.contract.endDate, todayDateKey) ? 'font-bold text-red-700' : 'font-medium text-slate-500'}`}>
                                                                             {acc.contract.endDate}
                                                                         </span>
                                                                     ) : (
@@ -2487,8 +2497,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({
                                                         </div>
 
                                                         {acc.contract.endDate && (
-                                                            <div className={`mt-4 pt-3 border-t border-dashed text-xs text-center font-medium
-                                                            ${new Date(acc.contract.endDate) < new Date() ? 'text-rose-500 bg-rose-50 rounded-lg py-1.5' : 'text-slate-400'}
+                                                            <div className={`mt-4 pt-3 border-t border-dashed text-xs text-center
+                                                            ${shouldHighlightContractEndDate(acc.contract.endDate, todayDateKey) ? 'font-bold text-red-700 bg-red-50 rounded-lg py-1.5' : 'font-medium text-slate-400'}
                                                         `}>
                                                                 계약만료: {acc.contract.endDate}
                                                             </div>
