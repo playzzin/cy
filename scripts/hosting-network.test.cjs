@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { checkHostingApi } = require('./hosting-network.cjs');
-const { readPublishedMain, assertPublishedMain } = require('./published-main.cjs');
+const { readPublishedMain, assertPublishedMain, assertGitHubQualityGate } = require('./published-main.cjs');
 const { main: diagnose } = require('./check-hosting-network.cjs');
 const { main: deployStage } = require('./deploy-staging.cjs');
 const { main: deployProduction } = require('./deploy-verified.cjs');
@@ -99,6 +99,43 @@ test('production builds and live development load only the canonical Hosting app
   assert.throws(() => productionSettings({ ...config, apiKey: 'demo\nOTHER=value' }), /형식/);
 });
 
+test('hosted releases reuse only a successful push check for this exact canonical main commit', async () => {
+  const env = { GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'playzzin/cy', GITHUB_REF: 'refs/heads/main', GH_TOKEN: 'fixture-token' };
+  const passed = {
+    head_sha: commit, head_branch: 'main', event: 'push', conclusion: 'success',
+    head_repository: { full_name: 'playzzin/cy' },
+  };
+  const stub = runs => async (url, options) => {
+    const requestUrl = new URL(url);
+    assert.equal(requestUrl.origin, 'https://api.github.com');
+    assert.equal(requestUrl.pathname, '/repos/playzzin/cy/actions/workflows/quality.yml/runs');
+    assert.deepEqual(Object.fromEntries(requestUrl.searchParams), {
+      branch: 'main', event: 'push', status: 'success', head_sha: commit,
+    });
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.headers.Authorization, 'Bearer fixture-token');
+    return Response.json({ workflow_runs: runs });
+  };
+  await assertGitHubQualityGate(commit, { env, request: stub([passed]) });
+  for (const mismatch of [
+    { head_sha: 'b'.repeat(40) }, { event: 'pull_request' }, { head_branch: 'develop' },
+    { conclusion: 'failure' }, { head_repository: { full_name: 'someone/cy' } },
+  ]) {
+    await assert.rejects(assertGitHubQualityGate(commit, { env, request: stub([{ ...passed, ...mismatch }]) }), /Quality Gate 성공/);
+  }
+  await assert.rejects(assertGitHubQualityGate(commit, { env: {}, request: unexpected }), /운영 브랜치 배포/);
+});
+
+test('Firebase CLI diagnostics report statuses and source locations without raw log data', () => {
+  const { diagnostics } = require('./firebase-deploy-diagnostics.cjs');
+  assert.deepEqual(diagnostics([
+    '[debug] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/cy?key=fixture-private-value 403',
+    '[debug] <<< [apiv2][body] {"access_token":"fixture-private-value"}',
+    '[debug] TypeError: fixture-private-value',
+    '    at run (/runner/node_modules/firebase-tools/lib/requireAuth.js:36:11)',
+  ].join('\n')), ['GET firebase.googleapis.com → HTTP 403', 'TypeError', 'firebase-tools/lib/requireAuth.js:36:11']);
+});
+
 test('successful main pushes deploy production, and manual retries must verify the selected main commit', () => {
   const fs = require('node:fs');
   const path = require('node:path');
@@ -138,5 +175,5 @@ test('successful main pushes deploy production, and manual retries must verify t
   assert.equal(job.environment, '${{ inputs.target }}');
   assert.equal(job.steps.find(step => step.uses?.startsWith('actions/checkout@')).with.ref, '${{ inputs.revision }}');
   assert.ok(job.steps.find(s => s.name === 'Deploy and verify staging').env.CY_DEPLOY_MAIN_COMMIT);
-  assert.ok(job.steps.some(s => s.run === 'npm run deploy:main'));
+  assert.ok(job.steps.some(s => s.run === 'npm run deploy:main -- --checked-in-github' && s.env?.GH_TOKEN === '${{ github.token }}'));
 });

@@ -5,7 +5,7 @@ const { root, sourceState, compareRelease, sameSourceState, gitBackendFingerprin
 const { checkRelease, readRemoteJson } = require('./check-release.cjs');
 const { firebaseCommand, deploymentProject, run } = require('./deploy-selected.cjs');
 
-const { readPublishedMain, assertPublishedMain } = require('./published-main.cjs');
+const { readPublishedMain, assertPublishedMain, assertGitHubQualityGate } = require('./published-main.cjs');
 const { checkHostingApi } = require('./hosting-network.cjs');
 
 function assertReleaseAncestry(localCommit, remoteCommit, runGit = args => spawnSync('git', args, {
@@ -26,15 +26,23 @@ function assertReleaseAncestry(localCommit, remoteCommit, runGit = args => spawn
 
 async function main(args = process.argv.slice(2), { getState = sourceState, execute = run,
   readRemote = readRemoteJson, verifyRelease = checkRelease, checkAncestry = assertReleaseAncestry,
-  getBackendFingerprints = gitBackendFingerprints, readMain = readPublishedMain, checkNetwork = checkHostingApi, log = console.log } = {}) {
-  if (args.some(arg => !['--initialize-record', '--dry-run', '--require-main'].includes(arg))) throw new Error('사용법: deploy:hosting [--dry-run] [--initialize-record] [--require-main]');
+  getBackendFingerprints = gitBackendFingerprints, readMain = readPublishedMain, checkNetwork = checkHostingApi,
+  verifyQualityGate = assertGitHubQualityGate, log = console.log } = {}) {
+  const requireMain = args.includes('--require-main');
+  const useGitHubChecks = args.includes('--checked-in-github');
+  if (args.some(arg => !['--initialize-record', '--dry-run', '--require-main', '--checked-in-github'].includes(arg))
+      || (useGitHubChecks && (!requireMain || args.includes('--initialize-record')))) {
+    throw new Error('사용법: deploy:hosting [--dry-run] [--initialize-record] [--require-main]');
+  }
   // Project/site are read from the existing config; this command does not create cloud resources.
   const config = JSON.parse(fs.readFileSync(path.join(root, 'firebase.json'), 'utf8'));
   const project = deploymentProject();
   const base = `https://${config.hosting.site}.web.app`;
   const invocation = firebaseCommand(project, 'hosting');
   log(`배포 대상: ${project} / hosting`);
-  log('프런트 타입 검사·React 테스트 → Hosting 사전 빌드·검증 → Hosting 배포 → 반영 확인. Functions 빌드는 제외합니다.');
+  log(useGitHubChecks
+    ? 'GitHub Quality Gate 확인 → 운영 Hosting 빌드·검증 → 배포 → 운영 버전 확인.'
+    : '프런트 타입 검사·React 테스트 → Hosting 사전 빌드·검증 → Hosting 배포 → 반영 확인. Functions 빌드는 제외합니다.');
   if (args.includes('--dry-run')) {
     log('실행 계획만 확인했습니다. 검사·빌드·네트워크 요청·배포는 실행하지 않았습니다.');
     return invocation;
@@ -42,7 +50,6 @@ async function main(args = process.argv.slice(2), { getState = sourceState, exec
   const state = getState();
   if (state.dirty) throw new Error('변경 사항을 먼저 커밋해 주세요. 커밋한 버전만 배포할 수 있습니다.');
   const initialize = args.includes('--initialize-record');
-  const requireMain = args.includes('--require-main');
   if (requireMain) await assertPublishedMain(state.commit, readMain);
   await checkNetwork(project);
   async function readBaseline() {
@@ -70,7 +77,8 @@ async function main(args = process.argv.slice(2), { getState = sourceState, exec
   }
   if ((!comparison.known || backend.length) && !initialize) throw new Error(`서버·설정 변경을 먼저 별도 검증하고 배포해야 합니다: ${backend.join(', ')}. 작업 기록을 확인한 뒤 --initialize-record로 새 기준을 설정하세요.`);
   if (remote && !comparison.known) throw new Error('운영 배포 기록 형식을 확인할 수 없습니다.');
-  execute(process.execPath, [path.join(root, 'scripts', 'verify-project-health.js'), '--scope=hosting']);
+  if (useGitHubChecks) await verifyQualityGate(state.commit);
+  else execute(process.execPath, [path.join(root, 'scripts', 'verify-project-health.js'), '--scope=hosting']);
   if (!sameSourceState(state, getState())) throw new Error('검사 전후 코드가 바뀌었습니다. 배포 전에 다시 검사해 주세요.');
   // Another release may have completed during the checks. Never overwrite a
   // version that was not included in the source we just verified.

@@ -22,6 +22,7 @@ jobs:
       group: firebase-hosting-${{ inputs.target }}
       cancel-in-progress: false
     permissions:
+      actions: read
       contents: read
       id-token: write
     env:
@@ -45,7 +46,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm install --global firebase-tools@15.1.0
+      - run: npm install --global firebase-tools@15.37.0
       - name: Prepare public production web configuration
         if: inputs.target == 'production'
         run: node scripts/ci-hosting-web-config.cjs
@@ -56,6 +57,8 @@ jobs:
           workload_identity_provider: ${{ vars.CY_HOSTING_WIF_PROVIDER }}
           service_account: ${{ vars.CY_HOSTING_SERVICE_ACCOUNT }}
           credentials_json: ${{ !vars.CY_HOSTING_WIF_PROVIDER && secrets.existing_deploy_key || '' }}
+      - name: Check access to the selected Hosting site
+        run: firebase hosting:sites:get "$PROJECT_ID" --project "$PROJECT_ID" --non-interactive
       - name: Deploy and verify staging
         if: inputs.target == 'staging'
         env:
@@ -63,4 +66,9 @@ jobs:
         run: npm run staging:deploy
       - name: Deploy and verify production
         if: inputs.target == 'production'
-        run: npm run deploy:main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run deploy:main -- --checked-in-github
+      - name: Report Firebase CLI errors without credentials
+        if: failure()
+        run: node scripts/firebase-deploy-diagnostics.cjs
