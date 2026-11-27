@@ -1,3 +1,4 @@
+import { hostedReadCallable } from './hostedReadCallable';
 import {
     Timestamp,
     collection,
@@ -201,7 +202,7 @@ export const noticeService = {
                 await auth.authStateReady();
                 if (cancelled) return;
                 const account = auth.currentUser;
-                const response = await httpsCallable<void, { notices: DocumentData[]; access: NoticeBoardAccess }>(functions, 'getNoticeBoard')();
+                const response = await hostedReadCallable<void, { notices: DocumentData[]; access: NoticeBoardAccess }>('getNoticeBoard')();
                 if (cancelled || auth.currentUser !== account) return;
                 onAccess?.(response.data.access);
                 callback(sortNotices(response.data.notices.map(item => normalizeNotice(item.id, item))));
