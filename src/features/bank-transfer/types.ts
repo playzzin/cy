@@ -35,17 +35,20 @@ export interface SupportTransferDetail {
     }[];
 }
 
-export interface TransferCandidate {
+export interface TransferBankAccount {
+    bankName: string;
+    bankCode: string;
+    accountNumber: string;
+    accountHolder: string;
+}
+
+export interface TransferCandidate extends TransferBankAccount {
     id: string;
     source: TransferSource;
     sourceId: string;
     name: string;
     groupName: string;
     category: AccountCategory;
-    bankName: string;
-    bankCode: string;
-    accountNumber: string;
-    accountHolder: string;
     amount: number;
     period: string;
     detail: string;
@@ -56,6 +59,8 @@ export interface TransferCandidate {
     accountTeamLabel?: string;
     teamAffiliation?: AccountTeamAffiliation;
     payrollDetail?: PayrollTransferDetail;
+    payrollPersonalAccount?: TransferBankAccount;
+    usesPrimaryAccount?: boolean;
     supportDetail?: SupportTransferDetail;
     /** Amount captured when a source item was added; manual accounts have no source amount. */
     originalAmount?: number;
