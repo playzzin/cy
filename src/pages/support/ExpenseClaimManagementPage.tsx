@@ -376,7 +376,7 @@ const ExpenseClaimManagementPage: React.FC<ExpenseClaimManagementPageProps> = ({
     officeExpenseCategoryOptions,
     rawDocs,
     loadData
-  } = useExpenseLedgerData(yearMonth, 'all', 'all', true);
+  } = useExpenseLedgerData(yearMonth, 'all', 'all', { includeDailyReports: true });
 
   const loadFixedExpenses = useCallback(async () => {
     setFixedExpenseLoading(true);

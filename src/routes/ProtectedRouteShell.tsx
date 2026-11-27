@@ -17,7 +17,7 @@ import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { canReuseScopedWorkerClaims, resolveAccountOnboardingMode } from '../utils/accountOnboardingState';
 import TeamWorkflowGate from './TeamWorkflowGate';
 import { INVESTMENT_PATH } from '../constants/siteModes';
-import { TEAM_SITE_PATH } from '../constants/teamWorkflowActions';
+import { getTeamMenuPage } from './teamMenuPages';
 
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { status, result } = useWorkerTeamIdMigration();
@@ -204,14 +204,18 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
 
 const ProtectedRouteShell: React.FC = () => {
   const { pathname } = useLocation();
-  const hasSelfContainedRequestData = [
-    '/manpower/team-worker-requests',
+  const path = pathname.replace(/\/+$/, '');
+  const hasSelfContainedRequestData = Boolean(getTeamMenuPage(path)) || [
     '/manpower/team-account-approvals',
-    '/support/team-expense-requests',
     '/jeonkuk/recruitment',
-    TEAM_SITE_PATH,
+    '/memos',
+    '/materials/master',
+    '/materials/inbound',
+    '/materials/outbound',
+    '/materials/inbound-certificate',
+    '/materials/outbound-certificate',
     INVESTMENT_PATH,
-  ].includes(pathname.replace(/\/+$/, ''));
+  ].includes(path);
   return (
     <AccountOnboardingGate>
       <MigrationRunner>

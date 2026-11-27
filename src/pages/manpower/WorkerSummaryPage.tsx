@@ -6,7 +6,6 @@ import { companyService } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCopy, faSearch, faFilter, faPaperPlane, faXmark, faArrowRight, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { toast } from '../../utils/swal';
-import html2canvas from 'html2canvas';
 import { saveAs } from 'file-saver';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { getTeamScopedRows } from '../../services/teamScopedReadService';
@@ -642,7 +641,8 @@ const WorkerSummaryPage: React.FC = () => {
     }, [selectedWorkerIds, workers]);
 
     const captureSummaryImageBlob = async (): Promise<Blob> => {
-        if (!summaryRef.current) {
+        const table = summaryRef.current;
+        if (!table) {
             throw new Error('요약 테이블을 찾을 수 없습니다.');
         }
 
@@ -658,7 +658,8 @@ const WorkerSummaryPage: React.FC = () => {
                 table.style.minWidth = '1080px';
             }
         };
-        const canvas = await html2canvas(summaryRef.current, captureOptions);
+        const { default: html2canvas } = await import('html2canvas');
+        const canvas = await html2canvas(table, captureOptions);
 
         return await new Promise<Blob>((resolve, reject) => {
             canvas.toBlob((blob) => {

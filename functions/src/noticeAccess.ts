@@ -7,6 +7,7 @@ const list = (value: unknown): string[] => {
     if (typeof value === 'string') { try { return list(JSON.parse(value)); } catch { return value.split(',').map(text).filter(Boolean); } }
     return Array.isArray(value) ? [...new Set(value.map(text).filter(Boolean))] : [];
 };
+export const noticeLinkedWorkerIds = (user: Row) => list(user.linkedWorkerIds);
 export const activeNoticeUser = (user: Row | undefined): user is Row => !!user && user.isActive !== false && (!user.status || user.status === 'active');
 const managerRoles = new Set(['admin', 'administrator', 'superadmin', 'owner', 'manager', '관리자', '사장', '실장', '매니저', 'dev', 'developer', 'systemadmin', '개발', '개발자', '시스템관리자']);
 const leaderRoles = new Set(['팀장', '반장', 'teamlead', 'teamleader', 'foreman']);
@@ -20,7 +21,7 @@ export function isNoticeManager(user: Row | undefined, menu: Row = {}): boolean 
 }
 const activeWorker = (worker: Row) => worker.isActive !== false && !['퇴사', 'inactive', 'retired', 'archived', 'suspended'].includes(text(worker.status));
 export function noticeIdentity(user: Row, workers: Row[], teams: Row[], menu: Row = {}) {
-    const linked = list(user.linkedWorkerIds);
+    const linked = noticeLinkedWorkerIds(user);
     const ownWorkers = workers.filter(worker => activeWorker(worker) && (
         (user.uid && worker.uid === user.uid)
         || linked.some(id => [worker.id, worker.legacyId].includes(id)
