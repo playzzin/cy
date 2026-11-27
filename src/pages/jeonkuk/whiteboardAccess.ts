@@ -33,14 +33,14 @@ const indexById = <T extends { id?: string; legacyId?: string | null }>(rows: T[
 // Only the server's authenticated team scope can grant access. URL filters and
 // the shared master-data cache must never be used as authorization evidence.
 export const loadWhiteboardTeamAccess = async (): Promise<WhiteboardTeamAccess | null> => {
-    const teams = await getTeamScopedRows<Team>('teams');
-    if (teams === null) return null;
-    if (!teams.length) throw new Error('연결된 소속 팀을 확인해 주세요.');
-    const [sites, workers] = await Promise.all([
+    const [teams, sites, workers] = await Promise.all([
+        getTeamScopedRows<Team>('teams'),
         getTeamScopedRows<Site>('sites'),
         getTeamScopedRows<Worker>('workers'),
     ]);
-    if (sites === null || workers === null) throw new Error('조회 권한을 다시 확인해 주세요.');
+    if (teams === null && sites === null && workers === null) return null;
+    if (teams === null || sites === null || workers === null) throw new Error('조회 권한을 다시 확인해 주세요.');
+    if (!teams.length) throw new Error('연결된 소속 팀을 확인해 주세요.');
     const teamById = indexById(teams);
     return {
         teams,
