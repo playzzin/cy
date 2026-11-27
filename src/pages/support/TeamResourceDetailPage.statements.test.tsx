@@ -51,6 +51,7 @@ const setBills = (cardDocs: CardBillingDocument[], vehicleDocs: VehicleBillingDo
 const openTab = async (tab: '카드' | '차량' = '카드') => {
     render(<TeamResourceDetailPage />);
     await waitFor(() => expect(screen.getByRole('button', { name: '새로고침' })).toBeEnabled());
+    expect(cardService.getTransactionsByMonth).not.toHaveBeenCalled();
     // eslint-disable-next-line testing-library/no-unnecessary-act -- Also flush the async expense fetch before this helper returns.
     await act(async () => { fireEvent.click(within(screen.getByRole('tablist', { name: '지원 상세 선택' })).getByRole('tab', { name: new RegExp(`^${tab}`) })); });
     return screen.getAllByRole('table')[0];

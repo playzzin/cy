@@ -34,7 +34,7 @@ const reviewerRoles = new Set(['admin', 'administrator', 'superadmin', 'owner', 
 const roleFields = ['role', 'position', 'systemRole', 'accountType', 'roles', 'additionalPositions'];
 const actorFields = ['status', ...roleFields, 'linkedWorkerIds', 'name', 'displayName', 'admin.positionConfig'];
 const workerScopeFields = ['isActive', 'status', 'role', 'teamId'];
-const teamScopeFields = ['isActive', 'name', 'color', 'icon', 'iconKey'];
+const teamScopeFields = ['isActive', 'name', 'color', 'icon', 'iconKey', 'legacyId'];
 
 export function resolvedRoleNames(profile: any, menu: any): string[] {
     const positions: Array<{ id: string; name: string }> = menu?.admin?.positionConfig || [];
@@ -74,7 +74,9 @@ export async function actorFor(uid: string, db: FirebaseFirestore.Firestore = ad
         db.collection('teams').where('legacyId', 'in', teamIds).select(...teamScopeFields).limit(100).get().then(snapshot => snapshot.docs),
     ]).then(results => results.flat()) : [];
     const teams = [...new Map(teamDocs.filter(doc => doc.exists && doc.data()?.isActive !== false).map(doc => [doc.id, { ...doc.data(), id: doc.id }])).values()];
-    return { uid, name: text(profile!.name || profile!.displayName) || '사용자', canReview, teams: teams.map((team: any) => ({ id: team.id, name: text(team.name), color: teamColor(team.color), icon: teamIcon(team) })) };
+    return { uid, name: text(profile!.name || profile!.displayName) || '사용자', canReview,
+        cardTeamRefs: teams.map((team: any) => ({ id: team.id as string, legacyId: text(team.legacyId) })),
+        teams: teams.map((team: any) => ({ id: team.id, name: text(team.name), color: teamColor(team.color), icon: teamIcon(team) })) };
 }
 
 async function categoriesFor(db: FirebaseFirestore.Firestore = admin.firestore()) {
@@ -94,16 +96,17 @@ async function categoriesFor(db: FirebaseFirestore.Firestore = admin.firestore()
 
 export async function readTeamExpenseRequestList(db: FirebaseFirestore.Firestore, actor: Awaited<ReturnType<typeof actorFor>>, input: any) {
     const yearMonth = month(input.yearMonth);
+    const formOnly = input.formOnly === true && !actor.canReview && input.cursor === undefined && input.pageSize === undefined;
     const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth)
         : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
     // These reads only depend on the freshly checked actor, not on each other.
     const [snapshot, directory, categories, paymentCards] = await Promise.all([
-        readRequestPage(scope, input),
+        formOnly ? Promise.resolve({ docs: [], nextCursor: null }) : readRequestPage(scope, input),
         actor.canReview || input.includeBillingTeams === true
             ? db.collection('teams').select('name', 'color', 'icon', 'iconKey').limit(1001).get()
             : Promise.resolve(null),
         categoriesFor(db),
-        input.includePaymentCards === true ? listExpensePaymentCards(db, actor.teams) : Promise.resolve(undefined),
+        input.includePaymentCards === true ? listExpensePaymentCards(db, actor.cardTeamRefs) : Promise.resolve(undefined),
     ]);
     if (directory && directory.size > 1000) fail('resource-exhausted', '팀 목록이 많습니다. 사무실에 문의해 주세요.');
     const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any))
@@ -112,7 +115,8 @@ export async function readTeamExpenseRequestList(db: FirebaseFirestore.Firestore
     // Old pages still use `teams` as the payer selector. The billing directory
     // continues to project only public team fields.
     const teams = directory ? directory.docs.map(teamOption).sort((a, b) => a.name.localeCompare(b.name, 'ko')) : actor.teams;
-    return { canReview: actor.canReview, payerTeams: actor.teams, teams, categories, requests, nextCursor: snapshot.nextCursor, ...(paymentCards ? { paymentCards } : {}) };
+    return { canReview: actor.canReview, payerTeams: actor.teams, teams, categories, requests, nextCursor: snapshot.nextCursor,
+        ...(formOnly ? { historyLoaded: false } : {}), ...(paymentCards ? { paymentCards } : {}) };
 }
 
 export const validateExpenseReceipt = (contentType: string, encoded: string): Buffer => {
@@ -219,8 +223,8 @@ export async function handleTeamExpenseRequest(input: any, context: functions.ht
         // Lock ownership/team before storage writes. Submitted receipts cannot
         // be changed, even by retrying an earlier upload from another tab.
         const existing = await db.runTransaction(async transaction => {
-            const row = (await transaction.get(ref)).data();
-            const saved = (await transaction.get(receiptRef)).data();
+            const [requestDoc, receiptDoc] = await transaction.getAll(ref, receiptRef);
+            const row = requestDoc.data(), saved = receiptDoc.data();
             if (row && (row.ownerUid !== actor.uid || row.teamId !== team!.id)) fail('permission-denied', '신청 정보를 확인해 주세요.');
             if (['discarding', 'discarded'].includes(row?.status)) fail('failed-precondition', '정리 중인 임시 신청입니다. 새로 작성해 주세요.');
             if (saved) {

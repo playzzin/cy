@@ -548,6 +548,22 @@ test('팀장 모바일은 탭 왕복 중 경비·첨부를 보존하고 제출 �
   } finally { view.unmount(); Object.defineProperty(window, 'matchMedia', { configurable: true, value: original }); }
 });
 
+test('팀장 모바일 등록은 내역을 기다리지 않고 내역 탭에서 처음 전체 목록을 받는다', async () => {
+  const original = window.matchMedia;
+  Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }) });
+  window.history.replaceState(null, '', window.location.pathname);
+  service.list.mockResolvedValueOnce({ ...data, requests: [], historyLoaded: false }).mockResolvedValue({ ...data, requests: [request] });
+  const view = render(<TeamMobileProvider enabled><TeamExpenseRequestPage /></TeamMobileProvider>);
+  try {
+    await screen.findByLabelText('금액 (원)');
+    expect(service.list).toHaveBeenCalledTimes(1);
+    expect(service.list).toHaveBeenCalledWith(expect.any(String), undefined, { formOnly: true });
+    fireEvent.click(screen.getByRole('tab', { name: '신청 내역' }));
+    await waitFor(() => expect(service.list).toHaveBeenCalledTimes(2));
+    expect(service.list).toHaveBeenLastCalledWith(expect.any(String), undefined, undefined);
+  } finally { view.unmount(); Object.defineProperty(window, 'matchMedia', { configurable: true, value: original }); }
+});
+
 test('팀장 모바일 범위에서도 사무실 승인 화면에는 신청 탭을 만들지 않는다', async () => {
   const original = window.matchMedia;
   Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() }) });

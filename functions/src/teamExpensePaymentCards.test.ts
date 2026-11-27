@@ -31,7 +31,7 @@ const fixture = () => {
 
 test('소속팀과 legacy ID에 배정된 사용 가능 카드만 최소 정보로 반환한다', async () => {
     const { db, reads } = fixture();
-    assert.deepEqual(await listExpensePaymentCards(db, [{ id: 'a' }]), [
+    assert.deepEqual(await listExpensePaymentCards(db, [{ id: 'a', legacyId: 'legacy-a' }]), [
         { id: 'a', label: '현장 경비 · 테스트카드 · •••• 1234', teamId: 'a' },
     ]);
     assert.deepEqual(reads, [['a', 'legacy-a']]);

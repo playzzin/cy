@@ -28,13 +28,14 @@ const call = async <T>(input: Record<string, unknown>): Promise<T> => {
   }
 };
 
-const list = (yearMonth: string, cursor?: string, options?: { forceReload?: boolean }) => {
-  const input = { action: 'list', yearMonth, includeBillingTeams: true, includePaymentCards: true, ...(cursor ? { cursor } : {}) };
+const list = (yearMonth: string, cursor?: string, options?: { forceReload?: boolean; formOnly?: boolean }) => {
+  const formOnly = options?.formOnly === true && !cursor;
+  const input = { action: 'list', yearMonth, includeBillingTeams: true, includePaymentCards: true, ...(cursor ? { cursor } : {}), ...(formOnly ? { formOnly } : {}) };
   const account = auth.currentUser;
   if (!account || isDevAdminSessionEnabled()) return call<TeamExpenseRequestData>(input);
   let requests = pendingLists.get(account);
   if (!requests) { requests = new Map(); pendingLists.set(account, requests); }
-  const key = JSON.stringify([account.uid, yearMonth, cursor || '']);
+  const key = JSON.stringify([account.uid, yearMonth, cursor || '', formOnly]);
   const existing = requests.get(key);
   if (existing && !options?.forceReload) return existing;
   const request = call<TeamExpenseRequestData>(input);

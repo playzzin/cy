@@ -71,16 +71,19 @@ export default function TeamWorkerRequestPage() {
   const fullReadInFlight = useRef(false);
   const [submittedId, setSubmittedId] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshingHistory, setRefreshingHistory] = useState(false);
   const [payroll, setPayroll] = useState({ payType: '', unitPrice: '' });
   const moreLock = useRef(false);
   const [warnings, setWarnings] = useState<Partial<Record<WorkerDocumentKind, string[]>>>(cachedDraft?.warnings ?? {}), [confirm, setConfirm] = useState(false);
   const [filter, setFilter] = useState('all'), [review, setReview] = useState<TeamWorkerRequest | null>(null), [reason, setReason] = useState(''), [preview, setPreview] = useState<DocumentFile | null>(null);
   const generation = useRef(0), lock = useRef(false), activeUid = useRef(currentUser?.uid), documentsRef = useRef(documents), previewRef = useRef(preview);
+  const uploaded = useRef({ key: '', ids: new Set<string>() });
   activeUid.current = currentUser?.uid; documentsRef.current = documents; previewRef.current = preview;
-  const load = useCallback(async (forceReload = false, formOnly = false) => {
+  const load = useCallback(async (forceReload = false, formOnly = false, afterSubmit = false) => {
     const sequence = ++generation.current;
     fullReadInFlight.current = !formOnly;
-    setLoading(true);
+    setLoading(!afterSubmit);
+    setRefreshingHistory(afterSubmit);
     setError('');
     try {
       const options = { ...(forceReload ? { forceReload } : {}), ...(formOnly ? { formOnly } : {}) };
@@ -89,11 +92,16 @@ export default function TeamWorkerRequestPage() {
       setData(next);
       setTeamId(previous => next.teams.some(team => team.id === previous) ? previous : next.teams.length === 1 ? next.teams[0].id : '');
     } catch (cause) {
-      if (sequence === generation.current) { setData(null); setError(errorText(cause)); }
+      if (sequence === generation.current) {
+        const denied = /permission-denied|unauthenticated/.test(String((cause as { code?: string })?.code));
+        if (!afterSubmit || denied) setData(null);
+        setError(afterSubmit ? '승인 요청은 접수되었습니다. 신청 내역을 새로고침해 주세요.' : errorText(cause));
+      }
     } finally {
       if (sequence === generation.current) {
         fullReadInFlight.current = false;
         setLoading(false);
+        setRefreshingHistory(false);
       }
     }
   }, [yearMonth]);
@@ -122,7 +130,7 @@ export default function TeamWorkerRequestPage() {
     if (needsHistory && !fullReadInFlight.current) void load();
   }, [load, needsHistory]);
   const loadMore = async () => {
-    if (!data?.nextCursor || moreLock.current || loading) return;
+    if (!data?.nextCursor || moreLock.current || fullReadInFlight.current || loading) return;
     moreLock.current = true; setLoadingMore(true); setError('');
     const sequence = generation.current;
     try {
@@ -173,12 +181,22 @@ export default function TeamWorkerRequestPage() {
     if (lock.current) return; lock.current = true; const uid = activeUid.current;
     const check = () => { if (!uid || activeUid.current !== uid) throw new Error('로그인 계정이 변경되었습니다.'); };
     setError(''); setBusy('서류 업로드 중…');
-    try { validate(); for (const doc of documents) { check(); await service.upload(requestId, teamId, doc.kind, doc.id, doc.file); check(); }
+    try {
+      validate(); check();
+      const key = JSON.stringify([uid, teamId, requestId]);
+      if (uploaded.current.key !== key) uploaded.current = { key, ids: new Set() };
+      const completed = uploaded.current.ids;
+      const results = await Promise.allSettled(documents.filter(doc => !completed.has(doc.id)).map(async doc => {
+        await service.upload(requestId, teamId, doc.kind, doc.id, doc.file);
+        check(); completed.add(doc.id);
+      }));
+      check();
+      for (const result of results) if (result.status === 'rejected') throw result.reason;
       setBusy('승인 요청 중…'); await service.submit(requestId, teamId, fields, documents.find(doc => doc.kind === 'identity')!.id, documents.find(doc => doc.kind === 'bank')?.id); check();
       documents.forEach(doc => URL.revokeObjectURL(doc.preview)); setDocuments([]); setFields(empty()); setWarnings({}); setRequestId(createId()); setConfirm(false); setNotice('승인을 요청했습니다. 사무실 승인 후 통합DB에 작업자가 등록됩니다.');
       setBankOpen(false);
       setSubmittedId(requestId); setFilter('all'); tabs.showHistory();
-      if (yearMonth !== monthNow()) setYearMonth(monthNow()); else await load(true);
+      if (yearMonth !== monthNow()) setYearMonth(monthNow()); else void load(true, false, true);
     } catch (cause) { if (uid === activeUid.current) setError(errorText(cause)); }
     finally { lock.current = false; setBusy(''); }
   };
@@ -270,11 +288,12 @@ export default function TeamWorkerRequestPage() {
       <div className="worker-form-footer"><p>미리보기에서 최종 확인한 후 승인 요청할 수 있습니다.</p><button type="submit" className="primary" disabled={disabled}>등록 전 미리보기</button></div>
     </form>}
     {data && !data.teams.length && !data.canReview && <p className="worker-warning">현재 소속팀이 없습니다. 사무실에서 작업자와 소속팀 연결을 확인해 주세요.</p>}
-    <section id="worker-request-history" {...tabs.panel('history')} className="worker-history" aria-busy={loading || loadingMore}>
+    <section id="worker-request-history" {...tabs.panel('history')} className="worker-history" aria-busy={loading || loadingMore || refreshingHistory}>
+      {refreshingHistory && <p role="status">접수한 신청 내역을 불러오고 있습니다.</p>}
       <header className="worker-section-heading"><div><span className="worker-section-kicker">신청 현황</span><h2>{data?.canReview ? '작업자 등록 신청' : '내 신청 내역'}</h2></div><span className="worker-history-count">{visibleRequests.length.toLocaleString()}건</span></header>
       <div className="worker-history-filters"><label>조회 월<input type="month" value={yearMonth} disabled={disabled || documents.length > 0} onChange={event => { if (event.target.value) setYearMonth(event.target.value); }} /></label><label>처리 상태<select value={filter} onChange={event => setFilter(event.target.value)}><option value="all">전체</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
       {data && !historyMissing && <><p className="worker-history-caption">불러온 {data.requests.length}건 기준으로 표시합니다.{data.nextCursor ? ' 이전 신청은 더 보기를 눌러 확인하세요.' : ''}</p>
-        {visibleRequests.length === 0 && <div className="worker-empty"><Files size={28} /><strong>해당하는 신청이 없습니다.</strong><p>{filter === 'all' ? '선택한 월에 등록한 신청 내역이 여기에 표시됩니다.' : '조회 월이나 처리 상태를 변경해 보세요.'}</p></div>}
+        {!refreshingHistory && visibleRequests.length === 0 && <div className="worker-empty"><Files size={28} /><strong>해당하는 신청이 없습니다.</strong><p>{filter === 'all' ? '선택한 월에 등록한 신청 내역이 여기에 표시됩니다.' : '조회 월이나 처리 상태를 변경해 보세요.'}</p></div>}
         <div className="worker-request-list">{visibleRequests.map(row => <article key={row.id} data-submitted={row.id === submittedId || undefined}><header><h3>{row.name}</h3><span className={`worker-status ${row.status}`}>{statusLabels[row.status]}</span></header><TeamTag name={row.teamName} color={row.teamColor} icon={row.teamIcon} /><dl className="worker-request-meta"><div><dt>소속회사</dt><dd>{row.companyName}</dd></div><div><dt>신청자</dt><dd>{row.submitterName}</dd></div><div><dt>연락처</dt><dd>{row.contact}</dd></div><div><dt>신청일</dt><dd>{row.submittedAt.slice(0, 10)}</dd></div></dl>{row.reviewReason && <p className="worker-warning">반려 사유: {row.reviewReason}</p>}<button type="button" className="worker-review-button" disabled={disabled} onClick={() => { setReview(row); setReason(''); setError(''); setPayroll({ payType: '', unitPrice: '' }); }}>서류 및 신청 내용 {data.canReview && row.status === 'pending' ? '검토' : '보기'}</button></article>)}</div>
         {data.nextCursor && <div className="worker-load-more"><button type="button" disabled={disabled} onClick={() => void loadMore()}>{loadingMore ? <RefreshCw size={16} className="worker-spin" /> : <ArrowDown size={16} />}{loadingMore ? '추가 조회 중…' : '다음 100건 더 보기'}</button></div>}
       </>}

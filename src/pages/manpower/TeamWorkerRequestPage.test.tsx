@@ -25,6 +25,23 @@ const fill = async () => {
   fireEvent.change(screen.getByLabelText('연락처 *'), { target: { value: '01000000000' } });
 };
 
+test('두 서류를 동시에 전송하고 한 건만 실패하면 성공한 서류를 다시 보내지 않는다', async () => {
+  render(<TeamWorkerRequestPage />); await fill();
+  fireEvent.change(screen.getByLabelText('통장 파일'), { target: { files: [new File(['bank'], '통장.png', { type: 'image/png' })] } });
+  await screen.findByDisplayValue('001234567890');
+  let finishIdentity!: () => void;
+  const identityPending = new Promise<void>(resolve => { finishIdentity = resolve; });
+  service.upload.mockImplementationOnce(() => identityPending).mockRejectedValueOnce(new Error('통장 재시도'));
+  fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
+  fireEvent.click(screen.getByRole('button', { name: '확인 후 승인 요청' }));
+  await waitFor(() => expect(service.upload).toHaveBeenCalledTimes(2));
+  expect(service.submit).not.toHaveBeenCalled();
+  finishIdentity(); await screen.findByText('통장 재시도');
+  fireEvent.click(screen.getByRole('button', { name: '확인 후 승인 요청' }));
+  await waitFor(() => expect(service.submit).toHaveBeenCalledTimes(1));
+  expect(service.upload.mock.calls.map(call => call[2])).toEqual(['identity', 'bank', 'bank']);
+});
+
 test('다른 화면에서 돌아오면 입력·서류를 복원하고 지우기를 선택하면 초안을 폐기한다', async () => {
   const view = render(<TeamWorkerRequestPage />); await fill();
   fireEvent.change(screen.getByLabelText('주소 *'), { target: { value: '보존할 테스트 주소' } });
