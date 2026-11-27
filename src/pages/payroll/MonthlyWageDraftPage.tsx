@@ -1615,6 +1615,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
 
                 setPaymentData(newPaymentData);
 
+                if (transferPickerMode) {
+                    // The transfer picker separately waits for the ledger results for the current inputs.
+                    markApplyFinished(runSeq);
+                    return;
+                }
+
                 requestAnimationFrame(() => {
                     setTimeout(() => {
                         markApplyFinished(runSeq);
@@ -1632,6 +1638,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
         markApplyFinished,
         markApplyStarted,
         setPaymentData,
+        transferPickerMode,
     ]);
 
     const batchTeamId = transferPicker?.batchJob?.teamId;
