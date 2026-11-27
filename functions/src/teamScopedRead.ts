@@ -124,11 +124,13 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
             }
             if (['accommodations', 'vehicles', 'cards', 'cardTransactions', 'vehicleExpenses', 'accommodationUtilityRecords'].includes(name)) {
                 const kind = name === 'cards' || name === 'cardTransactions' ? 'card' : name === 'vehicles' || name === 'vehicleExpenses' ? 'vehicle' : 'accommodation';
-                const assignments = (await read(`${kind}Assignments`)).filter(row => belongsToTeam(row, scope));
-                const ids = assignments.map(row => text(row[`${kind}Id`] ?? row[kind]?.id));
                 const isAsset = ['accommodations', 'vehicles', 'cards'].includes(name);
                 const groups = await Promise.all([
-                    byIds(name, isAsset ? [FieldPath.documentId()] : [`${kind}Id`], ids),
+                    read(`${kind}Assignments`).then(assignments => {
+                        const ids = assignments.filter(row => belongsToTeam(row, scope))
+                            .map(row => text(row[`${kind}Id`] ?? row[kind]?.id));
+                        return byIds(name, isAsset ? [FieldPath.documentId()] : [`${kind}Id`], ids);
+                    }),
                     isAsset ? candidates(name) : Promise.resolve([]),
                 ]);
                 return mergeTeamQueryRows(groups);

@@ -47,6 +47,7 @@ export interface TeamExpenseRequest {
 export interface TeamExpenseRequestData {
   nextCursor?: string | null;
   canReview: boolean;
+  historyLoaded?: boolean;
   teams: ExpenseTeamOption[];
   payerTeams: ExpenseTeamOption[];
   paymentCards?: ExpensePaymentCardOption[];

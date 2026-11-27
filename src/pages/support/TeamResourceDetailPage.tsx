@@ -346,7 +346,7 @@ const TeamResourceDetailPage: React.FC = () => {
     const [vehicleAssignments, setVehicleAssignments] = useState<VehicleAssignmentRecord[]>([]);
     const [cards, setCards] = useState<Card[]>([]);
     const [cardAssignments, setCardAssignments] = useState<CardAssignmentRecord[]>([]);
-    const [cardTransactions, setCardTransactions] = useState<{ month: string; rows: CardTransaction[] }>({ month: '', rows: [] });
+    const [cardTransactions, setCardTransactions] = useState<{ month: string; rows: CardTransaction[]; failed?: boolean }>({ month: '', rows: [] });
     const [statementRevision, setStatementRevision] = useState(0);
     const [statementSelection, setStatementSelection] = useState<{ scope: string; key: string; path?: string; view?: 'original' | 'details' } | null>(null);
     const [vehicleExpenses, setVehicleExpenses] = useState<{ month: string; rows: VehicleExpenseRecord[]; loading: boolean; error: boolean }>({ month: '', rows: [], loading: false, error: false });
@@ -382,15 +382,16 @@ const TeamResourceDetailPage: React.FC = () => {
     }, [statementScope]);
 
     useEffect(() => {
+        if (detailView !== 'card') return;
         let active = true;
-        setCardTransactions({ month: selectedMonth, rows: [] });
+        setCardTransactions({ month: '', rows: [] });
         cardService.getTransactionsByMonth(selectedMonth).then(rows => {
             if (active) setCardTransactions({ month: selectedMonth, rows });
         }).catch(() => {
-            if (active) toast.error('카드 사용내역서 연결 정보를 불러오지 못했습니다. 새로고침해 주세요.');
+            if (active) setCardTransactions({ month: selectedMonth, rows: [], failed: true });
         });
         return () => { active = false; };
-    }, [selectedMonth, statementRevision]);
+    }, [detailView, selectedMonth, statementRevision]);
 
     useEffect(() => {
         if (detailView !== 'vehicle') return;
@@ -1127,6 +1128,8 @@ const TeamResourceDetailPage: React.FC = () => {
 
     const teamColor = selectedTeamRow?.color || getTeamColor(selectedTeam);
     const isBusy = loading || loadingResources || accessScope.loading;
+    const cardStatus = isBusy || cardTransactions.month !== selectedMonth ? '카드 원본을 불러오는 중…'
+        : cardTransactions.failed ? '카드 사용내역서 조회 실패 · 새로고침해 주세요' : '';
     const fineResources = selectedVehicleDocs.map(doc => ({
         doc,
         amount: summarizeVehicleBillingCosts(doc).fine,
@@ -1711,7 +1714,7 @@ const TeamResourceDetailPage: React.FC = () => {
                                                     cardLast4={resource.card?.last4 || ''} cardName={resource.card?.name || resource.cardLabel}
                                                     paths={resource.statementPaths} transactions={resource.transactions} dateRanges={resource.dateRanges} />
                                             </article>)}
-                                            {!selectedCardResources.some(resource => resource.statementPaths.length > 0) && <p>{isBusy ? '카드 원본을 불러오는 중…' : '선택한 달에 연결된 카드 원본이 없습니다.'}</p>}
+                                            {cardStatus ? <p role="status">{cardStatus}</p> : !selectedCardResources.some(resource => resource.statementPaths.length > 0) && <p>선택한 달에 연결된 카드 원본이 없습니다.</p>}
                                         </div>
                                     </section>
                                     <section className="tw-output-section">
@@ -1759,7 +1762,7 @@ const TeamResourceDetailPage: React.FC = () => {
                                                                                 <button type="button" disabled={isBusy || (!resource.statementPaths.length && !resource.transactions.length)}
                                                                                     onClick={() => setStatementSelection({ scope: statementScope, key: resource.key, view: 'details' })}>사용 상세 보기</button>
                                                                             </div>
-                                                                            <small>{resource.statementPaths.length ? `${resource.statementPaths.length}개 파일` : '등록된 파일 없음'}</small>
+                                                                            <small>{resource.statementPaths.length ? `${resource.statementPaths.length}개 파일` : cardStatus || '등록된 파일 없음'}</small>
                                                                         </div>
                                                                     </td>
                                                                 </tr>
