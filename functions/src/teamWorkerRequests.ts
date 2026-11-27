@@ -41,7 +41,7 @@ export function workerPayroll(input: any) {
     return { payType, salaryModel: payType, unitPrice };
 }
 
-export async function readTeamWorkerRequestList(db: FirebaseFirestore.Firestore, actor: Awaited<ReturnType<typeof actorFor>>, input: any) {
+export async function readTeamWorkerRequestList(db: FirebaseFirestore.Firestore, actor: Omit<Awaited<ReturnType<typeof actorFor>>, 'cardTeamRefs'>, input: any) {
     const yearMonth = text(input.yearMonth);
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '조회 월을 확인해 주세요.');
     if (input.formOnly === true && !actor.canReview && input.cursor === undefined && input.pageSize === undefined) {
