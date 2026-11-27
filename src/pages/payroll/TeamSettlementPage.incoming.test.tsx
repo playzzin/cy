@@ -1,6 +1,7 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { TeamMobileProvider } from '../../components/team-mobile/TeamMobileUI';
 import { TeamSettlementPage } from './TeamSettlementPage';
 import { teamSettlementService } from '../../services/teamSettlementService';
 import type { TeamSettlementDeductionItem, TeamSettlementDocument } from '../../types/teamSettlement';
@@ -189,6 +190,29 @@ it('다른 월의 이전 정산이 남아 있는 동안에는 청구서를 만�
   render(<TeamSettlementPage />);
   expect(await screen.findByRole('button', { name: '대납청구서 보기' })).toBeDisabled();
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('모바일 조회월을 변경하면 이전 월의 확정 상태를 표시하지 않는다', async () => {
+  const original = window.matchMedia;
+  window.matchMedia = jest.fn().mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() });
+  jest.mocked(useTeamSettlementAccess).mockReturnValue({ loading: false, canWrite: false });
+  let resolveNextMonth: () => void = () => {};
+  jest.mocked(teamSettlementService.getTeamSettlement)
+    .mockImplementationOnce(async ({ yearMonth }) => ({ ...document(), yearMonth }))
+    .mockImplementationOnce(({ yearMonth }) => new Promise(resolve => {
+      resolveNextMonth = () => resolve({ ...document(), yearMonth, confirmedAt: null });
+    }));
+  try {
+    render(<TeamMobileProvider enabled><TeamSettlementPage /></TeamMobileProvider>);
+    const bar = within(screen.getByRole('group', { name: '정산 조회월' }));
+    expect(await bar.findByText('확정')).toBeInTheDocument();
+    fireEvent.click(bar.getByRole('button', { name: '이전 달' }));
+    expect(await bar.findByText('조회 중')).toBeInTheDocument();
+    expect(bar.queryByText('확정')).not.toBeInTheDocument();
+    await waitFor(() => expect(teamSettlementService.getTeamSettlement).toHaveBeenCalledTimes(2));
+    await act(async () => resolveNextMonth());
+    expect(await bar.findByText('미확정')).toBeInTheDocument();
+  } finally { window.matchMedia = original; }
 });
 
 it.each([false, true])('조회자는 정산의 확정 여부와 관계없이 모든 쓰기가 잠기고 새로고침은 가능하다 (확정=%s)', async confirmed => {

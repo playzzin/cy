@@ -1008,8 +1008,12 @@ export const TeamSettlementPage: React.FC = () => {
   );
 
   const selectedTeamName = selectedTeam?.name ?? '';
-  const canPreviewInvoice = Boolean(doc && loadState.status === 'idle'
-    && doc.yearMonth === yearMonth && doc.teamId === selectedTeamId);
+  const currentSettlement = doc?.yearMonth === yearMonth && doc.teamId === selectedTeamId ? doc : null;
+  const headerSettlement = isTeamMobile ? currentSettlement : doc;
+  const confirmationState = isTeamMobile && !currentSettlement
+    ? (!selectedTeamId || loadState.status === 'error' ? 'unavailable' : 'loading')
+    : undefined;
+  const canPreviewInvoice = Boolean(currentSettlement && loadState.status === 'idle');
   const teamSettlementAccentStyle = useMemo(
     () => getTeamSettlementAccentStyle(selectedTeam?.color),
     [selectedTeam?.color]
@@ -3568,17 +3572,18 @@ export const TeamSettlementPage: React.FC = () => {
   return (
     <div className="team-settlement-page min-w-0 w-full" style={teamSettlementAccentStyle}>
       <TeamSettlementWorkspaceHeader
-        teamName={doc?.teamName || selectedTeamName || '팀 선택'}
+        teamName={headerSettlement?.teamName || selectedTeamName || '팀 선택'}
         year={selectedYearMonth.year}
         month={selectedYearMonth.month}
-        confirmedAt={doc?.confirmedAt ?? null}
-        updatedAt={doc?.updatedAt ?? null}
+        confirmedAt={headerSettlement?.confirmedAt ?? null}
+        confirmationState={confirmationState}
+        updatedAt={headerSettlement?.updatedAt ?? null}
         isDirty={isDirty}
-        issueCount={doc ? validationDisplay.totalCount : 0}
+        issueCount={headerSettlement ? validationDisplay.totalCount : 0}
         saveState={saveState}
         loading={loadState.status === 'loading'}
         canWrite={canWrite}
-        canEdit={Boolean(doc && canEdit)}
+        canEdit={Boolean(headerSettlement && canEdit)}
         canRecalculate={Boolean(canWrite && selectedTeamId && yearMonth)}
         onRefresh={handleRefresh}
         onRecalculate={handleRecalculate}

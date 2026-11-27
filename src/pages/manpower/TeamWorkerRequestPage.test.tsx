@@ -131,6 +131,39 @@ test('모바일 등록은 신청 이력을 기다리지 않고 신청 내역을 
   } finally { window.matchMedia = original; }
 });
 
+test('모바일 등록의 계좌 영역은 선택이며 통장 정보가 빠진 초안은 펼쳐서 수정한다', async () => {
+  const original = window.matchMedia;
+  window.matchMedia = jest.fn().mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() });
+  const request = () => <TeamMobileProvider enabled><TeamWorkerRequestPage /></TeamMobileProvider>;
+  const getAccountSection = () => screen.getByText((_, element) =>
+    element?.tagName === 'DETAILS' && Boolean(element.textContent?.startsWith('계좌 등록')));
+  try {
+    const { unmount } = render(request());
+    await fill();
+    const bankSummary = screen.getByText('계좌 등록');
+    const bankSection = getAccountSection();
+    expect(bankSection).not.toHaveAttribute('open');
+    expect(screen.getByLabelText('연락처 *').compareDocumentPosition(bankSummary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '돌아가서 수정' }));
+    fireEvent.click(bankSummary);
+    service.analyze.mockResolvedValueOnce({ fields: { bankName: '테스트은행' }, warnings: [] });
+    fireEvent.change(screen.getByLabelText('통장 파일'), { target: { files: [new File(['bank'], '통장.png', { type: 'image/png' })] } });
+    await screen.findByDisplayValue('테스트은행');
+    fireEvent.click(bankSummary);
+    await waitFor(() => expect(screen.getByLabelText('계좌번호 *')).not.toBeRequired());
+    fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('계좌를 등록하려면');
+    expect(bankSection).toHaveAttribute('open');
+    expect(screen.getByLabelText('계좌번호 *')).toBeRequired();
+    unmount();
+    render(request());
+    expect(await screen.findByLabelText('은행 *')).toHaveValue('테스트은행');
+    expect(getAccountSection()).toHaveAttribute('open');
+  } finally { window.matchMedia = original; }
+});
+
 test('최종 확인 중에는 배경 입력과 첨부를 잠근다', async () => {
   render(<TeamWorkerRequestPage />); await fill();
   fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));

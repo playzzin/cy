@@ -2575,7 +2575,10 @@
 
 @media screen and (max-width: 768px) {
     .tw-page--team-mobile .tw-mobile-filter-bar { gap: 4px; margin-bottom: 6px; }
-    .tw-page--team-mobile .tw-search-result { font-size: 12px; }
+    .tw-page--team-mobile .tw-worker-item__chevron {
+        flex: 0 0 auto;
+        color: #58677c;
+    }
     .tw-page--team-mobile .tw-toolbar--always-visible {
         display: grid;
         gap: 6px;

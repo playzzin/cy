@@ -71,7 +71,7 @@
     html[data-team-mobile='true'] .expense-request-team-fields { gap: 8px; }
     html[data-team-mobile='true'] :is(.expense-current-team, .expense-billing-team, .worker-affiliation) { padding: 8px; }
     html[data-team-mobile='true'] .expense-request-upload { padding: 12px; }
-    html[data-team-mobile='true'] :is(.expense-submit-bar, .worker-form-footer) { position: sticky; bottom: 0; z-index: 15; padding: 8px 0 max(8px, env(safe-area-inset-bottom)); background: #fff; }
+    html[data-team-mobile='true'] .expense-submit-bar { position: sticky; bottom: 0; z-index: 15; padding: 8px 0 max(8px, env(safe-area-inset-bottom)); background: #fff; }
     html[data-team-mobile='true'] :is(.expense-submit-bar, .worker-form-footer) > button { width: 100%; }
     html[data-team-mobile='true'] .worker-form-footer > p { margin: 0 0 4px; font-size: 13px; }
     html[data-team-mobile='true'] .worker-step-heading { margin: 12px 0 8px; }

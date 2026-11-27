@@ -18,6 +18,8 @@ const createId = () => typeof crypto.randomUUID === 'function' ? crypto.randomUU
 const monthNow = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 7);
 const empty = (): WorkerRegistrationFields => ({ name: '', address: '', contact: '', bankName: '', accountNumber: '', accountHolder: '' });
 const fieldLabels: Record<keyof WorkerRegistrationFields, string> = { name: '이름', address: '주소', contact: '연락처', bankName: '은행', accountNumber: '계좌번호', accountHolder: '예금주' };
+const identityFields = ['name', 'address', 'contact'] as const;
+const bankFields = ['bankName', 'accountNumber', 'accountHolder'] as const;
 const statusLabels = { pending: '승인 대기', approved: '통합DB 등록 완료', rejected: '반려' };
 type DocumentFile = { id: string; kind: WorkerDocumentKind; file: File; preview: string };
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : '처리하지 못했습니다. 다시 시도해 주세요.';
@@ -50,6 +52,9 @@ function UploadBox({ kind, document: doc, disabled, onFile, onRemove, onAnalyze 
 function FieldSummary({ fields }: { fields: WorkerRegistrationFields }) { return <dl className="worker-fields-summary">{(Object.keys(fieldLabels) as Array<keyof WorkerRegistrationFields>).map(key => <div key={key}><dt>{fieldLabels[key]}</dt><dd>{fields[key] || '미등록'}</dd></div>)}</dl>; }
 
 type WorkerDraft = { fields: WorkerRegistrationFields; documents: DocumentFile[]; teamId: string; requestId: string; warnings: Partial<Record<WorkerDocumentKind, string[]>> };
+const draftHasBankDetails = (draft?: WorkerDraft | null) => Boolean(draft && (
+  draft.documents.some(doc => doc.kind === 'bank') || bankFields.some(key => draft.fields[key])
+));
 const draftKey = 'worker-registration';
 export default function TeamWorkerRequestPage() {
   const { currentUser } = useAuth();
@@ -59,6 +64,7 @@ export default function TeamWorkerRequestPage() {
   const [fields, setFields] = useState(() => cachedDraft?.fields ?? empty()), [documents, setDocuments] = useState<DocumentFile[]>(cachedDraft?.documents ?? []), [requestId, setRequestId] = useState(() => cachedDraft?.requestId ?? createId());
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : '');
   const mobile = useTeamMobile();
+  const [bankOpen, setBankOpen] = useState(() => draftHasBankDetails(cachedDraft));
   const tabs = useTeamRequestTabs('worker-request-history', data?.canReview === false, currentUser?.uid);
   const preferFormOnly = useRef(false);
   preferFormOnly.current = mobile && tabs.view === 'entry' && !data?.canReview;
@@ -101,6 +107,7 @@ export default function TeamWorkerRequestPage() {
   useEffect(() => {
     if (draftOwner === currentUser?.uid) return;
     setDraftOwner(currentUser?.uid);
+    setBankOpen(draftHasBankDetails(cachedDraft));
     documentsRef.current.forEach(doc => URL.revokeObjectURL(doc.preview));
     if (previewRef.current) URL.revokeObjectURL(previewRef.current.preview);
     setDocuments(cachedDraft?.documents ?? []); setFields(cachedDraft?.fields ?? empty()); setTeamId(cachedDraft?.teamId || ''); setData(null); setReview(null); setPreview(null); setConfirm(false); setWarnings(cachedDraft?.warnings ?? {}); setNotice(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : ''); setRequestId(cachedDraft?.requestId ?? createId());
@@ -152,9 +159,15 @@ export default function TeamWorkerRequestPage() {
     try { validateWorkerDocument(file); removeDocument(kind); const doc = { id: createId(), kind, file, preview: URL.createObjectURL(file) }; setDocuments(previous => [...previous.filter(item => item.kind !== kind), doc]); void analyze(doc); }
     catch (cause) { setError(errorText(cause)); }
   };
+  const bankDocumentAttached = documents.some(doc => doc.kind === 'bank');
   const validate = () => {
     if (!teamId || !documents.some(doc => doc.kind === 'identity') || !fields.name.trim() || !fields.address.trim() || !/^0\d{8,10}$/.test(fields.contact.replace(/[\s-]/g, ''))) throw new Error('신분증·이름·주소·올바른 연락처를 확인해 주세요.');
-    if (documents.some(doc => doc.kind === 'bank') ? !fields.bankName.trim() || !fields.accountHolder.trim() || !/^\d{6,20}$/.test(fields.accountNumber.replace(/[\s-]/g, '')) : fields.bankName || fields.accountNumber || fields.accountHolder) throw new Error('계좌를 등록하려면 통장 사진·은행·계좌번호·예금주를 함께 확인해 주세요.');
+    if (bankDocumentAttached
+      ? !fields.bankName.trim() || !fields.accountHolder.trim() || !/^\d{6,20}$/.test(fields.accountNumber.replace(/[\s-]/g, ''))
+      : bankFields.some(key => fields[key])) {
+      setBankOpen(true);
+      throw new Error('계좌를 등록하려면 통장 사진·은행·계좌번호·예금주를 함께 확인해 주세요.');
+    }
   };
   const save = async () => {
     if (lock.current) return; lock.current = true; const uid = activeUid.current;
@@ -163,6 +176,7 @@ export default function TeamWorkerRequestPage() {
     try { validate(); for (const doc of documents) { check(); await service.upload(requestId, teamId, doc.kind, doc.id, doc.file); check(); }
       setBusy('승인 요청 중…'); await service.submit(requestId, teamId, fields, documents.find(doc => doc.kind === 'identity')!.id, documents.find(doc => doc.kind === 'bank')?.id); check();
       documents.forEach(doc => URL.revokeObjectURL(doc.preview)); setDocuments([]); setFields(empty()); setWarnings({}); setRequestId(createId()); setConfirm(false); setNotice('승인을 요청했습니다. 사무실 승인 후 통합DB에 작업자가 등록됩니다.');
+      setBankOpen(false);
       setSubmittedId(requestId); setFilter('all'); tabs.showHistory();
       if (yearMonth !== monthNow()) setYearMonth(monthNow()); else await load(true);
     } catch (cause) { if (uid === activeUid.current) setError(errorText(cause)); }
@@ -185,6 +199,7 @@ export default function TeamWorkerRequestPage() {
   };
   const discardDraft = () => {
     deleteRequestDraft(currentUser?.uid, draftKey); setDocuments([]); setFields(empty()); setWarnings({}); setRequestId(createId()); setNotice('작성 내용을 지웠습니다.');
+    setBankOpen(false);
   };
   const selectedTeam = data?.teams.find(team => team.id === teamId);
   const disabled = loading || loadingMore || Boolean(busy) || confirm || Boolean(review) || Boolean(preview);
@@ -192,10 +207,32 @@ export default function TeamWorkerRequestPage() {
   const visibleRequests = useMemo(() => data?.requests.filter(row => filter === 'all' || row.status === filter) || [], [data?.requests, filter]);
   const counts = useMemo(() => (data?.requests || []).reduce((result, row) => { result[row.status]++; return result; }, { pending: 0, approved: 0, rejected: 0 }), [data?.requests]);
   const differentHolder = Boolean(fields.accountHolder && fields.name && fields.accountHolder.trim() !== fields.name.trim());
+  const renderUpload = (kind: WorkerDocumentKind) => {
+    const document = documents.find(doc => doc.kind === kind);
+    return <UploadBox key={kind} kind={kind} document={document} disabled={disabled || !teamId}
+      onFile={file => attach(kind, file)} onRemove={() => removeDocument(kind)}
+      onAnalyze={() => { if (document) void analyze(document); }} />;
+  };
+  const renderField = (key: keyof WorkerRegistrationFields, showRequiredMark: boolean, required: boolean) => (
+    <label key={key} className={key === 'address' ? 'worker-field-address' : undefined}>
+      {fieldLabels[key]}{showRequiredMark ? ' *' : ''}
+      <input value={fields[key]} required={required} maxLength={key === 'address' ? 300 : 80}
+        inputMode={key === 'contact' || key === 'accountNumber' ? 'tel' : 'text'} autoComplete="off"
+        onChange={event => { setFields(previous => ({ ...previous, [key]: event.target.value })); resetRequest(); }} />
+    </label>
+  );
+  const accountHolderWarning = differentHolder && <p className="worker-warning">이름과 예금주가 다릅니다. 통장 원본과 예금주를 확인해 주세요.</p>;
+  const registrationGuide = <p>서류를 첨부하고 정보를 확인하면, 사무실 승인 후 작업자가 등록됩니다.</p>;
   return <main className="team-worker-request">
     <header className="worker-page-heading">
-      <div className="worker-page-title"><div className="worker-eyebrow"><Users size={16} />팀별 작업자 관리</div><h1>{data?.canReview ? '작업자 등록 승인' : '신규 작업자 등록'}</h1><TeamMobileDisclosure title="등록 안내"><p>서류를 첨부하고 정보를 확인하면, 사무실 승인 후 작업자가 등록됩니다.</p></TeamMobileDisclosure></div>
-      <TeamPageActions><div className="worker-heading-actions"><a className="worker-history-link" href="#worker-request-history" onClick={tabs.showHistory}><ArrowDown size={16} />신청 내역</a><button type="button" className="primary" disabled={disabled} onClick={() => void load(true, preferFormOnly.current)}><RefreshCw size={16} className={loading ? 'worker-spin' : ''} />새로고침</button></div></TeamPageActions>
+      <div className="worker-page-title"><div className="worker-eyebrow"><Users size={16} />팀별 작업자 관리</div><h1>{data?.canReview ? '작업자 등록 승인' : '신규 작업자 등록'}</h1>{!mobile && registrationGuide}</div>
+      <TeamPageActions>
+        <div className="worker-heading-actions">
+          {!tabs.active && <a className="worker-history-link" href="#worker-request-history" onClick={tabs.showHistory}><ArrowDown size={16} />신청 내역</a>}
+          <button type="button" className="primary" disabled={disabled} onClick={() => void load(true, preferFormOnly.current)}><RefreshCw size={16} className={loading ? 'worker-spin' : ''} />새로고침</button>
+        </div>
+        {mobile && registrationGuide}
+      </TeamPageActions>
     </header>
     <TeamRequestTabs tabs={tabs} disabled={Boolean(busy) || confirm} />
     {error && !confirm && !review && <p role="alert" className="worker-error">{error}</p>}{notice && <p role="status" className="worker-notice">{notice}</p>}{busy && <p role="status" className="worker-busy"><Sparkles size={17} />{busy}</p>}
@@ -208,16 +245,28 @@ export default function TeamWorkerRequestPage() {
     </section>
     {loading && <div role="status" className="worker-loading"><RefreshCw size={16} className="worker-spin" />{preferFormOnly.current ? '등록에 필요한 소속팀과 회사 정보를 불러오고 있습니다…' : data ? '신청 내역을 새로 확인하고 있습니다…' : '소속팀과 신청 내역을 불러오고 있습니다…'}</div>}
     {loading && !data && <div className="worker-loading-skeleton" aria-hidden="true"><span /><span /><div><span /><span /></div><span /></div>}
-    {data && data.teams.length > 0 && <form id={`${tabs.id}-entry`} {...tabs.panel('entry')} className="worker-form" onSubmit={event => { event.preventDefault(); if (disabled) return; try { validate(); setError(''); setConfirm(true); } catch (cause) { setError(errorText(cause)); } }}>
-      <header className="worker-section-heading"><div><span className="worker-section-kicker">신규 등록</span><h2><FilePlus2 size={20} />작업자 등록 신청</h2></div><span className="worker-required-hint">* 필수 입력</span></header>
+    {data && data.teams.length > 0 && <form id={`${tabs.id}-entry`} {...tabs.panel('entry')} className={`worker-form${mobile ? ' worker-form--team-mobile' : ''}`} onSubmit={event => { event.preventDefault(); if (disabled) return; try { validate(); setError(''); setConfirm(true); } catch (cause) { setError(errorText(cause)); } }}>
+      {!mobile && <header className="worker-section-heading"><div><span className="worker-section-kicker">신규 등록</span><h2><FilePlus2 size={20} />작업자 등록 신청</h2></div><span className="worker-required-hint">* 필수 입력</span></header>}
       <div className="worker-affiliation"><div><span>현재 소속팀</span>{data.teams.length > 1 && <select aria-label="현재 소속팀" value={teamId} disabled={disabled} required onChange={event => { setTeamId(event.target.value); resetRequest(); }}><option value="">소속팀 선택</option>{data.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select>}{selectedTeam && <TeamTag {...selectedTeam} />}</div><div><span>소속회사</span><strong>{data.company.name}</strong></div></div>
       {!teamId && <p className="worker-warning">현재 소속팀을 먼저 선택해 주세요.</p>}
-      <div className="worker-step-heading"><span>1</span><div><h3>서류 첨부</h3><p>신분증은 필수이며, 계좌 등록이 필요하면 통장도 첨부해 주세요.</p></div></div>
-      <div className="worker-upload-grid">{(['identity', 'bank'] as const).map(kind => <UploadBox key={kind} kind={kind} document={documents.find(doc => doc.kind === kind)} disabled={disabled || !teamId} onFile={file => attach(kind, file)} onRemove={() => removeDocument(kind)} onAnalyze={() => void analyze(documents.find(doc => doc.kind === kind)!)} />)}</div>
+      {!mobile && <div className="worker-step-heading"><span>1</span><div><h3>서류 첨부</h3><p>신분증은 필수이며, 계좌 등록이 필요하면 통장도 첨부해 주세요.</p></div></div>}
+      <div className="worker-upload-grid">{renderUpload('identity')}{!mobile && renderUpload('bank')}</div>
       {warningsList.length > 0 && <div className="worker-warning"><strong>분석 후 확인할 항목</strong><ul>{warningsList.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div>}
-      <div className="worker-step-heading"><span>2</span><div><h3>등록 정보 확인</h3><p>자동 입력된 내용을 원본과 비교해 주세요. 사진에 없는 연락처는 직접 입력하세요.</p></div></div>
-      <fieldset disabled={disabled} className="worker-input-grid">{(Object.keys(fieldLabels) as Array<keyof WorkerRegistrationFields>).map(key => <label key={key} className={key === 'address' ? 'worker-field-address' : undefined}>{fieldLabels[key]}{['name', 'address', 'contact'].includes(key) ? ' *' : ''}<input value={fields[key]} required={['name', 'address', 'contact'].includes(key) || documents.some(doc => doc.kind === 'bank')} maxLength={key === 'address' ? 300 : 80} inputMode={['contact', 'accountNumber'].includes(key) ? 'tel' : 'text'} autoComplete="off" onChange={event => { setFields(previous => ({ ...previous, [key]: event.target.value })); resetRequest(); }} /></label>)}</fieldset>
-      {differentHolder && <p className="worker-warning">이름과 예금주가 다릅니다. 통장 원본과 예금주를 확인해 주세요.</p>}
+      {!mobile && <div className="worker-step-heading"><span>2</span><div><h3>등록 정보 확인</h3><p>자동 입력된 내용을 원본과 비교해 주세요. 사진에 없는 연락처는 직접 입력하세요.</p></div></div>}
+      <fieldset disabled={disabled} className="worker-input-grid" aria-label={mobile ? '필수 등록 정보' : undefined}>
+        {identityFields.map(key => renderField(key, true, true))}
+        {!mobile && bankFields.map(key => renderField(key, false, bankDocumentAttached))}
+      </fieldset>
+      {mobile ? (
+        <TeamMobileDisclosure title="계좌 등록" summary={bankDocumentAttached ? '통장 첨부됨' : '선택'}
+          defaultOpen={bankOpen} onOpenChange={setBankOpen}>
+          {renderUpload('bank')}
+          <fieldset disabled={disabled} className="worker-input-grid" aria-label="계좌 정보">
+            {bankFields.map(key => renderField(key, bankDocumentAttached, bankDocumentAttached && bankOpen))}
+          </fieldset>
+          {accountHolderWarning}
+        </TeamMobileDisclosure>
+      ) : accountHolderWarning}
       <div className="worker-form-footer"><p>미리보기에서 최종 확인한 후 승인 요청할 수 있습니다.</p><button type="submit" className="primary" disabled={disabled}>등록 전 미리보기</button></div>
     </form>}
     {data && !data.teams.length && !data.canReview && <p className="worker-warning">현재 소속팀이 없습니다. 사무실에서 작업자와 소속팀 연결을 확인해 주세요.</p>}

@@ -76,7 +76,10 @@ test('모바일 작업자 목록은 신분증 이미지를 만들지 않고 상�
     (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ ...workers[0], fileNameSaved: 'https://example.invalid/fixture.png' }]);
     try {
         render(<TeamMobileProvider enabled><TeamWorkerDetailPage /></TeamMobileProvider>);
-        const worker = await screen.findByRole('button', { name: /가상하나.*검증팀/ });
+        const list = screen.getByRole('region', { name: '작업자 목록' });
+        const worker = await within(list).findByRole('button', { name: /가상하나/ });
+        expect(within(list).getByRole('button', { name: '팀 선택, 검증팀' })).toHaveAccessibleDescription('1명');
+        expect(worker).not.toHaveTextContent('검증팀');
         expect(screen.queryByAltText('가상하나 신분증')).not.toBeInTheDocument();
         fireEvent.click(worker);
         expect(await screen.findByAltText('가상하나 신분증')).toHaveAttribute('src', 'https://example.invalid/fixture.png');

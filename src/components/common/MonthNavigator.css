@@ -46,6 +46,11 @@
     cursor: not-allowed;
 }
 
+.month-navigator__center {
+    min-width: 0;
+    display: grid;
+}
+
 .month-navigator__value {
     min-width: 0;
     display: flex;
