@@ -1,6 +1,6 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import materialService from '../../services/materialService';
 import { siteService } from '../../services/siteService';
@@ -75,6 +75,37 @@ afterEach(() => {
     cleanup();
     localStorage.clear();
     jest.restoreAllMocks();
+});
+
+it('현장 목록을 기다리는 동안 입고 수량을 입력하고 조회 후 같은 수량을 유지한다', async () => {
+    let resolveSites!: (sites: Array<{ id: string; name: string; companyName: string; status: string }>) => void;
+    (siteService.getSites as jest.Mock).mockReturnValueOnce(new Promise(resolve => { resolveSites = resolve; }));
+    render(<MemoryRouter><MaterialInboundPage /></MemoryRouter>);
+    const mobile = await screen.findByRole('group', { name: '자재 분류' });
+    expect(within(mobile).getByRole('button', { name: /동바리/ })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('차량번호'), { target: { value: '12가3456' } });
+    const quantity = within(getDesktopSection('동바리')).getAllByRole('spinbutton')[0];
+    fireEvent.change(quantity, { target: { value: '3' } });
+    expect(screen.getByRole('combobox', { name: '현장 선택' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: '임대사' })).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: '입고 완료' }).every(button => (button as HTMLButtonElement).disabled)).toBe(true);
+    await act(async () => resolveSites([{ id: 'qa-site', name: '검증 현장', companyName: '(주)청연이엔지', status: 'active' }]));
+    expect(quantity).toHaveValue(3);
+    expect(screen.getByLabelText('차량번호')).toHaveValue('12가3456');
+    expect(screen.getByRole('combobox', { name: '현장 선택' })).toBeEnabled();
+    expect(screen.getAllByRole('button', { name: '입고 완료' })[0]).toBeEnabled();
+    expect(materialService.addInboundTransactionsBatch).not.toHaveBeenCalled();
+});
+
+it('입고 현장 조회가 실패하면 저장할 수 없고 다시 불러올 수 있다', async () => {
+    (siteService.getSites as jest.Mock).mockRejectedValueOnce(new Error('unavailable'));
+    render(<MemoryRouter><MaterialInboundPage /></MemoryRouter>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('입고 자료를 불러오지 못했습니다');
+    expect(screen.queryByRole('button', { name: '입고 완료' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '다시 불러오기' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '현장 선택' })).toBeEnabled());
+    expect(siteService.getSites).toHaveBeenCalledTimes(2);
+    expect(materialService.addInboundTransactionsBatch).not.toHaveBeenCalled();
 });
 
 describe.each([
