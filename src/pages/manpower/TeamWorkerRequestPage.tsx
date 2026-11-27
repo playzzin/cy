@@ -186,12 +186,16 @@ export default function TeamWorkerRequestPage() {
       const key = JSON.stringify([uid, teamId, requestId]);
       if (uploaded.current.key !== key) uploaded.current = { key, ids: new Set() };
       const completed = uploaded.current.ids;
-      const results = await Promise.allSettled(documents.filter(doc => !completed.has(doc.id)).map(async doc => {
-        await service.upload(requestId, teamId, doc.kind, doc.id, doc.file);
-        check(); completed.add(doc.id);
-      }));
-      check();
-      for (const result of results) if (result.status === 'rejected') throw result.reason;
+      const pending = documents.filter(doc => !completed.has(doc.id));
+      if (pending.length === 2 && pending[0].file.size + pending[1].file.size <= (data?.maxUploadBatchBytes ?? 0)) {
+        await service.uploadPair(requestId, teamId, pending);
+        check(); pending.forEach(doc => completed.add(doc.id));
+      } else {
+        for (const doc of pending) {
+          await service.upload(requestId, teamId, doc.kind, doc.id, doc.file);
+          check(); completed.add(doc.id);
+        }
+      }
       setBusy('승인 요청 중…'); await service.submit(requestId, teamId, fields, documents.find(doc => doc.kind === 'identity')!.id, documents.find(doc => doc.kind === 'bank')?.id); check();
       documents.forEach(doc => URL.revokeObjectURL(doc.preview)); setDocuments([]); setFields(empty()); setWarnings({}); setRequestId(createId()); setConfirm(false); setNotice('승인을 요청했습니다. 사무실 승인 후 통합DB에 작업자가 등록됩니다.');
       setBankOpen(false);
