@@ -10,12 +10,12 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUsers } from '@fortawesome/free-solid-svg-icons';
 import { resolveIcon } from '../../constants/iconMap';
 import { useAuth } from '../../contexts/AuthContext';
+import { takeWorkerFormRead, WorkerFormEntryContext, workerFormMonth } from '../../contexts/WorkerFormEntryContext';
 import { teamWorkerRequestService as service, validateWorkerDocument } from '../../services/teamWorkerRequestService';
 import type { TeamWorkerRequest, TeamWorkerRequestData, WorkerDocumentKind, WorkerRegistrationFields } from '../../types/teamWorkerRequest';
 import './TeamWorkerRequestPage.css';
 
 const createId = () => typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
-const monthNow = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 7);
 const empty = (): WorkerRegistrationFields => ({ name: '', address: '', contact: '', bankName: '', accountNumber: '', accountHolder: '' });
 const fieldLabels: Record<keyof WorkerRegistrationFields, string> = { name: '이름', address: '주소', contact: '연락처', bankName: '은행', accountNumber: '계좌번호', accountHolder: '예금주' };
 const identityFields = ['name', 'address', 'contact'] as const;
@@ -58,9 +58,10 @@ const draftHasBankDetails = (draft?: WorkerDraft | null) => Boolean(draft && (
 const draftKey = 'worker-registration';
 export default function TeamWorkerRequestPage() {
   const { currentUser } = useAuth();
+  const entry = React.useContext(WorkerFormEntryContext);
   const cachedDraft = useMemo(() => readRequestDraft<WorkerDraft>(currentUser?.uid, draftKey), [currentUser?.uid]);
   const [draftOwner, setDraftOwner] = useState(currentUser?.uid);
-  const [yearMonth, setYearMonth] = useState(monthNow), [data, setData] = useState<TeamWorkerRequestData | null>(null), [teamId, setTeamId] = useState(cachedDraft?.teamId || '');
+  const [yearMonth, setYearMonth] = useState(workerFormMonth), [data, setData] = useState<TeamWorkerRequestData | null>(null), [teamId, setTeamId] = useState(cachedDraft?.teamId || '');
   const [fields, setFields] = useState(() => cachedDraft?.fields ?? empty()), [documents, setDocuments] = useState<DocumentFile[]>(cachedDraft?.documents ?? []), [requestId, setRequestId] = useState(() => cachedDraft?.requestId ?? createId());
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : '');
   const mobile = useTeamMobile();
@@ -87,7 +88,10 @@ export default function TeamWorkerRequestPage() {
     setError('');
     try {
       const options = { ...(forceReload ? { forceReload } : {}), ...(formOnly ? { formOnly } : {}) };
-      const next = await (forceReload || formOnly ? service.list(yearMonth, undefined, options) : service.list(yearMonth));
+      const early = formOnly && !forceReload ? takeWorkerFormRead(entry, currentUser?.uid, yearMonth) : undefined;
+      const prepared = early && await early;
+      if (sequence !== generation.current) return;
+      const next = prepared ?? await (forceReload || formOnly ? service.list(yearMonth, undefined, options) : service.list(yearMonth));
       if (sequence !== generation.current) return;
       setData(next);
       setTeamId(previous => next.teams.some(team => team.id === previous) ? previous : next.teams.length === 1 ? next.teams[0].id : '');
@@ -104,7 +108,7 @@ export default function TeamWorkerRequestPage() {
         setRefreshingHistory(false);
       }
     }
-  }, [yearMonth]);
+  }, [yearMonth, entry, currentUser?.uid]);
   const hasDraft = documents.length > 0 || Object.values(fields).some(Boolean);
   useUnsavedRequestGuard(hasDraft, '작성 중인 내용은 이 탭에 임시 보관됩니다. 다른 화면으로 이동할까요?');
   useEffect(() => {
@@ -200,7 +204,7 @@ export default function TeamWorkerRequestPage() {
       documents.forEach(doc => URL.revokeObjectURL(doc.preview)); setDocuments([]); setFields(empty()); setWarnings({}); setRequestId(createId()); setConfirm(false); setNotice('승인을 요청했습니다. 사무실 승인 후 통합DB에 작업자가 등록됩니다.');
       setBankOpen(false);
       setSubmittedId(requestId); setFilter('all'); tabs.showHistory();
-      if (yearMonth !== monthNow()) setYearMonth(monthNow()); else void load(true, false, true);
+      if (yearMonth !== workerFormMonth()) setYearMonth(workerFormMonth()); else void load(true, false, true);
     } catch (cause) { if (uid === activeUid.current) setError(errorText(cause)); }
     finally { lock.current = false; setBusy(''); }
   };

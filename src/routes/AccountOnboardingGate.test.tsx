@@ -3,14 +3,18 @@ import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { AccountOnboardingGate } from './ProtectedRouteShell';
 import { accountLinkService } from '../services/accountLinkService';
+import { WorkerFormEntryContext, type WorkerFormEntry } from '../contexts/WorkerFormEntryContext';
 
 let mockSnapshot: (snapshot: any) => Promise<void>;
 let mockError: () => void;
 const mockToken = jest.fn();
 const mockTokenResult = jest.fn();
-jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'qa-worker', getIdToken: mockToken, getIdTokenResult: mockTokenResult } }) }));
+const mockWorker = { uid: 'qa-worker', getIdToken: mockToken, getIdTokenResult: mockTokenResult };
+const mockFormList = jest.fn();
+jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: mockWorker }) }));
+jest.mock('../services/teamWorkerRequestService', () => ({ teamWorkerRequestService: { list: (...args: unknown[]) => mockFormList(...args) } }));
 jest.mock('firebase/firestore', () => ({ doc: jest.fn(), onSnapshot: (_: unknown, _options: unknown, next: any, error: any) => { mockSnapshot = next; mockError = error; return jest.fn(); } }));
-jest.mock('../config/firebase', () => ({ db: {} }));
+jest.mock('../config/firebase', () => ({ db: {}, auth: { get currentUser() { return mockWorker; } } }));
 jest.mock('../services/accountLinkService', () => ({ accountLinkService: { getMyStatus: jest.fn() } }));
 jest.mock('../services/teamScopedReadService', () => ({ invalidateTeamScopedCache: jest.fn() }));
 jest.mock('../utils/devAdminSession', () => ({ isDevAdminSessionEnabled: () => false }));
@@ -30,6 +34,29 @@ const workerClaims = {
     roles: ['user', 'worker', '일반'], additionalPositions: [], erpRoleGroups: ['user'],
 };
 const mount = () => render(<AccountOnboardingGate><p>업무 화면</p></AccountOnboardingGate>);
+test('모바일 팀장 등록 조회를 권한 확인과 겹쳐 시작하고 확인 실패 시 결과를 폐기한다', async () => {
+    const media = window.matchMedia;
+    window.matchMedia = jest.fn().mockReturnValue({ matches: true });
+    const entry: WorkerFormEntry = {};
+    let reject!: (error: Error) => void;
+    (accountLinkService.getMyStatus as jest.Mock).mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
+    mockFormList.mockResolvedValue({ canReview: false, historyLoaded: false });
+    try {
+        render(<WorkerFormEntryContext.Provider value={entry}><AccountOnboardingGate><p>업무 화면</p></AccountOnboardingGate></WorkerFormEntryContext.Provider>);
+        const active = profile('active');
+        const leader = { ...active, data: () => ({ ...active.data(), position: '팀장' }) };
+        await act(() => mockSnapshot({ ...leader, metadata: { fromCache: true, hasPendingWrites: false } }));
+        expect(mockFormList).not.toHaveBeenCalled();
+        let verification!: Promise<void>;
+        await act(async () => { verification = mockSnapshot(leader); });
+        expect(mockFormList).toHaveBeenCalledWith(expect.any(String), undefined, { formOnly: true });
+        expect(entry.read).toBeDefined();
+        expect(screen.queryByText('업무 화면')).not.toBeInTheDocument();
+        await act(async () => { reject(new Error('denied')); await verification; });
+        expect(screen.getByRole('alert')).toBeInTheDocument();
+        expect(entry.read).toBeUndefined();
+    } finally { window.matchMedia = media; }
+});
 beforeEach(() => {
     jest.clearAllMocks(); mockToken.mockResolvedValue('synthetic-token');
     mockTokenResult.mockResolvedValue({ claims: {} });

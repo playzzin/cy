@@ -12,7 +12,10 @@ import { MasterDataProvider } from '../contexts/MasterDataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkerTeamIdMigration } from '../hooks/useWorkerTeamIdMigration';
 import type { UserData } from '../services/userService';
-import { db } from '../config/firebase';
+import { auth, db } from '../config/firebase';
+import { WorkerFormEntryContext, workerFormMonth, type WorkerFormEntry } from '../contexts/WorkerFormEntryContext';
+import { TEAM_MOBILE_QUERY } from '../components/team-mobile/TeamMobileUI';
+import { isRestrictedTeamLeader } from '../utils/teamWorkflowPolicy';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { canReuseScopedWorkerClaims, resolveAccountOnboardingMode } from '../utils/accountOnboardingState';
 import TeamWorkflowGate from './TeamWorkflowGate';
@@ -73,6 +76,9 @@ const isAdminLike = (profile: UserData | null): boolean => {
 
 export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser } = useAuth();
+  const entry = React.useContext(WorkerFormEntryContext);
+  const activeEntry = React.useRef(entry);
+  React.useLayoutEffect(() => { activeEntry.current = entry; }, [entry]);
   const [loading, setLoading] = React.useState(true);
   const [profile, setProfile] = React.useState<UserData | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
@@ -109,6 +115,18 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
         .filter(([field]) => !['lastLogin', 'updatedAt', 'displayName', 'photoURL'].includes(field))
         .sort(([left], [right]) => left.localeCompare(right)));
       if (key !== lastAccessKey) {
+        const visit = activeEntry.current;
+        if (visit) delete visit.read;
+        if (visit && firstProfile && loaded?.status === 'active' && loaded.accountType === 'worker'
+          && isRestrictedTeamLeader(loaded) && window.matchMedia?.(TEAM_MOBILE_QUERY).matches) {
+          const month = workerFormMonth();
+          const result = import('../services/teamWorkerRequestService').then(async ({ teamWorkerRequestService }) => {
+            if (!alive || activeEntry.current !== visit || auth.currentUser !== currentUser || lastAccessKey !== key) return;
+            const form = await teamWorkerRequestService.list(month, undefined, { formOnly: true });
+            if (!form.canReview && form.historyLoaded === false) return form;
+          }).catch(() => undefined);
+          visit.read = { uid: currentUser.uid, month, started: performance.now(), result };
+        }
         lastAccessKey = key;
         verified = false;
         pendingVerification = undefined;
@@ -144,12 +162,16 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
           setLoading(false);
         }
       } catch {
-        if (alive && request === revision) { setAccessError(true); setLoading(false); }
+        if (alive && request === revision) {
+          if (activeEntry.current) delete activeEntry.current.read;
+          setAccessError(true); setLoading(false);
+        }
       }
     }, () => {
       revision += 1;
       verified = false;
       pendingVerification = undefined;
+      if (activeEntry.current) delete activeEntry.current.read;
       if (alive) { setAccessError(true); setLoading(false); }
     });
 
@@ -203,8 +225,12 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
 };
 
 const ProtectedRouteShell: React.FC = () => {
-  const { pathname } = useLocation();
+  const { pathname, key, hash } = useLocation();
+  const { currentUser } = useAuth();
   const path = pathname.replace(/\/+$/, '');
+  const workerEntry = React.useMemo<WorkerFormEntry | null>(() =>
+    currentUser && path === '/manpower/team-worker-requests' && hash !== '#worker-request-history' ? {} : null,
+  [currentUser, path, key, hash]);
   const hasSelfContainedRequestData = Boolean(getTeamMenuPage(path)) || [
     '/manpower/team-account-approvals',
     '/jeonkuk/recruitment',
@@ -216,13 +242,15 @@ const ProtectedRouteShell: React.FC = () => {
     INVESTMENT_PATH,
   ].includes(path);
   return (
-    <AccountOnboardingGate>
-      <MigrationRunner>
-        <MasterDataProvider autoLoad={!hasSelfContainedRequestData}>
-          <DashboardLayoutWrapper />
-        </MasterDataProvider>
-      </MigrationRunner>
-    </AccountOnboardingGate>
+    <WorkerFormEntryContext.Provider value={workerEntry}>
+      <AccountOnboardingGate>
+        <MigrationRunner>
+          <MasterDataProvider autoLoad={!hasSelfContainedRequestData}>
+            <DashboardLayoutWrapper />
+          </MasterDataProvider>
+        </MigrationRunner>
+      </AccountOnboardingGate>
+    </WorkerFormEntryContext.Provider>
   );
 };
 
