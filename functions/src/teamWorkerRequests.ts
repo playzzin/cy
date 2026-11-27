@@ -11,6 +11,8 @@ import { maintainRequestDrafts } from './teamRequestDrafts';
 
 const COLLECTION = 'team_worker_requests';
 const DOCUMENTS = 'team-worker-documents';
+// Two base64-encoded files plus the callable envelope must fit in a Gen 1 request.
+const MAX_BATCH_BYTES = 6 * 1024 * 1024;
 const text = (value: unknown) => cleanWorkerText(value, 500);
 const fail = (code: functions.https.FunctionsErrorCode, message: string): never => { throw new functions.https.HttpsError(code, message); };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -41,7 +43,7 @@ export function workerPayroll(input: any) {
     return { payType, salaryModel: payType, unitPrice };
 }
 
-export async function readTeamWorkerRequestList(db: FirebaseFirestore.Firestore, actor: Awaited<ReturnType<typeof actorFor>>, input: any) {
+export async function readTeamWorkerRequestList(db: FirebaseFirestore.Firestore, actor: Omit<Awaited<ReturnType<typeof actorFor>>, 'cardTeamRefs'>, input: any) {
     const yearMonth = text(input.yearMonth);
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '조회 월을 확인해 주세요.');
     if (input.formOnly === true && !actor.canReview && input.cursor === undefined && input.pageSize === undefined) {
@@ -60,7 +62,7 @@ export async function handleTeamWorkerRequest(input: any, context: functions.htt
     const db = admin.firestore();
     const action = text(input?.action);
     if (['drafts', 'discardDraft'].includes(action)) return maintainRequestDrafts(input, actor.canReview, COLLECTION, DOCUMENTS);
-    if (action === 'list') return readTeamWorkerRequestList(db, actor, input);
+    if (action === 'list') return { ...await readTeamWorkerRequestList(db, actor, input), maxUploadBatchBytes: MAX_BATCH_BYTES };
     if (action === 'document') {
         const ref = db.collection(COLLECTION).doc(safeId(input.id));
         const row = (await ref.get()).data();
@@ -136,34 +138,67 @@ export async function handleTeamWorkerRequest(input: any, context: functions.htt
     }
     const id = hash(`${actor.uid}:${safeId(input.requestId)}`), ref = db.collection(COLLECTION).doc(id);
     if (action === 'upload') {
-        const fileId = safeId(input.fileId), kind = documentKind(input.kind), contentType = text(input.contentType);
-        const bytes = validateExpenseReceipt(contentType, String(input.base64 || '')), digest = createHash('sha256').update(bytes).digest('hex');
-        const documentRef = ref.collection('documents').doc(fileId);
-        const existing = await db.runTransaction(async transaction => {
-            const row = (await transaction.get(ref)).data(), saved = (await transaction.get(documentRef)).data();
+        const batch = input.documents !== undefined;
+        const files: any[] = batch ? input.documents : [input];
+        if (!Array.isArray(files) || (batch && files.length !== 2)) fail('invalid-argument', '신분증과 통장 서류를 확인해 주세요.');
+        const documents = files.map(file => {
+            const fileId = safeId(file?.fileId), kind = documentKind(file?.kind), contentType = text(file?.contentType);
+            const bytes = validateExpenseReceipt(contentType, String(file?.base64 || ''));
+            return { id: fileId, kind, contentType, bytes, digest: createHash('sha256').update(bytes).digest('hex'),
+                ref: ref.collection('documents').doc(fileId), fullPath: `${DOCUMENTS}/${actor.uid}/${id}/${fileId}`,
+                name: cleanWorkerText(file?.name, 120) || '서류' };
+        });
+        if (batch && (documents[0].kind === documents[1].kind || documents[0].id === documents[1].id
+            || documents[0].bytes.length + documents[1].bytes.length > MAX_BATCH_BYTES)) {
+            fail('invalid-argument', '서로 다른 신분증과 통장을 묶음 용량 이내로 첨부해 주세요.');
+        }
+        const pendingDocuments = (items: typeof documents, snapshots: FirebaseFirestore.DocumentSnapshot[]) =>
+            items.filter((item, i) => {
+                const saved = snapshots[i].data();
+                if (saved && (saved.digest !== item.digest || saved.kind !== item.kind)) fail('already-exists', '이미 등록된 서류를 바꿀 수 없습니다.');
+                return !saved;
+            });
+        const missing = await db.runTransaction(async transaction => {
+            const [requestDoc, ...stored] = await transaction.getAll(ref, ...documents.map(item => item.ref));
+            const row = requestDoc.data();
             if (row && (row.ownerUid !== actor.uid || row.teamId !== team!.id)) fail('permission-denied', '신청 소속팀을 확인해 주세요.');
             if (['discarding', 'discarded'].includes(row?.status)) fail('failed-precondition', '정리 중인 임시 신청입니다. 새로 작성해 주세요.');
-            if (saved) { if (saved.digest !== digest || saved.kind !== kind) fail('already-exists', '이미 등록된 서류를 바꿀 수 없습니다.'); if (row?.status === 'uploading') transaction.update(ref, { updatedAt: new Date().toISOString() }); return saved; }
+            const missing = pendingDocuments(documents, stored);
+            if (!missing.length) {
+                if (row?.status === 'uploading') transaction.update(ref, { updatedAt: new Date().toISOString() });
+                return missing;
+            }
             if (row && row.status !== 'uploading') fail('failed-precondition', '제출된 신청의 서류를 바꿀 수 없습니다.');
             const uploaded = await transaction.get(ref.collection('documents').limit(3));
-            const uploadIds = [...new Set([...(Array.isArray(row?.uploadIds) ? row!.uploadIds : []), ...uploaded.docs.map(doc => doc.id), fileId])];
+            const uploadIds = [...new Set([...(Array.isArray(row?.uploadIds) ? row!.uploadIds : []), ...uploaded.docs.map(doc => doc.id), ...documents.map(item => item.id)])];
             if (uploadIds.length > 2) fail('resource-exhausted', '한 신청에는 신분증과 통장 서류만 올릴 수 있습니다.');
             if (!row) transaction.create(ref, { ownerUid: actor.uid, teamId: team!.id, status: 'uploading', uploadIds, createdAt: new Date().toISOString() });
             else transaction.update(ref, { uploadIds, updatedAt: new Date().toISOString() });
-            return undefined;
+            return missing;
         });
-        if (existing) return { fileId };
-        const fullPath = `${DOCUMENTS}/${actor.uid}/${id}/${fileId}`, file = admin.storage().bucket().file(fullPath);
-        try { await file.save(bytes, { resumable: false, preconditionOpts: { ifGenerationMatch: 0 }, metadata: { contentType, metadata: { digest, kind } } }); }
-        catch (error) { if (Number((error as any)?.code) !== 412) throw error; const [metadata] = await file.getMetadata(); if (metadata.metadata?.digest !== digest || metadata.metadata?.kind !== kind) fail('already-exists', '다른 서류로 덮어쓸 수 없습니다.'); }
-        await db.runTransaction(async transaction => {
-            const row = (await transaction.get(ref)).data();
-            const saved = (await transaction.get(documentRef)).data();
-            if (saved) { if (saved.digest !== digest || saved.kind !== kind) fail('already-exists', '다른 서류로 덮어쓸 수 없습니다.'); return; }
-            if (row?.status !== 'uploading') fail('failed-precondition', '이미 제출된 신청입니다.');
-            transaction.set(documentRef, { id: fileId, kind, fullPath, contentType, name: cleanWorkerText(input.name, 120) || '서류', size: bytes.length, digest });
-        });
-        return { fileId };
+        if (missing.length) {
+            const uploads = await Promise.allSettled(missing.map(async item => {
+                const file = admin.storage().bucket().file(item.fullPath);
+                try {
+                    await file.save(item.bytes, { resumable: false, preconditionOpts: { ifGenerationMatch: 0 },
+                        metadata: { contentType: item.contentType, metadata: { digest: item.digest, kind: item.kind } } });
+                } catch (error) {
+                    if (Number((error as any)?.code) !== 412) throw error;
+                    const [metadata] = await file.getMetadata();
+                    if (metadata.metadata?.digest !== item.digest || metadata.metadata?.kind !== item.kind) fail('already-exists', '다른 서류로 덮어쓸 수 없습니다.');
+                }
+            }));
+            for (const upload of uploads) if (upload.status === 'rejected') throw upload.reason;
+            await db.runTransaction(async transaction => {
+                const [requestDoc, ...stored] = await transaction.getAll(ref, ...missing.map(item => item.ref));
+                const remaining = pendingDocuments(missing, stored);
+                if (!remaining.length) return;
+                const row = requestDoc.data();
+                if (row?.status !== 'uploading' || row.ownerUid !== actor.uid || row.teamId !== team!.id) fail('failed-precondition', '이미 제출되었거나 변경된 신청입니다.');
+                for (const { ref: documentRef, bytes, ...metadata } of remaining) transaction.set(documentRef, { ...metadata, size: bytes.length });
+            });
+        }
+        return batch ? { fileIds: documents.map(item => item.id) } : { fileId: documents[0].id };
     }
     const fields = workerFields(input.fields), company = await registrationCompany();
     const identityId = safeId(input.identityId), bankId = input.bankId ? safeId(input.bankId) : '';

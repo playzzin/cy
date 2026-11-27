@@ -53,8 +53,8 @@ test('권한은 매번 최신 문서로 확인하고 직접 팀과 legacy 팀은
     assert.deepEqual(masks, [
         ['status', 'role', 'position', 'systemRole', 'accountType', 'roles', 'additionalPositions', 'linkedWorkerIds', 'name', 'displayName', 'admin.positionConfig'],
         ['isActive', 'status', 'role', 'teamId'],
-        ['isActive', 'name', 'color', 'icon', 'iconKey'],
-        ['isActive', 'name', 'color', 'icon', 'iconKey'],
+        ['isActive', 'name', 'color', 'icon', 'iconKey', 'legacyId'],
+        ['isActive', 'name', 'color', 'icon', 'iconKey', 'legacyId'],
     ]);
     direct.resolve([]);
     legacy.resolve({ docs: [document('team-a', { name: 'A팀', color: '#f00' })] });
@@ -134,7 +134,7 @@ test('목록·팀·경비 구분을 병렬 조회하면서 월과 소유자 범�
         };
         return query;
     } };
-    const actor = { uid: 'leader', name: '팀장', canReview: false, teams: [] };
+    const actor = { uid: 'leader', name: '팀장', canReview: false, teams: [], cardTeamRefs: [] };
     const loading = readTeamExpenseRequestList(db as any, actor, { yearMonth: '2026-09', includeBillingTeams: true });
     assert.deepEqual(reads, ['team_expense_requests', 'teams', 'team_expense_categories']);
     assert.deepEqual(predicates, [['ownerUid', '==', 'leader'], ['yearMonth', '==', '2026-09']]);
@@ -153,6 +153,15 @@ test('목록·팀·경비 구분을 병렬 조회하면서 월과 소유자 범�
     assert.equal(result.nextCursor, null);
     assert.equal(result.categories.some(category => category.id === 'meal'), false);
     assert.deepEqual(result.teams, [{ id: 'team', name: '팀', color: '#64748b', icon: 'fa-users' }]);
+    reads.length = 0;
+    const entry = await readTeamExpenseRequestList(db as any, actor, { yearMonth: '2026-09', includeBillingTeams: true, formOnly: true });
+    assert.deepEqual(reads, ['teams', 'team_expense_categories']);
+    assert.equal(entry.historyLoaded, false);
+    assert.deepEqual(entry.teams, result.teams);
+    assert.deepEqual(entry.categories, result.categories);
+    reads.length = 0;
+    await readTeamExpenseRequestList(db as any, { ...actor, canReview: true }, { yearMonth: '2026-09', formOnly: true });
+    assert.ok(reads.includes('team_expense_requests'));
 });
 
 test('제출·영수증 불변성·권한·승인 원자성·반려를 검증한다', { skip: !process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_STORAGE_EMULATOR_HOST }, async () => {

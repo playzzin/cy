@@ -40,7 +40,11 @@ test('소속팀·서류 접근 제한, 승인 전 미등록, 승인 원자성·�
         await call('worker-leader-a', upload); await call('worker-leader-a', upload);
         await assert.rejects(call('worker-leader-a', { ...upload, kind: 'bank' }), rejected('already-exists'));
         await assert.rejects(call('worker-leader-a', { ...upload, base64: Buffer.concat([Buffer.from(png, 'base64'), Buffer.from('change')]).toString('base64') }), rejected('already-exists'));
-        await call('worker-leader-a', { ...upload, fileId: 'bank-one', kind: 'bank' });
+        const bank = { ...upload, fileId: 'bank-one', kind: 'bank' };
+        const pair = { action: 'upload', teamId: 'team-a', requestId: 'first-request', documents: [upload, bank] };
+        assert.deepEqual(await call('worker-leader-a', pair), { fileIds: ['identity-one', 'bank-one'] });
+        await assert.rejects(call('worker-leader-a', { ...pair, documents: [upload, upload] }), rejected('invalid-argument'));
+        await assert.rejects(call('worker-leader-b', pair), rejected('permission-denied'));
         await assert.rejects(call('worker-leader-a', { ...upload, fileId: 'third-document' }), rejected('resource-exhausted'));
         const result = await call('worker-leader-a', submit);
         assert.equal(result.status, 'pending'); assert.equal((await db.collection('workers').get()).size, 2);
@@ -61,7 +65,9 @@ test('소속팀·서류 접근 제한, 승인 전 미등록, 승인 원자성·�
         assert.equal(worker.payType, '일급제'); assert.equal(worker.salaryModel, '일급제'); assert.equal(worker.unitPrice, 150000);
         assert.equal(worker.companyId, 'dynamic-company'); assert.equal(worker.teamId, 'team-a'); assert.equal(worker.accountNumber, '001234567890'); assert.equal(worker.status, '재직'); assert.equal(worker.needsApproval, false);
         await assert.rejects(call('worker-office', { action: 'review', id: result.id, decision: 'rejected', reason: '늦은 반려' }), rejected('failed-precondition'));
-        for (const kind of ['identity', 'bank']) await call('worker-leader-a', { ...upload, requestId: 'duplicate-request', kind, fileId: `${kind}-one` });
+        const duplicatePair = { ...pair, requestId: 'duplicate-request' };
+        await call('worker-leader-a', duplicatePair);
+        await call('worker-leader-a', duplicatePair);
         const duplicate = await call('worker-leader-a', { ...submit, requestId: 'duplicate-request' });
         await assert.rejects(call('worker-office', { action: 'review', id: duplicate.id, decision: 'approved', payroll: { payType: '일급제', unitPrice: 150000 } }), rejected('already-exists'));
         assert.equal((await db.doc(`team_worker_requests/${duplicate.id}`).get()).data()!.status, 'pending');

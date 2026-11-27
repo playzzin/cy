@@ -1,5 +1,6 @@
 const loadWorkers = () => import('../pages/manpower/TeamWorkerDetailPage');
 const loadSites = () => import('../pages/manpower/SiteResponsibleDetailPage');
+export const loadMaterialWorkspace = () => import('../pages/materials/MaterialManagementPage');
 
 // Each of these pages loads its own data. No shared MasterDataProvider fetch is needed.
 export const teamMenuPages = {
@@ -18,6 +19,10 @@ export const teamMenuPages = {
   '/team/requests': () => import('../pages/office/OperationalWorkflowPage'),
   '/support/vehicles/oil-cycle': () => import('../pages/support/EngineOilCyclePage'),
   '/support/team-resource-detail': () => import('../pages/support/TeamResourceDetailPage'),
+  '/materials/inbound': async () => {
+    const [page] = await Promise.all([import('../pages/materials/MaterialInboundPage'), loadMaterialWorkspace()]);
+    return page;
+  },
   '/notices': () => import('../pages/notices/NoticeBoardPage'),
   '/worker/delegation-signature': () => import('../pages/worker/WorkerDelegationSignaturePage'),
 };

@@ -218,6 +218,41 @@ it('묶음 안의 권한 오류는 해당 조회에만 전달한다', async () =
     expect(call).toHaveBeenCalledTimes(1);
 });
 
+it('현장과 업체의 범위 조회가 끝나기 전에 입고 자재를 반환한다', async () => {
+    let finishDirectory!: () => void;
+    const directory = new Promise<void>(resolve => { finishDirectory = resolve; });
+    call.mockImplementation(async ({ requests }: { requests: Array<{ collection: string }> }) => {
+        if (requests.some(request => request.collection === 'sites')) await directory;
+        return { data: { results: requests.map(({ collection }) => ({ rows: [{ id: collection }] })) } };
+    });
+    const sites = getTeamScopedRows('sites');
+    const companies = getTeamScopedRows('companies');
+    try {
+        expect(await getTeamScopedRows('materials')).toEqual([{ id: 'materials' }]);
+        expect(call.mock.calls.map(([data]) => data.requests.map((r: { collection: string }) => r.collection)))
+            .toEqual([['materials'], ['sites', 'companies']]);
+    } finally { finishDirectory(); }
+    expect(await Promise.all([sites, companies])).toEqual([[{ id: 'sites' }], [{ id: 'companies' }]]);
+});
+
+it('계정 확인은 권한을 다시 읽고 직전 카탈로그 변경의 갱신 요청을 보존한다', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
+    try {
+        await getTeamScopedRows('materials');
+        invalidateTeamScopedCache({ catalogChanged: false });
+        await getTeamScopedRows('materials');
+        expect(getDoc).toHaveBeenCalledTimes(2);
+        expect(call).toHaveBeenLastCalledWith(expect.objectContaining({ requests: [{ collection: 'materials', filters: {} }] }));
+        invalidateTeamScopedCache();
+        invalidateTeamScopedCache({ catalogChanged: false });
+        await getTeamScopedRows('materials');
+        expect(call).toHaveBeenLastCalledWith(expect.objectContaining({ requests: [{ collection: 'materials', filters: { bypassCache: true } }] }));
+    } finally {
+        now.mockRestore();
+        invalidateTeamScopedCache();
+    }
+});
+
 it('수정 또는 새로고침 후 카탈로그 캐시를 우회한다', async () => {
     const now = jest.spyOn(Date, 'now').mockReturnValue(1000);
     try {

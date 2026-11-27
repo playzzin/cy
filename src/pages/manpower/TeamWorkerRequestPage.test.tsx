@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import TeamWorkerRequestPage from './TeamWorkerRequestPage';
 import { teamWorkerRequestService } from '../../services/teamWorkerRequestService';
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'leader' } }) }));
-jest.mock('../../services/teamWorkerRequestService', () => ({ teamWorkerRequestService: { list: jest.fn(), upload: jest.fn(), submit: jest.fn(), analyze: jest.fn(), review: jest.fn(), document: jest.fn() }, validateWorkerDocument: jest.fn() }));
+jest.mock('../../services/teamWorkerRequestService', () => ({ teamWorkerRequestService: { list: jest.fn(), upload: jest.fn(), uploadPair: jest.fn(), submit: jest.fn(), analyze: jest.fn(), review: jest.fn(), document: jest.fn() }, validateWorkerDocument: jest.fn() }));
 const service = teamWorkerRequestService as jest.Mocked<typeof teamWorkerRequestService>;
 const team = { id: 'team-a', name: 'A팀', color: '#ef4444', icon: 'fa-helmet-safety' };
 const data = { canReview: false, teams: [team], company: { id: 'company-dynamic', name: '㈜청연이엔지' }, requests: [] };
@@ -24,6 +24,23 @@ const fill = async () => {
   await screen.findByDisplayValue('테스트 작업자');
   fireEvent.change(screen.getByLabelText('연락처 *'), { target: { value: '01000000000' } });
 };
+
+test('개별 전송에서 한 건만 실패하면 성공한 서류를 다시 보내지 않는다', async () => {
+  render(<TeamWorkerRequestPage />); await fill();
+  fireEvent.change(screen.getByLabelText('통장 파일'), { target: { files: [new File(['bank'], '통장.png', { type: 'image/png' })] } });
+  await screen.findByDisplayValue('001234567890');
+  let finishIdentity!: () => void;
+  const identityPending = new Promise<void>(resolve => { finishIdentity = resolve; });
+  service.upload.mockImplementationOnce(() => identityPending).mockRejectedValueOnce(new Error('통장 재시도'));
+  fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
+  fireEvent.click(screen.getByRole('button', { name: '확인 후 승인 요청' }));
+  await waitFor(() => expect(service.upload).toHaveBeenCalledTimes(1));
+  expect(service.submit).not.toHaveBeenCalled();
+  finishIdentity(); await screen.findByText('통장 재시도');
+  fireEvent.click(screen.getByRole('button', { name: '확인 후 승인 요청' }));
+  await waitFor(() => expect(service.submit).toHaveBeenCalledTimes(1));
+  expect(service.upload.mock.calls.map(call => call[2])).toEqual(['identity', 'bank', 'bank']);
+});
 
 test('다른 화면에서 돌아오면 입력·서류를 복원하고 지우기를 선택하면 초안을 폐기한다', async () => {
   const view = render(<TeamWorkerRequestPage />); await fill();
@@ -55,13 +72,15 @@ test('현재 소속팀과 회사로 신청하며 분석 결과를 수정하고 �
   expect(await screen.findByText(/승인을 요청했습니다/)).toBeInTheDocument();
 });
 test('통장을 드래그하여 분석하고 계좌번호 앞자리 0을 보존한다', async () => {
+  service.list.mockResolvedValueOnce({ ...data, maxUploadBatchBytes: 1000 });
   render(<TeamWorkerRequestPage />); await fill();
   expect(screen.getByLabelText('신분증 촬영 파일')).toHaveAttribute('capture', 'environment');
   fireEvent.drop(screen.getByRole('region', { name: '통장 첨부' }), { dataTransfer: { files: [new File(['test'], '통장.png', { type: 'image/png' })] } });
   await screen.findByDisplayValue('001234567890');
   fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' })); fireEvent.click(screen.getByRole('button', { name: '확인 후 승인 요청' }));
   await waitFor(() => expect(service.submit).toHaveBeenCalledTimes(1));
-  expect(service.upload).toHaveBeenCalledTimes(2);
+  expect(service.uploadPair).toHaveBeenCalledTimes(1);
+  expect(service.upload).not.toHaveBeenCalled();
   expect(service.submit.mock.calls[0][2].accountNumber).toBe('001234567890');
 });
 test('분석 실패 후 직접 입력할 수 있고 제출 실패 시 동일한 요청으로 재시도한다', async () => {
