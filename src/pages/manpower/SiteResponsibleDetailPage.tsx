@@ -1,5 +1,5 @@
 import { TeamPageActions, TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
 import {
     Banknote,
@@ -19,11 +19,13 @@ import {
     X,
 } from 'lucide-react';
 
-import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
+import type { DailyReportWorkerRow } from '../../services/dailyReportService';
 import MonthNavigator from '../../components/common/MonthNavigator';
 import MobileListReturnButton from '../../components/common/MobileListReturnButton';
 import WorkerWorkHistory from '../../components/manpower/WorkerWorkHistory';
 import SiteMonthlyManDays from '../../components/manpower/SiteMonthlyManDays';
+import { useAuth } from '../../contexts/AuthContext';
+import { useSiteReportOutput } from '../../hooks/useSiteReportOutput';
 import TeamResourceStatusControl from '../../components/manpower/TeamResourceStatusControl';
 import { isClosedSite, normalizeSiteStatus } from '../../utils/siteStatus';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
@@ -280,11 +282,11 @@ const downloadCsv = (filename: string, rows: Array<Record<string, string | numbe
 };
 
 const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }> = ({ view }) => {
+    const { currentUser } = useAuth();
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [calendarTeams, setCalendarTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
-    const [outputRows, setOutputRows] = useState<DailyReportWorkerRow[]>([]);
     const [selectedResponsibleKey, setSelectedResponsibleKey] = useState('');
     const [selectedSiteKey, setSelectedSiteKey] = useState('');
     const isTeamMobile = useTeamMobile();
@@ -294,9 +296,8 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
     const [selectedDetailView, setDetailView] = useState<DetailView>('siteInfo');
     const [mobileView, setMobileView, workspaceRef] = useMobileDetailNavigation<MobileView>('sites', true);
     const [isResponsiblePickerOpen, setIsResponsiblePickerOpen] = useState(false);
+    const [isSummaryOpen, setIsSummaryOpen] = useState(false);
     const [loadingMaster, setLoadingMaster] = useState(true);
-    const [loadingOutput, setLoadingOutput] = useState(false);
-    const [outputError, setOutputError] = useState('');
     const [refreshRevision, setRefreshRevision] = useState(0);
     const restrictedTeam = useRestrictedTeamWorkflow();
     const siteMode = useOptionalSiteMode();
@@ -304,10 +305,14 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
     const selectedYear = selectedMonth.slice(0, 4);
-    const queryPeriod = detailView === 'siteInfo' ? selectedYear : selectedMonth;
-    const outputRanges = useMemo(() => queryPeriod.length === 4
-        ? Array.from({ length: 12 }, (_, index) => getMonthRange(`${queryPeriod}-${String(index + 1).padStart(2, '0')}`))
-        : [getMonthRange(queryPeriod)], [queryPeriod]);
+    const prioritizeMonth = isTeamMobile && detailView === 'siteInfo';
+    const { current: reportOutput, cumulative: cumulativeOutput } = useSiteReportOutput({
+        uid: currentUser?.uid, month: selectedMonth, annual: detailView === 'siteInfo', prioritizeMonth,
+        showAnnual: isSummaryOpen || mobileView === 'detail', includeSiteSupport: restrictedTeam,
+        revision: refreshRevision, getMonthRange,
+    });
+    const { rows: outputRows, loading: loadingOutput, error: outputError } = reportOutput;
+    useEffect(() => { if (outputError) toast.error(outputError); }, [outputError]);
     const accessScope = useWorkerAccessScope(workers, teams);
     // Menu presentation is independent of permissions: office/admin accounts
     // can open the team-leader menu while retaining their broader read scope.
@@ -351,38 +356,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         return () => {
             mounted = false;
         };
-    }, [refreshRevision]);
-
-    useEffect(() => {
-        let mounted = true;
-
-        const loadOutputRows = async () => {
-            setLoadingOutput(true);
-            setOutputError('');
-            setOutputRows([]);
-            try {
-                // The scoped attendance endpoint accepts at most one month per
-                // request. Its service batches these bounded monthly reads.
-                const months = await Promise.all(outputRanges.map(range => dailyReportService.getWorkerRows({ ...range, includeSiteSupport: restrictedTeam })));
-                const rows = months.flat();
-                if (mounted) setOutputRows(rows);
-            } catch (error) {
-                console.error(error);
-                toast.error('출력일보 데이터를 불러오지 못했습니다.');
-                if (mounted) {
-                    setOutputRows([]);
-                    setOutputError('출력일보를 불러오지 못했습니다. 새로고침해 주세요.');
-                }
-            } finally {
-                if (mounted) setLoadingOutput(false);
-            }
-        };
-
-        loadOutputRows();
-        return () => {
-            mounted = false;
-        };
-    }, [outputRanges, restrictedTeam, refreshRevision]);
+    }, [currentUser?.uid, refreshRevision]);
 
     const teamByKey = useMemo(() => {
         const map = new Map<string, Team>();
@@ -431,16 +405,20 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         return map;
     }, [workers]);
 
-    const scopedPeriodRows = useMemo(
-        () => outputRows.filter(row => workerAccessMatchesReportRow(accessScope, row)
+    const filterReportScope = useCallback(
+        (rows: DailyReportWorkerRow[]) => rows.filter(row => workerAccessMatchesReportRow(accessScope, row)
             || (restrictedTeam && accessScope.mode === 'team' && !accessScope.loading && sites.some(site =>
                 workerAccessMatchesTeamRef(accessScope, site.responsibleTeamId, site.responsibleTeamName) && rowMatchesSite(row, site)))),
-        [accessScope, outputRows, restrictedTeam, sites]
+        [accessScope, restrictedTeam, sites]
     );
+    const scopedPrimaryRows = useMemo(() => filterReportScope(outputRows), [filterReportScope, outputRows]);
+    const scopedPeriodRows = useMemo(() => cumulativeOutput.rows === outputRows
+        ? scopedPrimaryRows : filterReportScope(cumulativeOutput.rows),
+    [cumulativeOutput.rows, filterReportScope, outputRows, scopedPrimaryRows]);
 
     const scopedOutputRows = useMemo(
-        () => scopedPeriodRows.filter(row => row.date?.startsWith(`${selectedMonth}-`)),
-        [scopedPeriodRows, selectedMonth]
+        () => scopedPrimaryRows.filter(row => row.date?.startsWith(`${selectedMonth}-`)),
+        [scopedPrimaryRows, selectedMonth]
     );
 
     const scopedOutputSiteKeys = useMemo(
@@ -542,7 +520,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
 
     useEffect(() => {
         if (responsibleGroups.length === 0) {
-            setSelectedResponsibleKey('');
+            if (!loadingMaster && !loadingOutput && !accessScope.loading) setSelectedResponsibleKey('');
             return;
         }
 
@@ -551,7 +529,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                 ? current
                 : responsibleGroups[0].key
         );
-    }, [responsibleGroups]);
+    }, [accessScope.loading, loadingMaster, loadingOutput, responsibleGroups]);
 
     const selectedResponsible = useMemo(
         () => responsibleGroups.find(group => group.key === selectedResponsibleKey) ?? null,
@@ -608,7 +586,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
 
     useEffect(() => {
         if (selectedResponsibleSites.length === 0) {
-            setSelectedSiteKey('');
+            if (!loadingMaster && !loadingOutput && !accessScope.loading) setSelectedSiteKey('');
             return;
         }
 
@@ -617,7 +595,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                 ? current
                 : getSitePrimaryKey(selectedResponsibleSites[0])
         );
-    }, [selectedResponsibleSites]);
+    }, [accessScope.loading, loadingMaster, loadingOutput, selectedResponsibleSites]);
 
     const selectedSite = useMemo(
         () => siteByKey.get(selectedSiteKey) ?? null,
@@ -641,7 +619,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
         .reduce((sum, row) => sum + asNumber(row.manDay), 0);
     const responsibleCumulativeManDay = cumulativeManDay(scopedPeriodRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey));
     const siteCumulativeManDay = cumulativeManDay(selectedSiteYearRows);
-    const cumulativeValue = (value: number) => loadingOutput || outputError ? '-' : formatManDay(value);
+    const cumulativeValue = (value: number) => cumulativeOutput.error ? '확인 필요' : cumulativeOutput.ready ? formatManDay(value) : '조회 중';
 
     const selectedSiteStatsByKey = useMemo(() => {
         const map = new Map<string, SiteListStats>();
@@ -822,7 +800,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
     );
 
     return (
-        <div className="tw-page sr-page">
+        <div className={`tw-page sr-page${isTeamMobile ? ' sr-page--team-mobile' : ''}`}>
             <header className="tw-page__header">
                 <div>
                     <div className="tw-page__eyebrow">
@@ -886,7 +864,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                     </div>
                 </label>
 
-                <label className="tw-control">
+                <label className="tw-control sr-site-status">
                     <span>현장 상태</span>
                     <select aria-label="현장 상태" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as SiteStatusFilter); setMobileView('sites'); }}>
                         <option value="active">진행중 현장 ({selectedResponsibleStatusCounts.active})</option>
@@ -906,11 +884,11 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                 <strong>현재 표시 {selectedResponsibleSites.length.toLocaleString('ko-KR')}개</strong>
             </div>
 
-            {isTeamMobile && <TeamMobileSummary label="조회 현장" value={loadingMaster ? '조회 중' : `${selectedResponsibleStats.siteCount}곳`}>
+            {isTeamMobile && <TeamMobileSummary label="조회 현장" value={loadingMaster || accessScope.loading || (monthlySitesOnly && loadingOutput) ? '조회 중' : `${selectedResponsibleStats.siteCount}곳`}>
                 <span>{selectedMonth} · {loadingOutput ? '조회 중' : outputError ? '확인 필요' : `${formatManDay(selectedResponsibleStats.totalManDay)} 공수`}</span>
                 <span>출역 {loadingOutput ? '조회 중' : outputError ? '확인 필요' : `${selectedResponsibleStats.workerCount}명`}</span>
             </TeamMobileSummary>}
-            <TeamMobileDisclosure title="현장 요약 더보기">
+            <TeamMobileDisclosure title="현장 요약 더보기" onOpenChange={setIsSummaryOpen}>
             <section className="tw-kpi-grid" aria-label="현장담당 요약">
                 <div className="tw-kpi">
                     <Building2 size={20} />
@@ -933,6 +911,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                     <strong>{selectedResponsibleStats.workerCount.toLocaleString('ko-KR')}</strong>
                 </div>
             </section>
+            {prioritizeMonth && cumulativeOutput.error && <p className="sr-annual-error" role="status">누적공수를 불러오지 못했습니다. 새로고침해 주세요.</p>}
 
             </TeamMobileDisclosure>
             <div className="sr-mobile-switch" role="tablist" aria-label="모바일 현장 선택 안내">
@@ -1156,7 +1135,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                                         </div>
                                     </section>
                                     <SiteMonthlyManDays rows={selectedSiteYearRows} month={selectedMonth}
-                                        loading={loadingOutput} error={outputError} />
+                                        loading={!cumulativeOutput.ready && !cumulativeOutput.error} error={cumulativeOutput.error || outputError} />
                                 </div>
                             )}
 

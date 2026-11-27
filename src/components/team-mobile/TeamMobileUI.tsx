@@ -65,12 +65,13 @@ export function TeamPageActions({ children }: { children: React.ReactNode }) {
 }
 
 /** Native details keeps children mounted, including draft inputs and loaded documents. */
-export function TeamMobileDisclosure({ title, children, defaultOpen = false, summary }: {
+export function TeamMobileDisclosure({ title, children, defaultOpen = false, summary, onOpenChange }: {
     title: string; children: React.ReactNode; defaultOpen?: boolean; summary?: React.ReactNode;
+    onOpenChange?: (open: boolean) => void;
 }) {
     const mobile = useTeamMobile();
     if (!mobile) return <>{children}</>;
-    return <details className="tm-disclosure" open={defaultOpen || undefined}>
+    return <details className="tm-disclosure" open={defaultOpen || undefined} onToggle={event => onOpenChange?.(event.currentTarget.open)}>
         <summary><span>{title}</span>{summary && <span className="tm-disclosure__summary">{summary}</span>}</summary>
         <div className="tm-disclosure__body">{children}</div>
     </details>;

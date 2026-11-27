@@ -30,12 +30,13 @@ const call = async <T>(input: Record<string, unknown>): Promise<T> => {
     return result.data;
   } finally { if (mutating) clearPendingLists(); }
 };
-const list = async (yearMonth: string, cursor?: string, options?: { forceReload?: boolean }): Promise<TeamWorkerRequestData> => {
+const list = async (yearMonth: string, cursor?: string, options?: { forceReload?: boolean; formOnly?: boolean }): Promise<TeamWorkerRequestData> => {
   requireUser();
-  const key = JSON.stringify([yearMonth, cursor || '']);
+  const formOnly = !cursor && options?.formOnly === true;
+  const key = JSON.stringify([yearMonth, cursor || '', formOnly]);
   const pending = pendingLists.get(key);
   if (pending && !options?.forceReload) return pending;
-  const request = call<TeamWorkerRequestData>({ action: 'list', yearMonth, ...(cursor ? { cursor } : {}) });
+  const request = call<TeamWorkerRequestData>({ action: 'list', yearMonth, ...(cursor ? { cursor } : {}), ...(formOnly ? { formOnly } : {}) });
   pendingLists.set(key, request);
   try { return await request; }
   finally { if (pendingLists.get(key) === request) pendingLists.delete(key); }

@@ -1,4 +1,4 @@
-import { TeamPageActions, TeamMobileDisclosure, TeamRequestTabs, useTeamRequestTabs } from '../../components/team-mobile/TeamMobileUI';
+import { TeamPageActions, TeamMobileDisclosure, TeamRequestTabs, useTeamMobile, useTeamRequestTabs } from '../../components/team-mobile/TeamMobileUI';
 import RequestDraftNotice from '../../components/RequestDraftNotice';
 import { readRequestDraft, saveRequestDraft, deleteRequestDraft } from '../../utils/requestDraftStore';
 import { useUnsavedRequestGuard } from '../../hooks/useUnsavedRequestGuard';
@@ -58,7 +58,11 @@ export default function TeamWorkerRequestPage() {
   const [yearMonth, setYearMonth] = useState(monthNow), [data, setData] = useState<TeamWorkerRequestData | null>(null), [teamId, setTeamId] = useState(cachedDraft?.teamId || '');
   const [fields, setFields] = useState(() => cachedDraft?.fields ?? empty()), [documents, setDocuments] = useState<DocumentFile[]>(cachedDraft?.documents ?? []), [requestId, setRequestId] = useState(() => cachedDraft?.requestId ?? createId());
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : '');
+  const mobile = useTeamMobile();
   const tabs = useTeamRequestTabs('worker-request-history', data?.canReview === false, currentUser?.uid);
+  const preferFormOnly = useRef(false);
+  preferFormOnly.current = mobile && tabs.view === 'entry' && !data?.canReview;
+  const fullReadInFlight = useRef(false);
   const [submittedId, setSubmittedId] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
   const [payroll, setPayroll] = useState({ payType: '', unitPrice: '' });
@@ -67,11 +71,25 @@ export default function TeamWorkerRequestPage() {
   const [filter, setFilter] = useState('all'), [review, setReview] = useState<TeamWorkerRequest | null>(null), [reason, setReason] = useState(''), [preview, setPreview] = useState<DocumentFile | null>(null);
   const generation = useRef(0), lock = useRef(false), activeUid = useRef(currentUser?.uid), documentsRef = useRef(documents), previewRef = useRef(preview);
   activeUid.current = currentUser?.uid; documentsRef.current = documents; previewRef.current = preview;
-  const load = useCallback(async (forceReload = false) => {
-    const sequence = ++generation.current; setLoading(true); setError('');
-    try { const next = await (forceReload ? service.list(yearMonth, undefined, { forceReload: true }) : service.list(yearMonth)); if (sequence !== generation.current) return; setData(next); setTeamId(previous => next.teams.some(team => team.id === previous) ? previous : next.teams.length === 1 ? next.teams[0].id : ''); }
-    catch (cause) { if (sequence === generation.current) { setData(null); setError(errorText(cause)); } }
-    finally { if (sequence === generation.current) setLoading(false); }
+  const load = useCallback(async (forceReload = false, formOnly = false) => {
+    const sequence = ++generation.current;
+    fullReadInFlight.current = !formOnly;
+    setLoading(true);
+    setError('');
+    try {
+      const options = { ...(forceReload ? { forceReload } : {}), ...(formOnly ? { formOnly } : {}) };
+      const next = await (forceReload || formOnly ? service.list(yearMonth, undefined, options) : service.list(yearMonth));
+      if (sequence !== generation.current) return;
+      setData(next);
+      setTeamId(previous => next.teams.some(team => team.id === previous) ? previous : next.teams.length === 1 ? next.teams[0].id : '');
+    } catch (cause) {
+      if (sequence === generation.current) { setData(null); setError(errorText(cause)); }
+    } finally {
+      if (sequence === generation.current) {
+        fullReadInFlight.current = false;
+        setLoading(false);
+      }
+    }
   }, [yearMonth]);
   const hasDraft = documents.length > 0 || Object.values(fields).some(Boolean);
   useUnsavedRequestGuard(hasDraft, '작성 중인 내용은 이 탭에 임시 보관됩니다. 다른 화면으로 이동할까요?');
@@ -87,7 +105,15 @@ export default function TeamWorkerRequestPage() {
     if (previewRef.current) URL.revokeObjectURL(previewRef.current.preview);
     setDocuments(cachedDraft?.documents ?? []); setFields(cachedDraft?.fields ?? empty()); setTeamId(cachedDraft?.teamId || ''); setData(null); setReview(null); setPreview(null); setConfirm(false); setWarnings(cachedDraft?.warnings ?? {}); setNotice(cachedDraft ? '이전에 작성하던 내용을 복원했습니다.' : ''); setRequestId(cachedDraft?.requestId ?? createId());
   }, [currentUser?.uid]);
-  useEffect(() => { void load(); return () => { generation.current++; }; }, [currentUser?.uid, load]);
+  useEffect(() => {
+    void load(false, preferFormOnly.current);
+    return () => { generation.current++; };
+  }, [currentUser?.uid, load]);
+  const historyMissing = data?.historyLoaded === false;
+  const needsHistory = historyMissing && (!mobile || tabs.view === 'history');
+  useEffect(() => {
+    if (needsHistory && !fullReadInFlight.current) void load();
+  }, [load, needsHistory]);
   const loadMore = async () => {
     if (!data?.nextCursor || moreLock.current || loading) return;
     moreLock.current = true; setLoadingMore(true); setError('');
@@ -169,18 +195,18 @@ export default function TeamWorkerRequestPage() {
   return <main className="team-worker-request">
     <header className="worker-page-heading">
       <div className="worker-page-title"><div className="worker-eyebrow"><Users size={16} />팀별 작업자 관리</div><h1>{data?.canReview ? '작업자 등록 승인' : '신규 작업자 등록'}</h1><TeamMobileDisclosure title="등록 안내"><p>서류를 첨부하고 정보를 확인하면, 사무실 승인 후 작업자가 등록됩니다.</p></TeamMobileDisclosure></div>
-      <TeamPageActions><div className="worker-heading-actions"><a className="worker-history-link" href="#worker-request-history" onClick={tabs.showHistory}><ArrowDown size={16} />신청 내역</a><button type="button" className="primary" disabled={disabled} onClick={() => void load(true)}><RefreshCw size={16} className={loading ? 'worker-spin' : ''} />새로고침</button></div></TeamPageActions>
+      <TeamPageActions><div className="worker-heading-actions"><a className="worker-history-link" href="#worker-request-history" onClick={tabs.showHistory}><ArrowDown size={16} />신청 내역</a><button type="button" className="primary" disabled={disabled} onClick={() => void load(true, preferFormOnly.current)}><RefreshCw size={16} className={loading ? 'worker-spin' : ''} />새로고침</button></div></TeamPageActions>
     </header>
     <TeamRequestTabs tabs={tabs} disabled={Boolean(busy) || confirm} />
     {error && !confirm && !review && <p role="alert" className="worker-error">{error}</p>}{notice && <p role="status" className="worker-notice">{notice}</p>}{busy && <p role="status" className="worker-busy"><Sparkles size={17} />{busy}</p>}
     {hasDraft && <RequestDraftNotice onDiscard={discardDraft} disabled={Boolean(busy) || confirm} />}
-    <section hidden={tabs.active && tabs.view === 'entry'} className="worker-summary" aria-label="불러온 신청 현황" aria-busy={loading}>
+    <section hidden={historyMissing || (tabs.active && tabs.view === 'entry')} className="worker-summary" aria-label="불러온 신청 현황" aria-busy={loading}>
       <article><span className="worker-summary-icon"><Files size={20} /></span><div><span>조회한 신청</span><strong>{data ? data.requests.length.toLocaleString() : '—'}<small>건</small></strong></div></article>
       <article className="pending"><span className="worker-summary-icon"><Clock3 size={20} /></span><div><span>승인 대기</span><strong>{data ? counts.pending.toLocaleString() : '—'}<small>건</small></strong></div></article>
       <article className="approved"><span className="worker-summary-icon"><CheckCircle2 size={20} /></span><div><span>등록 완료</span><strong>{data ? counts.approved.toLocaleString() : '—'}<small>건</small></strong></div></article>
       <article className="rejected"><span className="worker-summary-icon"><RotateCcw size={20} /></span><div><span>반려</span><strong>{data ? counts.rejected.toLocaleString() : '—'}<small>건</small></strong></div></article>
     </section>
-    {loading && <div role="status" className="worker-loading"><RefreshCw size={16} className="worker-spin" />{data ? '신청 내역을 새로 확인하고 있습니다…' : '소속팀과 신청 내역을 불러오고 있습니다…'}</div>}
+    {loading && <div role="status" className="worker-loading"><RefreshCw size={16} className="worker-spin" />{preferFormOnly.current ? '등록에 필요한 소속팀과 회사 정보를 불러오고 있습니다…' : data ? '신청 내역을 새로 확인하고 있습니다…' : '소속팀과 신청 내역을 불러오고 있습니다…'}</div>}
     {loading && !data && <div className="worker-loading-skeleton" aria-hidden="true"><span /><span /><div><span /><span /></div><span /></div>}
     {data && data.teams.length > 0 && <form id={`${tabs.id}-entry`} {...tabs.panel('entry')} className="worker-form" onSubmit={event => { event.preventDefault(); if (disabled) return; try { validate(); setError(''); setConfirm(true); } catch (cause) { setError(errorText(cause)); } }}>
       <header className="worker-section-heading"><div><span className="worker-section-kicker">신규 등록</span><h2><FilePlus2 size={20} />작업자 등록 신청</h2></div><span className="worker-required-hint">* 필수 입력</span></header>
@@ -198,7 +224,7 @@ export default function TeamWorkerRequestPage() {
     <section id="worker-request-history" {...tabs.panel('history')} className="worker-history" aria-busy={loading || loadingMore}>
       <header className="worker-section-heading"><div><span className="worker-section-kicker">신청 현황</span><h2>{data?.canReview ? '작업자 등록 신청' : '내 신청 내역'}</h2></div><span className="worker-history-count">{visibleRequests.length.toLocaleString()}건</span></header>
       <div className="worker-history-filters"><label>조회 월<input type="month" value={yearMonth} disabled={disabled || documents.length > 0} onChange={event => { if (event.target.value) setYearMonth(event.target.value); }} /></label><label>처리 상태<select value={filter} onChange={event => setFilter(event.target.value)}><option value="all">전체</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-      {data && <><p className="worker-history-caption">불러온 {data.requests.length}건 기준으로 표시합니다.{data.nextCursor ? ' 이전 신청은 더 보기를 눌러 확인하세요.' : ''}</p>
+      {data && !historyMissing && <><p className="worker-history-caption">불러온 {data.requests.length}건 기준으로 표시합니다.{data.nextCursor ? ' 이전 신청은 더 보기를 눌러 확인하세요.' : ''}</p>
         {visibleRequests.length === 0 && <div className="worker-empty"><Files size={28} /><strong>해당하는 신청이 없습니다.</strong><p>{filter === 'all' ? '선택한 월에 등록한 신청 내역이 여기에 표시됩니다.' : '조회 월이나 처리 상태를 변경해 보세요.'}</p></div>}
         <div className="worker-request-list">{visibleRequests.map(row => <article key={row.id} data-submitted={row.id === submittedId || undefined}><header><h3>{row.name}</h3><span className={`worker-status ${row.status}`}>{statusLabels[row.status]}</span></header><TeamTag name={row.teamName} color={row.teamColor} icon={row.teamIcon} /><dl className="worker-request-meta"><div><dt>소속회사</dt><dd>{row.companyName}</dd></div><div><dt>신청자</dt><dd>{row.submitterName}</dd></div><div><dt>연락처</dt><dd>{row.contact}</dd></div><div><dt>신청일</dt><dd>{row.submittedAt.slice(0, 10)}</dd></div></dl>{row.reviewReason && <p className="worker-warning">반려 사유: {row.reviewReason}</p>}<button type="button" className="worker-review-button" disabled={disabled} onClick={() => { setReview(row); setReason(''); setError(''); setPayroll({ payType: '', unitPrice: '' }); }}>서류 및 신청 내용 {data.canReview && row.status === 'pending' ? '검토' : '보기'}</button></article>)}</div>
         {data.nextCursor && <div className="worker-load-more"><button type="button" disabled={disabled} onClick={() => void loadMore()}>{loadingMore ? <RefreshCw size={16} className="worker-spin" /> : <ArrowDown size={16} />}{loadingMore ? '추가 조회 중…' : '다음 100건 더 보기'}</button></div>}

@@ -1,4 +1,4 @@
-import { TeamPageActions, TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
+import { TeamPageActions, TeamMobileDisclosure, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
 import SecureSignature from '../../components/SecureSignature';
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMobileDetailNavigation } from '../../hooks/useMobileScroll';
@@ -698,13 +698,15 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
         [selectedWorker, selectedTeam, teamById]
     );
 
+    const showIdentityPhoto = !isDocumentView && (!isTeamMobile || mobileView === 'detail');
     useEffect(() => {
         let mounted = true;
 
         const loadIdCard = async () => {
             setIdCardUrl('');
             setIdCardError('');
-            if (isDocumentView) return;
+            setIdCardLoading(false);
+            if (!showIdentityPhoto) return;
 
             const rawPath = String(selectedWorker?.fileNameSaved ?? '').trim();
             if (!rawPath) return;
@@ -726,8 +728,8 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                     if (mounted) {
                         setIdCardUrl(url);
                         setIdCardError('');
+                        setIdCardLoading(false);
                     }
-                    setIdCardLoading(false);
                     return;
                 } catch {
                     // Try next compatible storage path.
@@ -744,7 +746,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
         return () => {
             mounted = false;
         };
-    }, [isDocumentView, selectedWorker?.fileNameSaved, selectedWorkerId]);
+    }, [showIdentityPhoto, selectedWorker?.fileNameSaved, selectedWorkerId]);
 
     const handleSignatureSaved = (downloadUrl: string) => {
         const workerId = String(selectedWorker?.id ?? '').trim();
@@ -820,7 +822,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
         || (!restrictedTeam && detailView === 'profile' && profileSection === 'work');
 
     return (
-        <div className={`tw-page${showingWorkHistory ? ' tw-page--work-history' : ''}${searchQuery.trim() ? ' tw-page--searching' : ''}`}>
+        <div className={`tw-page${isTeamMobile ? ' tw-page--team-mobile' : ''}${showingWorkHistory ? ' tw-page--work-history' : ''}${searchQuery.trim() ? ' tw-page--searching' : ''}`}>
             <header className="tw-page__header">
                 <div>
                     <div className="tw-page__eyebrow">
@@ -931,11 +933,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                 </section>
             )}
 
-            {isTeamMobile && <TeamMobileSummary label="재직 인원" value={`${teamStats.activeWorkers}명`}>
-                <span>{selectedMonth} · {monthlyPendingText ?? `${formatManDay(teamStats.totalManDay)} 공수`}</span>
-                <span>{monthlyPendingText ?? formatCurrency(teamStats.totalAmount)}</span>
-            </TeamMobileSummary>}
-            <TeamMobileDisclosure title="인원·서류 현황">
+            <TeamMobileDisclosure title="인원·서류 현황" summary={loadingMaster || accessScope.loading ? '조회 중' : `재직 ${teamStats.activeWorkers}명`}>
             <section className="tw-kpi-grid" aria-label="팀 요약">
                 <div className="tw-kpi" aria-label="팀 재직 인원">
                     <Users size={20} />
@@ -1002,7 +1000,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
 
             <main ref={workspaceRef} className={`tw-workspace tw-workspace--${mobileView}`}>
                 <section className="tw-worker-panel">
-                    <div className="tw-panel-heading">
+                    {!isTeamMobile && <div className="tw-panel-heading">
                         <div className="tw-panel-heading__title">
                             <span>선택한 팀</span>
                             <strong>{selectedTeam?.name || '청연이엔지 소속팀'}</strong>
@@ -1011,7 +1009,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                             <strong>{filteredWorkers.length.toLocaleString('ko-KR')}명</strong>
                             <small>현재 목록</small>
                         </div>
-                    </div>
+                    </div>}
 
                     <div className="tw-worker-list">
                         <div className={isTeamPickerOpen ? 'tw-merged-team-list tw-merged-team-list--open' : 'tw-merged-team-list'} aria-label="청연이엔지 소속팀 선택">

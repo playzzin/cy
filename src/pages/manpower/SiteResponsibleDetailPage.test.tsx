@@ -9,7 +9,9 @@ import { teamResourceStatusService } from '../../services/teamResourceStatusServ
 import { showConfirmAlert } from '../../utils/swal';
 import { SiteModeProvider, SiteModeContextType } from '../../contexts/SiteModeContext';
 import { useWorkerAccessScope } from '../../hooks/useWorkerAccessScope';
+import { TeamMobileProvider } from '../../components/team-mobile/TeamMobileUI';
 
+jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'site-leader' } }) }));
 jest.mock('../../services/siteService', () => ({ siteService: { getSites: jest.fn() } }));
 jest.mock('../../services/teamService', () => ({ teamService: { getTeams: async () => [
     { id: 'a', name: '검증팀', companyName: '청연이엔지' },
@@ -222,6 +224,23 @@ test('현장정보 연간 조회 실패 시 이전 누적공수를 숨긴다', a
     expect(screen.queryByRole('region', { name: '월별 누적공수' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /가상 가현장.*진행중/ })).not.toBeInTheDocument();
     log.mockRestore();
+});
+
+test('모바일 현장정보는 월 목록부터 열고 누적공수에 필요한 나머지 월은 펼칠 때 조회한다', async () => {
+    window.matchMedia = jest.fn().mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() });
+    render(<TeamMobileProvider enabled><SiteResponsibleDetailPage view="siteInfo" /></TeamMobileProvider>);
+    await screen.findByRole('button', { name: /가상 가현장.*진행중/ });
+    const read = dailyReportService.getWorkerRows as jest.Mock;
+    expect(read).toHaveBeenCalledTimes(1);
+    const currentMonth = screen.getByRole('group', { name: '조회월' }).textContent?.match(/\d{4}년 \d{1,2}월/);
+    expect(currentMonth).toBeTruthy();
+    const actual = new Date();
+    expect(read.mock.calls[0][0].startDate).toBe(`${actual.getFullYear()}-${String(actual.getMonth() + 1).padStart(2, '0')}-01`);
+    fireEvent.click(screen.getByText('현장 요약 더보기'));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(12));
+    const chart = await screen.findByRole('region', { name: '월별 누적공수' });
+    await within(chart).findByRole('table');
+    expect(new Set(read.mock.calls.map(([range]) => range.startDate)).size).toBe(12);
 });
 
 test('팀장 현장정보는 조회월의 실제 내 팀 투입 현장만 세고 0공수·이전월·타팀 지원만 있는 현장은 제외한다', async () => {

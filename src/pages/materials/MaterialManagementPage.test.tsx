@@ -24,3 +24,8 @@ it.each([
     expect(screen.queryByRole('link', { name: /재고 현황|현장별 재고|자재 로그/ })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('link', { name: /입출고 내역|현장·일자|재고 현황|현장별 재고|자재 로그/ })).toHaveLength(Number(count) - 3);
 });
+
+it.each([['inbound', '입고 확인서'], ['outbound', '출고 확인서']])('확인서 경로 %s에서 현재 업무를 표시한다', (path, label) => {
+    render(<MemoryRouter initialEntries={[`/materials/${path}-certificate`]}><MaterialManagementPage /></MemoryRouter>);
+    expect(screen.getByText(label)).toHaveAttribute('aria-current', 'page');
+});

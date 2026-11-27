@@ -10,5 +10,12 @@ export interface TeamWorkerRequest extends WorkerRegistrationFields {
   attachments: WorkerRegistrationAttachment[]; workerId?: string;
   reviewerName?: string; reviewedAt?: string; reviewReason?: string;
 }
-export interface TeamWorkerRequestData { canReview: boolean; teams: ExpenseTeamOption[]; company: { id: string; name: string }; requests: TeamWorkerRequest[]; nextCursor?: string | null }
+export interface TeamWorkerRequestData {
+  canReview: boolean;
+  teams: ExpenseTeamOption[];
+  company: { id: string; name: string };
+  requests: TeamWorkerRequest[];
+  nextCursor?: string | null;
+  historyLoaded?: boolean;
+}
 export interface WorkerDocumentAnalysis { fields: Partial<WorkerRegistrationFields>; warnings: string[] }

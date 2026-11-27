@@ -22,6 +22,7 @@
 .materials-navigation__tab small { display: block; margin-top: 2px; font-size: 10px; color: #73859a; white-space: nowrap; }
 .materials-navigation__tab.active small { color: #c4d8e8; }
 .materials-navigation__tab:focus-visible { outline: 3px solid #38a0c3; outline-offset: 2px; }
+.materials-navigation__current { display: inline-flex; align-items: center; gap: 7px; margin: 0; padding: 6px 9px; border-radius: 8px; background: #e9f1f8; color: #183955; font-size: 12px; font-weight: 750; }
 .material-page { --material-accent: #183955; --material-soft: #edf3f8; --material-line: #dce5ee; background: #f3f6fa; color: #172b45; }
 .material-page.material-page { margin-inline: auto; max-width: 2100px; padding: 24px; }
 .material-page--inbound { --material-accent: #0f766e; --material-soft: #edf9f6; }
@@ -68,6 +69,7 @@
     .materials-navigation__inner { padding: 8px 12px; gap: 10px; }
     .materials-navigation__brand { display: none; }
     .materials-navigation nav { width: 100%; gap: 3px; }
+    .materials-navigation__current { margin-top: -3px; }
     .materials-navigation__tab { justify-content: center; flex-direction: column; gap: 5px; padding: 8px 2px; }
     .materials-navigation__tab strong { font-size: 10px; }
     .materials-navigation__tab small { display: none; }
