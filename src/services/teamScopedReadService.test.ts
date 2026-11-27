@@ -1,6 +1,7 @@
 import { getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { auth } from '../config/firebase';
+import { hostedTeamScopedReadUrl } from '../config/teamScopedReadEndpoint';
 import { getTeamScopedRows, invalidateTeamScopedCache } from './teamScopedReadService';
 
 jest.mock('../config/firebase', () => ({ auth: { currentUser: { uid: 'leader' } }, db: {}, functions: {} }));
@@ -13,6 +14,14 @@ beforeEach(() => {
     (getDoc as jest.Mock).mockResolvedValue({ data: () => ({ role: 'user', position: '팀장', status: 'active' }) });
     (httpsCallable as jest.Mock).mockReturnValue(call);
     call.mockImplementation(async ({ requests }) => ({ data: { results: requests.map(() => ({ rows: [{ id: 'own-worker' }] })) } }));
+});
+it('운영 Hosting 도메인에서만 같은 주소의 팀 조회 함수를 사용한다', () => {
+    for (const host of ['cyee-9c1e4.web.app', 'cyee-9c1e4.firebaseapp.com']) {
+        expect(hostedTeamScopedReadUrl(new URL(`https://${host}/dashboard`))).toBe(`https://${host}/api/getTeamScopedData`);
+    }
+    for (const origin of ['https://cy-erp-staging-9c1e4.web.app', 'http://localhost:3000', 'https://cyee-9c1e4.web.app.example.test']) {
+        expect(hostedTeamScopedReadUrl(new URL(origin))).toBeUndefined();
+    }
 });
 it('팀장 조회는 전체 Firestore 조회 대신 서버 범위 조회를 사용한다', async () => {
     expect(await getTeamScopedRows('workers')).toEqual([{ id: 'own-worker' }]);
