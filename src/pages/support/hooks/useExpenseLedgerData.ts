@@ -1,3 +1,4 @@
+import type { Accommodation } from '../../../types/accommodation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { calculateTeamAverageExpense } from '../../../features/team-expense-average/teamExpenseAverage';
 import { accommodationBillingService } from '../../../services/accommodationBillingService';
@@ -562,7 +563,15 @@ const summarizeCardBillingAmountFromDetailRows = (doc: CardBillingDocument): num
   }, 0);
 };
 
-export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, billingScope: BillingScope = 'all', includeDailyReports = false, includePersonalAccommodation = false) => {
+interface ExpenseLedgerOptions {
+  includeDailyReports?: boolean;
+  includePersonalAccommodation?: boolean;
+  loadRooms?: () => Promise<Accommodation[]>;
+}
+
+export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, billingScope: BillingScope = 'all', {
+  includeDailyReports = false, includePersonalAccommodation = false, loadRooms,
+}: ExpenseLedgerOptions = {}) => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [accommodationDocs, setAccommodationDocs] = useState<AccommodationBillingDocument[]>([]);
@@ -599,7 +608,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       const [teamList, siteList, accommodationList, vehicleList, cardBillingList, claimList, companyList, cardMasterList, cardBillingTargetList, categoryList, dailyReportList, accommodationTargetList] = await Promise.all([
         teamService.getTeams(),
         siteService.getSites(),
-        accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, forExpenseLedger: true }),
+        accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth, forExpenseLedger: true, rooms: loadRooms?.() }),
         vehicleBillingService.getBillingsByMonth(yearMonth),
         cardBillingService.getBillingsByMonth(yearMonth),
         teamExpenseLedgerService.getClaimsByMonth(yearMonth),
@@ -658,7 +667,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
     } finally {
       if (sequence === generation.current) setLoading(false);
     }
-  }, [includeDailyReports, yearMonth]);
+  }, [includeDailyReports, loadRooms, yearMonth]);
 
   useEffect(() => {
     void loadData();

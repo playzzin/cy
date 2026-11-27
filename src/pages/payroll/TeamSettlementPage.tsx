@@ -933,13 +933,18 @@ export const TeamSettlementPage: React.FC = () => {
     };
   }, [selectedTeamId, yearMonth]);
 
+  const currentSettlement = doc?.teamId === selectedTeamId && doc.yearMonth === yearMonth ? doc : null;
+  // Viewers can read the saved statement before loading its source documents.
+  // Editors need those independent reads even when a draft is still being rebuilt.
+  const loadExpenseSources = !accessLoading && (canWrite || Boolean(currentSettlement));
+  const settlementUpdatedAt = canWrite ? doc?.updatedAt : currentSettlement?.updatedAt;
   useEffect(() => {
     let cancelled = false;
 
     const scope = selectedTeamId + ':' + yearMonth;
     const loadDeductionSources = async () => {
       setExpenseSourceLoad({ scope, status: 'loading' });
-      if (!selectedTeamId || !yearMonth) return;
+      if (!selectedTeamId || !yearMonth || !loadExpenseSources) return;
       try {
         const [accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims] = await Promise.all([
           getTeamSettlementAccommodationBillings(yearMonth),
@@ -958,7 +963,7 @@ export const TeamSettlementPage: React.FC = () => {
     };
     void loadDeductionSources();
     return () => { cancelled = true; };
-  }, [selectedTeamId, yearMonth, doc?.updatedAt, expenseSourceRevision]);
+  }, [selectedTeamId, yearMonth, settlementUpdatedAt, loadExpenseSources, expenseSourceRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -975,6 +980,11 @@ export const TeamSettlementPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [expenseSourceRevision]);
 
+  const selectedTeam = useMemo(
+    () => teams.find((team) => String(team.id ?? '') === String(selectedTeamId)),
+    [selectedTeamId, teams]
+  );
+
   const settlementLoadGeneration = useRef(0);
   const settlementScope = useRef('');
   settlementScope.current = `${selectedTeamId}:${yearMonth}`;
@@ -984,7 +994,7 @@ export const TeamSettlementPage: React.FC = () => {
 
     setLoadState({ status: 'loading' });
     try {
-      const loaded = await teamSettlementService.getTeamSettlement({ yearMonth, teamId: selectedTeamId, persistSnapshot: canWrite, refreshDraft: canWrite });
+      const loaded = await teamSettlementService.getTeamSettlement({ yearMonth, teamId: selectedTeamId, selectedTeam, persistSnapshot: canWrite, refreshDraft: canWrite });
       if (sequence !== settlementLoadGeneration.current) return;
       const nextDoc = stripSupportOriginalLines(loaded);
       setDoc(nextDoc);
@@ -995,20 +1005,14 @@ export const TeamSettlementPage: React.FC = () => {
       console.error(error);
       if (sequence === settlementLoadGeneration.current) setLoadState({ status: 'error', message: '팀정산 데이터를 불러오지 못했습니다.' });
     }
-  }, [accessLoading, canWrite, selectedTeamId, yearMonth]);
+  }, [accessLoading, canWrite, selectedTeam, selectedTeamId, yearMonth]);
 
   useEffect(() => {
     void loadSettlement();
     return () => { settlementLoadGeneration.current++; };
   }, [loadSettlement]);
 
-  const selectedTeam = useMemo(
-    () => teams.find((team) => String(team.id ?? '') === String(selectedTeamId)),
-    [selectedTeamId, teams]
-  );
-
   const selectedTeamName = selectedTeam?.name ?? '';
-  const currentSettlement = doc?.yearMonth === yearMonth && doc.teamId === selectedTeamId ? doc : null;
   const headerSettlement = isTeamMobile ? currentSettlement : doc;
   const confirmationState = isTeamMobile && !currentSettlement
     ? (!selectedTeamId || loadState.status === 'error' ? 'unavailable' : 'loading')

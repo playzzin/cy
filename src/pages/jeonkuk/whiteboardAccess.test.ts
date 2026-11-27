@@ -43,3 +43,18 @@ test('서버가 허용한 배정 현장은 담당팀이 달라도 유지하고 �
     expect(result?.sites).toEqual([assignedSite]);
     expect(result?.workers).toEqual(access.workers);
 });
+
+test('현황판 명단을 함께 요청하며 일부 조회만 범위 밖이면 전체 조회로 전환하지 않는다', async () => {
+    let finishTeam!: (rows: null) => void;
+    const read = jest.mocked(getTeamScopedRows);
+    read.mockReset();
+    read.mockImplementation(collection => collection === 'teams'
+        ? new Promise(resolve => { finishTeam = resolve; })
+        : Promise.resolve([]));
+    const result = loadWhiteboardTeamAccess();
+    expect(read.mock.calls.map(([collection]) => collection)).toEqual(['teams', 'sites', 'workers']);
+    finishTeam(null);
+    await expect(result).rejects.toThrow('권한');
+    read.mockResolvedValue(null);
+    await expect(loadWhiteboardTeamAccess()).resolves.toBeNull();
+});

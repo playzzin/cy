@@ -375,6 +375,14 @@ describe('accommodationBillingService.upsertBillingDocument line item safety', (
     expect(isProtectedAccommodationBillingStatus('OVERDUE')).toBe(true);
   });
 
+  it('팀 경비 화면에서 이미 요청한 숙소 목록으로 종료월을 확인한다', async () => {
+    mockedListItems.mockResolvedValue({ data: { accommodationBillingLineItems: [buildStoredItem({ amount: 100 })] } } as any);
+    const rooms = Promise.resolve([{ id: 'acc-1', status: 'active', contract: { endDate: '2026-06-30' } } as any]);
+    const docs = await accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: '2026-07', forExpenseLedger: true, rooms });
+    expect(docs).toEqual([]);
+    expect(accommodationService.listAllAccommodations).not.toHaveBeenCalled();
+  });
+
   it('경비 조회에서 종료 후 청구 행과 빈 문서를 제거하고 원본 조회는 유지한다', async () => {
     jest.mocked(accommodationService.listAllAccommodations).mockResolvedValue([
       { id: 'acc-1', status: 'active', contract: { endDate: '2026-06-30' } } as any,

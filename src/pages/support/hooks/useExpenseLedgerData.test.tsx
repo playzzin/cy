@@ -24,7 +24,7 @@ it('팀 경비를 해당팀 담당현장 공수와 다른현장 지원 공수의
     { id: 'out', date: '2026-09-02', teamId: 'other-team', responsibleTeamId: 'other-team', totalManDay: 101,
       workers: [{ workerId: 'own-worker', teamId: 'fixture-team', manDay: 1 }, { workerId: 'other', teamId: 'other-team', manDay: 100 }] }
   ]);
-  const { result } = renderHook(() => useExpenseLedgerData('2026-09', 'fixture-team', 'posted', true));
+  const { result } = renderHook(() => useExpenseLedgerData('2026-09', 'fixture-team', 'posted', { includeDailyReports: true }));
   await waitFor(() => expect(result.current.loading).toBe(false));
   expect(result.current).toHaveProperty('teamAverageExpenses.fixture-team', {
     responsibleSiteManDay: 2, supportManDay: 1, totalManDay: 3, averageExpense: 30000
@@ -56,7 +56,7 @@ it.each([
   const claims = adjusted ? [{ id: 'adjustment', yearMonth: month, payerTeamId: 'fixture-team',
     claimType: 'otherExpense', category: 'accommodationAdjustment', amount: -450000, status: 'charged' }] : [];
   (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValueOnce(claims).mockResolvedValueOnce(claims);
-  const { result: overview } = renderHook(() => useExpenseLedgerData(month, 'fixture-team', 'posted', false, true));
+  const { result: overview } = renderHook(() => useExpenseLedgerData(month, 'fixture-team', 'posted', { includePersonalAccommodation: true }));
   await waitFor(() => expect(overview.current.loading).toBe(false));
   expect(overview.current.summaries[0]).toMatchObject({ accommodation: displayed, otherClaim: 0 });
   expect(overview.current.totals).toMatchObject({ accommodation: displayed, total: displayed });
@@ -96,7 +96,7 @@ it('10월 95만원을 유지하고 11월은 종료 숙소의 모든 경비와 �
     return applyAccommodationExpensePeriod(docs, [room]);
   });
   (teamExpenseLedgerService.getClaimsByMonth as jest.Mock).mockResolvedValue([]);
-  const { result, rerender } = renderHook(({ month }) => useExpenseLedgerData(month, 'fixture-team', 'all', false, true), {
+  const { result, rerender } = renderHook(({ month }) => useExpenseLedgerData(month, 'fixture-team', 'all', { includePersonalAccommodation: true }), {
     initialProps: { month: '2026-10' },
   });
   await waitFor(() => expect(result.current.loading).toBe(false));
@@ -115,7 +115,7 @@ it('음수 기타청구를 상세에 유지하고 팀별 금액과 전체 합계
     { id: 'draft', yearMonth: '2026-09', payerTeamId: 'fixture-team', claimType: 'otherExpense', amount: -50000, status: 'draft' }
   ]);
   (dailyReportService.getReports as jest.Mock).mockResolvedValueOnce([]);
-  const { result } = renderHook(() => useExpenseLedgerData('2026-09', 'fixture-team', 'posted', true));
+  const { result } = renderHook(() => useExpenseLedgerData('2026-09', 'fixture-team', 'posted', { includeDailyReports: true }));
   await waitFor(() => expect(result.current.loading).toBe(false));
   expect(result.current.summaries[0]).toMatchObject({ otherClaim: 60000 });
   expect(result.current.totals).toMatchObject({ otherClaim: 60000, total: 60000 });
@@ -130,7 +130,7 @@ it('공수 조회 실패를 0공수로 오인하지 않도록 평균 집계를 �
   ]);
   (dailyReportService.getReports as jest.Mock).mockRejectedValueOnce(new Error('unavailable'));
   try {
-    const { result } = renderHook(() => useExpenseLedgerData('2026-09', 'fixture-team', 'posted', true));
+    const { result } = renderHook(() => useExpenseLedgerData('2026-09', 'fixture-team', 'posted', { includeDailyReports: true }));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current).toHaveProperty('dailyReportsError', true);
     expect(result.current.teamAverageExpenses).toEqual({});
