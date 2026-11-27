@@ -48,7 +48,7 @@ const completeGoogleRedirect = (auth: Auth, authModule: FirebaseAuthModule, star
   const finishAccess = loginAccessTracker.beginInteractiveLogin();
   googleRedirectCompletion = Promise.resolve().then(() => flow === 'local-google'
     ? authModule.signInWithCredential(auth, authModule.GoogleAuthProvider.credential(consumeLocalGoogleCredential()))
-    : authModule.getRedirectResult(auth)).then(result => {
+    : authModule.getRedirectResult(auth, authModule.browserPopupRedirectResolver)).then(result => {
     if (!result) throw Object.assign(new Error('Google sign-in did not complete'), { code: 'auth/redirect-cancelled' });
     finishAccess(result.user);
     void writeAuthLog({ action: 'login_success', provider: 'google', method: 'redirect', user: result.user, email: result.user.email });
@@ -269,7 +269,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await authModule.setPersistence(auth, remember ? authModule.browserLocalPersistence : authModule.browserSessionPersistence);
       if (usePopup) {
         clearGoogleLoginRedirect();
-        const { user } = await authModule.signInWithPopup(auth, provider);
+        const { user } = await authModule.signInWithPopup(auth, provider, authModule.browserPopupRedirectResolver);
         finishPopupLogin?.(user);
         setCurrentUser(user);
         setSessionCheck('ready');
@@ -279,7 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await startLocalGoogleLogin(auth.app.options.apiKey || '');
       } else {
         rememberGoogleLoginRedirect(returnPath);
-        await authModule.signInWithRedirect(auth, provider);
+        await authModule.signInWithRedirect(auth, provider, authModule.browserPopupRedirectResolver);
       }
     } catch (error) {
       clearGoogleLoginRedirect();

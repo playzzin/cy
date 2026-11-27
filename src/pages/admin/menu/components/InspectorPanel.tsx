@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faChevronLeft, faChevronRight, faTag, faLink, faUserShield,
-    faEye, faEyeSlash, faTimes, faCheckCircle, faPalette, faChartPie, faLayerGroup
+    faEye, faEyeSlash, faTimes, faCheckCircle, faPalette, faChartPie, faLayerGroup, faMinus
 } from '@fortawesome/free-solid-svg-icons';
 import { resolveIcon } from '../../../../constants/iconMap';
 import { MenuItem } from '../../../../services/menuServiceV11';
@@ -13,7 +13,6 @@ import SidebarColorSettings from './SidebarColorSettings';
 import type { SidebarColorSource } from '../../../../utils/sidebarColors';
 import { isMenuDivider } from '../../../../utils/menuDivider';
 import { getLinkedMenuRef } from '../../../../utils/linkedPositionMenus';
-import * as Fas from '@fortawesome/free-solid-svg-icons';
 import { IconName } from '@fortawesome/fontawesome-svg-core';
 
 interface InspectorPanelProps {
@@ -95,7 +94,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                         <div className="flex items-center gap-3 mb-1">
                             <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 ring-1 ring-blue-500/20">
                                 <FontAwesomeIcon
-                                    icon={isMenuDivider(localState) ? Fas.faMinus : resolveIcon(localState.icon, faChartPie)}
+                                    icon={isMenuDivider(localState) ? faMinus : resolveIcon(localState.icon, faChartPie)}
                                     size="lg"
                                 />
                             </div>
