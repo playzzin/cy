@@ -65,6 +65,13 @@
     ],
     "rewrites": [
       {
+        "source": "/api/getTeamScopedData",
+        "function": {
+          "functionId": "getTeamScopedData",
+          "region": "asia-northeast3"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

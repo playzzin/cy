@@ -1,6 +1,7 @@
-import { httpsCallable } from 'firebase/functions';
+import { httpsCallable, httpsCallableFromURL } from 'firebase/functions';
 import { doc, getDoc, Timestamp } from 'firebase/firestore';
 import { auth, db, functions } from '../config/firebase';
+import { hostedTeamScopedReadUrl } from '../config/teamScopedReadEndpoint';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 
 const leaderRoles = new Set(['팀장', '반장', 'teamlead', 'teamleader', 'foreman']);
@@ -93,6 +94,11 @@ const reportCollections = new Set(['daily_reports', 'site_work_reports']);
 const siteDirectoryCollections = new Set(['sites', 'teams', 'workers']);
 type ReadRequest = { collection: string; filters: Record<string, unknown> };
 type ReadResult = { rows?: unknown[]; error?: { code: string; message: string } };
+const teamScopedCallable = <Request, Result>() => {
+    const url = typeof window !== 'undefined' ? hostedTeamScopedReadUrl(window.location) : undefined;
+    return url ? httpsCallableFromURL<Request, Result>(functions, url)
+        : httpsCallable<Request, Result>(functions, 'getTeamScopedData');
+};
 type ReadOptions = { withSiteDirectory?: boolean };
 type QueuedRead = { uid: string | undefined; request: ReadRequest; options: ReadOptions; resolve: (rows: unknown[]) => void; reject: (error: unknown) => void };
 let legacyServerUntil = 0;
@@ -117,7 +123,7 @@ const filterLegacyRows = async (item: QueuedRead, rows: unknown[]): Promise<unkn
 const readLegacy = async (item: QueuedRead): Promise<unknown[]> => {
     const rows = await withReadSlot(async () => {
         assertCurrentAccount(item.uid);
-        const response = await httpsCallable<ReadRequest, { rows: unknown[] }>(functions, 'getTeamScopedData')({
+        const response = await teamScopedCallable<ReadRequest, { rows: unknown[] }>()({
             collection: item.request.collection, filters: legacyFilters(item.request),
         });
         assertCurrentAccount(item.uid);
@@ -162,7 +168,7 @@ const flushReads = () => {
                 assertCurrentAccount(uid);
                 // Both server versions can execute this request. Old servers read
                 // the first collection; new servers process the entire batch.
-                const response = await httpsCallable<ReadRequest & { requests: ReadRequest[] }, { results?: ReadResult[]; rows?: unknown[] }>(functions, 'getTeamScopedData')({
+                const response = await teamScopedCallable<ReadRequest & { requests: ReadRequest[] }, { results?: ReadResult[]; rows?: unknown[] }>()({
                     collection: group[0].request.collection,
                     filters: legacyFilters(group[0].request),
                     requests: group.map(item => item.request),

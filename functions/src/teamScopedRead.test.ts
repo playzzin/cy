@@ -46,6 +46,10 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         'system_configs/unrelated': { data: JSON.stringify({ teamId: 'team-a' }) },
         'sites/site-a': { responsibleTeamId: 'team-a' }, 'sites/site-b': { responsibleTeamId: 'team-b' },
         'daily_reports/mixed': { date: '2026-09-17', workers: [{ workerId: 'member-a', manDay: 1, unitPrice: 100 }, { workerId: 'member-b', manDay: 1, unitPrice: 900 }] },
+        'daily_reports/site-attendance': { date: '2026-09-18', siteId: 'site-a', workers: [
+            { workerId: 'member-a', manDay: 1, unitPrice: 100 },
+            { workerId: 'member-b', manDay: 0.5, unitPrice: 900 },
+        ] },
         'cardAssignments/own': { cardId: 'card-a', assigneeType: 'TEAM', assigneeId: 'team-a', startDate: '2026-09-10', endDate: '2026-09-20' },
         'cardTransactions/before': { cardId: 'card-a', date: '2026-09-01' },
         'cardTransactions/during': { cardId: 'card-a', date: '2026-09-17' },
@@ -112,6 +116,15 @@ test('서버가 연결된 팀을 결정하고 타 팀·미승인·임의 컬렉�
         const reports = (await call('daily_reports', 'leader', { filters: { startDate: '2026-09-01', endDate: '2026-09-30' } })).rows;
         assert.equal(reports[0].workers.length, 1);
         assert.equal(reports[0].totalAmount, 100);
+        const siteOverview = await getTeamScopedData.run({ requests: [
+            { collection: 'site_work_reports', filters: { startDate: '2026-09-01', endDate: '2026-09-30' } },
+            { collection: 'sites' },
+        ] }, { auth: { uid: 'leader', token: {} } } as any);
+        const attendance = siteOverview.results[0].rows.find((row: any) => row.id === 'site-attendance');
+        assert.deepEqual(attendance.workers.map((row: any) => [row.workerId, row.manDay, row.unitPrice]), [
+            ['member-a', 1, 100], ['member-b', 0.5, undefined],
+        ]);
+        assert.deepEqual(siteOverview.results[1].rows.map((row: any) => row.id).sort(), ['nested-own', 'site-a']);
         assert.deepEqual((await call('cardTransactions')).rows.map((row: any) => row.id), ['during']);
         assert.deepEqual((await call('vehicleExpenses')).rows.map((row: any) => row.id), ['own']);
         assert.deepEqual((await call('accommodationUtilityRecords')).rows.map((row: any) => row.id), ['own']);
