@@ -52,6 +52,23 @@ test('활성 상태 권한 갱신보다 나중에 도착한 정지 상태를 우
     expect(screen.queryByText('업무 화면')).not.toBeInTheDocument();
 });
 
+test('같은 활성 프로필의 마지막 로그인만 바뀌면 진행 중인 권한과 토큰 확인을 공유한다', async () => {
+    let resolve!: (value: unknown) => void;
+    const status = accountLinkService.getMyStatus as jest.Mock;
+    status.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    mount();
+    const active = profile('active');
+    act(() => {
+        void mockSnapshot(active);
+        void mockSnapshot({ ...active, data: () => ({ ...active.data(), lastLogin: 'updated' }) });
+    });
+    expect(status).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('업무 화면')).not.toBeInTheDocument();
+    await act(async () => resolve({ user: { status: 'active' } }));
+    expect(mockToken).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('업무 화면')).toBeInTheDocument();
+});
+
 test('조회 또는 토큰 갱신 실패는 재승인/가입 화면으로 보내지 않고 재시도한다', async () => {
     mount(); act(() => mockError());
     expect(screen.getByRole('alert')).toBeInTheDocument();

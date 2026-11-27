@@ -17,6 +17,7 @@ import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import { resolveAccountOnboardingMode } from '../utils/accountOnboardingState';
 import TeamWorkflowGate from './TeamWorkflowGate';
 import { INVESTMENT_PATH } from '../constants/siteModes';
+import { TEAM_SITE_PATH } from '../constants/teamWorkflowActions';
 
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { status, result } = useWorkerTeamIdMigration();
@@ -86,6 +87,7 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
 
     let alive = true;
     let revision = 0;
+    let pendingVerification: { key: string; promise: Promise<unknown> } | undefined;
     if (!currentUser?.uid) {
       setProfile(null);
       setLoading(false);
@@ -103,11 +105,25 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
       // accounts stay behind their existing gate until claims are refreshed.
       try {
         if (loaded?.status === 'active') {
-          if (loaded.accountType === 'worker') {
-            const status = await accountLinkService.getMyStatus({ refreshAccessClaims: true });
-            if (status.user.status !== 'active') throw new Error('Account status changed');
+          const key = JSON.stringify(Object.entries(loaded)
+            .filter(([field]) => field !== 'lastLogin')
+            .sort(([left], [right]) => left.localeCompare(right)));
+          if (pendingVerification?.key !== key) {
+            const verify = async () => {
+              if (loaded.accountType === 'worker') {
+                const status = await accountLinkService.getMyStatus({ refreshAccessClaims: true });
+                if (status.user.status !== 'active') throw new Error('Account status changed');
+              }
+              return currentUser.getIdToken(true);
+            };
+            const promise = verify().finally(() => {
+              if (pendingVerification?.promise === promise) pendingVerification = undefined;
+            });
+            pendingVerification = { key, promise };
           }
-          await currentUser.getIdToken(true);
+          await pendingVerification.promise;
+        } else {
+          pendingVerification = undefined;
         }
         if (alive && request === revision) {
           invalidateTeamScopedCache();
@@ -120,6 +136,7 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
       }
     }, () => {
       revision += 1;
+      pendingVerification = undefined;
       if (alive) { setAccessError(true); setLoading(false); }
     });
 
@@ -179,6 +196,7 @@ const ProtectedRouteShell: React.FC = () => {
     '/manpower/team-account-approvals',
     '/support/team-expense-requests',
     '/jeonkuk/recruitment',
+    TEAM_SITE_PATH,
     INVESTMENT_PATH,
   ].includes(pathname.replace(/\/+$/, ''));
   return (
