@@ -850,9 +850,9 @@
         gap: 6px;
     }
 
-    .sr-page--team-mobile .tw-toolbar :is(.tw-control--month, .sr-site-status) {
+    .sr-page--team-mobile .tw-toolbar :is(.tw-control--month, .sr-site-filter-status) {
         display: grid;
-        grid-template-columns: 4em minmax(0, 1fr);
+        grid-template-columns: 4.25rem minmax(0, 1fr);
         align-items: center;
         gap: 8px;
     }
