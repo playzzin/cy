@@ -528,6 +528,7 @@ export const accommodationBillingService = {
         yearMonth: string;
         strict?: boolean;
         forExpenseLedger?: boolean;
+        rooms?: ReturnType<typeof accommodationService.getAccommodations>;
     }): Promise<AccommodationBillingDocument[]> {
         const [docsRes, itemsRes] = await Promise.all([
             listAllAccommodationBillingDocuments({ limit: Number.MAX_SAFE_INTEGER, offset: 0, yearMonth: params.yearMonth }),
@@ -599,7 +600,7 @@ export const accommodationBillingService = {
         if (!params.forExpenseLedger || !documents.some((document: AccommodationBillingDocument) => (
             document.lineItems.some(item => item.sourceAccommodationId)
         ))) return documents;
-        return applyAccommodationExpensePeriod(documents, await accommodationService.listAllAccommodations());
+        return applyAccommodationExpensePeriod(documents, await (params.rooms ?? accommodationService.listAllAccommodations()));
     },
 
     async upsertBillingDocument(

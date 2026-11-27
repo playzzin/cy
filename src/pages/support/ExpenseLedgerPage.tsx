@@ -98,7 +98,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false,
     teamAverageExpenses = {},
     dailyReportsError,
     billingTargetReviewCount = 0
-  } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope, true);
+  } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope, { includeDailyReports: true });
 
   const draftCount =
     statusCounts.accommodationDraft +

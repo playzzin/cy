@@ -1,5 +1,5 @@
 import { TeamPageActions, TeamMobileDisclosure, TeamMobileSummary, useTeamMobile } from '../../components/team-mobile/TeamMobileUI';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Banknote,
     BedDouble,
@@ -354,6 +354,16 @@ const TeamResourceDetailPage: React.FC = () => {
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
 
+    const pendingRooms = useRef<Promise<Accommodation[]> | null>(null);
+    const loadRooms = useCallback(() => {
+        if (pendingRooms.current) return pendingRooms.current;
+        const request = accommodationService.getAccommodations();
+        pendingRooms.current = request;
+        const clear = () => { pendingRooms.current = null; };
+        void request.then(clear, clear);
+        return request;
+    }, []);
+
     const {
         loading,
         teamOptions,
@@ -362,7 +372,7 @@ const TeamResourceDetailPage: React.FC = () => {
         resolveTeam,
         allCategoryOptions,
         loadData,
-    } = useExpenseLedgerData(selectedMonth, 'all', billingScope);
+    } = useExpenseLedgerData(selectedMonth, 'all', billingScope, { loadRooms });
     const accessScope = useWorkerAccessScope(workers, teamOptions);
     const canViewWholeTeam = workerAccessCanViewWholeTeam(accessScope);
     const statementScope = JSON.stringify([selectedMonth, selectedTeamId, billingScope, detailView, accessScope.mode, accessScope.loading, accessScope.workerIds, accessScope.teamIds]);
@@ -406,7 +416,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 nextCardAssignments,
                 nextWorkers,
             ] = await Promise.all([
-                accommodationService.getAccommodations(),
+                loadRooms(),
                 accommodationService.getAssignments(),
                 vehicleService.getVehicles(),
                 vehicleService.listAllVehicleAssignments(),
@@ -428,7 +438,7 @@ const TeamResourceDetailPage: React.FC = () => {
         } finally {
             setLoadingResources(false);
         }
-    }, []);
+    }, [loadRooms]);
 
     useEffect(() => {
         void loadResourceData();
