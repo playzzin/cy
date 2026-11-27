@@ -24,6 +24,7 @@ interface MonthNavigatorProps {
     onChange: (nextMonth: string) => void;
     disabled?: boolean;
     ariaLabel?: string;
+    caption?: React.ReactNode;
 }
 
 const MonthNavigator: React.FC<MonthNavigatorProps> = ({
@@ -31,6 +32,7 @@ const MonthNavigator: React.FC<MonthNavigatorProps> = ({
     onChange,
     disabled = false,
     ariaLabel = '조회월',
+    caption,
 }) => (
     <div className="month-navigator" role="group" aria-label={ariaLabel}>
         <button
@@ -43,9 +45,12 @@ const MonthNavigator: React.FC<MonthNavigatorProps> = ({
         >
             <ChevronLeft size={18} aria-hidden="true" />
         </button>
-        <output className="month-navigator__value" aria-live="polite">
-            {formatYearMonth(value)}
-        </output>
+        <div className="month-navigator__center">
+            <output className="month-navigator__value" aria-live="polite">
+                {formatYearMonth(value)}
+            </output>
+            {caption}
+        </div>
         <button
             type="button"
             className="month-navigator__button"

@@ -152,3 +152,20 @@ test('인력 신청 목록과 회사 정보를 병렬 조회하고 월·소유�
     assert.equal(result.nextCursor, null);
     assert.equal(result.canReview, false);
 });
+
+test('팀장 등록 첫 화면은 소속 정보만 응답하고 신청 이력은 조회하지 않는다', async () => {
+    const reads: string[] = [];
+    const db = { collection: (name: string) => {
+        reads.push(name);
+        const query = {
+            select: () => query,
+            limit: () => query,
+            get: async () => ({ size: 1, docs: [{ id: 'company', data: () => ({ name: '청연이엔지' }) }] }),
+        };
+        return query;
+    } };
+    const teams = [{ id: 'team-a', name: '검증팀', color: '#111111', icon: 'fa-users' }];
+    const result = await readTeamWorkerRequestList(db as any, { uid: 'leader', name: '팀장', canReview: false, teams }, { yearMonth: '2026-09', formOnly: true });
+    assert.deepEqual(reads, ['companies']);
+    assert.deepEqual(result, { canReview: false, teams, company: { id: 'company', name: '청연이엔지' }, requests: [], nextCursor: null, historyLoaded: false });
+});

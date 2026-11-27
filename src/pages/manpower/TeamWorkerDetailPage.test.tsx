@@ -10,6 +10,7 @@ import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
 import { useAuth } from '../../contexts/AuthContext';
 import { teamResourceStatusService } from '../../services/teamResourceStatusService';
 import { showConfirmAlert } from '../../utils/swal';
+import { TeamMobileProvider } from '../../components/team-mobile/TeamMobileUI';
 
 jest.mock('../../config/firebase', () => ({ storage: {} }));
 jest.mock('../../routes/TeamWorkflowGate', () => ({ useRestrictedTeamWorkflow: jest.fn() }));
@@ -66,6 +67,26 @@ test('빠른 검색 바로 아래에서 결과 수와 빈 결과를 알리고 �
     fireEvent.click(screen.getByRole('button', { name: '검색어 지우기' }));
     expect(status).toHaveTextContent('검색 결과 3명');
     expect(search).toHaveAccessibleDescription('검색 결과 3명');
+});
+
+test('모바일 작업자 목록은 신분증 이미지를 만들지 않고 상세에서만 표시한다', async () => {
+    const previousScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: jest.fn() });
+    window.matchMedia = jest.fn().mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() });
+    (manpowerService.getWorkers as jest.Mock).mockResolvedValue([{ ...workers[0], fileNameSaved: 'https://example.invalid/fixture.png' }]);
+    try {
+        render(<TeamMobileProvider enabled><TeamWorkerDetailPage /></TeamMobileProvider>);
+        const list = screen.getByRole('region', { name: '작업자 목록' });
+        const worker = await within(list).findByRole('button', { name: /가상하나/ });
+        expect(within(list).getByRole('button', { name: '팀 선택, 검증팀' })).toHaveAccessibleDescription('1명');
+        expect(worker).not.toHaveTextContent('검증팀');
+        expect(screen.queryByAltText('가상하나 신분증')).not.toBeInTheDocument();
+        fireEvent.click(worker);
+        expect(await screen.findByAltText('가상하나 신분증')).toHaveAttribute('src', 'https://example.invalid/fixture.png');
+    } finally {
+        if (previousScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previousScroll);
+        else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    }
 });
 
 test('급여명세서는 이름 검색 후 명시적으로 선택하며 동명이인과 타 팀의 기록이 섞이지 않는다', async () => {
