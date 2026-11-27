@@ -21,9 +21,8 @@ const loadProtectedShell = () => {
   return import('./routes/ProtectedRouteShell');
 };
 const ProtectedRouteShell = React.lazy(loadProtectedShell);
-// Start the code downloads for a direct inbound visit while Firebase restores
-// the session. PrivateRoute and the account gates still control all rendering.
-if (window.location.pathname.replace(/\/+$/, '') === '/materials/inbound') {
+// Start the opened module while Firebase restores the session on direct entry.
+if (['/materials/inbound', '/manpower/team-worker-requests'].includes(window.location.pathname.replace(/\/+$/, ''))) {
   void loadProtectedShell().catch(() => { /* React.lazy retries when the route renders. */ });
 }
 const DashboardPage = React.lazy(teamMenuPages['/dashboard']);
