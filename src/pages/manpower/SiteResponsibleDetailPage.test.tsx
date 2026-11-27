@@ -235,7 +235,10 @@ test('모바일 현장정보는 월 목록부터 열고 누적공수에 필요�
     const currentMonth = screen.getByRole('group', { name: '조회월' }).textContent?.match(/\d{4}년 \d{1,2}월/);
     expect(currentMonth).toBeTruthy();
     const actual = new Date();
-    expect(read.mock.calls[0][0].startDate).toBe(`${actual.getFullYear()}-${String(actual.getMonth() + 1).padStart(2, '0')}-01`);
+    expect(read.mock.calls[0][0]).toMatchObject({
+        startDate: `${actual.getFullYear()}-${String(actual.getMonth() + 1).padStart(2, '0')}-01`,
+        withSiteDirectory: true,
+    });
     const summary = screen.getByText('현장 요약 더보기');
     expect(firstSite.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.change(screen.getByRole('textbox', { name: '현장 빠른 검색' }), { target: { value: '가상 가현장' } });
@@ -245,6 +248,7 @@ test('모바일 현장정보는 월 목록부터 열고 누적공수에 필요�
     const chart = await screen.findByRole('region', { name: '월별 누적공수' });
     await within(chart).findByRole('table');
     expect(new Set(read.mock.calls.map(([range]) => range.startDate)).size).toBe(12);
+    expect(read.mock.calls.slice(1).every(([range]) => !range.withSiteDirectory)).toBe(true);
 });
 
 test('팀장 현장정보는 조회월의 실제 내 팀 투입 현장만 세고 0공수·이전월·타팀 지원만 있는 현장은 제외한다', async () => {

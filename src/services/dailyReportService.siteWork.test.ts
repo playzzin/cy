@@ -15,8 +15,8 @@ const report = { id: 'r', date: '2026-10-17', siteId: 's', teamId: 'a', workers:
 test('현장 전용 조회의 지원 표시와 분수 공수를 보존하고 일반 급여 조회와 분리한다', async () => {
     (getTeamScopedRows as jest.Mock).mockResolvedValue([report]);
     const normal = jest.spyOn(dailyReportService, 'getReports').mockResolvedValue([]);
-    const rows = await dailyReportService.getWorkerRows({ ...range, includeSiteSupport: true });
-    expect(getTeamScopedRows).toHaveBeenCalledWith('site_work_reports', range);
+    const rows = await dailyReportService.getWorkerRows({ ...range, includeSiteSupport: true, withSiteDirectory: true });
+    expect(getTeamScopedRows).toHaveBeenCalledWith('site_work_reports', range, { withSiteDirectory: true });
     expect(rows[0]).toMatchObject({ workerName: '지원인원', manDay: 0.25, workerTeamId: 'b', workerTeamColorHex: '#d96cbd', isSiteSupport: true, unitPrice: 0 });
     expect(normal).not.toHaveBeenCalled();
     await dailyReportService.getWorkerRows(range);

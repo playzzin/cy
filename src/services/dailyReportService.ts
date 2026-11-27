@@ -628,6 +628,7 @@ export const dailyReportService = {
 
     getWorkerRows: async (params: {
         includeSiteSupport?: boolean;
+        withSiteDirectory?: boolean;
         startDate?: string;
         endDate?: string;
         teamId?: string;
@@ -636,7 +637,7 @@ export const dailyReportService = {
         companyIds?: string[];
     } = {}): Promise<DailyReportWorkerRow[]> => {
         const siteReports = params.includeSiteSupport
-            ? await getTeamScopedRows<DailyReport>('site_work_reports', { startDate: params.startDate, endDate: params.endDate })
+            ? await getTeamScopedRows<DailyReport>('site_work_reports', { startDate: params.startDate, endDate: params.endDate }, { withSiteDirectory: params.withSiteDirectory })
             : null;
         const reports = siteReports ?? await dailyReportService.getReports(params);
         const rows: DailyReportWorkerRow[] = [];
