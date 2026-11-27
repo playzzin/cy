@@ -9,6 +9,7 @@ type TeamSettlementWorkspaceHeaderProps = {
   year: number;
   month: number;
   confirmedAt: string | null;
+  confirmationState?: 'loading' | 'unavailable';
   updatedAt: string | null;
   isDirty: boolean;
   issueCount: number;
@@ -45,6 +46,7 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
   year,
   month,
   confirmedAt,
+  confirmationState,
   updatedAt,
   isDirty,
   issueCount,
@@ -62,9 +64,25 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
 }) => {
   const isSaving = saveState === 'saving';
   const mobile = useTeamMobile();
+  const compactMonthBar = mobile && Boolean(onMonthChange);
+  const currentTeam = teamName || '팀 선택';
+  const confirmationLabel = confirmationState === 'loading' ? '조회 중'
+    : confirmationState === 'unavailable' ? '미조회' : confirmedAt ? '확정' : '미확정';
+  const confirmationColors = confirmationState ? 'bg-slate-100 text-slate-600'
+    : confirmedAt ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800';
+  const confirmationBadge = (
+    <span className={`team-settlement-page__confirmation rounded-full px-2 py-0.5 text-xs font-bold ${confirmationColors}`} aria-live="polite">
+      {confirmationLabel}
+    </span>
+  );
   const monthNavigator = onMonthChange && <MonthNavigator value={`${year}-${String(month).padStart(2, '0')}`}
-    onChange={onMonthChange} disabled={isSaving} ariaLabel="정산 조회월" />;
-  const compactMonthBar = mobile && Boolean(monthNavigator);
+    onChange={onMonthChange} disabled={isSaving} ariaLabel="정산 조회월"
+    caption={compactMonthBar && (
+      <div className="team-settlement-page__mobile-context">
+        <strong title={currentTeam}>{currentTeam}</strong>
+        {confirmationBadge}
+      </div>
+    )} />;
 
   return (
     <>
@@ -99,20 +117,16 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
         className={`team-settlement-page__workspace-bar ${compactMonthBar ? 'team-settlement-page__workspace-bar--compact' : 'sticky top-[60px]'} z-30 mt-3 flex flex-col gap-3 rounded-2xl border p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between`}
         aria-label="정산 상태와 실행 작업"
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        {!compactMonthBar && <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className="font-semibold text-slate-500">현재 정산</span>
           <strong className="team-settlement-page__current-team inline-flex max-w-full items-center truncate rounded-lg border px-3 py-1 text-base font-black shadow-sm">
-            {teamName || '팀 선택'}
+            {currentTeam}
           </strong>
-          {!compactMonthBar && <>
-            <span className="text-slate-300">·</span>
-            {monthNavigator ? <div className="team-settlement-page__sticky-month">{monthNavigator}</div>
-              : <span className="font-semibold text-slate-700">{year}년 {month}월</span>}
-          </>}
-          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${confirmedAt ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
-            {confirmedAt ? '확정' : '미확정'}
-          </span>
-        </div>
+          <span className="text-slate-300">·</span>
+          {monthNavigator ? <div className="team-settlement-page__sticky-month">{monthNavigator}</div>
+            : <span className="font-semibold text-slate-700">{year}년 {month}월</span>}
+          {confirmationBadge}
+        </div>}
 
         <div className="team-settlement-page__workspace-actions grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
           <button

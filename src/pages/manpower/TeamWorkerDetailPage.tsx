@@ -10,6 +10,7 @@ import {
     Building2,
     CalendarDays,
     ChevronDown,
+    ChevronRight,
     CheckCircle2,
     Copy,
     Download,
@@ -868,7 +869,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                         </button>
                     )}
                 </label>
-                <p id="team-worker-mobile-search-result" className="tw-search-result" role="status" aria-live="polite">{searchResultMessage}</p>
+                <p id="team-worker-mobile-search-result" className={isTeamMobile ? 'sr-only' : 'tw-search-result'} role="status" aria-live="polite">{searchResultMessage}</p>
             </section>
 
             <section id="team-worker-filter-controls" className="tw-toolbar tw-toolbar--always-visible">
@@ -899,7 +900,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                         {([{ value: 'active', label: '재직중' }, { value: 'retired', label: '퇴사자' }, { value: 'all', label: '전체' },
                             ...(allTeamWorkers.some(worker => getWorkerStatusGroup(worker) === 'inactive') ? [{ value: 'inactive', label: '기타' }] : [])]
                         ).map(option => <button type="button" key={option.value} aria-pressed={statusFilter === option.value}
-                            onClick={() => { setStatusFilter(option.value as StatusFilter); setMobileView('list'); }}>{option.label} ({allTeamWorkers.filter(worker => workerStatusMatches(worker, option.value as StatusFilter)).length})</button>)}
+                            onClick={() => { setStatusFilter(option.value as StatusFilter); setMobileView('list'); }}>{option.label}{!isTeamMobile && ` (${allTeamWorkers.filter(worker => workerStatusMatches(worker, option.value as StatusFilter)).length})`}</button>)}
                     </div>
                 </div>
             </section>
@@ -933,7 +934,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                 </section>
             )}
 
-            <TeamMobileDisclosure title="인원·서류 현황" summary={loadingMaster || accessScope.loading ? '조회 중' : `재직 ${teamStats.activeWorkers}명`}>
+            <TeamMobileDisclosure title="인원·서류 현황">
             <section className="tw-kpi-grid" aria-label="팀 요약">
                 <div className="tw-kpi" aria-label="팀 재직 인원">
                     <Users size={20} />
@@ -974,7 +975,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
 
             </TeamMobileDisclosure>
 
-            <div className="tw-mobile-switch" role="tablist" aria-label="모바일 보기 전환">
+            {!isTeamMobile && <div className="tw-mobile-switch" role="tablist" aria-label="모바일 보기 전환">
                 <button
                     type="button"
                     className={mobileView === 'list' ? 'tw-mobile-switch__button tw-mobile-switch__button--active' : 'tw-mobile-switch__button'}
@@ -996,10 +997,10 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                     <UserRound size={16} />
                     {selectedWorker ? `${selectedWorker.name} 상세` : '상세 보기'}
                 </button>
-            </div>
+            </div>}
 
             <main ref={workspaceRef} className={`tw-workspace tw-workspace--${mobileView}`}>
-                <section className="tw-worker-panel">
+                <section className="tw-worker-panel" aria-label={isTeamMobile ? '작업자 목록' : undefined}>
                     {!isTeamMobile && <div className="tw-panel-heading">
                         <div className="tw-panel-heading__title">
                             <span>선택한 팀</span>
@@ -1018,6 +1019,8 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                 className="tw-team-picker-button"
                                 onClick={() => setIsTeamPickerOpen(prev => !prev)}
                                 aria-expanded={isTeamPickerOpen}
+                                aria-label={isTeamMobile ? `팀 선택, ${selectedTeam?.name || '청연이엔지 소속팀 선택'}` : undefined}
+                                aria-describedby={isTeamMobile && !loadingMaster && !accessScope.loading && !masterError ? 'team-worker-list-count' : undefined}
                                 disabled={loadingMaster || accessScope.loading || visibleTeams.length === 0}
                             >
                                 <span className="tw-team-item__color" style={{ background: selectedTeam?.color || '#2563eb' }} />
@@ -1025,9 +1028,11 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                     <small>팀 선택</small>
                                     <strong>{selectedTeam?.name || '청연이엔지 소속팀 선택'}</strong>
                                 </span>
-                                <span className="tw-team-picker-button__meta">
-                                    재직 {teamStats.activeWorkers}명
-                                </span>
+                                {isTeamMobile ? !loadingMaster && !accessScope.loading && !masterError && (
+                                    <span id="team-worker-list-count" className="tw-team-picker-button__meta">
+                                        {filteredWorkers.length.toLocaleString('ko-KR')}명
+                                    </span>
+                                ) : <span className="tw-team-picker-button__meta">재직 {teamStats.activeWorkers}명</span>}
                                 <ChevronDown size={18} className={isTeamPickerOpen ? 'tw-team-picker-button__chevron tw-team-picker-button__chevron--open' : 'tw-team-picker-button__chevron'} />
                             </button>
                             {loadingMaster || accessScope.loading ? (
@@ -1043,7 +1048,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                             )}
                         </div>
 
-                        <div className="tw-list-block-title tw-list-block-title--workers">작업자 목록</div>
+                        {!isTeamMobile && <div className="tw-list-block-title tw-list-block-title--workers">작업자 목록</div>}
                         {loadingMaster || accessScope.loading ? (
                             <div className="tw-empty-state">작업자 데이터를 불러오는 중입니다.</div>
                         ) : masterError ? (
@@ -1068,13 +1073,14 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                                         <span className="tw-avatar" style={{ background: workerTeamColor }}>{String(worker.name ?? '?').slice(0, 1)}</span>
                                         <span className="tw-worker-item__main">
                                             <strong>{worker.name}</strong>
-                                            <small>{teamLabel} · {getWorkerRoleLabel(worker)}</small>
+                                            <small>{(!isTeamMobile || teamLabel !== selectedTeam?.name) && `${teamLabel} · `}{getWorkerRoleLabel(worker)}</small>
                                         </span>
                                         <span className="tw-worker-item__badges">
                                             {worker.fileNameSaved ? <IdCard size={15} /> : <AlertCircle size={15} />}
                                             {worker.signatureUrl ? <PenLine size={15} /> : null}
                                             <small>{monthlyPendingText ?? `${formatManDay(periodManDay)}공수`}</small>
                                         </span>
+                                        {isTeamMobile && <ChevronRight size={18} className="tw-worker-item__chevron" aria-hidden="true" />}
                                     </button>
                                 );
                             })
@@ -1083,6 +1089,7 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                 </section>
 
                 <section className="tw-detail-panel">
+                    <MobileListReturnButton kind="worker" onClick={() => setMobileView('list')} />
                     {!selectedWorker ? (
                         <div className="tw-empty-detail">
                             <UserRound size={44} />
@@ -1091,7 +1098,6 @@ const TeamWorkerDetailPage: React.FC<{ view?: DetailView }> = ({ view: detailVie
                         </div>
                     ) : (
                         <>
-                            <MobileListReturnButton kind="worker" onClick={() => setMobileView('list')} />
 
                             <div className="tw-worker-hero">
                                 <div className="tw-worker-hero__avatar" style={{ background: selectedWorkerTeamColor }}>{String(selectedWorker.name ?? '?').slice(0, 1)}</div>

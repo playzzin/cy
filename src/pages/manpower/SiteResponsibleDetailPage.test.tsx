@@ -229,14 +229,18 @@ test('현장정보 연간 조회 실패 시 이전 누적공수를 숨긴다', a
 test('모바일 현장정보는 월 목록부터 열고 누적공수에 필요한 나머지 월은 펼칠 때 조회한다', async () => {
     window.matchMedia = jest.fn().mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() });
     render(<TeamMobileProvider enabled><SiteResponsibleDetailPage view="siteInfo" /></TeamMobileProvider>);
-    await screen.findByRole('button', { name: /가상 가현장.*진행중/ });
+    const firstSite = await within(screen.getByRole('region', { name: '현장 목록' })).findByRole('button', { name: /가상 가현장.*진행중/ });
     const read = dailyReportService.getWorkerRows as jest.Mock;
     expect(read).toHaveBeenCalledTimes(1);
     const currentMonth = screen.getByRole('group', { name: '조회월' }).textContent?.match(/\d{4}년 \d{1,2}월/);
     expect(currentMonth).toBeTruthy();
     const actual = new Date();
     expect(read.mock.calls[0][0].startDate).toBe(`${actual.getFullYear()}-${String(actual.getMonth() + 1).padStart(2, '0')}-01`);
-    fireEvent.click(screen.getByText('현장 요약 더보기'));
+    const summary = screen.getByText('현장 요약 더보기');
+    expect(firstSite.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: '현장 빠른 검색' }), { target: { value: '가상 가현장' } });
+    expect(screen.getByRole('option', { name: '진행 중 1곳' })).toBeInTheDocument();
+    fireEvent.click(summary);
     await waitFor(() => expect(read).toHaveBeenCalledTimes(12));
     const chart = await screen.findByRole('region', { name: '월별 누적공수' });
     await within(chart).findByRole('table');
