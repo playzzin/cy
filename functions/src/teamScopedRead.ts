@@ -51,14 +51,17 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
         throw new functions.https.HttpsError('invalid-argument', '지원하지 않는 팀 조회입니다.');
     }
     const db = admin.firestore();
-    const user = (await db.doc(`users/${auth.uid}`).get()).data();
+    const profileRef = db.doc(`users/${auth.uid}`);
+    const menuRef = db.doc('settings/menus_v12');
+    const [profileSnapshot, menuSnapshot] = await db.getAll(profileRef, menuRef);
+    const user = profileSnapshot.data();
     if (!user || (user.status && user.status !== 'active')) {
         throw new functions.https.HttpsError('permission-denied', '활성 계정이 필요합니다.');
     }
     const linkedIds = Array.isArray(user.linkedWorkerIds) ? user.linkedWorkerIds.map(text).filter(Boolean) : [];
     const linked = linkedIds.length ? await db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : [];
     const anchors = linked.filter(doc => doc.exists && doc.data()?.isActive !== false && !['퇴사', 'inactive', 'retired', 'archived'].includes(text(doc.data()?.status))).map(doc => ({ ...doc.data(), id: doc.id } as TeamRow));
-    const menu = (await db.doc('settings/menus_v12').get()).data();
+    const menu = menuSnapshot.data();
     const roles = resolvedRoleNames(user, menu);
     if (!roles.some(isTeamLeader) && (user.accountType === 'worker' || roles.some(role => ['worker', '작업자', '일반'].includes(text(role).toLowerCase())))) {
         return serialize(await readWorkerScopedData(db, auth.uid, user, anchors, requests, batch));
@@ -181,8 +184,12 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
         }
         if (collection === 'site_work_reports') {
             validateSiteWorkRange(filters);
-            await sitesReady;
-            const reports = await read('daily_reports', { startDate: filters.startDate, endDate: filters.endDate });
+            // The date query is independent of the site directory. Apply the
+            // existing eligibility checks after both reads finish.
+            const [reports] = await Promise.all([
+                read('daily_reports', { startDate: filters.startDate, endDate: filters.endDate }),
+                sitesReady,
+            ]);
             const siteIds = new Set(responsibleSites(sites, scope).flatMap(row => [row.id, text(row.legacyId)]).filter(Boolean));
             const attendees = reports.filter(row => siteIds.has(text(row.siteId))).flatMap(row => list(row.workers));
             const missingTeams = attendees.filter(row => !text(row.teamId) && !scope.workerIds.includes(text(row.workerId || row.id)));
@@ -277,8 +284,8 @@ export const readTeamScopedData = async (input: any, context: functions.https.Ca
     });
     const confirmScopeUnchanged = async () => {
         const [currentProfile, currentMenu, currentAnchors] = await Promise.all([
-            db.doc(`users/${auth.uid}`).get(),
-            db.doc('settings/menus_v12').get(),
+            profileRef.get(),
+            menuRef.get(),
             linkedIds.length ? db.getAll(...linkedIds.map((id: string) => db.collection('workers').doc(id))) : Promise.resolve([]),
         ]);
         // Session timestamps and display fields cannot change access. Compare
