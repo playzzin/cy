@@ -42,7 +42,11 @@ export function useSiteReportOutput({ uid, month, annual, prioritizeMonth, showA
         return async period => {
             const months = period.length === 4 ? Array.from({ length: 12 }, (_, index) => `${period}-${String(index + 1).padStart(2, '0')}`) : [period];
             const rows = await Promise.all(months.map(rangeMonth => {
-                const load = () => dailyReportService.getWorkerRows({ ...getMonthRange(rangeMonth), includeSiteSupport });
+                const load = () => dailyReportService.getWorkerRows({
+                    ...getMonthRange(rangeMonth),
+                    includeSiteSupport,
+                    withSiteDirectory: includeSiteSupport && prioritizeMonth && period === rangeMonth,
+                });
                 if (!prioritizeMonth) return load();
                 const key = `${scopeKey}:${rangeMonth}`;
                 const existing = monthReads.get(key);
