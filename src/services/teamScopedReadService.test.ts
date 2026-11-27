@@ -85,6 +85,41 @@ it('이전 페이지의 느린 월간 일보와 겹쳐도 팀·작업자 목록�
     expect(await reportRead).toEqual([{ id: 'month-report' }]);
 });
 
+it('메뉴 설정을 기다리는 동안에도 선택월 현장일보를 현장 목록과 함께 전송한다', async () => {
+    let finishMenu!: (response: unknown) => void;
+    const menuResponse = new Promise(resolve => { finishMenu = resolve; });
+    let menuStarted!: () => void;
+    const menuDispatched = new Promise<void>(resolve => { menuStarted = resolve; });
+    const reportFilters = { startDate: '2026-10-01', endDate: '2026-10-31' };
+    call.mockImplementation(({ requests }: { requests: Array<{ collection: string }> }) => {
+        if (requests[0].collection === 'system_configs') {
+            menuStarted();
+            return menuResponse;
+        }
+        return Promise.resolve({ data: { results: requests.map(({ collection }) => ({ rows: [{ id: collection }] })) } });
+    });
+
+    const menu = getTeamScopedRows('system_configs', { configId: 'permissions' });
+    await menuDispatched;
+    const overview = Promise.all([
+        ...['sites', 'teams', 'workers'].map(collection => getTeamScopedRows(collection)),
+        getTeamScopedRows('site_work_reports', reportFilters, { withSiteDirectory: true }),
+    ]);
+    const background = getTeamScopedRows('site_work_reports', { startDate: '2026-09-01', endDate: '2026-09-30' });
+    try {
+        expect(await overview).toEqual(['sites', 'teams', 'workers', 'site_work_reports'].map(id => [{ id }]));
+        expect(call.mock.calls[1][0].requests).toEqual([
+            ...['sites', 'teams', 'workers'].map(collection => ({ collection, filters: {} })),
+            { collection: 'site_work_reports', filters: reportFilters },
+        ]);
+        await background;
+        expect(call.mock.calls[2][0].requests).toHaveLength(1);
+    } finally {
+        finishMenu({ data: { results: [{ rows: [] }] } });
+        await menu;
+    }
+});
+
 it('팀장 경로만 10초간 재사용하고 만료 후 직책을 다시 확인한다', async () => {
     const now = jest.spyOn(Date, 'now').mockReturnValue(10_000_000);
     try {

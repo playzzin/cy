@@ -89,9 +89,12 @@ const assertCurrentAccount = (uid: string | undefined) => {
     if (!uid || auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다. 다시 조회해 주세요.');
 };
 const transientErrors = new Set(['functions/unavailable', 'functions/resource-exhausted', 'functions/deadline-exceeded', 'functions/internal']);
+const reportCollections = new Set(['daily_reports', 'site_work_reports']);
+const siteDirectoryCollections = new Set(['sites', 'teams', 'workers']);
 type ReadRequest = { collection: string; filters: Record<string, unknown> };
 type ReadResult = { rows?: unknown[]; error?: { code: string; message: string } };
-type QueuedRead = { uid: string | undefined; request: ReadRequest; resolve: (rows: unknown[]) => void; reject: (error: unknown) => void };
+type ReadOptions = { withSiteDirectory?: boolean };
+type QueuedRead = { uid: string | undefined; request: ReadRequest; options: ReadOptions; resolve: (rows: unknown[]) => void; reject: (error: unknown) => void };
 let legacyServerUntil = 0;
 const rememberLegacyServer = () => { legacyServerUntil = Date.now() + 5 * 60_000; };
 const legacyFilters = ({ collection, filters }: ReadRequest) => {
@@ -135,12 +138,19 @@ const flushReads = () => {
     const accounts = new Map<string | undefined, QueuedRead[]>();
     queue.forEach(item => accounts.set(item.uid, [...(accounts.get(item.uid) || []), item]));
     accounts.forEach(items => {
-        // A previous page can still have report reads in flight. Keep monthly
-        // reports out of directory batches so navigation never waits for them.
-        const batches = [
-            items.filter(item => !['daily_reports', 'site_work_reports'].includes(item.request.collection)),
-            items.filter(item => ['daily_reports', 'site_work_reports'].includes(item.request.collection)),
-        ].flatMap(reads => Array.from({ length: Math.ceil(reads.length / 20) },
+        const siteOverview: QueuedRead[] = [];
+        const otherReads: QueuedRead[] = [];
+        const reports: QueuedRead[] = [];
+        const hasSiteOverview = items.some(item => item.options.withSiteDirectory);
+        for (const item of items) {
+            const { collection } = item.request;
+            // The site list needs both the directory and selected month's reports.
+            // Share their server scope reads and slot, separate from the menu and other reports.
+            if (hasSiteOverview && (item.options.withSiteDirectory || siteDirectoryCollections.has(collection))) siteOverview.push(item);
+            else if (reportCollections.has(collection)) reports.push(item);
+            else otherReads.push(item);
+        }
+        const batches = [siteOverview, otherReads, reports].flatMap(reads => Array.from({ length: Math.ceil(reads.length / 20) },
             (_, index) => reads.slice(index * 20, (index + 1) * 20)));
         for (const group of batches) {
             if (legacyServerUntil > Date.now()) {
@@ -178,16 +188,16 @@ const flushReads = () => {
         }
     });
 };
-const enqueueRead = (uid: string | undefined, request: ReadRequest): Promise<unknown[]> => new Promise((resolve, reject) => {
-    queuedReads.push({ uid, request, resolve, reject });
+const enqueueRead = (uid: string | undefined, request: ReadRequest, options: ReadOptions): Promise<unknown[]> => new Promise((resolve, reject) => {
+    queuedReads.push({ uid, request, options, resolve, reject });
     // Gather parallel service calls from the current screen into one callable.
     if (!flushTimer) flushTimer = setTimeout(flushReads, 10);
 });
-const requestRows = async (uid: string | undefined, collection: string, filters: Record<string, unknown>): Promise<unknown[]> => {
+const requestRows = async (uid: string | undefined, collection: string, filters: Record<string, unknown>, options: ReadOptions): Promise<unknown[]> => {
     for (let attempt = 0; ; attempt += 1) {
         try {
             assertCurrentAccount(uid);
-            return await enqueueRead(uid, { collection, filters });
+            return await enqueueRead(uid, { collection, filters }, options);
         } catch (error) {
             assertCurrentAccount(uid);
             if (['functions/permission-denied', 'functions/unauthenticated', 'functions/failed-precondition'].includes(String((error as { code?: string })?.code))) leaderRoute = null;
@@ -197,7 +207,7 @@ const requestRows = async (uid: string | undefined, collection: string, filters:
     }
 };
 
-export async function getTeamScopedRows<T = any>(collection: string, filters: Record<string, unknown> = {}): Promise<T[] | null> {
+export async function getTeamScopedRows<T = any>(collection: string, filters: Record<string, unknown> = {}, options: ReadOptions = {}): Promise<T[] | null> {
     if (!scopedCollections.has(collection)) return null;
     const uid = auth?.currentUser?.uid;
     if (!await usesTeamScopedReads()) return null;
@@ -208,7 +218,7 @@ export async function getTeamScopedRows<T = any>(collection: string, filters: Re
     const key = JSON.stringify([uid, collection, normalizedFilters]);
     let pending = pendingReads.get(key);
     if (!pending) {
-        pending = requestRows(uid, collection, normalizedFilters);
+        pending = requestRows(uid, collection, normalizedFilters, options);
         pendingReads.set(key, pending);
     }
     try {
