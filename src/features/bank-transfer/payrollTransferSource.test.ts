@@ -107,11 +107,12 @@ it('미리보기의 대표계좌·선택 금액 기준·받는분표시·메모�
         accountHolder: '검증대표계좌', amount: 12300, receiverDisplay: '검증법인', senderMemo: '검증작업자 정산',
         usesPrimaryAccount: true, validationErrors: [],
     };
-    const candidates = buildPayrollPreviewCandidates([preview], 'laborAdvance2', '노무가불 2');
+    const originalAccount = { bankName: '국민은행', bankCode: '004', accountNumber: '00100000000', accountHolder: '검증작업자' };
+    const candidates = buildPayrollPreviewCandidates([preview], 'laborAdvance2', '노무가불 2', [{ sourceRowId: payment.id, ...originalAccount }]);
     expect(candidates[0]).toMatchObject({
         id: `payroll:${payment.id}:laborAdvance2`, amount: 12300, bankCode: '088',
         accountNumber: '000987654321', accountHolder: '검증대표계좌',
-        receiverDisplay: '검증법인', senderMemo: '검증작업자 정산',
+        receiverDisplay: '검증법인', senderMemo: '검증작업자 정산', usesPrimaryAccount: true, payrollPersonalAccount: originalAccount,
     });
     expect(candidates[0].detail).toContain('대표계좌 적용');
     expect(candidates[0].payrollDetail).toEqual(preview.payrollDetail);

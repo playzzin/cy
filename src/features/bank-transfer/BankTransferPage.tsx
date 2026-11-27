@@ -2,13 +2,15 @@ import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useStat
 import { Link } from 'react-router-dom';
 import { ArrowDown, ArrowUp, ArrowRight, Check, Copy, FolderOpen, GripVertical, Landmark, Plus, RefreshCw, Save, Search, X } from 'lucide-react';
 import * as XLSX from 'xlsx-js-style';
+import PagePrimaryAccountCard from '../../components/accounts/PagePrimaryAccountCard';
 import { useAuth } from '../../contexts/AuthContext';
+import { usePagePrimaryAccount } from '../../hooks/usePagePrimaryAccount';
 import { useIssueNavigationGuard } from '../../pages/taxinvoice/useIssueNavigationGuard';
 import { loadAccountTransferCandidates, loadRentTransferCandidates, loadSupportTransferCandidates } from './transferSources';
-import { addTransferCandidates, applyMemoRule, buildTransferWorkbook, CATEGORY_LABELS, SOURCE_LABELS, validateTransferRow } from './transferModel';
+import { addTransferCandidates, applyMemoRule, buildTransferWorkbook, CATEGORY_LABELS, SOURCE_LABELS, validateTransferAccount, validateTransferRow } from './transferModel';
 import { deleteTransferDraft, getTransferDraftStorageKey, loadTransferDrafts, saveTransferDraft } from './transferDraftStorage';
 import { clearTransferHandoff, readTransferHandoff } from './transferHandoff';
-import type { AccountCategory, AccountTeamAffiliation, TransferCandidate, TransferDraft, TransferLoadResult, TransferRow, TransferSource } from './types';
+import type { AccountCategory, AccountTeamAffiliation, TransferBankAccount, TransferCandidate, TransferDraft, TransferLoadResult, TransferRow, TransferSource } from './types';
 import './BankTransferPage.css';
 import './BankTransferTheme.css';
 import PayrollTransferDetails from './PayrollTransferDetails';
@@ -17,6 +19,7 @@ import { useSupportDetailRecovery } from './useSupportDetailRecovery';
 import { isSupportTransferDetail } from './supportTransferDetail';
 import type { SupportTransferDetail } from './types';
 import { isPayrollTransferDetail } from './payrollTransferDetail';
+import { toTransferBankAccount, updatePayrollTransferAccount } from './payrollTransferAccount';
 import { usePayrollDetailRecovery } from './usePayrollDetailRecovery';
 import type { PayrollDetailRecoveryResult } from './payrollDetailRecovery';
 import { buildTransferReview } from './transferReview';
@@ -60,6 +63,9 @@ const dateTime = (value: string) => new Date(value).toLocaleString('ko-KR', { ti
 // 안내문·FAQ·transferGuideSimulation.ts·TransferGuideSimulator.tsx도 같은 변경에서 갱신한다.
 export default function BankTransferPage() {
     const { currentUser } = useAuth();
+    const pagePrimaryAccount = usePagePrimaryAccount('monthly-wage');
+    const primaryAccount = pagePrimaryAccount.account ? toTransferBankAccount(pagePrimaryAccount.account) : null;
+    const primaryAccountErrors = primaryAccount ? validateTransferAccount(primaryAccount) : [];
     const userId = currentUser?.uid ?? '';
     const [draft, setDraft] = useState<TransferDraft>(makeDraft);
     const [savedSignature, setSavedSignature] = useState('');
@@ -222,10 +228,17 @@ export default function BankTransferPage() {
             let changed = false;
             const rows = previous.rows.map(row => {
                 const matching = details.get(detailKey(row));
-                if (row.source !== 'payroll' || isPayrollTransferDetail(row.payrollDetail) || !matching || !isPayrollTransferDetail(matching.payrollDetail)) return row;
+                if (row.source !== 'payroll' || !matching) return row;
+                const personalAccount = !row.payrollPersonalAccount && matching.payrollPersonalAccount;
+                const detail = !isPayrollTransferDetail(row.payrollDetail) && isPayrollTransferDetail(matching.payrollDetail) && matching.payrollDetail;
+                if (!personalAccount && !detail) return row;
                 changed = true;
-                return { ...row, payrollDetail: { ...matching.payrollDetail, restoredFromSource: true },
-                    ...((row.warning || matching.warning) ? { warning: [row.warning, matching.warning].filter(Boolean).join(' · ') } : {}) };
+                return {
+                    ...row,
+                    ...(personalAccount ? { payrollPersonalAccount: personalAccount } : {}),
+                    ...(detail ? { payrollDetail: { ...detail, restoredFromSource: true } } : {}),
+                    ...(detail && (row.warning || matching.warning) ? { warning: [row.warning, matching.warning].filter(Boolean).join(' · ') } : {}),
+                };
             });
             return changed ? { ...previous, rows } : previous;
         });
@@ -269,6 +282,8 @@ export default function BankTransferPage() {
     const workflow = workflowState(draft);
     const visibleRows = useMemo(() => filterTransferList(draft.rows, listFilters, review.notes), [draft.rows, listFilters, review.notes]);
     const selectedRows = draft.rows.filter(row => rowSelection.has(row.rowId));
+    const selectedPayrollRows = selectedRows.filter(row => row.source === 'payroll');
+    const missingPersonalAccount = selectedPayrollRows.some(row => !row.payrollPersonalAccount);
     useEffect(() => {
         if (!focusRow || preview) return;
         const element = document.getElementById(`bt-row-${focusRow}`);
@@ -277,6 +292,24 @@ export default function BankTransferPage() {
     const fixRow = (row: TransferRow) => { setPreview(false); setReviewMode(true); setListFilters({ ...emptyListFilters, query: row.name }); setFocusRow(row.rowId); };
     // @guide-sync 03·06: 계좌/금액 수정 범위와 재검토 조건은 시연의 updateRows 및 오류 해결 장면에도 적용한다.
     const editRow = (id: string, change: Partial<TransferRow>) => setDraft(previous => ({ ...previous, rows: previous.rows.map(row => row.rowId === id ? { ...row, ...change } : row) }));
+    const editRowAccount = (id: string, account: Partial<TransferBankAccount>) => setDraft(previous => ({
+        ...previous,
+        rows: previous.rows.map(row => {
+            if (row.rowId !== id) return row;
+            return row.source === 'payroll' ? updatePayrollTransferAccount(row, account) : { ...row, ...account };
+        }),
+    }));
+    const updateSelectedPayrollAccounts = (account?: TransferBankAccount) => {
+        if (!selectedPayrollRows.length || missingPersonalAccount) return;
+        setDraft(previous => ({
+            ...previous,
+            rows: previous.rows.map(row => row.source === 'payroll' && rowSelection.has(row.rowId) && row.payrollPersonalAccount
+                ? updatePayrollTransferAccount(row, account ?? row.payrollPersonalAccount, Boolean(account)) : row),
+        }));
+        setNotice(account
+            ? `선택한 급여 ${selectedPayrollRows.length}건에 ${account.accountHolder} 대표계좌를 적용했습니다.`
+            : `선택한 급여 ${selectedPayrollRows.length}건을 원계좌로 복원했습니다.`);
+    };
     const add = (items: TransferCandidate[]) => {
         if (!items.length) return;
         setActionError(''); setNotice('');
@@ -289,7 +322,7 @@ export default function BankTransferPage() {
     };
     const choose = (candidate: TransferCandidate) => {
         if (assignTarget) {
-            editRow(assignTarget, { bankName: candidate.bankName, bankCode: candidate.bankCode, accountNumber: candidate.accountNumber, accountHolder: candidate.accountHolder });
+            editRowAccount(assignTarget, { bankName: candidate.bankName, bankCode: candidate.bankCode, accountNumber: candidate.accountNumber, accountHolder: candidate.accountHolder });
             setAssignTarget(null); setNotice('선택한 송금 건의 입금계좌를 바꿨습니다.');
         } else add([candidate]);
     };
@@ -363,7 +396,7 @@ export default function BankTransferPage() {
     const queryPayrollDetail = (row: TransferCandidate) => {
         setPreview(false); setReviewMode(false); setDetailTarget(null); setSource('payroll');
         if (/^\d{4}-(0[1-9]|1[0-2])$/.test(row.period)) setDraft(previous => ({ ...previous, period: row.period }));
-        setNotice('급여에서 기존 항목과 같은 월·금액 기준으로 불러오세요. 일치하는 항목은 상세만 연결하고 기존 송금액과 계좌는 유지합니다.');
+        setNotice('급여에서 기존 항목과 같은 월·금액 기준으로 불러오세요. 일치하는 항목에 상세내역과 원계좌를 연결합니다.');
     };
     // @guide-sync 04: 선택 행 적용 범위와 이름 치환 변경 시 D/E열 설명 및 applyMemo 연습도 갱신한다.
     const updateMemoForRows = () => {
@@ -484,11 +517,22 @@ export default function BankTransferPage() {
                 {!!draft.rows.length && <TransferListReview rows={draft.rows} visible={visibleRows} selection={rowSelection} filters={listFilters} onChange={setListFilters} notes={review.notes} />}
                 <details className="bt-bulk-settings"><summary>통장 표시·메모 일괄 설정 · 선택 {selectedRows.length}건에 적용</summary><div className="bt-memo-settings"><label>받는분통장표시<input aria-label="받는분통장표시 일괄 설정" value={draft.receiverDisplay} onChange={event => setDraft({ ...draft, receiverDisplay: event.target.value })} /><small>D열에 표시할 문구</small></label><label>내통장메모 규칙<input aria-label="내통장메모 규칙" value={draft.memoRule} onChange={event => setDraft({ ...draft, memoRule: event.target.value })} /><small>{'{이름}'}은 각 대상 이름으로 바뀝니다.</small></label><button onClick={updateMemoForRows} disabled={!selectedRows.length}>선택 {selectedRows.length}건에 적용</button></div></details>
                 <div className="bt-list-tools"><label><input type="checkbox" aria-label="송금 목록 전체 선택" disabled={!visibleRows.length} checked={visibleRows.length > 0 && visibleRows.every(row => rowSelection.has(row.rowId))} onChange={event => setRowSelection(previous => { const next = new Set(previous); visibleRows.forEach(row => event.target.checked ? next.add(row.rowId) : next.delete(row.rowId)); return next; })} /> 검색 결과 선택 · 총 {selectedRows.length}건 선택</label><button disabled={!selectedRows.length} onClick={() => { setDraft({ ...draft, rows: draft.rows.filter(row => !rowSelection.has(row.rowId)) }); setRowSelection(new Set()); setAssignTarget(null); }}>선택 제외</button><button disabled={!selectedRows.length} onClick={() => setRowSelection(new Set())}>선택 해제</button><span>선택 중인 숨겨진 항목 {selectedRows.filter(row => !visibleRows.some(visible => visible.rowId === row.rowId)).length}건 · 순서 변경은 전체 목록에서 가능합니다.</span></div>
+                {draft.rows.some(row => row.source === 'payroll') && <section className="bt-payroll-accounts" aria-label="작업자 입금계좌 변경">
+                    <PagePrimaryAccountCard state={pagePrimaryAccount} inline />
+                    <div className="bt-payroll-account-actions">
+                        <span>{selectedPayrollRows.length ? `급여 ${selectedPayrollRows.length}건 선택` : '계좌를 바꿀 급여 항목을 선택하세요.'}</span>
+                        <button type="button" disabled={!selectedPayrollRows.length || missingPersonalAccount || !primaryAccount || !!primaryAccountErrors.length}
+                            onClick={() => { if (primaryAccount) updateSelectedPayrollAccounts(primaryAccount); }}>선택 → 대표계좌</button>
+                        <button type="button" disabled={!selectedPayrollRows.length || missingPersonalAccount} onClick={() => updateSelectedPayrollAccounts()}>원계좌 복원</button>
+                    </div>
+                    {!!primaryAccountErrors.length && <p className="bt-invalid">대표계좌의 정보를 확인해 주세요. {primaryAccountErrors.join(' ')}</p>}
+                    {missingPersonalAccount && <p>예전에 담은 급여는 같은 조회월·이체금액 기준으로 ‘급여 불러오기’를 눌러 원계좌를 연결하세요.</p>}
+                </section>}
                 <div className="bt-transfer-list">
                     {!draft.rows.length ? <div className="bt-empty bt-drop-empty"><span className="bt-drop-icon"><Plus size={30} /></span><strong>송금할 계좌를 여기에 담으세요</strong><span>왼쪽에서 끌어 놓거나 ‘담기’를 누르세요.<br />급여·월세·지원비는 금액도 함께 가져옵니다.</span></div> : !visibleRows.length ? <div className="bt-empty">조건에 맞는 송금 항목이 없습니다.<button onClick={() => setListFilters(emptyListFilters)}>전체 목록 보기</button></div> : visibleRows.map(row => { const index = draft.rows.indexOf(row); return <article id={`bt-row-${row.rowId}`} tabIndex={-1} className={`bt-transfer-row ${errorsByRow.get(row.rowId)?.length ? 'has-error' : ''}`} key={row.rowId} onDragOver={event => { if (event.dataTransfer.types.includes(ROW_DRAG)) event.preventDefault(); }} onDrop={event => { const from = event.dataTransfer.getData(ROW_DRAG); if (from && visibleRows.length === draft.rows.length) { event.preventDefault(); event.stopPropagation(); reorder(from, row.rowId); } }}>
                         <div className="bt-row-heading"><input type="checkbox" aria-label={`${row.name} 송금 선택`} checked={rowSelection.has(row.rowId)} onChange={event => { const next = new Set(rowSelection); event.target.checked ? next.add(row.rowId) : next.delete(row.rowId); setRowSelection(next); }} /><button className="bt-grip" disabled={visibleRows.length !== draft.rows.length} draggable={visibleRows.length === draft.rows.length} onDragStart={event => { event.dataTransfer.setData(ROW_DRAG, row.rowId); event.dataTransfer.effectAllowed = 'move'; }} aria-label={`${row.name} 순서 이동`} title="끌어서 순서를 바꾸세요"><GripVertical size={15} /></button><span className="bt-source-badge">{SOURCE_LABELS[row.source]}</span><strong>{row.name}</strong><WorkerEmploymentBadge status={getWorkerEmployment(row, workerEmployment)} /><span className="bt-row-group">{row.groupName}{row.period ? ` · ${row.period}` : ''}</span><div className="bt-row-actions"><button aria-label={`${row.name} 위로`} disabled={index === 0 || visibleRows.length !== draft.rows.length} onClick={() => reorder(row.rowId, draft.rows[index - 1].rowId)}><ArrowUp size={14} /></button><button aria-label={`${row.name} 아래로`} disabled={index === draft.rows.length - 1 || visibleRows.length !== draft.rows.length} onClick={() => reorder(row.rowId, draft.rows[index + 1].rowId)}><ArrowDown size={14} /></button><button aria-label={`${row.name} 제외`} onClick={() => { setDraft({ ...draft, rows: draft.rows.filter(item => item.rowId !== row.rowId) }); setRowSelection(previous => { const next = new Set(previous); next.delete(row.rowId); return next; }); if (assignTarget === row.rowId) setAssignTarget(null); }}><X size={14} /></button></div></div>
-                        <div className="bt-row-fields"><div className="bt-row-account"><strong>{row.bankName || '은행 미등록'} <span className="bt-number">{row.accountNumber || '계좌 미등록'}</span></strong><small>예금주 {row.accountHolder || '미등록'}</small><button onClick={() => { setAssignTarget(row.rowId); setReviewMode(false); setSource('account'); setQuery(''); setCategory('all'); setGroup('all'); }}>계좌 변경</button></div><label>이체금액<input className="bt-money-input" type="number" min="1" step="1" aria-label={`${row.name} 이체금액`} value={Number.isFinite(row.amount) ? row.amount : ''} onChange={event => editRow(row.rowId, { amount: event.target.value === '' ? 0 : Number(event.target.value) })} /></label><label>받는분통장표시<input aria-label={`${row.name} 받는분통장표시`} value={row.receiverDisplay} onChange={event => editRow(row.rowId, { receiverDisplay: event.target.value })} /></label><label>내통장메모<input aria-label={`${row.name} 내통장메모`} value={row.senderMemo} onChange={event => editRow(row.rowId, { senderMemo: event.target.value })} /></label></div>
-                        <details className="bt-inline-account"><summary>이 송금 건의 계좌 직접 수정</summary><p>이 목록에만 적용됩니다. 등록 계좌 원본은 유지됩니다.</p><div className="bt-row-fields"><label>은행<select aria-label={`${row.name} 송금 은행`} value={row.bankCode} onChange={event => editRow(row.rowId, { bankCode: event.target.value, bankName: BANK_CODES[event.target.value] || '' })}><option value="">은행 선택</option>{Object.entries(BANK_CODES).map(([code, name]) => <option key={code} value={code}>{name}</option>)}</select></label><label>계좌번호<input aria-label={`${row.name} 송금 계좌번호`} inputMode="numeric" value={row.accountNumber} onChange={event => editRow(row.rowId, { accountNumber: event.target.value })} /></label><label>예금주<input aria-label={`${row.name} 송금 예금주`} value={row.accountHolder} onChange={event => editRow(row.rowId, { accountHolder: event.target.value })} /></label></div></details>
+                        <div className="bt-row-fields"><div className="bt-row-account"><strong>{row.bankName || '은행 미등록'} <span className="bt-number">{row.accountNumber || '계좌 미등록'}</span></strong><small>예금주 {row.accountHolder || '미등록'}{row.usesPrimaryAccount && ' · 대표계좌 적용'}</small><button onClick={() => { setAssignTarget(row.rowId); setReviewMode(false); setSource('account'); setQuery(''); setCategory('all'); setGroup('all'); }}>계좌 변경</button></div><label>이체금액<input className="bt-money-input" type="number" min="1" step="1" aria-label={`${row.name} 이체금액`} value={Number.isFinite(row.amount) ? row.amount : ''} onChange={event => editRow(row.rowId, { amount: event.target.value === '' ? 0 : Number(event.target.value) })} /></label><label>받는분통장표시<input aria-label={`${row.name} 받는분통장표시`} value={row.receiverDisplay} onChange={event => editRow(row.rowId, { receiverDisplay: event.target.value })} /></label><label>내통장메모<input aria-label={`${row.name} 내통장메모`} value={row.senderMemo} onChange={event => editRow(row.rowId, { senderMemo: event.target.value })} /></label></div>
+                        <details className="bt-inline-account"><summary>이 송금 건의 계좌 직접 수정</summary><p>이 목록에만 적용됩니다. 등록 계좌 원본은 유지됩니다.</p><div className="bt-row-fields"><label>은행<select aria-label={`${row.name} 송금 은행`} value={row.bankCode} onChange={event => editRowAccount(row.rowId, { bankCode: event.target.value, bankName: BANK_CODES[event.target.value] || '' })}><option value="">은행 선택</option>{Object.entries(BANK_CODES).map(([code, name]) => <option key={code} value={code}>{name}</option>)}</select></label><label>계좌번호<input aria-label={`${row.name} 송금 계좌번호`} inputMode="numeric" value={row.accountNumber} onChange={event => editRowAccount(row.rowId, { accountNumber: event.target.value })} /></label><label>예금주<input aria-label={`${row.name} 송금 예금주`} value={row.accountHolder} onChange={event => editRowAccount(row.rowId, { accountHolder: event.target.value })} /></label></div></details>
                         {((originalTransferAmount(row) !== undefined && originalTransferAmount(row) !== row.amount) || row.adjustmentReason) && <label className="bt-adjustment-reason">금액 변경 사유<input aria-label={`${row.name} 금액 변경 사유`} maxLength={500} value={row.adjustmentReason ?? ''} placeholder="예: 일부 선지급, 식대 추가 정산" onChange={event => editRow(row.rowId, { adjustmentReason: event.target.value })} /></label>}
                         {row.detail && <p className="bt-row-detail">{row.detail}</p>}{!!review.notes.get(row.rowId)?.length && <ul className="bt-row-notes">{review.notes.get(row.rowId)?.map((note, i) => <li key={i}>{note}</li>)}</ul>}{!!errorsByRow.get(row.rowId)?.length && <p className="bt-invalid">{errorsByRow.get(row.rowId)?.join(' · ')}</p>}
                         <PayrollTransferDetails row={row} loadState={payrollRecovery.stateFor(row)} onLoadDetail={() => { void payrollRecovery.recover(row); }} onQueryPayroll={() => queryPayrollDetail(row)} onExpand={() => showDetail(row)} />

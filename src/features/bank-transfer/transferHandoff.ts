@@ -1,5 +1,6 @@
 import type { TransferCandidate } from './types';
 import { isPayrollTransferDetail } from './payrollTransferDetail';
+import { isTransferBankAccount } from './payrollTransferAccount';
 import { isSupportTransferDetail } from './supportTransferDetail';
 
 const KEY_PREFIX = 'bank-transfer-handoff:v1:';
@@ -18,6 +19,8 @@ const isCandidate = (value: unknown): value is TransferCandidate => {
     if (!['worker', 'team', 'company', 'purchase', 'other'].includes(String(row.category))) return false;
     if (typeof row.amount !== 'number' || !Number.isFinite(row.amount)) return false;
     if (row.payrollDetail !== undefined && !isPayrollTransferDetail(row.payrollDetail)) return false;
+    if (row.payrollPersonalAccount !== undefined && !isTransferBankAccount(row.payrollPersonalAccount)) return false;
+    if (row.usesPrimaryAccount !== undefined && typeof row.usesPrimaryAccount !== 'boolean') return false;
     if (row.supportDetail !== undefined && !isSupportTransferDetail(row.supportDetail)) return false;
     return ['receiverDisplay', 'senderMemo', 'warning'].every(key => row[key] === undefined || typeof row[key] === 'string');
 };
