@@ -3215,6 +3215,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader, transferPicker })
                 kbPreviewRows,
                 kbAmountType,
                 kbPreviewSnapshot.criteria.amountTypeLabel,
+                kbPreviewSnapshot.sourceRows,
             ));
         } catch (error) {
             setKbTransferError(error instanceof Error ? error.message : '송금 목록에 담지 못했습니다. 다시 시도해 주세요.');

@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx-js-style';
 import { BANK_CODES } from '../../pages/payroll/constants/payroll.constants';
 import { formatKBTransferMemo } from '../../pages/payroll/utils/kbTransferExport';
-import type { AccountCategory, TransferCandidate, TransferRow, TransferSource } from './types';
+import type { AccountCategory, TransferBankAccount, TransferCandidate, TransferRow, TransferSource } from './types';
 import { MAX_TRANSFER_ROWS } from './transferLimits';
 
 // @guide-sync 03·04·06: 검증·메모·A~E열 변경은 transferGuideContent.ts의 같은 단계와
@@ -49,7 +49,7 @@ export const addTransferCandidates = (
     return { rows: nextRows, duplicateCount };
 };
 
-export const validateTransferRow = (row: TransferRow): string[] => {
+export const validateTransferAccount = (row: TransferBankAccount): string[] => {
     const errors: string[] = [];
     const bankCode = String(row.bankCode ?? '').trim();
     const accountNumber = String(row.accountNumber ?? '').trim();
@@ -61,6 +61,11 @@ export const validateTransferRow = (row: TransferRow): string[] => {
         errors.push('계좌번호를 확인해 주세요.');
     }
     if (!String(row.accountHolder ?? '').trim()) errors.push('예금주를 입력해 주세요.');
+    return errors;
+};
+
+export const validateTransferRow = (row: TransferRow): string[] => {
+    const errors = validateTransferAccount(row);
     if (!Number.isSafeInteger(row.amount) || row.amount <= 0) {
         errors.push('이체금액은 1원 이상의 정수로 입력해 주세요.');
     }
