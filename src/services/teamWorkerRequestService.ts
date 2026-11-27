@@ -61,6 +61,13 @@ export const teamWorkerRequestService = {
   list,
   analyze: async (teamId: string, kind: WorkerDocumentKind, file: File) => call<WorkerDocumentAnalysis>({ action: 'analyze', teamId, kind, contentType: file.type, base64: await encode(file) }),
   upload: async (requestId: string, teamId: string, kind: WorkerDocumentKind, fileId: string, file: File) => call({ action: 'upload', requestId, teamId, kind, fileId, name: file.name, contentType: file.type, base64: await encode(file) }),
+  uploadPair: async (requestId: string, teamId: string, files: Array<{ id: string; kind: WorkerDocumentKind; file: File }>) => {
+    const user = requireUser();
+    const documents = await Promise.all(files.map(async ({ id, kind, file }) =>
+      ({ fileId: id, kind, name: file.name, contentType: file.type, base64: await encode(file) })));
+    if (requireUser() !== user) throw new Error('로그인 계정이 변경되었습니다.');
+    return call({ action: 'upload', requestId, teamId, documents });
+  },
   submit: (requestId: string, teamId: string, fields: WorkerRegistrationFields, identityId: string, bankId?: string) => call<{ id: string; status: string }>({ action: 'submit', requestId, teamId, fields, identityId, bankId: bankId || '' }),
   review: async (id: string, decision: 'approved' | 'rejected', reason: string, payroll?: { payType: string; unitPrice: number }) => {
     const result = await call({ action: 'review', id, decision, reason, ...(payroll ? { payroll } : {}) });

@@ -11,6 +11,7 @@ export interface TeamWorkerRequest extends WorkerRegistrationFields {
   reviewerName?: string; reviewedAt?: string; reviewReason?: string;
 }
 export interface TeamWorkerRequestData {
+  maxUploadBatchBytes?: number;
   canReview: boolean;
   teams: ExpenseTeamOption[];
   company: { id: string; name: string };
