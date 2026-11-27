@@ -36,10 +36,16 @@ const materialTabs = [
     },
 ];
 
+const certificateLabels: Record<string, string> = {
+    '/materials/inbound-certificate': '입고 확인서',
+    '/materials/outbound-certificate': '출고 확인서',
+};
+
 const MaterialManagementPage: React.FC = () => {
     const location = useLocation();
     const normalizedPath = location.pathname.replace(/\/+$/, '');
     const isFieldGoodsPage = normalizedPath === '/materials/field-goods';
+    const certificateLabel = certificateLabels[normalizedPath];
 
     if (isFieldGoodsPage) {
         return <Outlet />;
@@ -61,6 +67,9 @@ const MaterialManagementPage: React.FC = () => {
                             </NavLink>
                         ))}
                     </nav>
+                    {certificateLabel && <p className="materials-navigation__current" aria-current="page">
+                        <FontAwesomeIcon icon={faClipboardList} aria-hidden="true" />{certificateLabel}
+                    </p>}
                 </div>
             </div>
 

@@ -44,6 +44,10 @@ export function workerPayroll(input: any) {
 export async function readTeamWorkerRequestList(db: FirebaseFirestore.Firestore, actor: Awaited<ReturnType<typeof actorFor>>, input: any) {
     const yearMonth = text(input.yearMonth);
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) fail('invalid-argument', '조회 월을 확인해 주세요.');
+    if (input.formOnly === true && !actor.canReview && input.cursor === undefined && input.pageSize === undefined) {
+        const company = await registrationCompany(db);
+        return { canReview: false, teams: actor.teams, company, requests: [], nextCursor: null, historyLoaded: false };
+    }
     const scope = actor.canReview ? db.collection(COLLECTION).where('yearMonth', '==', yearMonth) : db.collection(COLLECTION).where('ownerUid', '==', actor.uid).where('yearMonth', '==', yearMonth);
     const [snapshot, company] = await Promise.all([readRequestPage(scope, input), registrationCompany(db)]);
     const requests = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)).filter(row => ['pending', 'approved', 'rejected'].includes(row.status) && row.yearMonth === yearMonth).sort((a, b) => text(b.submittedAt || b.createdAt).localeCompare(text(a.submittedAt || a.createdAt)));

@@ -1,5 +1,6 @@
 import React from 'react';
 import MonthNavigator from '../common/MonthNavigator';
+import { useTeamMobile } from '../team-mobile/TeamMobileUI';
 
 export type TeamSettlementSaveState = 'idle' | 'saving' | 'error';
 
@@ -60,6 +61,10 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
   onMonthChange
 }) => {
   const isSaving = saveState === 'saving';
+  const mobile = useTeamMobile();
+  const monthNavigator = onMonthChange && <MonthNavigator value={`${year}-${String(month).padStart(2, '0')}`}
+    onChange={onMonthChange} disabled={isSaving} ariaLabel="정산 조회월" />;
+  const compactMonthBar = mobile && Boolean(monthNavigator);
 
   return (
     <>
@@ -89,8 +94,9 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
         </div>
       </header>
 
+      {compactMonthBar && <div className="team-settlement-page__mobile-month">{monthNavigator}</div>}
       <section
-        className="team-settlement-page__workspace-bar sticky top-[60px] z-30 mt-3 flex flex-col gap-3 rounded-2xl border p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between"
+        className={`team-settlement-page__workspace-bar ${compactMonthBar ? 'team-settlement-page__workspace-bar--compact' : 'sticky top-[60px]'} z-30 mt-3 flex flex-col gap-3 rounded-2xl border p-3 shadow-lg backdrop-blur sm:flex-row sm:items-center sm:justify-between`}
         aria-label="정산 상태와 실행 작업"
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -98,10 +104,11 @@ export const TeamSettlementWorkspaceHeader: React.FC<TeamSettlementWorkspaceHead
           <strong className="team-settlement-page__current-team inline-flex max-w-full items-center truncate rounded-lg border px-3 py-1 text-base font-black shadow-sm">
             {teamName || '팀 선택'}
           </strong>
-          <span className="text-slate-300">·</span>
-          {onMonthChange ? <div className="team-settlement-page__sticky-month">
-            <MonthNavigator value={`${year}-${String(month).padStart(2, '0')}`} onChange={onMonthChange} disabled={isSaving} ariaLabel="정산 조회월" />
-          </div> : <span className="font-semibold text-slate-700">{year}년 {month}월</span>}
+          {!compactMonthBar && <>
+            <span className="text-slate-300">·</span>
+            {monthNavigator ? <div className="team-settlement-page__sticky-month">{monthNavigator}</div>
+              : <span className="font-semibold text-slate-700">{year}년 {month}월</span>}
+          </>}
           <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${confirmedAt ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}`}>
             {confirmedAt ? '확정' : '미확정'}
           </span>

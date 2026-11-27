@@ -110,6 +110,27 @@ test('새로고침은 서버에서 최신 목록을 요청하면서 작성 중�
   expect(screen.getByLabelText('이름 *')).toHaveValue('작성 중인 이름');
 });
 
+test('모바일 등록은 신청 이력을 기다리지 않고 신청 내역을 열 때 조회한다', async () => {
+  const original = window.matchMedia;
+  window.matchMedia = jest.fn().mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() });
+  service.list.mockResolvedValueOnce({ ...data, historyLoaded: false });
+  try {
+    render(<TeamMobileProvider enabled><TeamWorkerRequestPage /></TeamMobileProvider>);
+    expect(await screen.findByLabelText('이름 *')).toBeEnabled();
+    expect(service.list).toHaveBeenCalledTimes(1);
+    expect(service.list).toHaveBeenLastCalledWith(expect.any(String), undefined, { formOnly: true });
+    fireEvent.change(screen.getByLabelText('이름 *'), { target: { value: '작성 중' } });
+    fireEvent.click(screen.getByRole('tab', { name: '신청 내역' }));
+    await screen.findByText('해당하는 신청이 없습니다.');
+    expect(service.list).toHaveBeenCalledTimes(2);
+    expect(service.list).toHaveBeenLastCalledWith(expect.any(String));
+    fireEvent.click(screen.getByRole('tab', { name: '신청하기' }));
+    expect(screen.getByLabelText('이름 *')).toHaveValue('작성 중');
+    fireEvent.click(screen.getByRole('tab', { name: '신청 내역' }));
+    expect(service.list).toHaveBeenCalledTimes(2);
+  } finally { window.matchMedia = original; }
+});
+
 test('최종 확인 중에는 배경 입력과 첨부를 잠근다', async () => {
   render(<TeamWorkerRequestPage />); await fill();
   fireEvent.click(screen.getByRole('button', { name: '등록 전 미리보기' }));
