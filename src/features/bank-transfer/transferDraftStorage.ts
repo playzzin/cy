@@ -1,6 +1,7 @@
 import type { TransferDraft, TransferExportRecord, TransferRow } from './types';
 import { validateTransferRow } from './transferModel';
 import { isPayrollTransferDetail } from './payrollTransferDetail';
+import { isTransferBankAccount } from './payrollTransferAccount';
 import { isSupportTransferDetail } from './supportTransferDetail';
 import { MAX_TRANSFER_ROWS } from './transferLimits';
 
@@ -36,6 +37,8 @@ const isRow = (value: unknown): value is TransferRow => {
         || !['roomName', 'address', 'billingMonth', 'basis', 'paymentStatus'].every(field => isText((value.rentDetail as Record<string, unknown>)[field]))
         || typeof value.rentDetail.originalAmount !== 'number' || !Number.isFinite(value.rentDetail.originalAmount))) return false;
     if (value.payrollDetail !== undefined && !isPayrollTransferDetail(value.payrollDetail)) return false;
+    if (value.payrollPersonalAccount !== undefined && !isTransferBankAccount(value.payrollPersonalAccount)) return false;
+    if (value.usesPrimaryAccount !== undefined && typeof value.usesPrimaryAccount !== 'boolean') return false;
     if (value.supportDetail !== undefined && !isSupportTransferDetail(value.supportDetail)) return false;
     // 미입력 금액과 계좌도 초안으로 보관할 수 있지만 JSON으로 손실되는 NaN/Infinity는 거부한다.
     return typeof value.amount === 'number' && Number.isFinite(value.amount);

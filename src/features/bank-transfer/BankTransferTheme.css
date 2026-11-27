@@ -112,6 +112,10 @@
 .bank-transfer-page .bt-memo-settings small { grid-column:1/-1; color:#94a3b8; font-size:11px; white-space:normal; }
 .bank-transfer-page .bt-memo-settings button { align-self:center; }
 .bank-transfer-page .bt-list-tools { padding:7px 12px; gap:6px; border-bottom:1px solid #334155; }
+.bank-transfer-page .bt-payroll-accounts { display:grid; gap:8px; padding:10px 12px; border-bottom:1px solid #334155; background:#0f172a; }
+.bank-transfer-page .bt-payroll-account-actions { display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:12px; }
+.bank-transfer-page .bt-payroll-account-actions button { min-height:28px; padding:3px 8px; }
+.bank-transfer-page .bt-payroll-accounts p { margin:0; font-size:12px; }
 .bank-transfer-page .bt-transfer-list { padding:8px 10px; }
 .bank-transfer-page .bt-transfer-row { padding:10px; border-color:#334155; background:#02061766; border-radius:8px; margin-bottom:7px; }
 .bank-transfer-page .bt-transfer-row.has-error { background:#8813371a; border-color:#fb718559; }

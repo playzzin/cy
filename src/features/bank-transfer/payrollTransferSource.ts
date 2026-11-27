@@ -1,9 +1,10 @@
 import { monthlyPayrollSettlementService } from '../../services/monthlyPayrollSettlementService';
-import type { KBTransferRow } from '../../pages/payroll/MonthlyWageModel';
+import type { KBPreviewSourceRow, KBTransferRow } from '../../pages/payroll/MonthlyWageModel';
 import { getKBValidationErrorLabel, type KBAmountType } from '../../pages/payroll/utils/kbTransferExport';
 import { resolvePayrollBankCode } from '../../pages/payroll/utils/payrollBankCode';
 import type { TransferCandidate, TransferLoadResult } from './types';
 import { buildPayrollTransferDetail } from './payrollTransferDetail';
+import { toTransferBankAccount } from './payrollTransferAccount';
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 const payrollCandidateId = (sourceId: string, amountType: KBAmountType): string => `payroll:${sourceId}:${amountType}`;
@@ -16,27 +17,36 @@ export const buildPayrollPreviewCandidates = (
     rows: KBTransferRow[],
     amountType: KBAmountType,
     amountTypeLabel: string,
-): TransferCandidate[] => rows.map(row => ({
-    id: payrollCandidateId(row.sourceRowId, amountType),
-    source: 'payroll',
-    sourceId: row.sourceRowId,
-    name: row.workerName,
-    groupName: row.teamName,
-    category: 'worker',
-    bankName: row.bankName,
-    bankCode: row.bankCode,
-    accountNumber: row.accountNumber,
-    accountHolder: row.accountHolder,
-    amount: row.amount,
-    period: row.month,
-    detail: ['급여 미리보기', amountTypeLabel, row.salaryLabel, row.usesPrimaryAccount ? '대표계좌 적용' : ''].filter(Boolean).join(' · '),
-    receiverDisplay: row.receiverDisplay,
-    senderMemo: row.senderMemo,
-    payrollDetail: row.payrollDetail,
-    ...(row.validationErrors.length > 0
-        ? { warning: `${row.validationErrors.map(getKBValidationErrorLabel).join(', ')} 확인 필요` }
-        : {}),
-}));
+    sourceRows: Array<Pick<KBPreviewSourceRow, 'sourceRowId' | 'bankName' | 'bankCode' | 'accountNumber' | 'accountHolder'>> = [],
+): TransferCandidate[] => {
+    const sources = new Map(sourceRows.map(row => [row.sourceRowId, row]));
+    return rows.map(row => {
+        const personalAccount = row.usesPrimaryAccount ? sources.get(row.sourceRowId) : row;
+        return {
+            id: payrollCandidateId(row.sourceRowId, amountType),
+            source: 'payroll',
+            sourceId: row.sourceRowId,
+            name: row.workerName,
+            groupName: row.teamName,
+            category: 'worker',
+            bankName: row.bankName,
+            bankCode: row.bankCode,
+            accountNumber: row.accountNumber,
+            accountHolder: row.accountHolder,
+            amount: row.amount,
+            period: row.month,
+            detail: ['급여 미리보기', amountTypeLabel, row.salaryLabel, row.usesPrimaryAccount ? '대표계좌 적용' : ''].filter(Boolean).join(' · '),
+            receiverDisplay: row.receiverDisplay,
+            senderMemo: row.senderMemo,
+            payrollDetail: row.payrollDetail,
+            usesPrimaryAccount: row.usesPrimaryAccount,
+            ...(personalAccount ? { payrollPersonalAccount: toTransferBankAccount(personalAccount) } : {}),
+            ...(row.validationErrors.length > 0
+                ? { warning: `${row.validationErrors.map(getKBValidationErrorLabel).join(', ')} 확인 필요` }
+                : {}),
+        };
+    });
+};
 
 /** Only persisted payment snapshots are reliable outside the payroll calculator. */
 export const loadPayrollTransferCandidates = async (period: string): Promise<TransferLoadResult> => {

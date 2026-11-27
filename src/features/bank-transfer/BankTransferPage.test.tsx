@@ -16,6 +16,9 @@ let mockUid = 'qa-user';
 type PickerCallbacks = { period: string; onLoad: (result: TransferLoadResult) => void; onInvalidate: () => void };
 let mockLatestPayrollPicker: PickerCallbacks;
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: mockUid } }) }));
+const mockUsePagePrimaryAccount = jest.fn();
+jest.mock('../../hooks/usePagePrimaryAccount', () => ({ usePagePrimaryAccount: (scope: string) => mockUsePagePrimaryAccount(scope) }));
+jest.mock('../../components/accounts/PagePrimaryAccountCard', () => ({ __esModule: true, default: () => null }));
 jest.mock('../../services/monthlyPayrollSettlementService', () => ({ monthlyPayrollSettlementService: { getSettlementsByYear: jest.fn() } }));
 jest.mock('./transferSources', () => ({ loadAccountTransferCandidates: jest.fn(), loadRentTransferCandidates: jest.fn(), loadSupportTransferCandidates: jest.fn(async () => ({ candidates: [], warnings: [] })) }));
 jest.mock('../../pages/payroll/MonthlyWageDraftPage', () => ({ __esModule: true, default: ({ transferPicker }: { transferPicker: PickerCallbacks }) => {
@@ -53,6 +56,69 @@ beforeEach(() => {
     (loadSupportTransferCandidates as jest.Mock).mockResolvedValue({ candidates: [], warnings: [] });
     (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockResolvedValue([]);
     (XLSX.writeFile as jest.Mock).mockReset();
+    mockUsePagePrimaryAccount.mockReturnValue({ loading: false, error: '', account: {
+        bankName: '신한은행', accountNumber: '00900000001', accountHolder: '검증대표예금주',
+    } });
+});
+
+it('선택한 급여만 통합급여 대표계좌로 바꾸고 저장 후 원계좌로 복원한다', async () => {
+    const personalAccount = { bankName: '국민은행', bankCode: '004', accountNumber: '00000000001', accountHolder: '급여작업자' };
+    const payroll = candidate({ ...personalAccount, id: 'payroll:w1:totalAmount', source: 'payroll', name: '급여작업자', amount: 123000, payrollPersonalAccount: personalAccount });
+    const otherAccount = { ...personalAccount, accountNumber: '00000000002', accountHolder: '다른작업자' };
+    const otherPayroll = candidate({ ...otherAccount, id: 'payroll:w2:totalAmount', sourceId: 'w2', source: 'payroll', name: '다른작업자', amount: 67000, payrollPersonalAccount: otherAccount });
+    const { unmount } = render(view());
+    await addWorker();
+    fireEvent.change(screen.getByLabelText('가상작업자 이체금액'), { target: { value: '1000' } });
+    fireEvent.click(screen.getByRole('tab', { name: '급여' }));
+    await screen.findByRole('button', { name: '급여 불러오기' });
+    act(() => mockLatestPayrollPicker.onLoad({ candidates: [payroll, otherPayroll], warnings: [] }));
+    fireEvent.click(screen.getByRole('button', { name: '급여작업자 담기' }));
+    fireEvent.click(screen.getByRole('button', { name: '다른작업자 담기' }));
+    expect(mockUsePagePrimaryAccount).toHaveBeenCalledWith('monthly-wage');
+    const apply = screen.getByRole('button', { name: '선택 → 대표계좌' });
+    expect(apply).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('가상작업자 송금 선택'));
+    expect(apply).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('급여작업자 송금 선택'));
+    fireEvent.click(apply);
+    expect(screen.getByLabelText('급여작업자 송금 계좌번호')).toHaveValue('00900000001');
+    expect(screen.getByLabelText('다른작업자 송금 계좌번호')).toHaveValue('00000000002');
+    expect(screen.getByLabelText('가상작업자 송금 계좌번호')).toHaveValue('00123456789');
+    fireEvent.click(screen.getByRole('button', { name: '목록 저장' }));
+    fireEvent.click(screen.getByRole('button', { name: '엑셀 미리보기' }));
+    confirmReview();
+    fireEvent.click(screen.getByRole('button', { name: '국민은행용 엑셀 다운로드' }));
+    const workbook = (XLSX.writeFile as jest.Mock).mock.calls[0][0];
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    expect([sheet.A3.v, sheet.B3.v, sheet.C3.v]).toEqual(['088', '00900000001', 123000]);
+    expect([sheet.A4.v, sheet.B4.v, sheet.C4.v]).toEqual(['004', '00000000002', 67000]);
+    const saved = loadTransferDrafts(mockUid)[0];
+    expect(saved.rows[1]).toMatchObject({ bankCode: '088', accountHolder: '검증대표예금주', usesPrimaryAccount: true, amount: 123000, payrollPersonalAccount: personalAccount });
+    unmount();
+    render(view());
+    fireEvent.click(await screen.findByLabelText('급여작업자 송금 선택'));
+    fireEvent.click(screen.getByRole('button', { name: '원계좌 복원' }));
+    expect(screen.getByLabelText('급여작업자 송금 계좌번호')).toHaveValue(personalAccount.accountNumber);
+    expect(screen.getByLabelText('급여작업자 송금 예금주')).toHaveValue(personalAccount.accountHolder);
+    expect(screen.getByLabelText('급여작업자 이체금액')).toHaveValue(123000);
+});
+
+it('기존 송금 목록은 원계좌를 재조회한 후에 복원할 수 있다', async () => {
+    const saved = oldSupportDraft();
+    const payroll = candidate({ id: 'payroll:old:totalAmount', sourceId: 'old', source: 'payroll', period: saved.period, amount: 120000 });
+    saved.rows = [createTransferRow({ ...payroll, accountNumber: '00000000099', accountHolder: '기존수취인' }, '', '{이름}')];
+    saveTransferDraft(mockUid, saved);
+    render(view());
+    fireEvent.click(await screen.findByLabelText('가상작업자 송금 선택'));
+    const restore = screen.getByRole('button', { name: '원계좌 복원' });
+    expect(restore).toBeDisabled();
+    fireEvent.click(screen.getByRole('tab', { name: '급여' }));
+    await screen.findByRole('button', { name: '급여 불러오기' });
+    const { bankName, bankCode, accountNumber, accountHolder } = payroll;
+    act(() => mockLatestPayrollPicker.onLoad({ candidates: [{ ...payroll, payrollPersonalAccount: { bankName, bankCode, accountNumber, accountHolder } }], warnings: [] }));
+    expect(screen.getByLabelText('가상작업자 송금 계좌번호')).toHaveValue('00000000099');
+    fireEvent.click(restore);
+    expect(screen.getByLabelText('가상작업자 송금 계좌번호')).toHaveValue(accountNumber);
 });
 
 it('설명서의 예시·검색·닫기는 편집 중인 송금액이나 저장본을 변경하지 않는다', async () => {
