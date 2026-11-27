@@ -184,7 +184,7 @@ it('기초 목록이 늦게 도착하면 다른 계산이 끝나도 가져오기
     await ready();
 });
 
-it('전체 팀은 팀마다 저장된 공제 기준으로 계산한 급여를 한 번에 전달한다', async () => {
+it('화면 갱신 없이 팀마다 저장된 공제 기준으로 계산한 급여를 한 번에 전달한다', async () => {
     const first = saved('a');
     first.calculationOptions = { ...defaultOptions, businessIncomeApplied: true };
     (monthlyPayrollSettlementService.getSettlementsByYear as jest.Mock).mockResolvedValue([first, saved('b')]);
@@ -192,8 +192,13 @@ it('전체 팀은 팀마다 저장된 공제 기준으로 계산한 급여를 �
     await ready();
     expect(screen.getByLabelText('급여 조회 팀')).toHaveValue('');
     expect(screen.getByLabelText('급여 구분')).toHaveValue('all');
-    fireEvent.click(screen.getByRole('button', { name: '급여 불러오기' }));
-    await waitFor(() => expect(onLoad).toHaveBeenCalledTimes(1));
+    const animationFrame = jest.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1);
+    try {
+        fireEvent.click(screen.getByRole('button', { name: '급여 불러오기' }));
+        await waitFor(() => expect(onLoad).toHaveBeenCalledTimes(1));
+    } finally {
+        animationFrame.mockRestore();
+    }
     expect(onLoad.mock.calls[0][0].candidates.map(row => [row.name, row.amount])).toEqual([['검증 A', 1068535], ['검증 B', 1105000]]);
     expect(onLoad.mock.calls[0][0].candidates.map(row => row.payrollDetail?.totalDeduction)).toEqual([36465, 0]);
     expect(monthlyPayrollSettlementService.saveSettlements).not.toHaveBeenCalled();
