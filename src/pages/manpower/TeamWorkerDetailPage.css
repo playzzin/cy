@@ -2574,6 +2574,35 @@
 .tw-profile-sections button[aria-selected=true] { background: #2563eb; color: #fff; }
 
 @media screen and (max-width: 768px) {
+    .tw-page--team-mobile .tw-mobile-filter-bar { gap: 4px; margin-bottom: 6px; }
+    .tw-page--team-mobile .tw-worker-item__chevron {
+        flex: 0 0 auto;
+        color: #58677c;
+    }
+    .tw-page--team-mobile .tw-toolbar--always-visible {
+        display: grid;
+        gap: 6px;
+        padding: 0;
+        margin-bottom: 6px;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+    .tw-page--team-mobile .tw-toolbar--always-visible .tw-control--search,
+    .tw-page--team-mobile .tw-toolbar--always-visible .tw-control > span { display: none; }
+    .tw-page--team-mobile > .tm-disclosure { margin: 6px 0; }
+    .tw-page--team-mobile .tw-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-auto-flow: row;
+        margin-inline: 0;
+        padding: 0;
+        overflow: visible;
+    }
+    .tw-page--team-mobile .tw-kpi { min-width: 0; overflow-wrap: anywhere; }
+}
+
+@media screen and (max-width: 768px) {
     .tw-workspace--detail .mobile-list-return--worker {
         position: fixed;
         left: 16px;

@@ -395,3 +395,56 @@
     display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px;
   }
 }
+
+.team-settlement-page__mobile-month {
+  position: sticky;
+  top: var(--header-height, 60px);
+  z-index: 36;
+  padding: 4px 0;
+  background: #fff;
+}
+.team-settlement-page__mobile-month .month-navigator { min-height: 44px; }
+.team-settlement-page__mobile-month .month-navigator__center {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 6px;
+}
+.team-settlement-page__mobile-month .month-navigator__value {
+  padding: 0;
+  font-size: 14px;
+  line-height: 16px;
+}
+.team-settlement-page__mobile-context {
+  display: flex;
+  min-width: 0;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 16px;
+}
+.team-settlement-page__mobile-context strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-settlement-page__mobile-context .team-settlement-page__confirmation {
+  flex: none;
+  padding-block: 0;
+  line-height: 16px;
+}
+.team-settlement-page .team-settlement-page__workspace-bar--compact {
+  position: static;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin: 6px 0;
+  border-top-width: 1px;
+  box-shadow: none;
+}
+@media print { .team-settlement-page__mobile-month { display: none; } }
