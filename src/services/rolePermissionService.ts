@@ -1,5 +1,4 @@
-import { db } from '../config/firebase';
-import { createSystemConfig, listSystemConfigs, listAllSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
+import { createSystemConfig, listSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
 import { UserRole, PermissionConfig, DEFAULT_PERMISSIONS } from '../types/roles';
 import { Position, positionService } from './positionService';
 import { menuServiceV11 } from './menuServiceV11';
@@ -167,58 +166,14 @@ class RolePermissionService {
                 return merged;
             };
 
-            const positions = await positionService.getPositions();
-
-            if (isDevAdminSessionEnabled()) {
-                this.permissions = mergeWithPositionKeys(DEFAULT_PERMISSIONS, positions);
-                this.notifyListeners();
-                return;
-            }
-
-            const findRowInList = (rows: any[]): any | null => {
-                if (!Array.isArray(rows)) return null;
-                return rows.find((r: any) => String(r?.id ?? '') === String(PERMISSION_DOC_ID)) ?? null;
-            };
-
-            let row: any | null = null;
-            try {
-                const response = await listSystemConfigs();
-                const rows = (response as any)?.data?.systemConfigs ?? [];
-                row = findRowInList(rows);
-            } catch {
-                row = null;
-            }
-
-            if (!row) {
-                const limit = 1000;
-                let offset = 0;
-                let safety = 0;
-                while (safety < 50) {
-                    safety += 1;
-                    const response = await listAllSystemConfigs({ limit, offset } as any);
-                    const rows = (response as any)?.data?.systemConfigs ?? [];
-                    const page = Array.isArray(rows) ? rows : [];
-                    if (page.length === 0) break;
-
-                    row = findRowInList(page);
-                    if (row) break;
-
-                    if (page.length < limit) break;
-                    offset += limit;
-                }
-            }
-
-            if (row?.data) {
-                const parsed = JSON.parse(String(row.data));
-                this.permissions = mergeWithPositionKeys(parsed as PermissionConfig, positions);
-                this.notifyListeners();
-                return;
-            }
-
-            // Initialize with position keys derived from defaults
-            const initial = mergeWithPositionKeys(DEFAULT_PERMISSIONS, positions);
-            await this.savePermissions(initial);
-            this.permissions = initial;
+            const [positions, response] = await Promise.all([
+                positionService.getPositions(),
+                isDevAdminSessionEnabled() ? undefined : listSystemConfigs({ configId: PERMISSION_DOC_ID }),
+            ]);
+            const rows: Array<{ id?: string; data?: unknown }> = response?.data?.systemConfigs ?? [];
+            const row = rows.find(item => item?.id === PERMISSION_DOC_ID);
+            const permissions = row?.data ? JSON.parse(String(row.data)) as PermissionConfig : DEFAULT_PERMISSIONS;
+            this.permissions = mergeWithPositionKeys(permissions, positions);
             this.notifyListeners();
         } catch (error) {
             console.error('Failed to refresh permissions:', error);

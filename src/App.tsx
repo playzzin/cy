@@ -1,4 +1,4 @@
-import { TEAM_REQUEST_ACTIONS } from './constants/teamWorkflowActions';
+import { TEAM_REQUEST_ACTIONS, TEAM_SITE_PATH } from './constants/teamWorkflowActions';
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
@@ -13,7 +13,14 @@ import DevPreviewFrameBridge from './components/developer/DevPreviewFrameBridge'
 import { isDevPreviewFrame } from './utils/devPreviewRuntime';
 import { lazyNamed } from './utils/lazyNamed';
 
-const ProtectedRouteShell = React.lazy(() => import('./routes/ProtectedRouteShell'));
+const loadSiteResponsibleDetailPage = () => import('./pages/manpower/SiteResponsibleDetailPage');
+const ProtectedRouteShell = React.lazy(() => {
+  if (window.location.pathname.replace(/\/+$/, '') === TEAM_SITE_PATH) {
+    // Download the route while the protected shell checks the account and menu.
+    void loadSiteResponsibleDetailPage().catch(() => { /* The route handles failed imports when it renders. */ });
+  }
+  return import('./routes/ProtectedRouteShell');
+});
 const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
 const DashboardExecutiveView = lazyNamed(() => import('./components/dashboard/executive/DashboardExecutiveView'), 'DashboardExecutiveView');
 const DailyReportPage = React.lazy(() => import('./pages/report/DailyReportPage'));
@@ -34,7 +41,7 @@ const SupportSettingsPage = React.lazy(() => import('./pages/support/SupportSett
 const SupportStatusPage = React.lazy(() => import('./pages/support/SupportStatusPage'));
 const WorkerSummaryPage = React.lazy(() => import('./pages/manpower/WorkerSummaryPage'));
 const TeamWorkerDetailPage = React.lazy(() => import('./pages/manpower/TeamWorkerDetailPage'));
-const SiteResponsibleDetailPage = React.lazy(() => import('./pages/manpower/SiteResponsibleDetailPage'));
+const SiteResponsibleDetailPage = React.lazy(loadSiteResponsibleDetailPage);
 const MaterialManagementPage = React.lazy(() => import('./pages/materials/MaterialManagementPage'));
 const MaterialMasterPage = React.lazy(() => import('./pages/materials/MaterialMasterPage'));
 const MaterialInboundPage = React.lazy(() => import('./pages/materials/MaterialInboundPage'));

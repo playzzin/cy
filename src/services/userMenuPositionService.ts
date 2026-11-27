@@ -9,7 +9,7 @@
  * 援ъ“: { [uid: string]: string[] }  (uid ??異붽? 吏곸콉紐?諛곗뿴)
  */
 
-import { createSystemConfig, listSystemConfigs, listAllSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
+import { createSystemConfig, listSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
 import {
     addDevUserPosition,
@@ -43,35 +43,9 @@ class UserMenuPositionService {
         }
 
         try {
-            const findRow = (rows: any[]): any | null => {
-                if (!Array.isArray(rows)) return null;
-                return rows.find((r: any) => String(r?.id ?? '') === DOC_ID) ?? null;
-            };
-
-            let row: any = null;
-            try {
-                const response = await listSystemConfigs();
-                const rows = (response as any)?.data?.systemConfigs ?? [];
-                row = findRow(rows);
-            } catch {
-                row = null;
-            }
-
-            if (!row) {
-                let offset = 0;
-                let safety = 0;
-                while (safety < 50) {
-                    safety++;
-                    const response = await listAllSystemConfigs({ limit: 1000, offset } as any);
-                    const rows = (response as any)?.data?.systemConfigs ?? [];
-                    const page = Array.isArray(rows) ? rows : [];
-                    if (page.length === 0) break;
-                    row = findRow(page);
-                    if (row) break;
-                    if (page.length < 1000) break;
-                    offset += 1000;
-                }
-            }
+            const response = await listSystemConfigs({ configId: DOC_ID });
+            const rows: Array<{ id?: string; data?: unknown }> = response?.data?.systemConfigs ?? [];
+            const row = rows.find(item => item?.id === DOC_ID);
 
             if (row?.data) {
                 this.data = JSON.parse(String(row.data)) as UserMenuPositionMap;
