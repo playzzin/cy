@@ -72,6 +72,27 @@
         }
       },
       {
+        "source": "/api/getNoticeBoard",
+        "function": {
+          "functionId": "getNoticeBoard",
+          "region": "asia-northeast3"
+        }
+      },
+      {
+        "source": "/api/teamWorkerRequests",
+        "function": {
+          "functionId": "teamWorkerRequests",
+          "region": "asia-northeast3"
+        }
+      },
+      {
+        "source": "/api/teamExpenseRequests",
+        "function": {
+          "functionId": "teamExpenseRequests",
+          "region": "asia-northeast3"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

@@ -11,7 +11,6 @@ import {
     useDroppable,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import html2canvas from 'html2canvas';
 import {
     AlertTriangle,
     CalendarDays,
@@ -3417,12 +3416,13 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         setMessage('');
 
         try {
-            const [teamRows, workerRows, siteRows, companyRows, vehicleRows] = await Promise.all([
+            const [teamRows, workerRows, siteRows, companyRows, vehicleRows, confirmedBoard] = await Promise.all([
                 teamService.getTeams(),
                 manpowerService.getWorkers(),
                 siteService.getSites(),
                 companyService.getCompanies(),
                 vehicleService.getVehicles(),
+                isScheduleConfirmationInput ? scheduleConfirmationBoardService.getBoardByDate(date) : Promise.resolve(null),
             ]);
 
             setTeams(teamRows);
@@ -3480,7 +3480,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 ? null
                 : await dispatchService.getDispatchByDate(date, { throwOnError: true });
             const savedAssignments = isScheduleConfirmationInput
-                ? (await scheduleConfirmationBoardService.getBoardByDate(date))?.assignments || []
+                ? confirmedBoard?.assignments || []
                 : savedDispatch?.assignments || [];
             const nextSchedules = savedAssignments.map((assignment, index) => {
                 const raw = assignment as DispatchAssignment & Partial<ScheduleItem> & { supportTeamIds?: string[] };
@@ -5016,6 +5016,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 throw new Error('Board capture target has no size');
             }
 
+            const { default: html2canvas } = await import('html2canvas');
             const canvas = await html2canvas(target, {
                 backgroundColor: '#f8fafc',
                 scale: getBoardCaptureScale(width, height),

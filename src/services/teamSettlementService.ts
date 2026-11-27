@@ -15,7 +15,7 @@ import { dailyAdvanceStatementRecruiterFeeService } from './dailyAdvanceStatemen
 import { siteService, type Site } from './siteService';
 import { supportRateService } from './supportRateService';
 import { teamExpenseLedgerService } from './teamExpenseLedgerService';
-import { teamService } from './teamService';
+import { teamService, type Team } from './teamService';
 import { vehicleBillingService } from './vehicleBillingService';
 import {
   TeamSettlementDocumentSchema,
@@ -246,7 +246,7 @@ const getMonthRange = (yearMonth: string): { startDate: string; endDate: string;
   return { startDate: toIsoDate(start), endDate: toIsoDate(end), year: safeYear, month: safeMonth };
 };
 
-const buildTeamIdVariants = async (teamId: string): Promise<{ canonicalTeamId: string; teamName: string; variants: Set<string> }> => {
+const buildTeamIdVariants = async (teamId: string, selectedTeam?: Team): Promise<{ canonicalTeamId: string; teamName: string; variants: Set<string> }> => {
   const raw = String(teamId);
   const variants = new Set<string>();
   const addVariant = (value: unknown) => {
@@ -263,8 +263,7 @@ const buildTeamIdVariants = async (teamId: string): Promise<{ canonicalTeamId: s
   let teamName = '';
 
   try {
-    const teams = await teamService.getTeams();
-    const matched = teams.find((t) => String(t.id ?? '') === raw || String(t.legacyId ?? '') === raw);
+    const matched = selectedTeam?.id === raw ? selectedTeam : (await teamService.getTeams()).find((t) => String(t.id ?? '') === raw || String(t.legacyId ?? '') === raw);
     if (matched?.id) canonicalTeamId = String(matched.id);
     addVariant(matched?.legacyId);
     addVariant(matched?.id);
@@ -784,8 +783,8 @@ export const teamSettlementService = {
     return rows;
   },
 
-  async getTeamSettlement(params: { yearMonth: string; teamId: string; persistSnapshot?: boolean; refreshDraft?: boolean }): Promise<TeamSettlementDocument> {
-    const team = await buildTeamIdVariants(params.teamId);
+  async getTeamSettlement(params: { yearMonth: string; teamId: string; selectedTeam?: Team; persistSnapshot?: boolean; refreshDraft?: boolean }): Promise<TeamSettlementDocument> {
+    const team = await buildTeamIdVariants(params.teamId, params.selectedTeam);
     const systemId = buildSystemConfigId({ yearMonth: params.yearMonth, teamId: team.canonicalTeamId });
 
     const res = await listSystemConfigs({ configId: systemId });

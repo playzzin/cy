@@ -1,4 +1,4 @@
-import { TEAM_REQUEST_ACTIONS, TEAM_SITE_PATH } from './constants/teamWorkflowActions';
+import { TEAM_REQUEST_ACTIONS } from './constants/teamWorkflowActions';
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
@@ -11,17 +11,16 @@ import RouteDocumentTitle from './components/common/RouteDocumentTitle';
 import { INVESTMENT_PATH } from './constants/siteModes';
 import DevPreviewFrameBridge from './components/developer/DevPreviewFrameBridge';
 import { isDevPreviewFrame } from './utils/devPreviewRuntime';
+import { getTeamMenuPage, teamMenuPages } from './routes/teamMenuPages';
 import { lazyNamed } from './utils/lazyNamed';
 
-const loadSiteResponsibleDetailPage = () => import('./pages/manpower/SiteResponsibleDetailPage');
 const ProtectedRouteShell = React.lazy(() => {
-  if (window.location.pathname.replace(/\/+$/, '') === TEAM_SITE_PATH) {
-    // Download the route while the protected shell checks the account and menu.
-    void loadSiteResponsibleDetailPage().catch(() => { /* The route handles failed imports when it renders. */ });
-  }
+  // Download only the opened page while the shell verifies the account and menu.
+  const loadPage = getTeamMenuPage(window.location.pathname);
+  if (loadPage) void loadPage().catch(() => { /* React.lazy handles failures when the route renders. */ });
   return import('./routes/ProtectedRouteShell');
 });
-const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
+const DashboardPage = React.lazy(teamMenuPages['/dashboard']);
 const DashboardExecutiveView = lazyNamed(() => import('./components/dashboard/executive/DashboardExecutiveView'), 'DashboardExecutiveView');
 const DailyReportPage = React.lazy(() => import('./pages/report/DailyReportPage'));
 const DailyReportWorkerCalendarPage = React.lazy(() => import('./pages/report/DailyReportWorkerCalendarPage'));
@@ -31,7 +30,7 @@ const DailyDispatchPage = React.lazy(() => import('./pages/assignment/DailyDispa
 const FieldScheduleRequestPage = React.lazy(() => import('./pages/assignment/FieldScheduleRequestPage'));
 const FieldSchedulePlannerPage = React.lazy(() => import('./pages/assignment/FieldSchedulePlannerPage'));
 const WorkerOffDutyRequestPage = React.lazy(() => import('./pages/assignment/WorkerOffDutyRequestPage'));
-const ScheduleConfirmationBoardPage = React.lazy(() => import('./pages/assignment/ScheduleConfirmationBoardPage'));
+const ScheduleConfirmationBoardPage = React.lazy(teamMenuPages['/assignment/schedule-confirmation']);
 const TeamAssignmentPage = React.lazy(() => import('./pages/assignment/TeamAssignmentPage'));
 const SiteAssignmentPage = React.lazy(() => import('./pages/assignment/SiteAssignmentPage'));
 const SupportAssignmentPage = React.lazy(() => import('./pages/assignment/SupportAssignmentPage'));
@@ -39,9 +38,9 @@ const RateChangePage = React.lazy(() => import('./pages/hr/RateChangePage'));
 const IncidentCaseRegisterPage = React.lazy(() => import('./pages/hr/IncidentCaseRegisterPage'));
 const SupportSettingsPage = React.lazy(() => import('./pages/support/SupportSettingsPage'));
 const SupportStatusPage = React.lazy(() => import('./pages/support/SupportStatusPage'));
-const WorkerSummaryPage = React.lazy(() => import('./pages/manpower/WorkerSummaryPage'));
-const TeamWorkerDetailPage = React.lazy(() => import('./pages/manpower/TeamWorkerDetailPage'));
-const SiteResponsibleDetailPage = React.lazy(loadSiteResponsibleDetailPage);
+const WorkerSummaryPage = React.lazy(teamMenuPages['/manpower/summary']);
+const TeamWorkerDetailPage = React.lazy(teamMenuPages['/manpower/team-worker-detail']);
+const SiteResponsibleDetailPage = React.lazy(teamMenuPages['/manpower/site-responsible-detail']);
 const MaterialManagementPage = React.lazy(() => import('./pages/materials/MaterialManagementPage'));
 const MaterialMasterPage = React.lazy(() => import('./pages/materials/MaterialMasterPage'));
 const MaterialInboundPage = React.lazy(() => import('./pages/materials/MaterialInboundPage'));
@@ -85,7 +84,7 @@ const FieldBuybackWorkbookPage = React.lazy(() => import('./pages/payroll/FieldB
 const PayrollRateManagementPage = React.lazy(() => import('./pages/payroll/PayrollRateManagementPage'));
 const AdvancePaymentPage = React.lazy(() => import('./pages/payroll/AdvancePaymentPage'));
 const AdvanceSummaryPage = React.lazy(() => import('./pages/payroll/AdvanceSummaryPage'));
-const WorkerAdvanceRequestPage = React.lazy(() => import('./pages/payroll/WorkerAdvanceRequestPage'));
+const WorkerAdvanceRequestPage = React.lazy(teamMenuPages['/payroll/advance-request']);
 const PayrollStatisticsPage = React.lazy(() => import('./pages/payroll/PayrollStatisticsPage'));
 const WorkerBulkRegistrationPage = React.lazy(() => import('./pages/manpower/WorkerBulkRegistrationPage'));
 const SignManagementPage = React.lazy(() => import('./pages/payroll/SignManagementPage'));
@@ -99,21 +98,21 @@ const DelegationBuilderPage = React.lazy(() => import('./pages/payroll/Delegatio
 const DelegationLetterV5Page = React.lazy(() => import('./pages/payroll/DelegationLetterV5Page'));
 const LaborCostStatementGeneratorPage = React.lazy(() => import('./pages/payroll/LaborCostStatementGeneratorPage'));
 const LaborExchangePage = React.lazy(() => import('./pages/payroll/LaborExchangePage'));
-const TeamSettlementPage = React.lazy(() => import('./pages/payroll/TeamSettlementPage'));
+const TeamSettlementPage = React.lazy(teamMenuPages['/payroll/team-settlement']);
 const TeamSettlementStatisticsPage = React.lazy(() => import('./pages/payroll/TeamSettlementStatisticsPage'));
 const TeamSettlementStatisticsManagementPage = React.lazy(() => import('./pages/payroll/TeamSettlementStatisticsManagementPage'));
 const TeamSettlementAnnualStatisticsPage = React.lazy(() => import('./pages/payroll/TeamSettlementAnnualStatisticsPage'));
 const TeamSettlementAnnualStatisticsManagementPage = React.lazy(() => import('./pages/payroll/TeamSettlementAnnualStatisticsManagementPage'));
 const SupportRateManagementPage = React.lazy(() => import('./pages/support/SupportRateManagementPage'));
 const SupportManagerPage = React.lazy(() => import('./pages/support/SupportManagerPage'));
-const TeamExpenseRequestPage = React.lazy(() => import('./pages/support/TeamExpenseRequestPage'));
-const TeamWorkerRequestPage = React.lazy(() => import('./pages/manpower/TeamWorkerRequestPage'));
+const TeamExpenseRequestPage = React.lazy(teamMenuPages['/support/team-expense-requests']);
+const TeamWorkerRequestPage = React.lazy(teamMenuPages['/manpower/team-worker-requests']);
 const TeamAccountApprovalPage = React.lazy(() => import('./pages/manpower/TeamAccountApprovalPage'));
-const EngineOilCyclePage = React.lazy(() => import('./pages/support/EngineOilCyclePage'));
+const EngineOilCyclePage = React.lazy(teamMenuPages['/support/vehicles/oil-cycle']);
 const TeamEquipmentStatusPage = React.lazy(() => import('./pages/support/TeamEquipmentStatusPage'));
 const CardStatementDetailsPage = React.lazy(() => import('./pages/support/CardStatementDetailsPage'));
 const CardExpenseAuditPage = React.lazy(() => import('./pages/support/CardExpenseAuditPage'));
-const TeamResourceDetailPage = React.lazy(() => import('./pages/support/TeamResourceDetailPage'));
+const TeamResourceDetailPage = React.lazy(teamMenuPages['/support/team-resource-detail']);
 const TeamBasedPaymentDraftPage = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPage'));
 const TeamBasedPaymentDraftPageV2 = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPageV2'));
 const EmploymentCertificatePage = React.lazy(() => import('./pages/hr/EmploymentCertificatePage'));
@@ -124,14 +123,14 @@ const OfficeDashboardPage = React.lazy(() => import('./pages/office/OfficeDashbo
 const OfficeRequestCenterPage = React.lazy(() => import('./pages/office/OfficeRequestCenterPage'));
 const OfficeManagementPage = React.lazy(() => import('./pages/office/OfficeManagementPage'));
 const OfficeTeamSettlementManagementPage = React.lazy(() => import('./pages/office/OfficeTeamSettlementManagementPage'));
-const OperationalWorkflowPage = React.lazy(() => import('./pages/office/OperationalWorkflowPage'));
+const OperationalWorkflowPage = React.lazy(teamMenuPages['/team/requests']);
 const IntegratedDatabase = React.lazy(() => import('./pages/database/ManpowerDatabase'));
 const ManualPage = React.lazy(() => import('./pages/manual'));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage'));
-const WorkerDelegationSignaturePage = React.lazy(() => import('./pages/worker/WorkerDelegationSignaturePage'));
+const WorkerDelegationSignaturePage = React.lazy(teamMenuPages['/worker/delegation-signature']);
 const MessageWriteAccessGate = React.lazy(() => import('./components/messages/MessageWriteAccessGate'));
 const MessageCenterPage = React.lazy(() => import('./pages/messages/MessageCenterPage'));
-const NoticeBoardPage = React.lazy(() => import('./pages/notices/NoticeBoardPage'));
+const NoticeBoardPage = React.lazy(teamMenuPages['/notices']);
 const MessageAutomationSettingsPage = React.lazy(() => import('./pages/messages/MessageAutomationSettingsPage'));
 const StorageManagerPage = React.lazy(() => import('./pages/storage/StorageManagerPage'));
 const GoogleDriveManagerPage = lazyNamed(() => import('./pages/storage/GoogleDriveManagerPage'), 'GoogleDriveManagerPage');

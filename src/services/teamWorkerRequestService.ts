@@ -1,3 +1,4 @@
+import { hostedReadCallable } from './hostedReadCallable';
 import type { DraftPage } from '../components/TeamRequestDraftMaintenance';
 import { httpsCallable } from 'firebase/functions';
 import { auth, functions } from '../config/firebase';
@@ -25,7 +26,10 @@ const call = async <T>(input: Record<string, unknown>): Promise<T> => {
   const mutating = ['upload', 'submit', 'review', 'discardDraft'].includes(String(input.action));
   if (mutating) clearPendingLists();
   try {
-    const result = await httpsCallable<Record<string, unknown>, T>(functions, 'teamWorkerRequests', { timeout: 120_000 })(input);
+    const invoke = input.action === 'list'
+      ? hostedReadCallable<Record<string, unknown>, T>('teamWorkerRequests', { timeout: 120_000 })
+      : httpsCallable<Record<string, unknown>, T>(functions, 'teamWorkerRequests', { timeout: 120_000 });
+    const result = await invoke(input);
     if (auth.currentUser !== user || auth.currentUser?.uid !== uid) throw new Error('로그인 계정이 변경되었습니다. 다시 조회해 주세요.');
     return result.data;
   } finally { if (mutating) clearPendingLists(); }
