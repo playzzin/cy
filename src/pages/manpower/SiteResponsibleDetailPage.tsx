@@ -864,7 +864,7 @@ const SiteResponsibleDetailPage: React.FC<{ view?: 'siteInfo' | 'dailyReport' }>
                     </div>
                 </label>
 
-                <label className="tw-control sr-site-status">
+                <label className="tw-control sr-site-filter-status">
                     <span>현장 상태</span>
                     <select aria-label="현장 상태" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as SiteStatusFilter); setMobileView('sites'); }}>
                         <option value="active">진행중 현장 ({selectedResponsibleStatusCounts.active})</option>
