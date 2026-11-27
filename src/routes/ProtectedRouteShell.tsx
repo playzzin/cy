@@ -14,7 +14,7 @@ import { useWorkerTeamIdMigration } from '../hooks/useWorkerTeamIdMigration';
 import type { UserData } from '../services/userService';
 import { db } from '../config/firebase';
 import { isDevAdminSessionEnabled } from '../utils/devAdminSession';
-import { resolveAccountOnboardingMode } from '../utils/accountOnboardingState';
+import { canReuseScopedWorkerClaims, resolveAccountOnboardingMode } from '../utils/accountOnboardingState';
 import TeamWorkflowGate from './TeamWorkflowGate';
 import { INVESTMENT_PATH } from '../constants/siteModes';
 import { TEAM_SITE_PATH } from '../constants/teamWorkflowActions';
@@ -87,6 +87,8 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
 
     let alive = true;
     let revision = 0;
+    let lastAccessKey: string | undefined;
+    let verified = false;
     let pendingVerification: { key: string; promise: Promise<unknown> } | undefined;
     if (!currentUser?.uid) {
       setProfile(null);
@@ -98,19 +100,28 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
 
     setLoading(true);
     setAccessError(false);
-    const unsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), async (snapshot) => {
+    const unsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), { includeMetadataChanges: true }, async (snapshot) => {
+      if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites) return;
       const request = ++revision;
       const loaded = snapshot.exists() ? ({ uid: snapshot.id, ...snapshot.data() } as UserData) : null;
-      // Keep a mounted workspace intact on profile/last-login updates. Pending
-      // accounts stay behind their existing gate until claims are refreshed.
+      const firstProfile = lastAccessKey === undefined && refreshKey === 0;
+      const key = JSON.stringify(Object.entries(loaded ?? {})
+        .filter(([field]) => !['lastLogin', 'updatedAt', 'displayName', 'photoURL'].includes(field))
+        .sort(([left], [right]) => left.localeCompare(right)));
+      if (key !== lastAccessKey) {
+        lastAccessKey = key;
+        verified = false;
+        pendingVerification = undefined;
+      }
       try {
-        if (loaded?.status === 'active') {
-          const key = JSON.stringify(Object.entries(loaded)
-            .filter(([field]) => field !== 'lastLogin')
-            .sort(([left], [right]) => left.localeCompare(right)));
+        if (loaded?.status === 'active' && !verified) {
           if (pendingVerification?.key !== key) {
             const verify = async () => {
               if (loaded.accountType === 'worker') {
+                if (firstProfile) {
+                  const token = await currentUser.getIdTokenResult().catch(() => null);
+                  if (token && canReuseScopedWorkerClaims(loaded, token.claims)) return;
+                }
                 const status = await accountLinkService.getMyStatus({ refreshAccessClaims: true });
                 if (status.user.status !== 'active') throw new Error('Account status changed');
               }
@@ -126,7 +137,8 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
           pendingVerification = undefined;
         }
         if (alive && request === revision) {
-          invalidateTeamScopedCache();
+          if (!verified) invalidateTeamScopedCache();
+          verified = true;
           setAccessError(false);
           setProfile(loaded);
           setLoading(false);
@@ -136,6 +148,7 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
       }
     }, () => {
       revision += 1;
+      verified = false;
       pendingVerification = undefined;
       if (alive) { setAccessError(true); setLoading(false); }
     });
