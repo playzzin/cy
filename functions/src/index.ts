@@ -1,8 +1,4 @@
-import * as admin from 'firebase-admin';
-
-// Firebase Admin 초기화
-admin.initializeApp();
-admin.firestore().settings({ ignoreUndefinedProperties: true });
+import './firebaseAdmin';
 
 export { privateReviewSession } from './privateReview';
 export { getDevPreviewAccounts, createDevPreviewSession } from './devUserPreview';

@@ -140,7 +140,8 @@ export async function handleTeamWorkerRequest(input: any, context: functions.htt
         const bytes = validateExpenseReceipt(contentType, String(input.base64 || '')), digest = createHash('sha256').update(bytes).digest('hex');
         const documentRef = ref.collection('documents').doc(fileId);
         const existing = await db.runTransaction(async transaction => {
-            const row = (await transaction.get(ref)).data(), saved = (await transaction.get(documentRef)).data();
+            const [requestDoc, storedDoc] = await transaction.getAll(ref, documentRef);
+            const row = requestDoc.data(), saved = storedDoc.data();
             if (row && (row.ownerUid !== actor.uid || row.teamId !== team!.id)) fail('permission-denied', '신청 소속팀을 확인해 주세요.');
             if (['discarding', 'discarded'].includes(row?.status)) fail('failed-precondition', '정리 중인 임시 신청입니다. 새로 작성해 주세요.');
             if (saved) { if (saved.digest !== digest || saved.kind !== kind) fail('already-exists', '이미 등록된 서류를 바꿀 수 없습니다.'); if (row?.status === 'uploading') transaction.update(ref, { updatedAt: new Date().toISOString() }); return saved; }
@@ -157,8 +158,8 @@ export async function handleTeamWorkerRequest(input: any, context: functions.htt
         try { await file.save(bytes, { resumable: false, preconditionOpts: { ifGenerationMatch: 0 }, metadata: { contentType, metadata: { digest, kind } } }); }
         catch (error) { if (Number((error as any)?.code) !== 412) throw error; const [metadata] = await file.getMetadata(); if (metadata.metadata?.digest !== digest || metadata.metadata?.kind !== kind) fail('already-exists', '다른 서류로 덮어쓸 수 없습니다.'); }
         await db.runTransaction(async transaction => {
-            const row = (await transaction.get(ref)).data();
-            const saved = (await transaction.get(documentRef)).data();
+            const [requestDoc, storedDoc] = await transaction.getAll(ref, documentRef);
+            const row = requestDoc.data(), saved = storedDoc.data();
             if (saved) { if (saved.digest !== digest || saved.kind !== kind) fail('already-exists', '다른 서류로 덮어쓸 수 없습니다.'); return; }
             if (row?.status !== 'uploading') fail('failed-precondition', '이미 제출된 신청입니다.');
             transaction.set(documentRef, { id: fileId, kind, fullPath, contentType, name: cleanWorkerText(input.name, 120) || '서류', size: bytes.length, digest });

@@ -14,15 +14,12 @@ const cardOption = (doc: FirebaseFirestore.DocumentSnapshot, teamId: string): Pa
 const isAssignedCard = (card: FirebaseFirestore.DocumentData | undefined, teamRefs: Set<string>) =>
     card?.status === 'ASSIGNED' && card.currentAssigneeType === 'TEAM' && teamRefs.has(text(card.currentAssigneeId));
 
-export async function listExpensePaymentCards(db: FirebaseFirestore.Firestore, teams: Array<{ id: string }>): Promise<PaymentCard[]> {
+export async function listExpensePaymentCards(db: FirebaseFirestore.Firestore, teams: Array<{ id: string; legacyId: string }>): Promise<PaymentCard[]> {
     if (!teams.length) return [];
-    const teamDocs = await db.getAll(...teams.map(team => db.doc(`teams/${team.id}`)), { fieldMask: ['legacyId'] });
     const teamByReference = new Map<string, string>();
-    teamDocs.forEach(doc => {
-        if (!doc.exists) return;
-        teamByReference.set(doc.id, doc.id);
-        const legacyId = text(doc.data()?.legacyId);
-        if (legacyId) teamByReference.set(legacyId, doc.id);
+    teams.forEach(team => {
+        teamByReference.set(team.id, team.id);
+        if (team.legacyId) teamByReference.set(team.legacyId, team.id);
     });
     const references = [...teamByReference.keys()];
     const queries: Array<Promise<FirebaseFirestore.QuerySnapshot>> = [];

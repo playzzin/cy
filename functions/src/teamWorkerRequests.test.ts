@@ -61,7 +61,7 @@ test('소속팀·서류 접근 제한, 승인 전 미등록, 승인 원자성·�
         assert.equal(worker.payType, '일급제'); assert.equal(worker.salaryModel, '일급제'); assert.equal(worker.unitPrice, 150000);
         assert.equal(worker.companyId, 'dynamic-company'); assert.equal(worker.teamId, 'team-a'); assert.equal(worker.accountNumber, '001234567890'); assert.equal(worker.status, '재직'); assert.equal(worker.needsApproval, false);
         await assert.rejects(call('worker-office', { action: 'review', id: result.id, decision: 'rejected', reason: '늦은 반려' }), rejected('failed-precondition'));
-        for (const kind of ['identity', 'bank']) await call('worker-leader-a', { ...upload, requestId: 'duplicate-request', kind, fileId: `${kind}-one` });
+        await Promise.all(['identity', 'bank'].map(kind => call('worker-leader-a', { ...upload, requestId: 'duplicate-request', kind, fileId: `${kind}-one` })));
         const duplicate = await call('worker-leader-a', { ...submit, requestId: 'duplicate-request' });
         await assert.rejects(call('worker-office', { action: 'review', id: duplicate.id, decision: 'approved', payroll: { payType: '일급제', unitPrice: 150000 } }), rejected('already-exists'));
         assert.equal((await db.doc(`team_worker_requests/${duplicate.id}`).get()).data()!.status, 'pending');
