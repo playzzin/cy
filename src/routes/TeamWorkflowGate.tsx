@@ -32,7 +32,7 @@ export default function TeamWorkflowGate({ profile, children }: { profile: UserD
             stops.push(onSnapshot(doc(db, 'workers', id), snapshot => {
                 if (!alive) return;
                 const worker = snapshot.data();
-                invalidateTeamScopedCache();
+                invalidateTeamScopedCache({ catalogChanged: false });
                 setWorkers(previous => ({ ...previous, [id]: worker ? { role: worker.role, teamId: worker.teamId, status: worker.status, isActive: worker.isActive } : null })); complete(id);
             }, () => { if (alive) { setFailed(true); setWorkers(previous => ({ ...previous, [id]: null })); } complete(id); }));
         });
@@ -46,7 +46,7 @@ export default function TeamWorkflowGate({ profile, children }: { profile: UserD
     // A menu save also updates this snapshot. Only role mappings used by this account affect its access.
     const mappedRoles = assignedRoles.map(role => positions.find(p => role === p.id || role === `pos_${p.id}`)?.name);
     const revision = JSON.stringify([profile?.status, assignedRoles, mappedRoles, linked, workers, restricted]);
-    useEffect(() => { invalidateTeamScopedCache(); }, [revision]);
+    useEffect(() => { invalidateTeamScopedCache({ catalogChanged: false }); }, [revision]);
     if (failed) return <p role="alert">현재 업무 권한을 확인하지 못했습니다. 연결을 확인한 뒤 새로고침해 주세요.</p>;
     if (!ready) return <p role="status">현재 업무 권한을 확인하는 중입니다.</p>;
     const destination = restricted && teamWorkflowDestination(location.pathname);

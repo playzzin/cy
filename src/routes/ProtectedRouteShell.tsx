@@ -137,7 +137,7 @@ export const AccountOnboardingGate: React.FC<{ children: React.ReactNode }> = ({
           pendingVerification = undefined;
         }
         if (alive && request === revision) {
-          if (!verified) invalidateTeamScopedCache();
+          if (!verified) invalidateTeamScopedCache({ catalogChanged: false });
           verified = true;
           setAccessError(false);
           setProfile(loaded);
@@ -210,7 +210,6 @@ const ProtectedRouteShell: React.FC = () => {
     '/jeonkuk/recruitment',
     '/memos',
     '/materials/master',
-    '/materials/inbound',
     '/materials/outbound',
     '/materials/inbound-certificate',
     '/materials/outbound-certificate',

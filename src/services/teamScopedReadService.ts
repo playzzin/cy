@@ -67,10 +67,12 @@ export const usesTeamScopedReads = async (): Promise<boolean> => {
 // room for other tabs/users instead of sending the whole screen at once.
 const pendingReads = new Map<string, Promise<unknown[]>>();
 let catalogInvalidatedUntil = 0;
-export const invalidateTeamScopedCache = () => {
+export const invalidateTeamScopedCache = ({ catalogChanged = true } = {}) => {
     leaderRoute = null;
     pendingReads.clear();
-    catalogInvalidatedUntil = Date.now() + 30_000;
+    // The server rechecks membership on every call and keys company rows by the
+    // authorized IDs. An access snapshot alone hasn't edited either catalog.
+    if (catalogChanged) catalogInvalidatedUntil = Date.now() + 30_000;
 };
 const waitingReads: Array<() => void> = [];
 let activeReads = 0;
@@ -139,18 +141,22 @@ const flushReads = () => {
     queue.forEach(item => accounts.set(item.uid, [...(accounts.get(item.uid) || []), item]));
     accounts.forEach(items => {
         const siteOverview: QueuedRead[] = [];
+        const materialCatalog: QueuedRead[] = [];
         const otherReads: QueuedRead[] = [];
         const reports: QueuedRead[] = [];
         const hasSiteOverview = items.some(item => item.options.withSiteDirectory);
+        const hasDirectory = items.some(item => ['sites', 'companies'].includes(item.request.collection));
         for (const item of items) {
             const { collection } = item.request;
             // The site list needs both the directory and selected month's reports.
             // Share their server scope reads and slot, separate from the menu and other reports.
             if (hasSiteOverview && (item.options.withSiteDirectory || siteDirectoryCollections.has(collection))) siteOverview.push(item);
+            // Material selection needs no site or worker directory on the server.
+            else if (collection === 'materials' && hasDirectory) materialCatalog.push(item);
             else if (reportCollections.has(collection)) reports.push(item);
             else otherReads.push(item);
         }
-        const batches = [siteOverview, otherReads, reports].flatMap(reads => Array.from({ length: Math.ceil(reads.length / 20) },
+        const batches = [siteOverview, materialCatalog, otherReads, reports].flatMap(reads => Array.from({ length: Math.ceil(reads.length / 20) },
             (_, index) => reads.slice(index * 20, (index + 1) * 20)));
         for (const group of batches) {
             if (legacyServerUntil > Date.now()) {

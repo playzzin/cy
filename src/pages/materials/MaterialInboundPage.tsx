@@ -100,6 +100,9 @@ const MaterialInboundPage: React.FC = () => {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
     const [initialLoading, setInitialLoading] = useState(true);
+    const [directoryReady, setDirectoryReady] = useState(false);
+    const [loadError, setLoadError] = useState(false);
+    const [loadAttempt, setLoadAttempt] = useState(0);
     const [saving, setSaving] = useState(false);
     const [transactionDate, setTransactionDate] = useState(new Date().toISOString().slice(0, 10));
     const [siteId, setSiteId] = useState('');
@@ -231,7 +234,6 @@ const MaterialInboundPage: React.FC = () => {
     };
 
     useEffect(() => {
-        loadData();
         loadTempData();
 
         // 브라우저 종료/새로고침 시 저장
@@ -256,34 +258,28 @@ const MaterialInboundPage: React.FC = () => {
         return () => clearTimeout(timer);
     }, [transactionDate, siteId, siteName, vehicleNumber, supplier, rentalCompanyId, rentalCompanyName, notes, quantities]);
 
-    const loadData = async () => {
-        setInitialLoading(true);
-        try {
-            const [sitesData, materialsData, companiesData, settlementTargetsData] = await Promise.all([
-                siteService.getSites(),
-                materialService.getUniqueMaterialsForSelection(),
-                companyService.getCompanies(),
-                settlementTargetService.getTargets().catch(() => []),
-            ]);
-            setSites(filterCheongyeonMaterialSites(sitesData));
+    useEffect(() => {
+        let active = true;
+        const failed = () => { if (active) setLoadError(true); };
+        materialService.getUniqueMaterialsForSelection().then(materialsData => {
+            if (!active) return;
             setMaterials(materialsData);
-            setRentalCompanies(buildMaterialRentalCompanyOptions(companiesData, settlementTargetsData));
-
-            // [FIX] 만약 이미 quantities에 데이터가 있다면 (임시저장 등),
-            // 새로 불러온 자재 목록에 존재하는 ID들만 남기고 유지합니다.
+            // Keep restored quantities only for materials that can still be selected.
             setQuantities((prev) => {
                 const validIds = new Set(materialsData.map((m) => m.id));
-                const filteredEntries = Object.entries(prev).filter(([id]) => validIds.has(id));
-                // 만약 prev가 비어있고 임시저장 데이터 로드가 아직 안됐다면 빈 객체 유지
-                return Object.fromEntries(filteredEntries);
+                return Object.fromEntries(Object.entries(prev).filter(([id]) => validIds.has(id)));
             });
-        } catch (error) {
-            console.error('Failed to load data:', error);
-            alert('데이터를 불러오지 못했습니다.');
-        } finally {
             setInitialLoading(false);
-        }
-    };
+        }).catch(failed);
+        Promise.all([siteService.getSites(), companyService.getCompanies(), settlementTargetService.getTargets().catch(() => [])])
+            .then(([sitesData, companiesData, settlementTargetsData]) => {
+                if (!active) return;
+                setSites(filterCheongyeonMaterialSites(sitesData));
+                setRentalCompanies(buildMaterialRentalCompanyOptions(companiesData, settlementTargetsData));
+                setDirectoryReady(true);
+            }).catch(failed);
+        return () => { active = false; };
+    }, [loadAttempt]);
 
     const handleSiteChange = (selectedSiteId: string) => {
         setSiteId(selectedSiteId);
@@ -321,6 +317,7 @@ const MaterialInboundPage: React.FC = () => {
     };
 
     const handleSave = async () => {
+        if (!directoryReady || loadError) return;
         if (!siteId) {
             alert('현장을 선택하세요.');
             return;
@@ -820,6 +817,15 @@ const MaterialInboundPage: React.FC = () => {
         );
     };
 
+    if (loadError) return <div role="alert" className="p-8 text-center">
+        <p>입고 자료를 불러오지 못했습니다.</p>
+        <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => {
+            setLoadError(false);
+            setInitialLoading(true);
+            setDirectoryReady(false);
+            setLoadAttempt(attempt => attempt + 1);
+        }}>다시 불러오기</button>
+    </div>;
     if (initialLoading) return <div className="p-8 text-center">데이터 로딩 중...</div>;
 
     return (
@@ -827,6 +833,7 @@ const MaterialInboundPage: React.FC = () => {
             <MaterialRegistrationHeader
                 kind="inbound"
                 saving={saving}
+                saveDisabled={!directoryReady}
                 onSave={handleSave}
                 additionalControls={<MaterialPhotoPicker
                     photos={photoAttachments}
@@ -850,23 +857,23 @@ const MaterialInboundPage: React.FC = () => {
                     </>}
                     trailingActions={<>
                         <button type="button" onClick={handleOpenInboundCertificatePage}
-                            disabled={sharingCertificate || selectedMaterials.length === 0}
+                            disabled={!directoryReady || sharingCertificate || selectedMaterials.length === 0}
                             className="border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-50">
                             <FontAwesomeIcon icon={faFileInvoice} /> 입고증 페이지
                         </button>
                         <button type="button" onClick={handleDownloadInboundCertificate}
-                            disabled={sharingCertificate || selectedMaterials.length === 0}
+                            disabled={!directoryReady || sharingCertificate || selectedMaterials.length === 0}
                             className="border border-teal-200 bg-white text-teal-700 hover:bg-teal-50 disabled:opacity-50">
                             <FontAwesomeIcon icon={faDownload} /> 입고증 저장
                         </button>
                         <button type="button" onClick={handleDownloadInboundPhotos}
-                            disabled={sharingCertificate || photoAttachments.length === 0}
+                            disabled={!directoryReady || sharingCertificate || photoAttachments.length === 0}
                             title="첨부사진 최대 40장을 A4 최대 2장으로 저장"
                             className="border border-teal-200 bg-white text-teal-700 hover:bg-teal-50 disabled:opacity-50">
                             <FontAwesomeIcon icon={faDownload} /> 사진 PDF 저장
                         </button>
                         <button type="button" onClick={handleShareInboundCertificate}
-                            disabled={sharingCertificate || selectedMaterials.length === 0}
+                            disabled={!directoryReady || sharingCertificate || selectedMaterials.length === 0}
                             className="bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50">
                             <FontAwesomeIcon icon={faShareNodes} />
                             {sharingCertificate ? '준비 중...' : '카카오톡 공유'}
@@ -882,7 +889,7 @@ const MaterialInboundPage: React.FC = () => {
                     <label htmlFor="inbound-site">현장 선택</label>
                     <MaterialSearchSelect id="inbound-site" label="현장 선택" value={siteId} selectedName={siteName}
                         options={sites.map(site => ({ id: site.id, name: site.name, description: site.address || site.code, keywords: site.code }))}
-                        placeholder="현장명 검색" onChange={handleSiteChange} disabled={saving} />
+                        placeholder={directoryReady ? '현장명 검색' : '현장 불러오는 중…'} onChange={handleSiteChange} disabled={saving || !directoryReady} />
                 </div>
                 <div className="material-registration-header__field material-registration-header__vehicle">
                     <label htmlFor="inbound-vehicle">차량번호</label>
@@ -891,7 +898,7 @@ const MaterialInboundPage: React.FC = () => {
                 <div className="material-registration-header__field material-registration-header__rental">
                     <label htmlFor="inbound-rental">임대사</label>
                     <MaterialSearchSelect id="inbound-rental" label="임대사" value={rentalCompanyId} selectedName={rentalCompanyName}
-                        options={rentalCompanies} placeholder="임대사명 검색" onChange={handleRentalCompanyChange} disabled={saving} />
+                        options={rentalCompanies} placeholder={directoryReady ? '임대사명 검색' : '임대사 불러오는 중…'} onChange={handleRentalCompanyChange} disabled={saving || !directoryReady} />
                 </div>
             </MaterialRegistrationHeader>
 
@@ -1048,7 +1055,7 @@ const MaterialInboundPage: React.FC = () => {
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={saving}
+                        disabled={saving || !directoryReady}
                         className="flex flex-[1.4] items-center justify-center rounded-xl bg-teal-600 px-4 py-3 font-bold text-white shadow-lg shadow-teal-200 transition hover:bg-teal-700 hover:shadow-teal-300 active:translate-y-0 disabled:opacity-50 sm:flex-none sm:px-8"
                     >
                         {saving ? '저장 중...' : '입고 완료'}
