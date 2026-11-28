@@ -5,12 +5,33 @@ import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import TeamWorkerRequestPage from './TeamWorkerRequestPage';
 import { teamWorkerRequestService } from '../../services/teamWorkerRequestService';
+import { WorkerFormEntryContext, workerFormMonth, type WorkerFormEntry } from '../../contexts/WorkerFormEntryContext';
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'leader' } }) }));
 jest.mock('../../services/teamWorkerRequestService', () => ({ teamWorkerRequestService: { list: jest.fn(), upload: jest.fn(), uploadPair: jest.fn(), submit: jest.fn(), analyze: jest.fn(), review: jest.fn(), document: jest.fn() }, validateWorkerDocument: jest.fn() }));
 const service = teamWorkerRequestService as jest.Mocked<typeof teamWorkerRequestService>;
 const team = { id: 'team-a', name: 'A팀', color: '#ef4444', icon: 'fa-helmet-safety' };
 const data = { canReview: false, teams: [team], company: { id: 'company-dynamic', name: '㈜청연이엔지' }, requests: [] };
 const identity = new File(['test'], '신분증.png', { type: 'image/png' });
+test.each([
+  ['leader', true, 0],
+  ['different-user', true, 1],
+  ['leader', false, 1],
+] as const)('현재 방문의 등록 정보만 사용하고 필요하면 다시 조회한다 (%s, %s)', async (uid, successful, reads) => {
+  const media = window.matchMedia;
+  window.matchMedia = jest.fn().mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() });
+  const result = Promise.resolve(successful ? { ...data, requests: [], historyLoaded: false } : undefined);
+  const entry: WorkerFormEntry = { read: { uid, month: workerFormMonth(), started: performance.now(), result } };
+  try {
+    const view = render(<WorkerFormEntryContext.Provider value={entry}><TeamMobileProvider enabled><TeamWorkerRequestPage /></TeamMobileProvider></WorkerFormEntryContext.Provider>);
+    expect(await screen.findByLabelText('이름 *')).toBeEnabled();
+    expect(service.list).toHaveBeenCalledTimes(reads);
+    expect(entry.read).toBeUndefined();
+    view.unmount();
+    render(<WorkerFormEntryContext.Provider value={entry}><TeamMobileProvider enabled><TeamWorkerRequestPage /></TeamMobileProvider></WorkerFormEntryContext.Provider>);
+    expect(await screen.findByLabelText('이름 *')).toBeEnabled();
+    expect(service.list).toHaveBeenCalledTimes(reads + 1);
+  } finally { window.matchMedia = media; }
+});
 beforeEach(() => {
   clearRequestDrafts();
   jest.clearAllMocks(); URL.createObjectURL = jest.fn(() => 'blob:test-document'); URL.revokeObjectURL = jest.fn();
