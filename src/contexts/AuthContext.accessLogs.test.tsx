@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, getRedirectResult, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, getRedirectResult, setPersistence, browserLocalPersistence, browserPopupRedirectResolver, browserSessionPersistence } from 'firebase/auth';
 import { AuthProvider, useAuth } from './AuthContext';
 import { loginLogService } from '../services/loginLogService';
 import { loginAccessTracker } from '../services/loginAccessTracker';
@@ -15,6 +15,7 @@ jest.mock('../utils/devAdminSession', () => ({ createDevAdminUser: () => null, i
 jest.mock('firebase/auth', () => ({
   onAuthStateChanged: jest.fn(), signInWithEmailAndPassword: jest.fn(), createUserWithEmailAndPassword: jest.fn(), signInWithPopup: jest.fn(), signInWithRedirect: jest.fn(),
   getRedirectResult: jest.fn(), setPersistence: jest.fn(), browserLocalPersistence: { type: 'LOCAL' }, browserSessionPersistence: { type: 'SESSION' },
+  browserPopupRedirectResolver: { type: 'BROWSER' },
   signInWithCredential: jest.fn(),
   GoogleAuthProvider: Object.assign(jest.fn(() => ({ setCustomParameters: jest.fn() })), { credential: jest.fn(value => ({ idToken: value })) }),
 }));
@@ -131,6 +132,7 @@ it('starts Google in the same tab and preserves the destination without logging 
   await act(async () => current.loginWithGoogle({ returnPath: '/payroll?month=11', remember: true }));
   expect(setPersistence).toHaveBeenCalledWith(expect.anything(), browserLocalPersistence);
   expect(signInWithRedirect).toHaveBeenCalledTimes(1);
+  expect(signInWithRedirect).toHaveBeenCalledWith(expect.anything(), expect.anything(), browserPopupRedirectResolver);
   expect(readGoogleLoginRedirect()?.returnPath).toBe('/payroll?month=11');
   expect(loginLogService.safeCreateLog).not.toHaveBeenCalled();
 });
@@ -142,6 +144,7 @@ it('records a completed Google redirect once across StrictMode mounts', async ()
   await waitFor(() => expect(current.currentUser).toBe(user));
   await waitFor(() => expect(loginLogService.safeCreateLog).toHaveBeenCalledTimes(1));
   expect(loginLogService.safeCreateLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'login_success', method: 'redirect' }));
+  expect(getRedirectResult).toHaveBeenCalledWith(expect.anything(), browserPopupRedirectResolver);
   expect(readGoogleLoginRedirect()).toBeNull();
 });
 
@@ -161,6 +164,7 @@ it.each([false, true])('uses the Firebase popup with the requested persistence w
   await act(async () => current.loginWithGoogle({ remember: false, returnPath: '/payroll' }));
   expect(setPersistence).toHaveBeenCalledWith(expect.anything(), browserSessionPersistence);
   expect((setPersistence as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan((signInWithPopup as jest.Mock).mock.invocationCallOrder[0]);
+  expect(signInWithPopup).toHaveBeenCalledWith(expect.anything(), expect.anything(), browserPopupRedirectResolver);
   expect(signInWithRedirect).not.toHaveBeenCalled();
   expect(startLocalGoogleLogin).not.toHaveBeenCalled();
   expect(readGoogleLoginRedirect()).toBeNull();

@@ -1,9 +1,8 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import * as Fas from '@fortawesome/free-solid-svg-icons';
-import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
-import { faSearch, faTimes } from '@fortawesome/free-solid-svg-icons';
+import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
+import { faIcons, faSearch, faTimes } from '@fortawesome/free-solid-svg-icons';
 
 interface IconPickerProps {
     isOpen: boolean;
@@ -12,21 +11,27 @@ interface IconPickerProps {
     currentIcon?: string;
 }
 
-// 1. Pre-filter icons to avoid heavy computation on every render
-// Exclude sensitive or large icon sets if necessary, but here we just take all solid icons.
-// We'll create a static list of icon names.
-const ICON_LIST = Object.keys(Fas)
-    .filter(key => key !== 'fas' && key !== 'prefix') // keys are mostly 'faAd', 'faAddressBook' etc.
-    .sort();
-
 const IconPicker: React.FC<IconPickerProps> = ({ isOpen, onClose, onSelect, currentIcon }) => {
     const [searchTerm, setSearchTerm] = useState('');
+    const [catalog, setCatalog] = useState<Array<[string, IconDefinition]>>();
+    const [loadFailed, setLoadFailed] = useState(false);
+
+    useEffect(() => {
+        if (!isOpen || catalog) return;
+        let active = true;
+        setLoadFailed(false);
+        void import('./solidIconCatalog').then(({ solidIconCatalog }) => {
+            if (active) setCatalog(solidIconCatalog);
+        }).catch(() => {
+            if (active) setLoadFailed(true);
+        });
+        return () => { active = false; };
+    }, [isOpen, catalog]);
 
     const filteredIcons = useMemo(() => {
-        if (!searchTerm) return ICON_LIST;
         const lower = searchTerm.toLowerCase();
-        return ICON_LIST.filter(name => name.toLowerCase().includes(lower));
-    }, [searchTerm]);
+        return catalog?.filter(([name]) => name.toLowerCase().includes(lower)) ?? [];
+    }, [catalog, searchTerm]);
 
     if (!isOpen) return null;
 
@@ -39,7 +44,7 @@ const IconPicker: React.FC<IconPickerProps> = ({ isOpen, onClose, onSelect, curr
                 {/* Header */}
                 <div className="p-4 border-b border-gray-700 flex items-center justify-between bg-gray-900/50">
                     <h3 className="text-lg font-bold text-gray-100 flex items-center gap-2">
-                        <FontAwesomeIcon icon={Fas.faIcons} className="text-blue-400" />
+                        <FontAwesomeIcon icon={faIcons} className="text-blue-400" />
                         아이콘 선택 (Select Icon)
                     </h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
@@ -65,10 +70,7 @@ const IconPicker: React.FC<IconPickerProps> = ({ isOpen, onClose, onSelect, curr
                 {/* Grid */}
                 <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-gray-900/30">
                     <div className="grid grid-cols-6 sm:grid-cols-8 gap-3">
-                        {filteredIcons.map(iconName => {
-                            const iconDef = (Fas as any)[iconName] as IconDefinition;
-                            if (!iconDef) return null;
-
+                        {filteredIcons.map(([iconName, iconDef]) => {
                             const isSelected = currentIcon === iconName;
 
                             return (
@@ -93,7 +95,10 @@ const IconPicker: React.FC<IconPickerProps> = ({ isOpen, onClose, onSelect, curr
                             );
                         })}
                     </div>
-                    {filteredIcons.length === 0 && (
+                    {!catalog && <p role={loadFailed ? 'alert' : 'status'} className="py-8 text-center text-gray-400">
+                        {loadFailed ? '아이콘을 불러오지 못했습니다. 창을 닫고 다시 열어 주세요.' : '아이콘을 불러오는 중입니다.'}
+                    </p>}
+                    {catalog && filteredIcons.length === 0 && (
                         <div className="text-center py-20 text-gray-500">
                             "{searchTerm}" 에 일치하는 아이콘이 없습니다.
                         </div>

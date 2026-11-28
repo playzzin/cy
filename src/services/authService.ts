@@ -1,4 +1,4 @@
-import { GoogleAuthProvider, signInWithPopup, User, signOut as firebaseSignOut } from 'firebase/auth';
+import { browserPopupRedirectResolver, GoogleAuthProvider, signInWithPopup, User, signOut as firebaseSignOut } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { manpowerService, Worker } from './manpowerService';
 import { loginAccessTracker, writeAuthLog, writeLogoutLog } from './loginAccessTracker';
@@ -21,7 +21,7 @@ export const authService = {
     let authenticated = false;
     try {
       // 1. Google 로그인
-      const result = await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
       const { user } = result;
       finishAccess(user);
       authenticated = true;
