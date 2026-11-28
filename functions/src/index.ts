@@ -1,5 +1,6 @@
 import './firebaseAdmin';
 
+export { privateReviewSession } from './privateReview';
 export { getDevPreviewAccounts, createDevPreviewSession } from './devUserPreview';
 
 export { recordGeminiClientUsage, listGeminiUsageLogs } from './geminiUsageLogs';

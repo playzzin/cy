@@ -17,6 +17,7 @@ it('검색 사용/미사용 값을 저장 검증 과정에서 유지하고 재�
         custom: { name: '기존 사이트', icon: 'fa-list', menu: [] }
     };
     (setDoc as jest.Mock).mockResolvedValue(undefined);
+    config.pos_leader.teamFontPreset = 'pretendard';
     const saved = await menuServiceV11.saveMenuConfig(config);
     const persisted = (setDoc as jest.Mock).mock.calls[0][1];
     expect(persisted.admin.sidebarSearchEnabled).toBe(true);
@@ -32,6 +33,8 @@ it('검색 사용/미사용 값을 저장 검증 과정에서 유지하고 재�
     expect(reloaded?.pos_leader.sidebarBackgroundColor).toBe('#224466');
     expect(reloaded?.pos_leader.sidebarSelectedBackgroundColor).toBe('#ffffdd');
     expect(reloaded?.pos_leader.sidebarFontPreset).toBe('wanted-sans');
+    expect(reloaded?.pos_leader.teamFontPreset).toBe('pretendard');
+    expect(reloaded?.custom.teamFontPreset).toBeUndefined();
     expect(reloaded?.pos_leader.menu.find(item => item.text === '보고')).toMatchObject({ activeColor: '#ffaa22', backgroundColor: '#ffeecc', selectedBackgroundColor: '#113355', fontPreset: 'maru-buri' });
     expect(reloaded?.custom.sidebarAccentColor).toBeUndefined();
     expect(reloaded?.custom.sidebarFontPreset).toBeUndefined();

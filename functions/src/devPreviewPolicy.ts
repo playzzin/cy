@@ -29,6 +29,7 @@ export function permitsPreviewCall(name: string, data: any): boolean {
 }
 export function assertPreviewClaims(uid: string, token: Record<string, any>, nowSeconds = Date.now() / 1000) {
     if (!uid.startsWith(PREVIEW_UID_PREFIX) || token.devPreview !== true
+        || (token.previewSelf === true && token.previewActorUid !== token.previewTargetUid)
         || !Number.isFinite(token.previewExpiresAt) || token.previewExpiresAt <= nowSeconds
         || token.previewExpiresAt > nowSeconds + PREVIEW_SECONDS + 60
         || ![token.previewActorUid, token.previewTargetUid].every(value => typeof value === 'string' && value.length > 0 && value.length <= 128 && !value.includes('/') && !value.startsWith(PREVIEW_UID_PREFIX))

@@ -1,19 +1,19 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithRedirect, signInWithCredential, getRedirectResult, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, getRedirectResult, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
 import { AuthProvider, useAuth } from './AuthContext';
 import { loginLogService } from '../services/loginLogService';
 import { loginAccessTracker } from '../services/loginAccessTracker';
 import { rememberGoogleLoginRedirect, readGoogleLoginRedirect } from '../utils/googleLoginRedirect';
-import { consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin } from '../utils/localGoogleLogin';
+import { consumeLocalGoogleCredential, startLocalGoogleLogin, usesLocalGoogleLogin, usesLocalFirebasePopup } from '../utils/localGoogleLogin';
 
 jest.mock('../config/firebaseAuth', () => ({ auth: { currentUser: null, app: { options: { apiKey: 'synthetic-api-key' } } } }));
-jest.mock('../utils/localGoogleLogin', () => ({ clearLocalGoogleLogin: jest.fn(), consumeLocalGoogleCredential: jest.fn(), startLocalGoogleLogin: jest.fn(), usesLocalGoogleLogin: jest.fn() }));
+jest.mock('../utils/localGoogleLogin', () => ({ clearLocalGoogleLogin: jest.fn(), consumeLocalGoogleCredential: jest.fn(), startLocalGoogleLogin: jest.fn(), usesLocalGoogleLogin: jest.fn(), usesLocalFirebasePopup: jest.fn() }));
 jest.mock('../services/loginLogService', () => ({ loginLogService: { safeCreateLog: jest.fn() } }));
 jest.mock('../services/userService', () => ({ userService: { saveUser: jest.fn() } }));
 jest.mock('../utils/devAdminSession', () => ({ createDevAdminUser: () => null, isDevAdminSessionEnabled: () => false, disableDevAdminSession: jest.fn() }));
 jest.mock('firebase/auth', () => ({
-  onAuthStateChanged: jest.fn(), signInWithEmailAndPassword: jest.fn(), createUserWithEmailAndPassword: jest.fn(), signInWithRedirect: jest.fn(),
+  onAuthStateChanged: jest.fn(), signInWithEmailAndPassword: jest.fn(), createUserWithEmailAndPassword: jest.fn(), signInWithPopup: jest.fn(), signInWithRedirect: jest.fn(),
   getRedirectResult: jest.fn(), setPersistence: jest.fn(), browserLocalPersistence: { type: 'LOCAL' }, browserSessionPersistence: { type: 'SESSION' },
   signInWithCredential: jest.fn(),
   GoogleAuthProvider: Object.assign(jest.fn(() => ({ setCustomParameters: jest.fn() })), { credential: jest.fn(value => ({ idToken: value })) }),
@@ -36,6 +36,7 @@ beforeEach(() => {
   (getRedirectResult as jest.Mock).mockResolvedValue(null);
   (signInWithRedirect as jest.Mock).mockResolvedValue(undefined);
   (usesLocalGoogleLogin as jest.Mock).mockReturnValue(false);
+  (usesLocalFirebasePopup as jest.Mock).mockReturnValue(false);
   (startLocalGoogleLogin as jest.Mock).mockResolvedValue(undefined);
   loginAccessTracker.observe(null);
   window.history.replaceState({}, '', '/admin/login-logs');
@@ -74,6 +75,49 @@ it.each(['/', '/login'])('restores the saved session immediately on %s without t
   expect(signInWithEmailAndPassword).not.toHaveBeenCalled();
 });
 
+it('clears the restore timeout when Firebase later confirms the browser is signed out', async () => {
+  jest.useFakeTimers();
+  try {
+    (onAuthStateChanged as jest.Mock).mockImplementation((_auth, listener) => {
+      observe = listener;
+      return jest.fn();
+    });
+    await open();
+    expect(current.loading).toBe(true);
+    act(() => { jest.advanceTimersByTime(12000); });
+    expect(current.authError).toContain('로그인 상태 확인이 지연');
+    expect(current.loading).toBe(false);
+
+    act(() => { observe(null); });
+    expect(current.currentUser).toBeNull();
+    expect(current.loading).toBe(false);
+    expect(current.authError).toBe('');
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+it('preserves a real redirect failure across a timeout and a later signed-out notification', async () => {
+  jest.useFakeTimers();
+  try {
+    rememberGoogleLoginRedirect('/dashboard');
+    (getRedirectResult as jest.Mock).mockRejectedValueOnce({ code: 'auth/network-request-failed' });
+    (onAuthStateChanged as jest.Mock).mockImplementation((_auth, listener) => {
+      observe = listener;
+      return jest.fn();
+    });
+    await open();
+    await waitFor(() => expect(current.authError).not.toBe(''));
+    const redirectError = current.authError;
+    act(() => { jest.advanceTimersByTime(12000); });
+    expect(current.authError).toBe(redirectError);
+    act(() => { observe(null); });
+    expect(current.authError).toBe(redirectError);
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it.each([true, false])('applies remember=%s before email authentication', async remember => {
   await open();
   (signInWithEmailAndPassword as jest.Mock).mockResolvedValue({ user });
@@ -107,6 +151,35 @@ it('clears redirect state and permits retry if redirect startup fails', async ()
   await act(async () => { await expect(current.loginWithGoogle()).rejects.toMatchObject({ code: 'auth/network-request-failed' }); });
   expect(readGoogleLoginRedirect()).toBeNull();
   expect(loginLogService.safeCreateLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'login_failed', method: 'redirect' }));
+});
+
+it.each([false, true])('uses the Firebase popup with the requested persistence when the legacy local origin matches=%s', async legacyLocalOrigin => {
+  (usesLocalFirebasePopup as jest.Mock).mockReturnValue(true);
+  (usesLocalGoogleLogin as jest.Mock).mockReturnValue(legacyLocalOrigin);
+  (signInWithPopup as jest.Mock).mockImplementationOnce(async () => { observe(user); return { user }; });
+  await open();
+  await act(async () => current.loginWithGoogle({ remember: false, returnPath: '/payroll' }));
+  expect(setPersistence).toHaveBeenCalledWith(expect.anything(), browserSessionPersistence);
+  expect((setPersistence as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan((signInWithPopup as jest.Mock).mock.invocationCallOrder[0]);
+  expect(signInWithRedirect).not.toHaveBeenCalled();
+  expect(startLocalGoogleLogin).not.toHaveBeenCalled();
+  expect(readGoogleLoginRedirect()).toBeNull();
+  expect(current.currentUser).toBe(user);
+  await waitFor(() => expect(loginLogService.safeCreateLog).toHaveBeenCalledTimes(1));
+  expect(loginLogService.safeCreateLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'login_success', provider: 'google', method: 'popup' }));
+});
+
+it('returns the Firebase popup failure and allows a fresh login attempt', async () => {
+  (usesLocalFirebasePopup as jest.Mock).mockReturnValue(true);
+  (signInWithPopup as jest.Mock).mockRejectedValueOnce({ code: 'auth/popup-closed-by-user' });
+  await open();
+  await act(async () => { await expect(current.loginWithGoogle()).rejects.toMatchObject({ code: 'auth/popup-closed-by-user' }); });
+  expect(current.currentUser).toBeNull();
+  expect(readGoogleLoginRedirect()).toBeNull();
+  await waitFor(() => expect(loginLogService.safeCreateLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'login_failed', method: 'popup' })));
+  (signInWithPopup as jest.Mock).mockResolvedValueOnce({ user });
+  await act(async () => current.loginWithGoogle());
+  expect(current.currentUser).toBe(user);
 });
 
 it('starts local Google authentication without the cross-origin Firebase iframe', async () => {

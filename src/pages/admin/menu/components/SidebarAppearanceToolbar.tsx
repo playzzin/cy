@@ -4,6 +4,7 @@ import { faArrowRotateLeft } from '@fortawesome/free-solid-svg-icons';
 import type { SiteData } from '../../../../types/menu';
 import { DEFAULT_SIDEBAR_ACCENT, DEFAULT_SIDEBAR_BACKGROUND } from '../../../../utils/sidebarColors';
 import SidebarFontSelect from './SidebarFontSelect';
+import { DEFAULT_TEAM_FONT, type SidebarFontId } from '../../../../constants/sidebarFonts';
 
 const colorFields = [
     { key: 'sidebarBackgroundColor', label: '배경', name: '좌측 메뉴 배경색', reset: '배경색 기본값 복원' },
@@ -17,17 +18,23 @@ const palettes = [
     { name: '샌드', colors: { sidebarBackgroundColor: '#faf5eb', sidebarSelectedBackgroundColor: '#ead8bd', sidebarAccentColor: '#714c27' } }
 ] satisfies { name: string; colors: Partial<Pick<SiteData, typeof colorFields[number]['key']>> }[];
 
-export default function SidebarAppearanceToolbar({ site, onChange }: { site: SiteData; onChange: (site: SiteData) => void }) {
-    return <section aria-label={`${site.name} 좌측 메뉴 스타일`}
+export default function SidebarAppearanceToolbar({ site, teamMenu, onChange }: { site: SiteData; teamMenu: boolean; onChange: (site: SiteData) => void }) {
+    function updateFont(field: 'sidebarFontPreset' | 'teamFontPreset', font?: SidebarFontId) {
+        const next = { ...site };
+        if (font) next[field] = font;
+        else delete next[field];
+        onChange(next);
+    }
+    return <section aria-label={teamMenu ? `${site.name} 메뉴 스타일` : `${site.name} 좌측 메뉴 스타일`}
         className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-100">
         <strong className="max-w-full truncate text-blue-200">{site.name}</strong>
-        <SidebarFontSelect label="좌측 메뉴 기본 글꼴" compactLabel="글꼴" value={site.sidebarFontPreset || ''} defaultLabel="기본 글꼴"
-            onChange={font => {
-                const next = { ...site };
-                if (font) next.sidebarFontPreset = font;
-                else delete next.sidebarFontPreset;
-                onChange(next);
-            }} />
+        {teamMenu && <SidebarFontSelect label="팀장 화면 기본 글꼴" compactLabel="팀장 화면 글꼴"
+            value={site.teamFontPreset || ''} defaultLabel="기본값 · 프리텐다드" inherited={DEFAULT_TEAM_FONT}
+            onChange={font => updateFont('teamFontPreset', font)} />}
+        <SidebarFontSelect label="좌측 메뉴 기본 글꼴" compactLabel={teamMenu ? '좌측 메뉴 글꼴' : '글꼴'}
+            value={site.sidebarFontPreset || ''} defaultLabel={teamMenu ? '팀장 화면 글꼴 따름' : '기본 글꼴'}
+            inherited={teamMenu ? site.teamFontPreset || DEFAULT_TEAM_FONT : undefined}
+            onChange={font => updateFont('sidebarFontPreset', font)} />
         <div role="group" aria-label="색상 테마" className="flex flex-wrap items-center gap-1">
             <span className="mr-1 text-xs text-slate-300">테마</span>
             {palettes.map(({ name, colors }) => {

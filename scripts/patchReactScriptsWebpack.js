@@ -110,7 +110,7 @@ function patchReactScriptsWebpack({ verifiedTypecheck = false, timings = false }
   };
 }
 
-function patchReactScriptsWebpackDevServer() {
+function patchReactScriptsWebpackDevServer(cloudIdentity, live = false) {
   const createDevServerConfig = require(webpackDevServerConfigPath);
 
   require.cache[webpackDevServerConfigPath].exports = (...args) => {
@@ -119,7 +119,7 @@ function patchReactScriptsWebpackDevServer() {
     const afterSetup = config.onAfterSetupMiddleware;
     const existingSetup = config.setupMiddlewares;
 
-    if (!beforeSetup && !afterSetup) {
+    if (!beforeSetup && !afterSetup && !cloudIdentity && !live) {
       return config;
     }
 
@@ -127,6 +127,21 @@ function patchReactScriptsWebpackDevServer() {
     delete config.onAfterSetupMiddleware;
 
     config.setupMiddlewares = (middlewares, devServer) => {
+      if (live) {
+        // Production Firebase Auth has registered localhost as the local sign-in domain.
+        devServer.app.get('*', (request, response, next) => {
+          if (request.hostname !== '127.0.0.1') return next();
+          response.set('Cache-Control', 'no-store').redirect(302, 'http://localhost:3000' + request.originalUrl);
+        });
+      }
+      if (cloudIdentity) {
+        devServer.app.get('/__cy_dev/status', (_request, response) => {
+          devServer.middleware.waitUntilValid(stats => {
+            const compiled = !stats.hasErrors();
+            response.set('Cache-Control', 'no-store').status(compiled ? 200 : 503).json({ ...cloudIdentity, compiled });
+          });
+        });
+      }
       if (typeof beforeSetup === 'function') {
         beforeSetup(devServer);
       }

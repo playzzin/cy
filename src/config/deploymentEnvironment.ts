@@ -1,4 +1,7 @@
 export const isStaging = process.env.REACT_APP_DEPLOYMENT_ENV === 'staging';
+export const isLiveDevelopment = process.env.NODE_ENV === 'development'
+    && process.env.REACT_APP_DEPLOYMENT_ENV === 'production'
+    && process.env.REACT_APP_LIVE_DEVELOPMENT === 'true';
 export function assertDeploymentEnvironment(projectId: string, hostname: string) {
     const stagingProject = 'cy-erp-staging-9c1e4';
     if ((isStaging && projectId !== stagingProject) || (!isStaging && projectId === stagingProject)

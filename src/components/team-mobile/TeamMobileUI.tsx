@@ -32,8 +32,10 @@ export function TeamMobileProvider({ enabled, children }: { enabled: boolean; ch
     return <TeamMobileContext.Provider value={enabled && !printing}>{children}</TeamMobileContext.Provider>;
 }
 
+export const useTeamPresentation = () => useContext(TeamMobileContext);
+
 export function useTeamMobile() {
-    const enabled = useContext(TeamMobileContext);
+    const enabled = useTeamPresentation();
     const [narrow, setNarrow] = useState(() => enabled && (window.matchMedia?.(TEAM_MOBILE_QUERY)?.matches ?? window.innerWidth <= 768));
     useEffect(() => {
         if (!enabled) return;

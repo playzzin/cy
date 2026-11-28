@@ -1,0 +1,57 @@
+name: Cloud development server
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'ops/cloud/**'
+      - 'scripts/check-cloud-development.cjs'
+      - 'scripts/react-scripts-start.js'
+      - 'scripts/patchReactScriptsWebpack.js'
+      - 'scripts/staging-environment.cjs'
+      - 'scripts/validate-firebase-build-env.js'
+      - 'firebase.staging.json'
+      - 'package*.json'
+      - 'functions/package*.json'
+      - '.github/workflows/cloud-development.yml'
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  development:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      - name: Prepare the Linux development checkout
+        run: bash ops/cloud/server.sh setup
+      - name: Start the staging-backed development server and read its app
+        shell: bash
+        run: |
+          bash ops/cloud/server.sh start > "$RUNNER_TEMP/cy-dev.log" 2>&1 &
+          server=$!
+          bash ops/cloud/server.sh check &
+          check=$!
+          trap 'kill "$server" "$check" 2>/dev/null || true' EXIT
+          if ! wait -n -p finished "$check" "$server" || [[ "$finished" != "$check" ]]; then
+            tail -n 60 "$RUNNER_TEMP/cy-dev.log"
+            exit 1
+          fi
+          # Load the React app in a fresh browser and inspect the rendered login form.
+          timeout 90s google-chrome --headless --user-data-dir="$RUNNER_TEMP/cy-dev-chrome" \
+            --virtual-time-budget=20000 --dump-dom http://127.0.0.1:3000/login > "$RUNNER_TEMP/cy-login.html"
+          grep -q 'type="email"' "$RUNNER_TEMP/cy-login.html"
+          grep -q 'type="password"' "$RUNNER_TEMP/cy-login.html"
+          echo 'Chrome rendered the ERP email and password fields.'

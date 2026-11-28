@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { runInNewContext } from 'vm';
 import { webcrypto } from 'crypto';
-import { clearLocalGoogleLogin, consumeLocalGoogleCredential, prepareLocalGoogleLogin, usesLocalGoogleLogin } from './localGoogleLogin';
+import { clearLocalGoogleLogin, consumeLocalGoogleCredential, prepareLocalGoogleLogin, usesLocalGoogleLogin, usesLocalFirebasePopup } from './localGoogleLogin';
 
 const clientId = 'synthetic.apps.googleusercontent.com';
 const originalLocation = Object.getOwnPropertyDescriptor(window, 'location')!;
@@ -24,6 +24,17 @@ beforeEach(() => { sessionStorage.clear(); jest.clearAllMocks(); });
 it('uses the local flow only for the registered local origin', () => {
   expect(usesLocalGoogleLogin()).toBe(true);
   for (const origin of ['https://cyee-9c1e4.web.app', 'http://localhost:3000.attacker.test', 'http://localhost:4000']) expect(usesLocalGoogleLogin(origin)).toBe(false);
+});
+
+it.each(['http://localhost:3000', 'http://127.0.0.1:3000'])('uses the Firebase popup on %s when enabled', origin => {
+  expect(usesLocalFirebasePopup(origin, true)).toBe(true);
+  expect(usesLocalFirebasePopup(origin, false)).toBe(false);
+});
+
+it('keeps the Firebase popup scoped to the local preview addresses', () => {
+  for (const origin of ['http://localhost:4000', 'http://127.0.0.1:4000', 'https://cy-erp-staging-9c1e4.web.app']) {
+    expect(usesLocalFirebasePopup(origin, true)).toBe(false);
+  }
 });
 
 it('requests only an ID token with independent unpredictable state and nonce', async () => {
