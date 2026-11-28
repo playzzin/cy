@@ -5,6 +5,7 @@ import { DashboardModeConfig } from './roleDashboardConfig';
 import type { PositionItem } from '../../types/menu';
 import { resolveIcon } from '../../constants/iconMap';
 import { matchesMenuPosition } from '../../utils/menuPosition';
+import { mixHexColors } from '../../utils/color';
 
 const DASHBOARD_LOGO_VIDEO_URL = 'https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/logo_cy.mp4?alt=media&token=9ec66009-cecb-4c02-9b72-5d0f95e410af';
 const DASHBOARD_LOGO_POSTER_URL = '/icons/icon-192.png?v=20260524';
@@ -15,6 +16,8 @@ interface DashboardHeaderProps {
     positions: PositionItem[];
     currentPosition: string;
     onPositionChange: (positionId: string) => void;
+    teamColor?: string;
+    teamName?: string;
 }
 
 const HeaderContainer = styled.div<{ $gradient: string }>`
@@ -50,10 +53,10 @@ const LogoSection = styled.div`
     min-width: 0;
 `;
 
-const BrandLogo = styled.div`
-    width: 88px;
-    height: 88px;
-    flex: 0 0 88px;
+const BrandLogo = styled.div<{ $compact: boolean }>`
+    width: ${({ $compact }) => $compact ? '56px' : '88px'};
+    height: ${({ $compact }) => $compact ? '56px' : '88px'};
+    flex: 0 0 auto;
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 18px;
@@ -159,41 +162,54 @@ const ModeButton = styled.button<{ $active: boolean }>`
     }
 `;
 
+export const DashboardLogo: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
+    const [logoVideoFailed, setLogoVideoFailed] = React.useState(false);
+
+    return (
+        <BrandLogo $compact={compact} role="img" aria-label="청연ENG ERP 로고">
+            {logoVideoFailed ? (
+                <img src={DASHBOARD_LOGO_POSTER_URL} alt="" />
+            ) : (
+                <video
+                    src={DASHBOARD_LOGO_VIDEO_URL}
+                    poster={DASHBOARD_LOGO_POSTER_URL}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    preload="metadata"
+                    aria-hidden="true"
+                    onError={() => setLogoVideoFailed(true)}
+                />
+            )}
+        </BrandLogo>
+    );
+};
+
 export const DashboardHeader = React.memo<DashboardHeaderProps>(({
     user,
     modeConfig,
     positions,
     currentPosition,
-    onPositionChange
+    onPositionChange,
+    teamColor,
+    teamName
 }) => {
-    const [logoVideoFailed, setLogoVideoFailed] = React.useState(false);
     const currentPositionName = positions.find((position) => position.id === currentPosition)?.name;
     const showPositionSwitcher = matchesMenuPosition(currentPosition, currentPositionName, 'dev');
 
+    const gradient = teamColor
+        ? `linear-gradient(130deg, #0f172a, ${mixHexColors(teamColor, '#0f172a', 0.65)})`
+        : modeConfig.gradient;
+
     return (
-        <HeaderContainer $gradient={modeConfig.gradient}>
+        <HeaderContainer $gradient={gradient}>
             <ContentHelper>
                 <LogoSection>
-                    <BrandLogo role="img" aria-label="청연ENG ERP 로고">
-                        {logoVideoFailed ? (
-                            <img src={DASHBOARD_LOGO_POSTER_URL} alt="" />
-                        ) : (
-                            <video
-                                src={DASHBOARD_LOGO_VIDEO_URL}
-                                poster={DASHBOARD_LOGO_POSTER_URL}
-                                autoPlay
-                                loop
-                                muted
-                                playsInline
-                                preload="metadata"
-                                aria-hidden="true"
-                                onError={() => setLogoVideoFailed(true)}
-                            />
-                        )}
-                    </BrandLogo>
+                    <DashboardLogo />
                     <TextSection>
-                        <Title>청연ENG ERP</Title>
-                        <Subtitle>{modeConfig.label} · {modeConfig.roleGroup}</Subtitle>
+                        <Title>{teamName ? '우리 팀 현황' : '청연ENG ERP'}</Title>
+                        <Subtitle>{teamName || `${modeConfig.label} · ${modeConfig.roleGroup}`}</Subtitle>
                     </TextSection>
                 </LogoSection>
 
