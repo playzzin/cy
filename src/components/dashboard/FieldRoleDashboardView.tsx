@@ -1,4 +1,4 @@
-import { TeamMobileSummary, TeamMobileDisclosure, useTeamMobile } from '../team-mobile/TeamMobileUI';
+import { TeamMobileDisclosure, useTeamMobile } from '../team-mobile/TeamMobileUI';
 import { TeamLeadQuickActions } from './TeamLeadQuickActions';
 import React, { useEffect, useMemo, useState } from 'react';
 import { format, subDays } from 'date-fns';
@@ -305,11 +305,15 @@ export const FieldRoleDashboardView: React.FC<FieldRoleDashboardViewProps> = ({ 
 
     if (teamMobile && role === 'teamLead') return <div className="tm-team-home">
         {!profileReady && <p role="status">작업자·소속팀 연결이 필요합니다.</p>}
-        <TeamMobileSummary label="오늘 팀 공수" value={profileReady ? `${formatManDay(todayManDay)} 공수` : '연결 필요'}>
-            <span>최근 30일 {profileReady ? `${formatManDay(monthManDay)} 공수` : '—'}</span>
-            <span>최근 30일 출역 {profileReady ? `${uniqueWorkers.size}명` : '—'}</span>
-        </TeamMobileSummary>
-        <p className="tm-home-status">{todayStatus}</p>
+        <dl className="tm-team-totals" aria-label="팀 출역 요약">
+            <div className="tm-team-totals__today">
+                <dt>오늘 팀 공수</dt>
+                <dd>{profileReady ? <>{formatManDay(todayManDay)} <small>공수</small></> : '연결 필요'}</dd>
+                {profileReady && <dd className="tm-team-totals__status">{todayStatus}</dd>}
+            </div>
+            <div><dt>최근 30일 누적 공수</dt><dd>{profileReady ? <>{formatManDay(monthManDay)} <small>공수</small></> : '—'}</dd></div>
+            <div><dt>최근 30일 출역 인원</dt><dd>{profileReady ? <>{uniqueWorkers.size}<small>명</small></> : '—'}</dd></div>
+        </dl>
         <TeamLeadQuickActions />
         <TeamMobileDisclosure title="현장별 팀 운영" summary={`최근 30일 · ${uniqueSites.size}곳`}>
             <div className="tm-home-list">{siteSummaries.length ? siteSummaries.map(site => <button type="button" key={site.id} onClick={() => runRouteAction(TEAM_SITE_PATH)}><span>{site.name}</span><strong>{formatManDay(site.manDay)} 공수</strong></button>) : <p>최근 30일 출역 기록이 없습니다.</p>}</div>

@@ -67,6 +67,7 @@ export const SIDEBAR_FONTS = {
     'kirang-haerang': googleFont('배민 기랑해랑체', 'Kirang Haerang', '제목용')
 };
 export type SidebarFontId = keyof typeof SIDEBAR_FONTS;
+export const DEFAULT_TEAM_FONT = 'pretendard' satisfies SidebarFontId;
 export const SIDEBAR_FONT_IDS = Object.keys(SIDEBAR_FONTS) as [SidebarFontId, ...SidebarFontId[]];
 
 export const isSidebarFont = (value: unknown): value is SidebarFontId =>

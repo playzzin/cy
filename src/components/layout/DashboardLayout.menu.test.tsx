@@ -81,12 +81,12 @@ it('공용 dev 설정이 남고 UID 역조회가 없어도 연결 ID로 팀장 �
     await waitFor(() => expect(screen.getByTestId('menu-mode').textContent).toBe('pos_leader'));
     expect(manpowerService.getWorker).toHaveBeenCalledWith('worker-1');
     expect(localStorage.getItem(getMenuModeStorageKey('cy_current_position', 'leader-account'))).toBe('leader');
-    expect(document.documentElement).toHaveAttribute('data-team-typography', 'baemin');
+    expect(document.documentElement).toHaveAttribute('data-team-typography', 'pretendard');
 });
 
 it('팀장 메뉴에서 다른 직책으로 이동하거나 레이아웃을 닫으면 글꼴 범위를 해제한다', async () => {
     const view = render(app());
-    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-team-typography', 'baemin'));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-team-typography', 'pretendard'));
     fireEvent.click(screen.getByRole('button', { name: '사무실 메뉴로 전환' }));
     await waitFor(() => expect(document.documentElement).not.toHaveAttribute('data-team-typography'));
     view.unmount();
@@ -96,7 +96,7 @@ it('팀장 메뉴에서 다른 직책으로 이동하거나 레이아웃을 닫�
 
 it('팀장 레이아웃이 사라지면 로그인 화면에 글꼴 설정을 남기지 않는다', async () => {
     const view = render(app());
-    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-team-typography', 'baemin'));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-team-typography', 'pretendard'));
     view.unmount();
     expect(document.documentElement).not.toHaveAttribute('data-team-typography');
 });
