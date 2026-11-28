@@ -34,6 +34,7 @@ export interface SiteData {
     sidebarBackgroundColor?: string;
     sidebarSelectedBackgroundColor?: string;
     sidebarFontPreset?: SidebarFontId;
+    teamFontPreset?: SidebarFontId;
     menuRegistrationVersion?: number;
     linkedPositionGroups?: { sourceSite: string; text?: string }[];
     /** DEV 좌측 메뉴 아래에 직책별 원본 메뉴 연결 (기본: 켜짐) */

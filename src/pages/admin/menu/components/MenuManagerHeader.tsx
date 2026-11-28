@@ -24,7 +24,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { SiteDataType } from '../../../../types/menu';
-import { isDevPositionSite } from '../../../../utils/linkedPositionMenus';
+import { isDevPositionSite, isTeamLeaderMenuSite } from '../../../../utils/linkedPositionMenus';
 import SidebarAppearanceToolbar from './SidebarAppearanceToolbar';
 import LinkedPositionSettings from './LinkedPositionSettings';
 
@@ -257,6 +257,7 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
                 </button>
             </div>
             {menuData[selectedSite] && <SidebarAppearanceToolbar key={selectedSite} site={menuData[selectedSite]}
+                teamMenu={isTeamLeaderMenuSite(menuData, selectedSite)}
                 onChange={site => onUpdateMenuData({ ...menuData, [selectedSite]: site })} />}
             {isDevPositionSite(menuData, selectedSite) && (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-700 bg-slate-800 px-4 py-3">

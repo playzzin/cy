@@ -34,13 +34,13 @@ import {
 import { isDevAdminSessionEnabled } from '../../utils/devAdminSession';
 import { getMenuModeStorageKey } from '../../utils/menuModeStorage';
 import { canPreviewUsers as hasUserPreviewAccess } from '../../utils/userPreviewAccess';
-import { getPositionMenuView, isDevPositionSite } from '../../utils/linkedPositionMenus';
+import { getPositionMenuView, isDevPositionSite, isTeamLeaderMenuSite } from '../../utils/linkedPositionMenus';
 import { getSidebarSide } from '../../utils/sidebarSide';
 import { getDevPreviewSession, isDevPreviewFrame } from '../../utils/devPreviewRuntime';
 import DevUserPreview from '../developer/DevUserPreview';
 import DevPreviewRouteGuard from '../developer/DevPreviewRouteGuard';
 import { useRestrictedTeamWorkflow } from '../../routes/TeamWorkflowGate';
-import { filterTeamWorkflowMenu, isTeamLeaderRole } from '../../utils/teamWorkflowPolicy';
+import { filterTeamWorkflowMenu } from '../../utils/teamWorkflowPolicy';
 
 // Removed hardcoded siteData in favor of dynamic loading
 
@@ -509,11 +509,11 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
         ? (siteData[effectiveSite] || siteData[fallbackSite] || null)
         : null;
     const restrictedTeam = useRestrictedTeamWorkflow();
-    const isTeamPresentation = !isSiteLayerMode && !userPreview && (
-        restrictedTeam || effectiveSite === 'pos_leader' ||
-        isTeamLeaderRole(positions.find(position => position.id === currentPosition)?.name)
-    );
-    useTeamLeaderTypography(isTeamPresentation);
+    const teamMenuSite = [positionSite, effectiveSite].find(key => key && isTeamLeaderMenuSite(siteData, key));
+    const isTeamPresentation = !isSiteLayerMode && !userPreview && (restrictedTeam || Boolean(teamMenuSite));
+    const ownSite = ownPositionId && getPositionSiteKey(ownPositionId);
+    const teamFontSite = teamMenuSite || (ownSite && isTeamLeaderMenuSite(siteData, ownSite) ? ownSite : 'pos_leader');
+    useTeamLeaderTypography(isTeamPresentation, siteData?.[teamFontSite]?.teamFontPreset);
     const currentSiteData = sourceSiteData && siteData
         ? { ...sourceSiteData, menu: restrictedTeam ? filterTeamWorkflowMenu(getPositionMenuView(siteData, effectiveSite)) : getPositionMenuView(siteData, effectiveSite),
             ...(restrictedTeam && sourceSiteData.headerActions ? { headerActions: filterTeamWorkflowMenu(sourceSiteData.headerActions) } : {}) }
