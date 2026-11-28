@@ -52,6 +52,14 @@ describe('DashboardHeader position switcher', () => {
     });
 });
 
+it('shows the dashboard logo before the team status title and identifies the selected team', () => {
+    render(<DashboardHeader {...props} currentPosition="teamLead" teamName="검증팀" teamColor="#ffec72" />);
+    const logo = screen.getByRole('img', { name: '청연ENG ERP 로고' });
+    const heading = screen.getByRole('heading', { name: '우리 팀 현황' });
+    expect(logo.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('검증팀')).toBeTruthy();
+});
+
 it('reuses the dashboard logo video in the compact header and falls back to the poster', () => {
     render(<DashboardLogo compact />);
 

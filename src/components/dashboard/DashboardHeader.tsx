@@ -17,6 +17,7 @@ interface DashboardHeaderProps {
     currentPosition: string;
     onPositionChange: (positionId: string) => void;
     teamColor?: string;
+    teamName?: string;
 }
 
 const HeaderContainer = styled.div<{ $gradient: string }>`
@@ -191,7 +192,8 @@ export const DashboardHeader = React.memo<DashboardHeaderProps>(({
     positions,
     currentPosition,
     onPositionChange,
-    teamColor
+    teamColor,
+    teamName
 }) => {
     const currentPositionName = positions.find((position) => position.id === currentPosition)?.name;
     const showPositionSwitcher = matchesMenuPosition(currentPosition, currentPositionName, 'dev');
@@ -206,8 +208,8 @@ export const DashboardHeader = React.memo<DashboardHeaderProps>(({
                 <LogoSection>
                     <DashboardLogo />
                     <TextSection>
-                        <Title>청연ENG ERP</Title>
-                        <Subtitle>{modeConfig.label} · {modeConfig.roleGroup}</Subtitle>
+                        <Title>{teamName ? '우리 팀 현황' : '청연ENG ERP'}</Title>
+                        <Subtitle>{teamName || `${modeConfig.label} · ${modeConfig.roleGroup}`}</Subtitle>
                     </TextSection>
                 </LogoSection>
 

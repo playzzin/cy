@@ -1,14 +1,14 @@
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { DashboardHeader, DashboardLogo } from '../components/dashboard/DashboardHeader';
 import { TeamLeadQuickActions } from '../components/dashboard/TeamLeadQuickActions';
-import { TeamMobileDisclosure, useTeamMobile } from '../components/team-mobile/TeamMobileUI';
+import { TeamMobileDisclosure, useTeamMobile, useTeamPresentation } from '../components/team-mobile/TeamMobileUI';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { useSiteMode } from '../contexts/SiteModeContext';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { useLinkedWorker } from '../hooks/useLinkedWorker';
 import { teamService } from '../services/teamService';
-import { getReadableAccentColor, hexToRgba, normalizeHexColor } from '../utils/color';
+import { getContrastingTextColor, getReadableAccentColor, hexToRgba, mixHexColors, normalizeHexColor } from '../utils/color';
 import { lazyNamed } from '../utils/lazyNamed';
 import {
     getDashboardModeConfigForPosition,
@@ -72,24 +72,24 @@ const DashboardSectionFallback: React.FC<{ minHeight?: string; label?: string }>
 
 const DashboardPage: React.FC = () => {
     const teamMobile = useTeamMobile();
+    const teamPresentation = useTeamPresentation();
     const { currentPosition, currentPositionData, positions, changePosition } = useSiteMode();
     const { loading, linkedWorker } = useLinkedWorker();
     const linkedWorkerRole = (linkedWorker as { role?: string } | null)?.role;
-    const selectedPositionName = useMemo(
-        () => currentPositionData?.name || (currentPosition === 'full' ? '전체 메뉴' : linkedWorkerRole),
-        [currentPosition, currentPositionData?.name, linkedWorkerRole]
-    );
+    const dashboardPosition = teamPresentation ? 'teamLead' : currentPosition;
+    const selectedPositionName = teamPresentation ? '팀장'
+        : currentPositionData?.name || (currentPosition === 'full' ? '전체 메뉴' : linkedWorkerRole);
     const modeConfig = useMemo(
-        () => getDashboardModeConfigForPosition(currentPosition, selectedPositionName),
-        [currentPosition, selectedPositionName]
+        () => getDashboardModeConfigForPosition(dashboardPosition, selectedPositionName),
+        [dashboardPosition, selectedPositionName]
     );
     const isClientDashboard = useMemo(
-        () => findBusinessPartnerPositionDefinition(currentPosition, selectedPositionName)?.id === 'client',
-        [currentPosition, selectedPositionName]
+        () => findBusinessPartnerPositionDefinition(dashboardPosition, selectedPositionName)?.id === 'client',
+        [dashboardPosition, selectedPositionName]
     );
     const isRentalDashboard = useMemo(
-        () => findBusinessPartnerPositionDefinition(currentPosition, selectedPositionName)?.id === 'rental',
-        [currentPosition, selectedPositionName]
+        () => findBusinessPartnerPositionDefinition(dashboardPosition, selectedPositionName)?.id === 'rental',
+        [dashboardPosition, selectedPositionName]
     );
     const isPartnerDashboard = isClientDashboard || isRentalDashboard;
     const isTeamLeadDashboard = modeConfig.id === 'teamLead';
@@ -98,24 +98,25 @@ const DashboardPage: React.FC = () => {
     const isDedicatedFieldDashboard = isTeamLeadDashboard || isForemanDashboard || isWorkerDashboard;
 
     const teamId = isTeamLeadDashboard ? linkedWorker?.teamId : undefined;
-    const [teamAccent, setTeamAccent] = useState<{ id: string; color: string }>();
+    const [teamAccent, setTeamAccent] = useState<{ id: string; color: string; name?: string }>();
     useEffect(() => {
         if (!teamId) return;
         let active = true;
         teamService.getTeams().then((teams) => {
             const team = teams.find(({ id }) => id === teamId)
                 ?? teams.find(({ legacyId }) => legacyId === teamId);
-            if (active) setTeamAccent({ id: teamId, color: normalizeHexColor(team?.color, '') });
+            if (active) setTeamAccent({ id: teamId, color: normalizeHexColor(team?.color, ''), name: team?.name });
         }).catch(() => {
             if (active) setTeamAccent(undefined);
         });
         return () => { active = false; };
     }, [teamId]);
 
-    const teamColor = teamId
-        ? (teamAccent?.id === teamId && teamAccent.color) || normalizeHexColor(linkedWorker?.color, '')
-        : '';
+    const currentTeam = teamAccent?.id === teamId ? teamAccent : undefined;
+    const teamColor = teamId ? currentTeam?.color || normalizeHexColor(linkedWorker?.color, '') : '';
+    const teamName = currentTeam?.name || linkedWorker?.teamName || '팀장 메뉴';
     const dashboardTint = teamColor ? hexToRgba(teamColor, 0.09) : undefined;
+    const headingText = teamColor ? getContrastingTextColor(teamColor) : '#ffffff';
 
     useDocumentMeta({
         title: `${modeConfig.shortLabel} 대시보드 | 청연ENG ERP`,
@@ -132,10 +133,14 @@ const DashboardPage: React.FC = () => {
         '--tm-dashboard-accent': teamColor,
         '--tm-dashboard-tint': dashboardTint,
         '--tm-dashboard-text': getReadableAccentColor(teamColor),
+        '--tm-dashboard-heading-text': headingText,
+        '--tm-dashboard-start': headingText === '#ffffff'
+            ? mixHexColors(teamColor, '#101828', 0.72) : mixHexColors(teamColor, '#ffffff', 0.55),
+        '--tm-dashboard-end': getReadableAccentColor(teamColor, headingText, 4.5),
     } as React.CSSProperties : undefined}>
         <header className="tm-page-heading">
             <DashboardLogo compact />
-            <div><h1>우리 팀 현황</h1><p>{linkedWorker?.teamName || '팀장 메뉴'}</p></div>
+            <div><h1>우리 팀 현황</h1><p>{teamName}</p></div>
         </header>
         <main>
             <Suspense fallback={<DashboardSectionFallback minHeight="min-h-[160px]" label="팀 현황을 준비하고 있습니다." />}>
@@ -164,6 +169,7 @@ const DashboardPage: React.FC = () => {
                 currentPosition={currentPosition}
                 onPositionChange={changePosition}
                 teamColor={teamColor}
+                teamName={isTeamLeadDashboard ? teamName : undefined}
             />
 
             <main className="relative z-10 mx-auto -mt-12 min-w-0 w-full max-w-none overflow-hidden px-3 pb-28 sm:-mt-16 sm:px-5 md:pb-12 lg:px-8 2xl:px-10">
