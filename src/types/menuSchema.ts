@@ -39,6 +39,7 @@ export const SiteDataSchema = z.object({
     sidebarBackgroundColor: hexColor.optional(),
     sidebarSelectedBackgroundColor: hexColor.optional(),
     sidebarFontPreset: sidebarFont,
+    teamFontPreset: sidebarFont,
     menuRegistrationVersion: z.number().int().positive().optional(),
     linkedPositionGroups: z.array(z.object({ sourceSite: z.string().min(1), text: z.string().optional() })).optional(),
     linkedPositionMenusEnabled: z.boolean().optional(),

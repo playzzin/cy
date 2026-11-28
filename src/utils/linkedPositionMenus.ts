@@ -1,12 +1,19 @@
 import type { MenuItem, SiteData, SiteDataType } from '../types/menu';
 import { createMenuDivider } from './menuDivider';
 import { hasRegisteredMenus } from './menuRegistration';
+import { isTeamLeaderRole } from './teamWorkflowPolicy';
 
 const PREFIX = '__linked_position__/';
 export const LINKED_POSITION_DIVIDER_ID = `${PREFIX}divider`;
 const normalize = (value: string) => value.trim().toLowerCase().replace(/^pos_/, '');
 const isDevName = (value: string) => ['dev', 'developer', '개발', '개발자'].includes(normalize(value));
 export const positionSiteKey = (id: string) => id.startsWith('pos_') ? id : `pos_${id}`;
+
+export function isTeamLeaderMenuSite(data: SiteDataType | null, siteKey: string): boolean {
+    if (!siteKey.startsWith('pos_')) return false;
+    const position = data?.admin?.positionConfig?.find(item => positionSiteKey(item.id) === siteKey);
+    return siteKey === 'pos_leader' || isTeamLeaderRole(position?.name) || isTeamLeaderRole(data?.[siteKey]?.name);
+}
 
 export const isDevPositionSite = (data: SiteDataType | null, siteKey: string): boolean => {
     if (!siteKey.startsWith('pos_') || !data?.[siteKey]) return false;

@@ -66,6 +66,27 @@ it('관리자가 최초 등록을 확정하고 DEV 연결의 추가·이름 변�
     expect(screen.getByRole('button', { name: '팀장 연결 메뉴 펼치기' })).toBeInTheDocument();
 });
 
+it('팀장 화면 글꼴을 등록하고 다시 열어 변경하거나 프리텐다드 기본값으로 복원한다', async () => {
+    stored.pos_leader.sidebarFontPreset = 'maru-buri';
+    const view = openEditor();
+    const picker = () => screen.getByRole('combobox', { name: '팀장 화면 기본 글꼴' });
+    expect(screen.queryByRole('combobox', { name: '팀장 화면 기본 글꼴' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '팀장' }));
+    expect(picker()).toHaveValue('');
+    fireEvent.change(picker(), { target: { value: 'pretendard' } });
+    await waitFor(() => expect(stored.pos_leader.teamFontPreset).toBe('pretendard'));
+    view.unmount();
+    openEditor();
+    fireEvent.click(screen.getByRole('button', { name: '팀장' }));
+    expect(picker()).toHaveValue('pretendard');
+    fireEvent.change(picker(), { target: { value: 'baemin-jua' } });
+    await waitFor(() => expect(stored.pos_leader.teamFontPreset).toBe('baemin-jua'));
+    fireEvent.change(picker(), { target: { value: '' } });
+    await waitFor(() => expect(stored.pos_leader.teamFontPreset).toBeUndefined());
+    expect(stored.pos_leader.sidebarFontPreset).toBe('maru-buri');
+    expect(stored.pos_dev.teamFontPreset).toBeUndefined();
+});
+
 it('직책별 글꼴과 연결 메뉴 예외를 따로 저장하고 다중 선택에서 직책 글꼴로 복원한다', async () => {
     stored.pos_dev.sidebarFontPreset = 'pretendard';
     stored.pos_leader.sidebarAccentColor = '#123456';
